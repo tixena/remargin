@@ -7,7 +7,7 @@
 // Module declarations — uncommented as features are implemented.
 pub mod config;
 pub mod crypto;
-// pub mod document;
+pub mod document;
 pub mod frontmatter;
 pub mod id;
 pub mod linter;
