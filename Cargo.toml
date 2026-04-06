@@ -93,3 +93,6 @@ pattern_type_mismatch = "allow"
 min_ident_chars = "allow"
 # Test function naming is clearer with descriptive names, not enforced prefix rules.
 redundant_test_prefix = "allow"
+# Integer division is used safely for threshold calculations and tests.
+integer_division = "allow"
+integer_division_remainder_used = "allow"

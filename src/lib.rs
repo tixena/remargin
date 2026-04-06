@@ -9,7 +9,7 @@ pub mod config;
 // pub mod crypto;
 // pub mod document;
 // pub mod frontmatter;
-// pub mod id;
+pub mod id;
 // pub mod linter;
 // pub mod mcp;
 // pub mod operations;
