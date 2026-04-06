@@ -1,4 +1,7 @@
 
+# Rust build artifacts
+/target
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

@@ -1,0 +1,1 @@
+//! Atomic batch operations.

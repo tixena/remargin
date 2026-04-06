@@ -1,0 +1,1 @@
+//! Embedded structural markdown linter.

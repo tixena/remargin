@@ -1,0 +1,75 @@
+[package]
+name = "remargin"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eduardo Burgos <eduardo@tixena.com>"]
+description = "Enhanced inline review protocol and document access layer for markdown"
+license = "MIT"
+repository = "https://github.com/tixena/remargin"
+
+[[bin]]
+name = "remargin"
+path = "src/main.rs"
+
+[dependencies]
+# CLI framework
+clap = { version = "4", features = ["derive", "env"] }
+
+# YAML processing
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+
+# System abstraction (filesystem, env, temp dirs)
+os-shim = { git = "https://github.com/tixena/os-shim.git" }
+
+# Cryptography (checksums, signatures)
+sha2 = "0.10"
+ssh-key = { version = "0.6", features = ["ed25519", "std"] }
+base64 = "0.22"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2"
+
+# File system
+tempfile = "3"
+ignore = "0.4"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Random ID generation
+rand = "0.9"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Skill embedding
+include_dir = "0.7"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+restriction = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+blanket_clippy_restriction_lints = "allow"
+implicit_return = "allow"
+pub_with_shorthand = "allow"
+module_name_repetitions = "allow"
+question_mark_used = "allow"
+self_named_module_files = "allow"
+separated_literal_suffix = "allow"
+single_call_fn = "allow"
+print_stderr = "allow"
