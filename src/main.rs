@@ -1290,6 +1290,12 @@ fn cmd_mcp(
             let bin_str = bin.display().to_string();
             let scope = if *user { "user" } else { "project" };
 
+            // Remove first to make the operation idempotent.
+            let _: Result<_, _> = Command::new("claude")
+                .args(["mcp", "remove", "remargin"])
+                .output()
+                .map(drop);
+
             let output = Command::new("claude")
                 .args(["mcp", "add", "remargin", "-s", scope, "--", &bin_str, "mcp"])
                 .output()
