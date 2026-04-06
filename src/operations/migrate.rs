@@ -145,6 +145,7 @@ pub fn migrate(
                     content: lc.content.clone(),
                     fence_depth: lc.fence_depth,
                     id: new_id,
+                    line: 0, // Will be recomputed on next parse.
                     reactions: BTreeMap::default(),
                     reply_to: None,
                     signature: None,

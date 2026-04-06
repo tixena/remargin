@@ -254,6 +254,11 @@ fn comments_lists_created_comment() {
     assert_eq!(comments[0]["id"].as_str().unwrap(), created_id);
     assert_eq!(comments[0]["author"], "tester");
     assert_eq!(comments[0]["content"], "First comment");
+    // Line number should be present and positive (comment is appended after body text).
+    assert!(
+        comments[0]["line"].as_u64().unwrap() > 0,
+        "line number should be a positive integer"
+    );
 }
 
 // ---------------------------------------------------------------------------

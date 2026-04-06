@@ -490,3 +490,86 @@ fn test_parse_file_missing() {
     let result = parse_file(&system, Path::new("/nonexistent.md"));
     result.unwrap_err();
 }
+
+// ---------------------------------------------------------------------------
+// Test: Line number for comment at start of file
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_line_number_at_start() {
+    let doc = minimal_block("ln1");
+    let parsed = parse(&doc).unwrap();
+    let c = parsed.comments()[0];
+    assert_eq!(c.line, 1, "comment at start of file should be line 1");
+}
+
+// ---------------------------------------------------------------------------
+// Test: Line number after body text
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_line_number_after_body() {
+    // "# Title\n\nBody text.\n\n" = 4 lines, comment starts on line 5
+    let doc = format!("# Title\n\nBody text.\n\n{}", minimal_block("ln2"));
+    let parsed = parse(&doc).unwrap();
+    let c = parsed.comments()[0];
+    assert_eq!(c.line, 5, "comment after 4 lines of body should be line 5");
+}
+
+// ---------------------------------------------------------------------------
+// Test: Line numbers for multiple comments
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_line_numbers_multiple_comments() {
+    // First comment at line 1.
+    // minimal_block produces 9 lines (opening fence, ---, 5 YAML fields, ---, closing fence).
+    // So second comment starts at line 10 (after a blank line separator at line 10? let's compute)
+    let block1 = minimal_block("m1");
+    let block2 = minimal_block("m2");
+    let doc = format!("{block1}\n{block2}");
+    let parsed = parse(&doc).unwrap();
+    let comments = parsed.comments();
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0].line, 1);
+    // block1 is 9 lines (ends with \n) + 1 blank separator line = line 11
+    assert_eq!(comments[1].line, 11);
+}
+
+// ---------------------------------------------------------------------------
+// Test: Legacy comment line number
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_legacy_comment_line_number() {
+    let doc = "# Title\n\nSome text.\n\n```user comments\nOld feedback.\n```\n";
+    let parsed = parse(doc).unwrap();
+    let legacy = parsed.legacy_comments();
+    assert_eq!(legacy.len(), 1);
+    // "# Title\n\nSome text.\n\n" = 4 lines, legacy starts at line 5
+    assert_eq!(legacy[0].line, 5);
+}
+
+// ---------------------------------------------------------------------------
+// Test: Line number preserved through round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_line_number_round_trip() {
+    let doc = format!(
+        "# Hello\n\n{}\nMore text.\n",
+        block_with_content("rt2", "Body.")
+    );
+    let parsed = parse(&doc).unwrap();
+    let original_line = parsed.comments()[0].line;
+    assert_eq!(original_line, 3);
+
+    // Round-trip through serialize and re-parse.
+    let reconstructed = parsed.to_markdown();
+    let reparsed = parse(&reconstructed).unwrap();
+    assert_eq!(
+        reparsed.comments()[0].line,
+        original_line,
+        "line number should be recomputed identically after round-trip"
+    );
+}

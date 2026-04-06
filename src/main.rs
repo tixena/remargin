@@ -487,6 +487,7 @@ fn comment_to_json(cm: &parser::Comment) -> Value {
         "ts": cm.ts.to_rfc3339(),
         "checksum": cm.checksum,
         "content": cm.content,
+        "line": cm.line,
     });
     let map = obj.as_object_mut().unwrap();
     if !cm.to.is_empty() {

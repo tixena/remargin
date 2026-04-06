@@ -41,6 +41,7 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
         content: String::from("Test content."),
         fence_depth: 3,
         id: String::from(id),
+        line: 0,
         reactions: BTreeMap::new(),
         reply_to: None,
         signature: None,

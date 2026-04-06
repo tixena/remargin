@@ -134,6 +134,7 @@ pub fn batch_comment(
             content: op.content.clone(),
             fence_depth: 3,
             id: new_id.clone(),
+            line: 0, // Placeholder; updated after document write and re-parse.
             reactions: BTreeMap::default(),
             reply_to: reply_to.map(String::from),
             signature: None,

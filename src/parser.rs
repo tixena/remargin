@@ -61,6 +61,9 @@ pub struct Comment {
     pub fence_depth: usize,
     /// Unique short identifier (e.g. "abc").
     pub id: String,
+    /// 1-indexed line number of the opening fence in the source document.
+    /// Zero means "not yet placed" (e.g. newly created, before write).
+    pub line: usize,
     /// Emoji reactions mapped to lists of author IDs.
     pub reactions: Reactions,
     /// ID of the comment this is replying to.
@@ -85,6 +88,8 @@ pub struct LegacyComment {
     pub done_date: Option<String>,
     /// Number of backticks in the wrapping fence.
     pub fence_depth: usize,
+    /// 1-indexed line number of the opening fence in the source document.
+    pub line: usize,
     /// The raw language tag exactly as it appeared (for faithful round-trip).
     pub raw_tag: String,
     /// Whether this was a user or agent comment.
@@ -232,6 +237,11 @@ impl ParsedDocument {
 // Top-level parse functions
 // ---------------------------------------------------------------------------
 
+/// Compute a 1-indexed line number from a byte offset into the source text.
+fn byte_offset_to_line(content: &str, offset: usize) -> usize {
+    content[..offset].matches('\n').count() + 1
+}
+
 /// Parse a markdown string into a structured document.
 ///
 /// # Errors
@@ -249,11 +259,13 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
             segments.push(Segment::Body(content[last_end..block.start].to_owned()));
         }
 
+        let line = byte_offset_to_line(content, block.start);
+
         if block.tag == "remargin" {
-            let comment = parse_remargin_block(&block.inner, block.depth)
+            let comment = parse_remargin_block(&block.inner, block.depth, line)
                 .with_context(|| format!("in remargin block starting at byte {}", block.start))?;
             segments.push(Segment::Comment(Box::new(comment)));
-        } else if let Some(legacy) = try_parse_legacy(block) {
+        } else if let Some(legacy) = try_parse_legacy(block, line) {
             segments.push(Segment::LegacyComment(legacy));
         } else {
             // Not a remargin or legacy block; treat as body text.
@@ -486,7 +498,7 @@ fn parse_ack_entry(entry: &str) -> Result<Acknowledgment> {
 }
 
 /// Parse the YAML header and content from a remargin block's inner text.
-fn parse_remargin_block(inner: &str, fence_depth: usize) -> Result<Comment> {
+fn parse_remargin_block(inner: &str, fence_depth: usize, line: usize) -> Result<Comment> {
     // Split on `---` delimiters.
     let mut parts = inner.splitn(3, "---\n");
 
@@ -532,6 +544,7 @@ fn parse_remargin_block(inner: &str, fence_depth: usize) -> Result<Comment> {
         content,
         fence_depth,
         id: header.id,
+        line,
         reactions: header.reactions,
         reply_to: header.reply_to,
         signature: header.signature,
@@ -547,7 +560,7 @@ fn parse_remargin_block(inner: &str, fence_depth: usize) -> Result<Comment> {
 
 /// Try to parse a fenced block as a legacy `user comments` or `agent comments`
 /// block.  Returns `None` if the tag does not match.
-fn try_parse_legacy(block: &FencedBlock) -> Option<LegacyComment> {
+fn try_parse_legacy(block: &FencedBlock, line: usize) -> Option<LegacyComment> {
     let tag = block.tag.trim();
 
     let (role, rest) = if let Some(rest) = tag.strip_prefix("user comment") {
@@ -576,6 +589,7 @@ fn try_parse_legacy(block: &FencedBlock) -> Option<LegacyComment> {
         content: block.inner.clone(),
         done_date,
         fence_depth: block.depth,
+        line,
         raw_tag: block.tag.clone(),
         role,
     })
