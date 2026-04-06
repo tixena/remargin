@@ -53,7 +53,7 @@ This approves all remargin tools at once — no per-tool confirmation needed.
 |------|---------|
 | `ls` | List files and directories |
 | `get` | Read a file's contents (supports `start_line`/`end_line` for ranges) |
-| `write` | Write file contents (comment-preserving — never destroys existing comments) |
+| `write` | Write file contents (comment-preserving — never destroys existing comments). Pass `create=true` to create a new file. |
 | `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
 
 ### Commenting
@@ -192,6 +192,79 @@ remargin write path="docs/design.md" content="Updated content here..."
 ```
 
 The `write` tool preserves all existing comments in the document. It will not destroy comment blocks.
+
+### Create a new document
+
+```
+remargin write path="docs/new-doc.md" content="# New Document\n\nInitial content." create=true
+```
+
+The `create` flag creates a new file. It will fail if the file already exists (to prevent accidental overwrites).
+
+## Comment Display Format
+
+When displaying comments to the user (after `comments`, `comment`, `batch`, or during a review), **always use this exact format**. This format enables ctrl+clickable `file:line` links in the terminal.
+
+### Starting a discussion or review
+
+When the user asks to review or discuss a document, show the document path as a clickable link first:
+
+```
+docs/design.md
+```
+
+Then display comments in the format below.
+
+### Single comment
+
+```
+docs/design.md:25
+  abc · eduardo (human) · 2026-04-06 14:32
+  │ The comment content goes here, wrapped
+  │ across multiple lines as needed.
+  │ pending
+```
+
+### Threaded reply (indented under parent)
+
+```
+docs/design.md:25
+  abc · eduardo (human) · 2026-04-06 14:32
+  │ I think the registry should support key rotation.
+  │ What happens when someone's key is compromised?
+  │ pending
+
+  docs/design.md:35
+    xyz · claude (agent) · 2026-04-06 14:33
+    │ ⤷ reply-to: abc
+    │ Good question. I'd add a `revoked_keys` list to the
+    │ registry entry. When a key is revoked, all comments
+    │ signed with it get flagged but not deleted.
+    │ ✓ acked by eduardo @ 2026-04-06 15:00
+```
+
+### Footer
+
+```
+─────
+3 comments · 2 pending
+```
+
+### Rules
+
+1. **`file:line` per comment**: Every comment gets its own `path:line` link on a line by itself. This is required for ctrl+click to work in the terminal.
+2. **Repeat file path per comment**: Even in threads where multiple comments reference the same file, repeat the full `path:line` on each.
+3. **Root comments indent 2 spaces**: The `id · author · timestamp` header line starts with 2 spaces.
+4. **Replies indent 2 more**: Each level of reply nesting adds 2 spaces (reply = 4 spaces, reply-to-reply = 6 spaces, etc.).
+5. **Content lines use `│` bar prefix**: All content lines start with `│` at the same indent as the header.
+6. **Threading marker**: Replies show `│ ⤷ reply-to: <id>` as the first content line.
+7. **Reactions before status**: If the comment has reactions, show them on their own line before the status line (e.g. `│ 👍 jorge, alice`).
+8. **Status as last content line**: Show `│ pending` or `│ ✓ acked by <who> @ <when>`.
+9. **Content truncation at 5 lines**: When content exceeds 5 lines, show the first 4 lines fully, then truncate the 5th line with `...`. Users can use `get` to read the full document.
+10. **Hide acked comments by default**: Do not show acked comments unless the user asks for them or you are displaying a full thread. This keeps the review focused on what needs attention.
+11. **Timestamp format**: Use short format in the header: `YYYY-MM-DD HH:MM` (no timezone, no seconds).
+12. **Blank line between comments**: Separate each comment block with a blank line.
+13. **Summary footer**: End with a `─────` separator and a line showing `N comments · M pending`.
 
 ## Key Concepts
 
