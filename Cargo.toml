@@ -42,6 +42,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # Random ID generation
 rand = "0.9"
 
+# Regex (text search)
+regex = "1"
+
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

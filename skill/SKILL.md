@@ -73,6 +73,7 @@ This approves all remargin tools at once — no per-tool confirmation needed.
 | Tool | Purpose |
 |------|---------|
 | `query` | Search across documents for comments — filter by `pending`, `pending_for`, `author`, `since` |
+| `search` | Search across documents for text matches — supports `regex`, `scope` (all/body/comments), `context` lines, `ignore_case` |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
 | `migrate` | Convert old-format inline comments to remargin format |
@@ -174,6 +175,14 @@ remargin react file="docs/design.md" id="abc" emoji="👍"
 ```
 remargin query path="docs/" pending=true
 remargin query path="." pending_for="eduardo"
+```
+
+### Search for text across documents
+
+```
+remargin search pattern="notification"
+remargin search pattern="error" path="docs/" scope="comments"
+remargin search pattern="TODO|FIXME" regex=true ignore_case=true context=2
 ```
 
 ### Review a document (full workflow)

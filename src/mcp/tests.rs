@@ -100,7 +100,7 @@ fn initialize_returns_capabilities() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_all_16_tools() {
+fn tools_list_returns_all_17_tools() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -118,7 +118,7 @@ fn tools_list_returns_all_16_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 16_usize);
+    assert_eq!(tools.len(), 17_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -137,6 +137,7 @@ fn tools_list_returns_all_16_tools() {
     assert!(names.contains(&"write"));
     assert!(names.contains(&"metadata"));
     assert!(names.contains(&"query"));
+    assert!(names.contains(&"search"));
     assert!(names.contains(&"purge"));
 }
 
@@ -326,6 +327,50 @@ fn batch_creates_multiple_comments() {
     let result = extract_tool_text(&response);
     let ids = result["ids"].as_array().unwrap();
     assert_eq!(ids.len(), 3_usize);
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+#[test]
+fn search_finds_text_in_document() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(
+        base,
+        "doc.md",
+        "# Hello\n\nThe notification system works.\n",
+    );
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {
+                    "pattern": "notification"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let matches = result["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 1_usize);
+    assert_eq!(matches[0]["line"], 3_i32);
+    assert_eq!(matches[0]["location"], "body");
+    assert!(
+        matches[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("notification")
+    );
 }
 
 // ---------------------------------------------------------------------------

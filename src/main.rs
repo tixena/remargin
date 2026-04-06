@@ -24,6 +24,7 @@ use remargin::operations::batch::BatchCommentOp;
 use remargin::operations::migrate;
 use remargin::operations::purge;
 use remargin::operations::query;
+use remargin::operations::search;
 use remargin::parser;
 use remargin::skill;
 use remargin::writer::InsertPosition;
@@ -262,6 +263,26 @@ enum Commands {
         #[command(subcommand)]
         action: RegistryAction,
     },
+    /// Search across documents for text matches.
+    Search {
+        /// Text or regex pattern to search for.
+        pattern: String,
+        /// Base directory to search.
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Treat pattern as a regex.
+        #[arg(long)]
+        regex: bool,
+        /// Search scope: all, body, or comments.
+        #[arg(long, default_value = "all")]
+        scope: String,
+        /// Lines of context around matches.
+        #[arg(long, short = 'C', default_value = "0")]
+        context: usize,
+        /// Case-insensitive matching.
+        #[arg(long, short = 'i')]
+        ignore_case: bool,
+    },
     /// Manage the Claude Code skill.
     Skill {
         /// Subcommand: install, uninstall, test.
@@ -377,6 +398,24 @@ struct QueryParams<'cmd> {
     pending_for: Option<&'cmd str>,
     /// Since timestamp filter.
     since: Option<&'cmd str>,
+}
+
+/// Parameters for the search command.
+struct SearchParams<'cmd> {
+    /// Context lines around matches.
+    context: usize,
+    /// Case-insensitive matching.
+    ignore_case: bool,
+    /// JSON output mode.
+    json_mode: bool,
+    /// Base directory to search.
+    path: &'cmd str,
+    /// Search pattern (literal or regex).
+    pattern: &'cmd str,
+    /// Regex mode.
+    regex: bool,
+    /// Search scope: all, body, or comments.
+    scope: &'cmd str,
 }
 
 /// Parameters for the react command.
@@ -637,6 +676,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::Query { .. }
         | Commands::React { .. }
         | Commands::Registry { .. }
+        | Commands::Search { .. }
         | Commands::Verify { .. }
         | Commands::Write { .. } => {}
     }
@@ -650,6 +690,10 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
 }
 
 /// Dispatch commands that require a loaded config.
+#[expect(
+    clippy::too_many_lines,
+    reason = "dispatch function maps all CLI subcommands"
+)]
 fn dispatch_with_config(
     cli: &Cli,
     system: &dyn System,
@@ -730,6 +774,25 @@ fn dispatch_with_config(
             cmd_react(system, cwd, config, &r)
         }
         Commands::Registry { action } => cmd_registry(system, cwd, action, json_mode),
+        Commands::Search {
+            pattern,
+            path,
+            regex,
+            scope,
+            context,
+            ignore_case,
+        } => {
+            let s = SearchParams {
+                context: *context,
+                ignore_case: *ignore_case,
+                json_mode,
+                path: path.as_str(),
+                pattern: pattern.as_str(),
+                regex: *regex,
+                scope: scope.as_str(),
+            };
+            cmd_search(system, cwd, &s)
+        }
         Commands::Verify { file, public_key } => {
             cmd_verify(system, cwd, file, public_key.as_deref(), json_mode)
         }
@@ -1176,6 +1239,76 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
                 r.comment_count,
                 r.pending_count,
             ))?;
+        }
+        Ok(())
+    }
+}
+
+fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Result<()> {
+    let target = cwd.join(params.path);
+
+    let scope = match params.scope {
+        "body" => search::SearchScope::Body,
+        "comments" => search::SearchScope::Comments,
+        _ => search::SearchScope::All,
+    };
+
+    let options = search::SearchOptions::new(String::from(params.pattern))
+        .context_lines(params.context)
+        .ignore_case(params.ignore_case)
+        .regex(params.regex)
+        .scope(scope);
+
+    let results = search::search(system, cwd, &target, &options)?;
+
+    if params.json_mode {
+        let entries: Vec<Value> = results
+            .iter()
+            .map(|m| {
+                let mut obj = json!({
+                    "path": m.path.display().to_string(),
+                    "line": m.line,
+                    "text": m.text,
+                    "location": match m.location {
+                        search::MatchLocation::Body => "body",
+                        search::MatchLocation::Comment => "comment",
+                        _ => "unknown",
+                    },
+                });
+                let map = obj.as_object_mut().unwrap();
+                if let Some(id) = &m.comment_id {
+                    map.insert("comment_id".into(), json!(id));
+                }
+                if !m.before.is_empty() {
+                    map.insert("before".into(), json!(m.before));
+                }
+                if !m.after.is_empty() {
+                    map.insert("after".into(), json!(m.after));
+                }
+                obj
+            })
+            .collect();
+        print_output(true, &json!({ "matches": entries }))
+    } else {
+        for m in &results {
+            let loc = match m.location {
+                search::MatchLocation::Body => "body",
+                search::MatchLocation::Comment => "comment",
+                _ => "unknown",
+            };
+            for line in &m.before {
+                out(&format!("  {line}"))?;
+            }
+            out(&format!(
+                "{}:{}  [{}]  {}",
+                m.path.display(),
+                m.line,
+                loc,
+                m.text
+            ))?;
+            for line in &m.after {
+                out(&format!("  {line}"))?;
+            }
         }
         Ok(())
     }

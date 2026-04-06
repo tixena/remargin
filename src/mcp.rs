@@ -22,6 +22,7 @@ use crate::operations::batch::BatchCommentOp;
 use crate::operations::migrate;
 use crate::operations::purge;
 use crate::operations::query::{self, QueryFilter};
+use crate::operations::search;
 use crate::parser;
 use crate::writer::InsertPosition;
 
@@ -306,6 +307,26 @@ fn desc_query() -> ToolDesc {
     }
 }
 
+/// Build the search tool descriptor.
+fn desc_search() -> ToolDesc {
+    ToolDesc {
+        name: "search",
+        description: "Search across documents for text matches",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "pattern": { "type": "string", "description": "Text or regex pattern to search for" },
+                "path": { "type": "string", "description": "Base directory to search", "default": "." },
+                "regex": { "type": "boolean", "description": "Treat pattern as a regex", "default": false },
+                "scope": { "type": "string", "description": "Search scope: all, body, or comments", "default": "all" },
+                "context": { "type": "integer", "description": "Lines of context around matches", "default": 0 },
+                "ignore_case": { "type": "boolean", "description": "Case-insensitive matching", "default": false }
+            },
+            "required": ["pattern"]
+        }),
+    }
+}
+
 /// Build the react tool descriptor.
 fn desc_react() -> ToolDesc {
     ToolDesc {
@@ -373,6 +394,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_migrate(),
         desc_purge(),
         desc_query(),
+        desc_search(),
         desc_react(),
         desc_verify(),
         desc_write(),
@@ -510,6 +532,7 @@ fn dispatch_tool(
         "migrate" => handle_migrate(system, base_dir, config, params),
         "purge" => handle_purge(system, base_dir, config, params),
         "query" => handle_query(system, base_dir, params),
+        "search" => handle_search(system, base_dir, params),
         "react" => handle_react(system, base_dir, config, params),
         "verify" => handle_verify(system, base_dir, params),
         "write" => handle_write(system, base_dir, config, params),
@@ -833,6 +856,62 @@ fn handle_query(
     let entries: Vec<Value> = results.iter().map(serialize_query_result).collect();
 
     Ok(json!({ "results": entries }))
+}
+
+/// Handle the `search` tool: search across documents for text matches.
+fn handle_search(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let pattern = required_str(params, "pattern")?;
+    let path_str = optional_str(params, "path").unwrap_or(".");
+    let target = base_dir.join(path_str);
+    let regex = optional_bool(params, "regex");
+    let ignore_case = optional_bool(params, "ignore_case");
+    let context = optional_usize(params, "context").unwrap_or(0);
+
+    let scope = match optional_str(params, "scope").unwrap_or("all") {
+        "body" => search::SearchScope::Body,
+        "comments" => search::SearchScope::Comments,
+        _ => search::SearchScope::All,
+    };
+
+    let options = search::SearchOptions::new(String::from(pattern))
+        .context_lines(context)
+        .ignore_case(ignore_case)
+        .regex(regex)
+        .scope(scope);
+
+    let results = search::search(system, base_dir, &target, &options)?;
+
+    let matches: Vec<Value> = results
+        .iter()
+        .map(|m| {
+            let mut obj = json!({
+                "path": m.path.display().to_string(),
+                "line": m.line,
+                "text": m.text,
+                "location": match m.location {
+                    search::MatchLocation::Body => "body",
+                    search::MatchLocation::Comment => "comment",
+                },
+            });
+            let map = obj.as_object_mut().unwrap();
+            if let Some(id) = &m.comment_id {
+                map.insert("comment_id".into(), json!(id));
+            }
+            if !m.before.is_empty() {
+                map.insert("before".into(), json!(m.before));
+            }
+            if !m.after.is_empty() {
+                map.insert("after".into(), json!(m.after));
+            }
+            obj
+        })
+        .collect();
+
+    Ok(json!({ "matches": matches }))
 }
 
 /// Handle the `react` tool: add or remove an emoji reaction.
