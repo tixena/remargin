@@ -47,6 +47,21 @@ pub struct BatchCommentOp {
     pub to: Vec<String>,
 }
 
+impl BatchCommentOp {
+    /// Create a new batch operation with the given content.
+    #[must_use]
+    pub const fn new(content: String) -> Self {
+        Self {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            content,
+            reply_to: None,
+            to: Vec::new(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------

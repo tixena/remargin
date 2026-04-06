@@ -11,7 +11,7 @@ pub mod document;
 pub mod frontmatter;
 pub mod id;
 pub mod linter;
-// pub mod mcp;
+pub mod mcp;
 pub mod operations;
 pub mod parser;
 pub mod skill;

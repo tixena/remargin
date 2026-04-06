@@ -25,7 +25,7 @@ os-shim = { git = "https://github.com/tixena/os-shim.git" }
 
 # Cryptography (checksums, signatures)
 sha2 = "0.10"
-ssh-key = { version = "0.6", features = ["ed25519", "std"] }
+ssh-key = { version = "0.6", features = ["ed25519", "std", "rand_core", "getrandom"] }
 base64 = "0.22"
 
 # Error handling

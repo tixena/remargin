@@ -50,6 +50,20 @@ pub struct CreateCommentParams<'params> {
     pub to: &'params [String],
 }
 
+impl<'params> CreateCommentParams<'params> {
+    /// Create new comment parameters.
+    #[must_use]
+    pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
+        Self {
+            attachments: &[],
+            content,
+            position,
+            reply_to: None,
+            to: &[],
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Create comment
 // ---------------------------------------------------------------------------
