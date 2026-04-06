@@ -4,7 +4,6 @@
 //! IDs are random alphanumeric strings that start at 3 characters and grow
 //! when the space at the current length becomes more than half full.
 
-use core::hash::BuildHasher;
 use core::iter::repeat_with;
 use std::collections::HashSet;
 
@@ -24,7 +23,7 @@ const INITIAL_LENGTH: u32 = 3;
 /// Starts at 3 characters.  If more than half the ID space at a given length
 /// is already occupied, the generator automatically bumps to length + 1.
 #[must_use]
-pub fn generate<S: BuildHasher>(existing_ids: &HashSet<&str, S>) -> String {
+pub fn generate(existing_ids: &HashSet<&str>) -> String {
     let length = pick_length(existing_ids);
     let mut rng = rand::rng();
 
@@ -43,7 +42,7 @@ pub fn generate<S: BuildHasher>(existing_ids: &HashSet<&str, S>) -> String {
 }
 
 /// Determine the appropriate ID length given the set of existing IDs.
-fn pick_length<S: BuildHasher>(existing_ids: &HashSet<&str, S>) -> u32 {
+fn pick_length(existing_ids: &HashSet<&str>) -> u32 {
     let mut length = INITIAL_LENGTH;
 
     loop {
