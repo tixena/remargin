@@ -13,6 +13,34 @@ use crate::mcp;
 use crate::parser::AuthorType;
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// A document with a comment in the middle for reply placement tests.
+const DOC_WITH_COMMENT: &str = "\
+---
+title: Test
+---
+
+# Heading
+
+Body paragraph one.
+
+```remargin
+---
+id: aaa
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:abc123
+---
+Original comment.
+```
+
+Body paragraph two.
+";
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -754,4 +782,241 @@ fn response_preserves_string_id() {
     );
 
     assert_eq!(response["id"], "request-abc");
+}
+
+// ---------------------------------------------------------------------------
+// Reply placement tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reply_placed_after_parent_not_appended() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // Reply to comment "aaa" without explicit positioning.
+    let reply_resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "This is a reply.",
+                    "reply_to": "aaa"
+                }
+            }
+        }),
+    );
+    let reply_id = String::from(extract_tool_text(&reply_resp)["id"].as_str().unwrap());
+
+    // List comments to get line numbers.
+    let list_resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comments",
+                "arguments": { "file": "doc.md" }
+            }
+        }),
+    );
+    let result = extract_tool_text(&list_resp);
+    let comments = result["comments"].as_array().unwrap();
+
+    let parent = comments.iter().find(|c| c["id"] == "aaa").unwrap();
+    let reply = comments.iter().find(|c| c["id"] == reply_id).unwrap();
+
+    let parent_line = parent["line"].as_u64().unwrap();
+    let reply_line = reply["line"].as_u64().unwrap();
+
+    // Reply must appear right after the parent, not at the end of the document.
+    assert!(
+        reply_line > parent_line,
+        "reply (line {reply_line}) should be after parent (line {parent_line})"
+    );
+    // "Body paragraph two" is after the parent comment. The reply should be
+    // between the parent and that trailing body text — not appended after it.
+    // The parent is at roughly line 9. The reply should be near line 20,
+    // not at the very end (which would be ~30+).
+    assert!(
+        reply_line < parent_line + 20,
+        "reply (line {reply_line}) should be near parent (line {parent_line}), not appended to end"
+    );
+}
+
+#[test]
+fn reply_ignores_explicit_after_line() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // Reply to "aaa" but also pass after_line=1 — reply_to should win.
+    let reply_resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Reply with conflicting position.",
+                    "reply_to": "aaa",
+                    "after_line": 1_i32
+                }
+            }
+        }),
+    );
+    let reply_id = String::from(extract_tool_text(&reply_resp)["id"].as_str().unwrap());
+
+    let list_resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comments",
+                "arguments": { "file": "doc.md" }
+            }
+        }),
+    );
+    let result = extract_tool_text(&list_resp);
+    let comments = result["comments"].as_array().unwrap();
+
+    let parent = comments.iter().find(|c| c["id"] == "aaa").unwrap();
+    let reply = comments.iter().find(|c| c["id"] == reply_id).unwrap();
+
+    let parent_line = parent["line"].as_u64().unwrap();
+    let reply_line = reply["line"].as_u64().unwrap();
+
+    // reply_to takes priority over after_line — reply is after parent, not at line 1.
+    assert!(
+        reply_line > parent_line,
+        "reply (line {reply_line}) should be after parent (line {parent_line}), not at line 1"
+    );
+}
+
+#[test]
+fn non_reply_still_appends() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // Comment without reply_to or explicit position — should append.
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "A standalone comment."
+                }
+            }
+        }),
+    );
+    let new_id = String::from(extract_tool_text(&resp)["id"].as_str().unwrap());
+
+    let list_resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comments",
+                "arguments": { "file": "doc.md" }
+            }
+        }),
+    );
+    let result = extract_tool_text(&list_resp);
+    let comments = result["comments"].as_array().unwrap();
+
+    let parent = comments.iter().find(|c| c["id"] == "aaa").unwrap();
+    let new_comment = comments.iter().find(|c| c["id"] == new_id).unwrap();
+
+    let parent_line = parent["line"].as_u64().unwrap();
+    let new_line = new_comment["line"].as_u64().unwrap();
+
+    // Non-reply appends to end — should be well past the parent and trailing body.
+    assert!(
+        new_line > parent_line,
+        "appended comment (line {new_line}) should be after parent (line {parent_line})"
+    );
+}
+
+#[test]
+fn non_reply_with_after_line_respected() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // Non-reply with after_line=5 — should place near line 5.
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Placed after line 5.",
+                    "after_line": 5_i32
+                }
+            }
+        }),
+    );
+    let new_id = String::from(extract_tool_text(&resp)["id"].as_str().unwrap());
+
+    let list_resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comments",
+                "arguments": { "file": "doc.md" }
+            }
+        }),
+    );
+    let result = extract_tool_text(&list_resp);
+    let comments = result["comments"].as_array().unwrap();
+    let new_comment = comments.iter().find(|c| c["id"] == new_id).unwrap();
+    let new_line = new_comment["line"].as_u64().unwrap();
+
+    // Should be placed near line 5, not at the end.
+    assert!(
+        new_line < 15,
+        "comment with after_line=5 placed at line {new_line}, expected near line 6"
+    );
 }

@@ -184,12 +184,15 @@ pub fn batch_comment(
 
 /// Resolve the insertion position for a batch operation.
 fn resolve_position(op: &BatchCommentOp) -> InsertPosition {
-    op.after_comment.as_ref().map_or_else(
-        || {
-            op.after_line.map_or(InsertPosition::Append, |line| {
-                InsertPosition::AfterLine(line)
-            })
-        },
-        |after_comment| InsertPosition::AfterComment(after_comment.clone()),
-    )
+    // Replies always go after their parent — explicit placement is ignored.
+    if let Some(parent_id) = &op.reply_to {
+        return InsertPosition::AfterComment(parent_id.clone());
+    }
+    if let Some(after_comment) = &op.after_comment {
+        return InsertPosition::AfterComment(after_comment.clone());
+    }
+    if let Some(line) = op.after_line {
+        return InsertPosition::AfterLine(line);
+    }
+    InsertPosition::Append
 }

@@ -494,14 +494,18 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Resolve insertion position from tool parameters.
-fn resolve_insert_position(params: &Map<String, Value>) -> InsertPosition {
-    optional_str(params, "after_comment").map_or_else(
-        || {
-            optional_usize(params, "after_line")
-                .map_or(InsertPosition::Append, InsertPosition::AfterLine)
-        },
-        |after_comment| InsertPosition::AfterComment(String::from(after_comment)),
-    )
+fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) -> InsertPosition {
+    // Replies always go after their parent — explicit placement is ignored.
+    if let Some(parent_id) = reply_to {
+        return InsertPosition::AfterComment(String::from(parent_id));
+    }
+    if let Some(after_comment) = optional_str(params, "after_comment") {
+        return InsertPosition::AfterComment(String::from(after_comment));
+    }
+    if let Some(after_line) = optional_usize(params, "after_line") {
+        return InsertPosition::AfterLine(after_line);
+    }
+    InsertPosition::Append
 }
 
 // ---------------------------------------------------------------------------
@@ -623,7 +627,7 @@ fn handle_comment(
         .map(PathBuf::from)
         .collect();
 
-    let position = resolve_insert_position(params);
+    let position = resolve_insert_position(params, reply_to.as_deref());
 
     let create_params = operations::CreateCommentParams {
         attachments: &attachments,

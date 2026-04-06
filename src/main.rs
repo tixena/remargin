@@ -894,6 +894,23 @@ fn cmd_batch(
     print_output(json_mode, &json!({ "ids": created_ids }))
 }
 
+/// Resolve comment insertion position.  Replies always go after their parent.
+fn resolve_comment_position(
+    reply_to: Option<&str>,
+    after_comment: Option<&str>,
+    after_line: Option<usize>,
+) -> InsertPosition {
+    reply_to.map_or_else(
+        || {
+            after_comment.map_or_else(
+                || after_line.map_or(InsertPosition::Append, InsertPosition::AfterLine),
+                |ac| InsertPosition::AfterComment(String::from(ac)),
+            )
+        },
+        |parent_id| InsertPosition::AfterComment(String::from(parent_id)),
+    )
+}
+
 fn cmd_comment(
     system: &dyn System,
     cwd: &Path,
@@ -902,13 +919,8 @@ fn cmd_comment(
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, cp.file)?;
 
-    let position = cp.after_comment.map_or_else(
-        || {
-            cp.after_line
-                .map_or(InsertPosition::Append, InsertPosition::AfterLine)
-        },
-        |ac| InsertPosition::AfterComment(String::from(ac)),
-    );
+    // Replies always go after their parent — explicit placement is ignored.
+    let position = resolve_comment_position(cp.reply_to, cp.after_comment, cp.after_line);
 
     if cp.dry_run {
         return print_output(cp.json_mode, &json!({ "dry_run": true, "file": cp.file }));
