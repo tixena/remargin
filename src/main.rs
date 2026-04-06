@@ -202,8 +202,12 @@ enum Commands {
         #[arg(default_value = ".")]
         path: String,
     },
-    /// Start the MCP server (stdio transport).
-    Mcp,
+    /// MCP server management and execution.
+    Mcp {
+        /// Subcommand: run, install, uninstall, test.
+        #[command(subcommand)]
+        action: Option<McpAction>,
+    },
     /// Get document metadata.
     Metadata {
         /// Path to the document.
@@ -311,6 +315,23 @@ enum SkillAction {
         #[arg(long)]
         global: bool,
     },
+}
+
+/// MCP subcommands.
+#[derive(clap::Subcommand)]
+enum McpAction {
+    /// Register remargin as an MCP server in Claude Code.
+    Install {
+        /// Install at user scope (default is project scope).
+        #[arg(long)]
+        user: bool,
+    },
+    /// Start the MCP server (stdio transport). This is the default.
+    Run,
+    /// Check MCP registration status.
+    Test,
+    /// Remove remargin MCP server from Claude Code.
+    Uninstall,
 }
 
 // ---------------------------------------------------------------------------
@@ -592,7 +613,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             eprintln!("remargin {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Commands::Mcp => return mcp::run(system, cwd, &overrides),
+        Commands::Mcp { action } => return cmd_mcp(system, cwd, &overrides, action.as_ref(), cli.global.json),
         Commands::Keygen { output } => return cmd_keygen(system, output),
         Commands::Skill { action } => return cmd_skill(system, action, cli.global.json),
         Commands::Ack { .. }
@@ -710,7 +731,7 @@ fn dispatch_with_config(
             cmd_write(system, cwd, config, path, content.as_deref(), json_mode)
         }
         // Already handled in `run()`.
-        Commands::Version | Commands::Mcp | Commands::Keygen { .. } | Commands::Skill { .. } => {
+        Commands::Version | Commands::Mcp { .. } | Commands::Keygen { .. } | Commands::Skill { .. } => {
             Ok(())
         }
     }
@@ -1245,6 +1266,83 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
                 print_output(true, &json!({ "uninstalled": true }))
             } else {
                 eprintln!("Skill uninstalled.");
+                Ok(())
+            }
+        }
+    }
+}
+
+fn cmd_mcp(
+    system: &dyn System,
+    cwd: &Path,
+    overrides: &config::CliOverrides<'_>,
+    mcp_action: Option<&McpAction>,
+    json_mode: bool,
+) -> Result<()> {
+    use std::process::Command;
+
+    // Default to Run when no subcommand given (bare `remargin mcp`).
+    match mcp_action {
+        None | Some(McpAction::Run) => mcp::run(system, cwd, overrides),
+        Some(McpAction::Install { user }) => {
+            let bin = env::current_exe()
+                .context("resolving remargin binary path")?;
+            let bin_str = bin.display().to_string();
+            let scope = if *user { "user" } else { "project" };
+
+            let output = Command::new("claude")
+                .args(["mcp", "add", "remargin", "-s", scope, "--", &bin_str, "mcp"])
+                .output()
+                .context("running 'claude mcp add' -- is Claude Code CLI installed?")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("claude mcp add failed: {stderr}");
+            }
+
+            if json_mode {
+                print_output(true, &json!({
+                    "installed": true,
+                    "scope": scope,
+                    "binary": bin_str,
+                }))
+            } else {
+                eprintln!("MCP server registered ({scope} scope): {bin_str}");
+                Ok(())
+            }
+        }
+        Some(McpAction::Uninstall) => {
+            let output = Command::new("claude")
+                .args(["mcp", "remove", "remargin"])
+                .output()
+                .context("running 'claude mcp remove' -- is Claude Code CLI installed?")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("claude mcp remove failed: {stderr}");
+            }
+
+            if json_mode {
+                print_output(true, &json!({ "uninstalled": true }))
+            } else {
+                eprintln!("MCP server unregistered.");
+                Ok(())
+            }
+        }
+        Some(McpAction::Test) => {
+            let output = Command::new("claude")
+                .args(["mcp", "list"])
+                .output()
+                .context("running 'claude mcp list' -- is Claude Code CLI installed?")?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let registered = stdout.lines().any(|l| l.contains("remargin"));
+            let status_str = if registered { "registered" } else { "not_registered" };
+
+            if json_mode {
+                print_output(true, &json!({ "status": status_str }))
+            } else {
+                eprintln!("MCP status: {status_str}");
                 Ok(())
             }
         }
