@@ -104,6 +104,11 @@ pub fn batch_comment(
 
     let mut created_ids: Vec<String> = Vec::new();
 
+    // Track line shifts from previous AfterLine insertions so subsequent
+    // AfterLine targets can be adjusted.  Each entry is (original_target_line,
+    // number_of_lines_added_by_that_insertion).
+    let mut line_shifts: Vec<(usize, usize)> = Vec::new();
+
     for (idx, op) in operations.iter().enumerate() {
         let existing_ids = doc.comment_ids();
         let new_id = id::generate(&existing_ids);
@@ -153,11 +158,21 @@ pub fn batch_comment(
             }
         }
 
-        // Determine insertion position.
-        let position = resolve_position(op);
+        // Determine insertion position, adjusting AfterLine targets for
+        // lines added by previous insertions in this batch.
+        let position = resolve_position_adjusted(op, &line_shifts);
+
+        let lines_before = doc.to_markdown().matches('\n').count();
 
         writer::insert_comment(&mut doc, comment, &position)
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
+
+        // Record the line shift if this was an AfterLine insertion.
+        if let Some(original_target) = op.after_line {
+            let lines_after = doc.to_markdown().matches('\n').count();
+            let lines_added = lines_after.saturating_sub(lines_before);
+            line_shifts.push((original_target, lines_added));
+        }
 
         created_ids.push(new_id);
     }
@@ -182,8 +197,17 @@ pub fn batch_comment(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve the insertion position for a batch operation.
-fn resolve_position(op: &BatchCommentOp) -> InsertPosition {
+/// Resolve the insertion position for a batch operation, adjusting
+/// `AfterLine` targets for lines added by previous insertions.
+///
+/// `line_shifts` contains `(original_target_line, lines_added)` from
+/// prior `AfterLine` insertions in this batch.  Any new `AfterLine`
+/// whose target is >= a prior target gets shifted by that insertion's
+/// line count.
+fn resolve_position_adjusted(
+    op: &BatchCommentOp,
+    line_shifts: &[(usize, usize)],
+) -> InsertPosition {
     // Replies always go after their parent — explicit placement is ignored.
     if let Some(parent_id) = &op.reply_to {
         return InsertPosition::AfterComment(parent_id.clone());
@@ -191,8 +215,14 @@ fn resolve_position(op: &BatchCommentOp) -> InsertPosition {
     if let Some(after_comment) = &op.after_comment {
         return InsertPosition::AfterComment(after_comment.clone());
     }
-    if let Some(line) = op.after_line {
-        return InsertPosition::AfterLine(line);
+    if let Some(target) = op.after_line {
+        let mut adjusted = target;
+        for &(prev_target, lines_added) in line_shifts {
+            if target >= prev_target {
+                adjusted += lines_added;
+            }
+        }
+        return InsertPosition::AfterLine(adjusted);
     }
     InsertPosition::Append
 }
