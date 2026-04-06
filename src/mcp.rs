@@ -1176,10 +1176,6 @@ fn process_message(
 /// - Config or registry loading fails
 /// - stdin/stdout I/O fails
 pub fn run(system: &dyn System, base_dir: &Path, overrides: &CliOverrides<'_>) -> Result<()> {
-    let config_data = load_config(system, base_dir)?;
-    let registry = load_registry(system, base_dir)?;
-    let config = ResolvedConfig::resolve(system, config_data, registry, overrides)?;
-
     let stdin = io::stdin();
     let stdout = io::stdout();
     let reader = stdin.lock();
@@ -1202,6 +1198,12 @@ pub fn run(system: &dyn System, base_dir: &Path, overrides: &CliOverrides<'_>) -
                 continue;
             }
         };
+
+        // Reload config on every request so changes to .remargin.yaml
+        // are picked up without restarting the MCP server.
+        let config_data = load_config(system, base_dir)?;
+        let registry = load_registry(system, base_dir)?;
+        let config = ResolvedConfig::resolve(system, config_data, registry, overrides)?;
 
         if let Some(response) = process_message(system, base_dir, &config, &message) {
             writeln!(writer, "{response}").context("writing to stdout")?;
