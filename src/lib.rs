@@ -6,13 +6,13 @@
 
 // Module declarations — uncommented as features are implemented.
 pub mod config;
-// pub mod crypto;
+pub mod crypto;
 // pub mod document;
-// pub mod frontmatter;
+pub mod frontmatter;
 pub mod id;
-// pub mod linter;
+pub mod linter;
 // pub mod mcp;
-// pub mod operations;
+pub mod operations;
 pub mod parser;
 // pub mod skill;
 pub mod writer;
