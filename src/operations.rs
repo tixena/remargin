@@ -8,6 +8,7 @@ pub mod batch;
 pub mod migrate;
 pub mod purge;
 pub mod query;
+pub mod threading;
 
 #[cfg(test)]
 mod tests;
