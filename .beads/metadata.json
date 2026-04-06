@@ -2,6 +2,7 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "embedded",
-  "dolt_database": "rem",
+  "dolt_server_host": "euclid",
+  "dolt_database": "beads_remargin",
   "project_id": "5ecb102a-ce13-483f-818c-ea719f4e5c27"
 }
