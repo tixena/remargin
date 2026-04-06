@@ -196,11 +196,17 @@ pub fn get(
 /// The payload must include all existing comment blocks with their original
 /// IDs, checksums, and signatures intact.
 ///
+/// When `create` is true, the file is expected to be new: the parent directory
+/// must exist, but the file itself must not. Comment preservation checks are
+/// skipped since there is no existing file to compare against.
+///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The path escapes the sandbox
-/// - Comments were added, removed, or modified
+/// - Comments were added, removed, or modified (when `create` is false)
+/// - `create` is true but the file already exists
+/// - `create` is true but the parent directory does not exist
 /// - The file cannot be written
 pub fn write(
     system: &dyn System,
@@ -208,8 +214,20 @@ pub fn write(
     path: &Path,
     content: &str,
     config: &ResolvedConfig,
+    create: bool,
 ) -> Result<()> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path)?;
+    let resolved = if create {
+        let target = allowlist::resolve_sandboxed_create(system, base_dir, path)?;
+        if system.read_to_string(&target).is_ok() {
+            bail!(
+                "file already exists (use write without --create): {}",
+                path.display()
+            );
+        }
+        target
+    } else {
+        allowlist::resolve_sandboxed(system, base_dir, path)?
+    };
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());
@@ -218,36 +236,38 @@ pub fn write(
     // Parse the incoming content.
     let new_doc = parser::parse(content).context("parsing incoming content")?;
 
-    // Parse the existing file to get original comment blocks.
-    let existing_content = system.read_to_string(&resolved);
-    if let Ok(old_content) = existing_content {
-        let old_doc = parser::parse(&old_content).context("parsing existing document")?;
+    // Comment preservation: only check when overwriting an existing file.
+    if !create {
+        let existing_content = system.read_to_string(&resolved);
+        if let Ok(old_content) = existing_content {
+            let old_doc = parser::parse(&old_content).context("parsing existing document")?;
 
-        // Check comment preservation: all original comment IDs must be present.
-        let old_ids: HashSet<&str> = old_doc.comment_ids();
-        let new_ids: HashSet<&str> = new_doc.comment_ids();
+            // Check comment preservation: all original comment IDs must be present.
+            let old_ids: HashSet<&str> = old_doc.comment_ids();
+            let new_ids: HashSet<&str> = new_doc.comment_ids();
 
-        for old_id in &old_ids {
-            if !new_ids.contains(old_id) {
-                bail!("comment {old_id:?} was removed; use remargin delete instead");
+            for old_id in &old_ids {
+                if !new_ids.contains(old_id) {
+                    bail!("comment {old_id:?} was removed; use remargin delete instead");
+                }
             }
-        }
 
-        for new_id in &new_ids {
-            if !old_ids.contains(new_id) {
-                bail!("unexpected comment {new_id:?} appeared; use remargin comment to add");
+            for new_id in &new_ids {
+                if !old_ids.contains(new_id) {
+                    bail!("unexpected comment {new_id:?} appeared; use remargin comment to add");
+                }
             }
-        }
 
-        // Verify checksums match for existing comments.
-        for old_comment in old_doc.comments() {
-            if let Some(new_comment) = new_doc.find_comment(&old_comment.id)
-                && new_comment.checksum != old_comment.checksum
-            {
-                bail!(
-                    "comment {:?} checksum was modified; use remargin edit instead",
-                    old_comment.id
-                );
+            // Verify checksums match for existing comments.
+            for old_comment in old_doc.comments() {
+                if let Some(new_comment) = new_doc.find_comment(&old_comment.id)
+                    && new_comment.checksum != old_comment.checksum
+                {
+                    bail!(
+                        "comment {:?} checksum was modified; use remargin edit instead",
+                        old_comment.id
+                    );
+                }
             }
         }
     }

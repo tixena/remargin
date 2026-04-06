@@ -78,3 +78,42 @@ pub fn resolve_sandboxed(system: &dyn System, base: &Path, requested: &Path) -> 
 
     Ok(resolved)
 }
+
+/// Resolve and sandbox a path for a file that does not yet exist.
+///
+/// Canonicalizes the **parent directory** (which must exist) and appends the
+/// filename. This avoids the `canonicalize` failure on non-existent paths.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The parent directory does not exist or cannot be canonicalized
+/// - The resolved path escapes the base directory
+/// - The requested path has no filename component
+pub fn resolve_sandboxed_create(
+    system: &dyn System,
+    base: &Path,
+    requested: &Path,
+) -> Result<PathBuf> {
+    let joined = base.join(requested);
+    let parent = joined
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("path has no parent: {}", requested.display()))?;
+    let filename = joined
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("path has no filename: {}", requested.display()))?;
+
+    let canonical_parent = system.canonicalize(parent).map_err(|source| {
+        anyhow::anyhow!(
+            "parent directory does not exist: {}: {source}",
+            parent.display()
+        )
+    })?;
+    let canonical_base = system.canonicalize(base)?;
+
+    if !canonical_parent.starts_with(&canonical_base) {
+        bail!("path escapes sandbox: {}", requested.display());
+    }
+
+    Ok(canonical_parent.join(filename))
+}

@@ -317,6 +317,7 @@ fn write_preserves_comments() {
         Path::new("doc.md"),
         &modified,
         &config,
+        false,
     )
     .unwrap();
 
@@ -361,6 +362,157 @@ First comment.
         Path::new("doc.md"),
         stripped,
         &config,
+        false,
+    );
+    result.unwrap_err();
+}
+
+// ---------------------------------------------------------------------------
+// Write --create tests
+// ---------------------------------------------------------------------------
+
+// Test: create new file succeeds
+#[test]
+fn write_create_new_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/project/docs"))
+        .unwrap();
+
+    let config = open_config();
+    let content = "---\ntitle: New Document\n---\n\n# New Document\n\nSome content.\n";
+
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("docs/new.md"),
+        content,
+        &config,
+        true,
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/docs/new.md"))
+        .unwrap();
+    assert!(result.contains("New Document"));
+}
+
+// Test: create fails if file already exists
+#[test]
+fn write_create_rejects_existing_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"# Existing")
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "# Overwrite attempt",
+        &config,
+        true,
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("already exists"),
+        "expected 'already exists' error, got: {err}"
+    );
+}
+
+// Test: create fails if parent directory does not exist
+#[test]
+fn write_create_rejects_missing_parent() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("nonexistent/dir/new.md"),
+        "# New",
+        &config,
+        true,
+    );
+    result.unwrap_err();
+}
+
+// Test: create fails if path escapes sandbox
+#[test]
+fn write_create_rejects_escape() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/other"))
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("../../other/new.md"),
+        "# Escape attempt",
+        &config,
+        true,
+    );
+    result.unwrap_err();
+}
+
+// Test: create rejects non-visible extensions
+#[test]
+fn write_create_rejects_disallowed_extension() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("script.rs"),
+        "fn main() {}",
+        &config,
+        true,
+    );
+    result.unwrap_err();
+}
+
+// Test: create rejects dotfiles
+#[test]
+fn write_create_rejects_dotfile() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new(".secret.md"),
+        "# Hidden",
+        &config,
+        true,
     );
     result.unwrap_err();
 }

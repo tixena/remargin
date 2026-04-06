@@ -349,7 +349,8 @@ fn desc_write() -> ToolDesc {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Path to the file" },
-                "content": { "type": "string", "description": "File content to write" }
+                "content": { "type": "string", "description": "File content to write" },
+                "create": { "type": "boolean", "description": "Create a new file (parent directory must exist, file must not)", "default": false }
             },
             "required": ["path", "content"]
         }),
@@ -902,9 +903,13 @@ fn handle_write(
 ) -> Result<Value> {
     let path_str = required_str(params, "path")?;
     let content = required_str(params, "content")?;
+    let create = params
+        .get("create")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     let target = Path::new(path_str);
-    document::write(system, base_dir, target, content, config)?;
+    document::write(system, base_dir, target, content, config, create)?;
 
     Ok(json!({ "written": path_str }))
 }

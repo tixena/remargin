@@ -284,6 +284,9 @@ enum Commands {
         path: String,
         /// File content to write (read from stdin if omitted).
         content: Option<String>,
+        /// Create a new file (parent directory must exist, file must not).
+        #[arg(long)]
+        create: bool,
     },
 }
 
@@ -613,7 +616,9 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             eprintln!("remargin {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Commands::Mcp { action } => return cmd_mcp(system, cwd, &overrides, action.as_ref(), cli.global.json),
+        Commands::Mcp { action } => {
+            return cmd_mcp(system, cwd, &overrides, action.as_ref(), cli.global.json);
+        }
         Commands::Keygen { output } => return cmd_keygen(system, output),
         Commands::Skill { action } => return cmd_skill(system, action, cli.global.json),
         Commands::Ack { .. }
@@ -727,13 +732,24 @@ fn dispatch_with_config(
         Commands::Verify { file, public_key } => {
             cmd_verify(system, cwd, file, public_key.as_deref(), json_mode)
         }
-        Commands::Write { path, content } => {
-            cmd_write(system, cwd, config, path, content.as_deref(), json_mode)
-        }
+        Commands::Write {
+            path,
+            content,
+            create,
+        } => cmd_write(
+            system,
+            cwd,
+            config,
+            path,
+            content.as_deref(),
+            *create,
+            json_mode,
+        ),
         // Already handled in `run()`.
-        Commands::Version | Commands::Mcp { .. } | Commands::Keygen { .. } | Commands::Skill { .. } => {
-            Ok(())
-        }
+        Commands::Version
+        | Commands::Mcp { .. }
+        | Commands::Keygen { .. }
+        | Commands::Skill { .. } => Ok(()),
     }
 }
 
@@ -1285,8 +1301,7 @@ fn cmd_mcp(
     match mcp_action {
         None | Some(McpAction::Run) => mcp::run(system, cwd, overrides),
         Some(McpAction::Install { user }) => {
-            let bin = env::current_exe()
-                .context("resolving remargin binary path")?;
+            let bin = env::current_exe().context("resolving remargin binary path")?;
             let bin_str = bin.display().to_string();
             let scope = if *user { "user" } else { "project" };
 
@@ -1307,11 +1322,14 @@ fn cmd_mcp(
             }
 
             if json_mode {
-                print_output(true, &json!({
-                    "installed": true,
-                    "scope": scope,
-                    "binary": bin_str,
-                }))
+                print_output(
+                    true,
+                    &json!({
+                        "installed": true,
+                        "scope": scope,
+                        "binary": bin_str,
+                    }),
+                )
             } else {
                 eprintln!("MCP server registered ({scope} scope): {bin_str}");
                 Ok(())
@@ -1343,7 +1361,11 @@ fn cmd_mcp(
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             let registered = stdout.lines().any(|l| l.contains("remargin"));
-            let status_str = if registered { "registered" } else { "not_registered" };
+            let status_str = if registered {
+                "registered"
+            } else {
+                "not_registered"
+            };
 
             if json_mode {
                 print_output(true, &json!({ "status": status_str }))
@@ -1428,6 +1450,7 @@ fn cmd_write(
     config: &ResolvedConfig,
     path_str: &str,
     content: Option<&str>,
+    create: bool,
     json_mode: bool,
 ) -> Result<()> {
     let target = Path::new(path_str);
@@ -1437,6 +1460,6 @@ fn cmd_write(
         None => read_stdin()?,
     };
 
-    document::write(system, cwd, target, &body, config)?;
+    document::write(system, cwd, target, &body, config, create)?;
     print_output(json_mode, &json!({ "written": path_str }))
 }
