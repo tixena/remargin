@@ -73,3 +73,23 @@ self_named_module_files = "allow"
 separated_literal_suffix = "allow"
 single_call_fn = "allow"
 print_stderr = "allow"
+# Parser and low-level operations require byte indexing and arithmetic.
+indexing_slicing = "allow"
+arithmetic_side_effects = "allow"
+string_slice = "allow"
+# Write to String is infallible; discarding the result is intentional.
+let_underscore_must_use = "allow"
+# Private implementation details do not need doc comments on every field.
+missing_docs_in_private_items = "allow"
+# Inline annotations are a micro-optimization applied selectively, not globally.
+missing_inline_in_public_items = "allow"
+# as_conversions are used sparingly and safely for numeric casts.
+as_conversions = "allow"
+# Tests use unwrap() and expect() for concise assertions.
+unwrap_used = "allow"
+# Pattern matching through references is idiomatic in filter_map closures.
+pattern_type_mismatch = "allow"
+# Single-char identifiers are fine in tight scopes (loop vars, closures).
+min_ident_chars = "allow"
+# Test function naming is clearer with descriptive names, not enforced prefix rules.
+redundant_test_prefix = "allow"

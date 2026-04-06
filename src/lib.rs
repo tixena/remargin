@@ -13,6 +13,6 @@
 // pub mod linter;
 // pub mod mcp;
 // pub mod operations;
-// pub mod parser;
+pub mod parser;
 // pub mod skill;
 // pub mod writer;
