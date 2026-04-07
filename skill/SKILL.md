@@ -286,6 +286,8 @@ The `comments` tool supports two output modes:
 
 When the user asks to see, review, or display comments, use `pretty=true` and **pass the output through verbatim**. Do not paraphrase, summarize, or re-render the output. The tool produces the exact format needed for terminal display with ctrl+clickable `file:line` links.
 
+**After showing pretty output, STOP.** Do not add summaries, reformatted lists, or any restatement of comment data below the tool output. The pretty output is the complete answer. Any text you write that references comment IDs, line numbers, or content from memory will be wrong.
+
 ```
 remargin comments file="docs/design.md" pretty=true
 ```
