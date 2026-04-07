@@ -159,8 +159,8 @@ enum Commands {
     Comment {
         /// Path to the document (use - for stdin).
         file: String,
-        /// Comment body text.
-        content: String,
+        /// Comment body text (mutually exclusive with --comment-file).
+        content: Option<String>,
         /// Insert after this comment ID.
         #[arg(long)]
         after_comment: Option<String>,
@@ -173,6 +173,9 @@ enum Commands {
         /// Automatically acknowledge the parent comment when replying.
         #[arg(long)]
         auto_ack: bool,
+        /// Read comment body from a file (use - for stdin).
+        #[arg(long, short = 'F', conflicts_with = "content")]
+        comment_file: Option<PathBuf>,
         /// ID of the comment to reply to.
         #[arg(long)]
         reply_to: Option<String>,
@@ -548,6 +551,37 @@ fn read_stdin() -> Result<String> {
     Ok(buf)
 }
 
+/// Resolve comment body from either a positional argument or a file.
+///
+/// Exactly one of `content` or `comment_file` must be provided. When
+/// `comment_file` is `"-"`, the body is read from stdin.
+fn resolve_comment_content(
+    system: &dyn System,
+    cwd: &Path,
+    content: Option<&String>,
+    comment_file: Option<&PathBuf>,
+) -> Result<String> {
+    match (content, comment_file) {
+        (Some(text), None) => Ok(text.clone()),
+        (None, Some(path)) => {
+            let path_str = path.to_string_lossy();
+            if path_str == "-" {
+                read_stdin().context("reading comment body from stdin")
+            } else {
+                system
+                    .read_to_string(&cwd.join(path))
+                    .with_context(|| format!("reading comment body from {path_str}"))
+            }
+        }
+        (None, None) => {
+            anyhow::bail!("comment body required: provide as argument or via --comment-file")
+        }
+        (Some(_), Some(_)) => {
+            anyhow::bail!("cannot use both positional content and --comment-file")
+        }
+    }
+}
+
 /// Resolve document path, supporting "-" for stdin.
 fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathBuf> {
     if file == "-" {
@@ -799,15 +833,18 @@ fn dispatch_with_config(
             after_line,
             attach,
             auto_ack,
+            comment_file,
             reply_to,
             to,
         } => {
+            let resolved_content =
+                resolve_comment_content(system, cwd, content.as_ref(), comment_file.as_ref())?;
             let cp = CommentParams {
                 after_comment: after_comment.as_deref(),
                 after_line: *after_line,
                 attachments: attach,
                 auto_ack: *auto_ack,
-                content,
+                content: &resolved_content,
                 dry_run,
                 file,
                 json_mode,
@@ -1779,4 +1816,78 @@ fn cmd_write(
 
     document::write(system, cwd, target, &body, config, create)?;
     print_output(json_mode, &json!({ "written": path_str }))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use os_shim::mock::MockSystem;
+
+    use super::resolve_comment_content;
+
+    #[test]
+    fn content_from_positional_arg() {
+        let system = MockSystem::new();
+        let cwd = Path::new("/project");
+        let content = String::from("Hello from arg");
+
+        let result = resolve_comment_content(&system, cwd, Some(&content), None).unwrap();
+        assert_eq!(result, "Hello from arg");
+    }
+
+    #[test]
+    fn content_from_file() {
+        let system = MockSystem::new()
+            .with_file(Path::new("/project/comment.txt"), b"Hello from file")
+            .unwrap();
+        let cwd = Path::new("/project");
+        let path = PathBuf::from("comment.txt");
+
+        let result = resolve_comment_content(&system, cwd, None, Some(&path)).unwrap();
+        assert_eq!(result, "Hello from file");
+    }
+
+    #[test]
+    fn content_from_absolute_file_path() {
+        let system = MockSystem::new()
+            .with_file(Path::new("/elsewhere/note.md"), b"Absolute path content")
+            .unwrap();
+        let cwd = Path::new("/project");
+        let path = PathBuf::from("/elsewhere/note.md");
+
+        let result = resolve_comment_content(&system, cwd, None, Some(&path)).unwrap();
+        assert_eq!(result, "Absolute path content");
+    }
+
+    #[test]
+    fn error_when_neither_content_nor_file() {
+        let system = MockSystem::new();
+        let cwd = Path::new("/project");
+
+        let err = resolve_comment_content(&system, cwd, None, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("comment body required"),
+            "unexpected error: {msg}",
+        );
+    }
+
+    #[test]
+    fn error_when_file_not_found() {
+        let system = MockSystem::new();
+        let cwd = Path::new("/project");
+        let path = PathBuf::from("missing.txt");
+
+        let err = resolve_comment_content(&system, cwd, None, Some(&path)).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("reading comment body from"),
+            "unexpected error: {msg}",
+        );
+    }
 }
