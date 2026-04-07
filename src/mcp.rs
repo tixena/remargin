@@ -202,9 +202,10 @@ fn desc_get() -> ToolDesc {
         schema: json!({
             "type": "object",
             "properties": {
+                "end_line": { "type": "integer", "description": "End line (1-indexed)" },
+                "line_numbers": { "type": "boolean", "description": "Prefix each line with its 1-indexed line number", "default": false },
                 "path": { "type": "string", "description": "Path to the file" },
-                "start_line": { "type": "integer", "description": "Start line (1-indexed)" },
-                "end_line": { "type": "integer", "description": "End line (1-indexed)" }
+                "start_line": { "type": "integer", "description": "Start line (1-indexed)" }
             },
             "required": ["path"]
         }),
@@ -698,8 +699,9 @@ fn handle_edit(
 /// Handle the `get` tool: read a file's contents.
 fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>) -> Result<Value> {
     let path_str = required_str(params, "path")?;
-    let start_line = optional_usize(params, "start_line");
     let end_line = optional_usize(params, "end_line");
+    let line_numbers = optional_bool(params, "line_numbers");
+    let start_line = optional_usize(params, "start_line");
 
     let target = Path::new(path_str);
     let lines = match (start_line, end_line) {
@@ -707,9 +709,19 @@ fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>)
         _ => None,
     };
 
-    let content = document::get(system, base_dir, target, lines, false)?;
+    let content = document::get(system, base_dir, target, lines, false, false)?;
 
-    Ok(json!({ "content": content }))
+    if line_numbers {
+        let start_num = lines.map_or(1, |(s, _)| s);
+        let json_lines: Vec<Value> = content
+            .split('\n')
+            .enumerate()
+            .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
+            .collect();
+        Ok(json!({ "lines": json_lines }))
+    } else {
+        Ok(json!({ "content": content }))
+    }
 }
 
 /// Handle the `lint` tool: run structural lint checks.

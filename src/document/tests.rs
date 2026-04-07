@@ -209,6 +209,7 @@ fn get_markdown() {
         Path::new("doc.md"),
         None,
         false,
+        false,
     )
     .unwrap();
     assert_eq!(content, "# Hello\nWorld");
@@ -229,6 +230,7 @@ fn get_dotfile_hidden() {
         Path::new(".env"),
         None,
         false,
+        false,
     );
     result.unwrap_err();
 }
@@ -247,6 +249,7 @@ fn get_disallowed_extension() {
         Path::new("/project"),
         Path::new("main.rs"),
         None,
+        false,
         false,
     );
     result.unwrap_err();
@@ -270,6 +273,7 @@ fn get_with_lines() {
         Path::new("doc.md"),
         Some((2, 4)),
         false,
+        false,
     )
     .unwrap();
     assert_eq!(content, "line2\nline3\nline4");
@@ -291,6 +295,7 @@ fn get_escape_attempt() {
         Path::new("/project"),
         Path::new("../../etc/passwd"),
         None,
+        false,
         false,
     );
     result.unwrap_err();
@@ -759,4 +764,169 @@ fn sandboxed_absolute_blocked_but_unrestricted_allows() {
     )
     .unwrap();
     assert_eq!(result, Path::new("/home/user/notes.md"));
+}
+
+// ---------------------------------------------------------------------------
+// get --line-numbers tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn line_numbers_full_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(
+            Path::new("/project/doc.md"),
+            b"alpha\nbeta\ngamma\ndelta\nepsilon",
+        )
+        .unwrap();
+
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        true,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        content,
+        "1\u{2502} alpha\n2\u{2502} beta\n3\u{2502} gamma\n4\u{2502} delta\n5\u{2502} epsilon"
+    );
+}
+
+#[test]
+fn line_numbers_with_range() {
+    let lines: Vec<String> = (1_i32..=100_i32).map(|i| format!("line{i}")).collect();
+    let file_content = lines.join("\n");
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), file_content.as_bytes())
+        .unwrap();
+
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        Some((50, 55)),
+        true,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        content,
+        "50\u{2502} line50\n51\u{2502} line51\n52\u{2502} line52\n53\u{2502} line53\n54\u{2502} line54\n55\u{2502} line55"
+    );
+}
+
+#[test]
+fn line_numbers_padding() {
+    let lines: Vec<String> = (1_i32..=1_000_i32).map(|i| format!("line{i}")).collect();
+    let file_content = lines.join("\n");
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), file_content.as_bytes())
+        .unwrap();
+
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        Some((998, 1000)),
+        true,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        content,
+        " 998\u{2502} line998\n 999\u{2502} line999\n1000\u{2502} line1000"
+    );
+}
+
+#[test]
+fn line_numbers_off_by_default() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"hello\nworld")
+        .unwrap();
+
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(content, "hello\nworld");
+}
+
+#[test]
+fn line_numbers_single_line() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"only line")
+        .unwrap();
+
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        true,
+        false,
+    )
+    .unwrap();
+    assert_eq!(content, "1\u{2502} only line");
+}
+
+#[test]
+fn line_numbers_empty_lines() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"first\n\nthird")
+        .unwrap();
+
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        true,
+        false,
+    )
+    .unwrap();
+    assert_eq!(content, "1\u{2502} first\n2\u{2502} \n3\u{2502} third");
+}
+
+#[test]
+fn line_numbers_binary_rejected() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/image.png"), b"\x89PNG\r\n")
+        .unwrap();
+
+    let result = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("image.png"),
+        None,
+        true,
+        false,
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("not supported for binary"),
+        "expected binary error, got: {err}"
+    );
 }

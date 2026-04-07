@@ -195,6 +195,9 @@ enum Commands {
         /// End line (1-indexed, inclusive).
         #[arg(long)]
         end: Option<usize>,
+        /// Show line numbers in output.
+        #[arg(short = 'n', long = "line-numbers")]
+        line_numbers: bool,
         /// Start line (1-indexed).
         #[arg(long)]
         start: Option<usize>,
@@ -395,6 +398,20 @@ struct CommentParams<'cmd> {
     reply_to: Option<&'cmd str>,
     /// Addressees.
     to: &'cmd [String],
+}
+
+/// Parameters for the get command.
+struct GetParams<'cmd> {
+    /// End line (1-indexed, inclusive).
+    end: Option<usize>,
+    /// JSON output mode.
+    json_mode: bool,
+    /// Show line numbers in output.
+    line_numbers: bool,
+    /// Path to the file.
+    path: &'cmd str,
+    /// Start line (1-indexed).
+    start: Option<usize>,
 }
 
 /// Parameters for the query command.
@@ -772,8 +789,20 @@ fn dispatch_with_config(
         Commands::Edit { file, id, content } => {
             cmd_edit(system, cwd, config, file, id, content, json_mode)
         }
-        Commands::Get { path, start, end } => {
-            cmd_get(system, cwd, config, path, *start, *end, json_mode)
+        Commands::Get {
+            path,
+            start,
+            end,
+            line_numbers,
+        } => {
+            let gp = GetParams {
+                end: *end,
+                json_mode,
+                line_numbers: *line_numbers,
+                path,
+                start: *start,
+            };
+            cmd_get(system, cwd, config, &gp)
         }
         Commands::Lint { file } => cmd_lint(system, cwd, file, json_mode),
         Commands::Ls { path } => cmd_ls(system, cwd, config, path, json_mode),
@@ -1043,21 +1072,38 @@ fn cmd_get(
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
-    path_str: &str,
-    start: Option<usize>,
-    end: Option<usize>,
-    json_mode: bool,
+    gp: &GetParams<'_>,
 ) -> Result<()> {
-    let target = Path::new(path_str);
-    let lines = match (start, end) {
+    let target = Path::new(gp.path);
+    let lines = match (gp.start, gp.end) {
         (Some(s), Some(e)) => Some((s, e)),
         _ => None,
     };
-    let content = document::get(system, cwd, target, lines, config.unrestricted)?;
-    if json_mode {
-        print_output(true, &json!({ "content": content }))
+
+    if gp.json_mode && gp.line_numbers {
+        // Structured JSON output with line numbers.
+        let content = document::get(system, cwd, target, lines, false, config.unrestricted)?;
+        let start_num = lines.map_or(1, |(s, _)| s);
+        let json_lines: Vec<Value> = content
+            .split('\n')
+            .enumerate()
+            .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
+            .collect();
+        print_output(true, &json!({ "lines": json_lines }))
     } else {
-        out_raw(&content)
+        let content = document::get(
+            system,
+            cwd,
+            target,
+            lines,
+            gp.line_numbers,
+            config.unrestricted,
+        )?;
+        if gp.json_mode {
+            print_output(true, &json!({ "content": content }))
+        } else {
+            out_raw(&content)
+        }
     }
 }
 

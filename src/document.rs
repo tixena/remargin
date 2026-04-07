@@ -158,6 +158,7 @@ pub fn get(
     base_dir: &Path,
     path: &Path,
     lines: Option<(usize, usize)>,
+    line_numbers: bool,
     unrestricted: bool,
 ) -> Result<String> {
     let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
@@ -168,6 +169,10 @@ pub fn get(
 
     if lines.is_some() && !allowlist::is_text(&resolved) {
         bail!("--lines is not supported for binary files");
+    }
+
+    if line_numbers && !allowlist::is_text(&resolved) {
+        bail!("--line-numbers is not supported for binary files");
     }
 
     let content = system
@@ -182,10 +187,38 @@ pub fn get(
                 .filter(|(i, _)| *i + 1 >= start && *i < end)
                 .map(|(_, line)| line)
                 .collect();
-            Ok(selected.join("\n"))
+            if line_numbers {
+                Ok(format_with_line_numbers(&selected, start))
+            } else {
+                Ok(selected.join("\n"))
+            }
         }
-        None => Ok(content),
+        None => {
+            if line_numbers {
+                let all_lines: Vec<&str> = content.split('\n').collect();
+                Ok(format_with_line_numbers(&all_lines, 1))
+            } else {
+                Ok(content)
+            }
+        }
     }
+}
+
+/// Format lines with right-aligned line numbers and a pipe separator.
+///
+/// `start_num` is the 1-indexed line number of the first line in the slice.
+fn format_with_line_numbers(lines: &[&str], start_num: usize) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let end_num = start_num + lines.len() - 1;
+    let width = end_num.to_string().len();
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{:>width$}\u{2502} {line}", start_num + i))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ---------------------------------------------------------------------------

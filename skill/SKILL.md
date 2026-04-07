@@ -18,16 +18,26 @@ Use remargin when:
 
 **Trigger phrases**: "remargin that", "remargin this", "let's discuss", "let's review", "review this document", "discuss this document", "discuss on that document", "comment on", "discuss this doc", "what comments are pending", "acknowledge", "react to", "check the document", "start a discussion", "leave a comment", "any pending comments"
 
-## Critical Rule: Never Use Filesystem Tools for Markdown
+## Critical Rule: Never Operate on Files Directly
 
-**NEVER use `Read`, `Edit`, or `Write` tools to manipulate markdown documents that remargin manages.** Always use the remargin MCP tools instead. This ensures:
+**NEVER use `Read`, `Edit`, `Write`, or `Bash` (awk, sed, cat, grep) to read, modify, or inspect markdown documents that remargin manages.** Always use the remargin MCP tools instead:
+
+- Use `remargin get` to read file contents (with `start_line`/`end_line` for ranges, `line_numbers=true` to see line numbers)
+- Use `remargin search` to find text and get line numbers
+- Use `remargin write` to update body content
+- Use `remargin comment` / `batch` to add comments
+- Use `remargin comments` to list comments in a file
+
+This ensures:
 
 - Comments are never accidentally deleted or corrupted
 - Document integrity (checksums, signatures) is preserved
 - Comment threading and acknowledgment state stays consistent
 - Structural lint checks run before and after every operation
 
-Use `Grep` and `Glob` for discovery (finding files, searching content), but all reads and writes go through remargin.
+The document access layer exists to prevent agents from corrupting comments. Bypassing it with direct filesystem tools defeats the entire purpose of remargin.
+
+Use `Grep` and `Glob` only for discovery (finding files across the repo), not for reading or modifying managed documents.
 
 ## Permissions Setup
 
@@ -52,9 +62,20 @@ This approves all remargin tools at once — no per-tool confirmation needed.
 | Tool | Purpose |
 |------|---------|
 | `ls` | List files and directories |
-| `get` | Read a file's contents (supports `start_line`/`end_line` for ranges) |
+| `get` | Read a file's contents (supports `start_line`/`end_line` for ranges, `line_numbers` to prefix each line with its number) |
 | `write` | Write file contents (comment-preserving — never destroys existing comments). Pass `create=true` to create a new file. |
 | `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
+
+#### `write` safety
+
+`write` replaces the **entire file content**. All existing comments must be carried **intact** in the new content — the checksum on each comment validates this. If the write would remove or alter any comment, remargin rejects it. This is by design — it is the core reason remargin exists.
+
+- Never use `write` as a shortcut to rewrite a file that has other participants' comments. If you need to update body text, read the full file first with `get`, make targeted changes to body segments only, and write back the complete content including all comment blocks verbatim.
+- If a `write` fails due to comment preservation, do **NOT** delete comments to make it work. Find an alternative approach (e.g., write to a different file) or ask the user.
+
+#### Never delete comments you didn't author
+
+Never delete another participant's comment unless the user explicitly tells you to. If an operation fails because of someone else's comment, find an alternative approach or ask the user. Deleting someone's comment to unblock your own operation is never acceptable.
 
 ### Commenting
 
@@ -126,6 +147,8 @@ Replying to the comment above.
 ```
 remargin get path="docs/design.md"
 remargin get path="docs/design.md" start_line=1 end_line=50
+remargin get path="docs/design.md" line_numbers=true
+remargin get path="docs/design.md" start_line=50 end_line=60 line_numbers=true
 ```
 
 ### List files in a directory
@@ -213,6 +236,22 @@ When comments are addressed to you (via `to` field) or the user asks you to "pro
 - Do NOT reply with a surface-level summary. "Understood, phase 1 is CLI backend" adds nothing.
 - Do NOT ack and then start doing the work. The work must be done before the ack.
 - Do NOT skip referenced files. If the comment says "look at X", you must read X before acking.
+
+### Multiple comments on the same file
+
+When placing 2 or more comments on the same file, **always use `batch`**. Do not call `comment` sequentially.
+
+Why: each `comment` call inserts a block into the file, shifting all subsequent line numbers. If you place comment A at line 50, line 80 in the original file is now line 90 (or whatever). Your second `comment --after-line 80` will land in the wrong place.
+
+`batch` is atomic — all line numbers are resolved against the original document in a single operation. No displacement.
+
+```
+remargin batch file="docs/design.md" operations=[
+  {content: "First note", after_line: 50},
+  {content: "Second note", after_line: 80},
+  {content: "Reply to abc", reply_to: "abc"}
+]
+```
 
 ### Write document content
 
