@@ -316,6 +316,10 @@ pub fn delete_comments(
     doc.segments
         .retain(|seg| !matches!(seg, Segment::Comment(cm) if id_set.contains(cm.id.as_str())));
 
+    // Normalize whitespace: merge adjacent Body segments and collapse
+    // runs of 3+ consecutive newlines down to 2 (at most one blank line).
+    collapse_body_segments(&mut doc.segments);
+
     // Clean up orphaned attachments.
     let remaining_attachments: HashSet<String> = doc
         .comments()
@@ -411,6 +415,78 @@ pub fn edit_comment(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Merge adjacent `Body` segments and collapse runs of 3+ consecutive
+/// newlines down to 2 (at most one blank line).  This prevents surplus
+/// blank lines after comment deletion.
+///
+/// The tricky part: comment serialization already appends `\n` via
+/// `writeln!` on the closing fence.  So a `Body("\n\n")` between two
+/// comments produces three consecutive newlines in the final output
+/// (`\n` from fence + `\n\n` from body).  We handle this by also
+/// considering the surrounding context when normalizing whitespace-only
+/// body segments.
+fn collapse_body_segments(segments: &mut Vec<Segment>) {
+    // 1. Merge adjacent Body segments into one.
+    let mut idx = 0;
+    while idx + 1 < segments.len() {
+        if matches!(segments[idx], Segment::Body(_))
+            && matches!(segments[idx + 1], Segment::Body(_))
+        {
+            if let Segment::Body(next_text) = segments.remove(idx + 1)
+                && let Segment::Body(ref mut text) = segments[idx]
+            {
+                text.push_str(&next_text);
+            }
+        } else {
+            idx += 1;
+        }
+    }
+
+    // 2. Normalize excessive newlines in Body segments.
+    //
+    // Two passes: first a general normalization (collapse 3+ newlines
+    // to 2), then a context-aware pass that accounts for the `\n` that
+    // comment serialization already appends via `writeln!` on the
+    // closing fence.
+    for seg in segments.iter_mut() {
+        if let Segment::Body(text) = seg {
+            while text.contains("\n\n\n") {
+                *text = text.replace("\n\n\n", "\n\n");
+            }
+        }
+    }
+
+    // Context-aware pass: a whitespace-only body segment adjacent to a
+    // comment only needs a single `\n` because the comment block itself
+    // already ends with `\n`.  Without this, `Body("\n\n")` between
+    // two comments produces three consecutive newlines in the output.
+    let len = segments.len();
+    for pos in 0..len {
+        let is_whitespace_body =
+            matches!(&segments[pos], Segment::Body(t) if t.trim().is_empty());
+        if !is_whitespace_body {
+            continue;
+        }
+
+        let preceded_by_comment = pos > 0
+            && matches!(
+                segments[pos - 1],
+                Segment::Comment(_) | Segment::LegacyComment(_)
+            );
+        let followed_by_comment = pos + 1 < len
+            && matches!(
+                segments[pos + 1],
+                Segment::Comment(_) | Segment::LegacyComment(_)
+            );
+
+        if (preceded_by_comment || followed_by_comment)
+            && let Segment::Body(text) = &mut segments[pos]
+        {
+            *text = String::from("\n");
+        }
+    }
+}
 
 /// Collect all descendant comment IDs in the reply chain (depth-first).
 fn collect_descendants(doc: &ParsedDocument, root_id: &str) -> Vec<String> {

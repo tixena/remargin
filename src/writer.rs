@@ -207,7 +207,11 @@ pub fn insert_comment(
             let after = &markdown[byte_offset..];
             let serialized = serialize_comment_from_segment(&segment);
 
-            let new_markdown = format!("{before}{serialized}\n{after}");
+            // `serialize_comment()` already ends with `\n` (the closing
+            // fence uses `writeln!`), so adding another `\n` here would
+            // produce a surplus blank line that becomes an artifact when
+            // the comment is later deleted.
+            let new_markdown = format!("{before}{serialized}{after}");
             let reparsed = parser::parse(&new_markdown)
                 .context("re-parsing after AfterLine insertion failed")?;
             doc.segments = reparsed.segments;

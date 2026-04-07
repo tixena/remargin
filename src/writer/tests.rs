@@ -315,6 +315,69 @@ fn write_with_mock_system() {
 }
 
 // ---------------------------------------------------------------------------
+// Insert whitespace tests (no surplus newlines)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn insert_after_line_no_double_newline() {
+    let doc_str = "Line 1\nLine 2\nLine 3\n";
+    let mut doc = parser::parse(doc_str).unwrap();
+    let comment = make_comment("aln1", "After line insert.");
+    insert_comment(&mut doc, comment, &InsertPosition::AfterLine(2)).unwrap();
+
+    let markdown = doc.to_markdown();
+    assert!(
+        !markdown.contains("\n\n\n"),
+        "AfterLine insert produced triple-newline:\n{markdown}"
+    );
+}
+
+#[test]
+fn insert_after_comment_no_double_newline() {
+    let doc_str = "\
+```remargin
+---
+id: abc
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+checksum: sha256:abc123
+---
+First comment.
+```
+Some text after.
+";
+    let mut doc = parser::parse(doc_str).unwrap();
+    let comment = make_comment("acn1", "After comment insert.");
+    insert_comment(
+        &mut doc,
+        comment,
+        &InsertPosition::AfterComment(String::from("abc")),
+    )
+    .unwrap();
+
+    let markdown = doc.to_markdown();
+    assert!(
+        !markdown.contains("\n\n\n"),
+        "AfterComment insert produced triple-newline:\n{markdown}"
+    );
+}
+
+#[test]
+fn insert_append_no_double_newline() {
+    let doc_str = "# Title\n\nSome text.\n";
+    let mut doc = parser::parse(doc_str).unwrap();
+    let comment = make_comment("apn1", "Appended.");
+    insert_comment(&mut doc, comment, &InsertPosition::Append).unwrap();
+
+    let markdown = doc.to_markdown();
+    assert!(
+        !markdown.contains("\n\n\n"),
+        "Append insert produced triple-newline:\n{markdown}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Test: AfterComment with nonexistent ID
 // ---------------------------------------------------------------------------
 

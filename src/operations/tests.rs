@@ -465,6 +465,379 @@ fn preservation_invariant() {
 }
 
 // ---------------------------------------------------------------------------
+// Delete whitespace normalization tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn delete_restores_original_whitespace() {
+    let original = "\
+---
+title: Test
+author: eduardo
+---
+
+# Section One
+
+Start with the HTTP transport.
+
+### 2. Inline widget complexity
+
+More text here.
+";
+    let system = system_with_doc(original);
+    let config = open_config();
+    let position = InsertPosition::AfterLine(9);
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "test comment",
+            position: &position,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    // Delete the comment.
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &[new_id.as_str()],
+    )
+    .unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    // The document should not have triple-newline sequences (max one blank line).
+    assert!(
+        !after.contains("\n\n\n"),
+        "delete left triple-newline artifact:\n{after}"
+    );
+}
+
+#[test]
+fn delete_at_end_no_trailing_blanks() {
+    let original = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+Some body text.
+";
+    let system = system_with_doc(original);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "appended comment",
+            position: &position,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &[new_id.as_str()],
+    )
+    .unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    assert!(
+        !after.contains("\n\n\n"),
+        "delete at end left trailing blank lines:\n{after}"
+    );
+}
+
+#[test]
+fn delete_after_frontmatter_no_leading_blanks() {
+    let original = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+Some text.
+";
+    let system = system_with_doc(original);
+    let config = open_config();
+    let position = InsertPosition::AfterLine(5);
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "after frontmatter",
+            position: &position,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &[new_id.as_str()],
+    )
+    .unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    assert!(
+        !after.contains("\n\n\n"),
+        "delete after frontmatter left leading blank lines:\n{after}"
+    );
+}
+
+#[test]
+fn delete_multiple_adjacent_comments() {
+    let original = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+Some body text.
+";
+    let system = system_with_doc(original);
+    let config = open_config();
+
+    // Insert three comments consecutively.
+    let id1 = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "first",
+            position: &InsertPosition::Append,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let id2 = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "second",
+            position: &InsertPosition::Append,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let id3 = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "third",
+            position: &InsertPosition::Append,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    // Delete all three.
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &[id1.as_str(), id2.as_str(), id3.as_str()],
+    )
+    .unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    assert!(
+        !after.contains("\n\n\n"),
+        "deleting multiple adjacent comments left excessive blank lines:\n{after}"
+    );
+}
+
+#[test]
+fn delete_middle_of_three_comments() {
+    let original = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+Some body text.
+";
+    let system = system_with_doc(original);
+    let config = open_config();
+
+    let id1 = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "first",
+            position: &InsertPosition::Append,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let id2 = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "second",
+            position: &InsertPosition::AfterComment(id1),
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let _id3 = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            content: "third",
+            position: &InsertPosition::AfterComment(id2.clone()),
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    // Delete only the middle comment.
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &[id2.as_str()],
+    )
+    .unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&after).unwrap();
+
+    // Two comments should remain.
+    assert_eq!(doc.comments().len(), 2);
+
+    assert!(
+        !after.contains("\n\n\n"),
+        "deleting middle comment left excessive blank lines:\n{after}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Delete collapse unit tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn delete_collapses_adjacent_body_segments() {
+    use crate::parser::{ParsedDocument, Segment};
+
+    let mut doc = ParsedDocument {
+        segments: vec![
+            Segment::Body(String::from("Text before.\n")),
+            Segment::Body(String::from("\n")),
+            Segment::Body(String::from("\n")),
+            Segment::Body(String::from("Text after.\n")),
+        ],
+    };
+
+    super::collapse_body_segments(&mut doc.segments);
+
+    let markdown = doc.to_markdown();
+    assert!(
+        !markdown.contains("\n\n\n"),
+        "collapsed body segments still have triple-newline:\n{markdown}"
+    );
+    assert!(markdown.contains("Text before."));
+    assert!(markdown.contains("Text after."));
+}
+
+#[test]
+fn delete_preserves_intentional_blank_lines() {
+    // A document with two blank lines between sections (intentional) and a
+    // comment at the end. Deleting the comment should preserve the existing
+    // two-newline separation (one blank line) in the body.
+    let original = "\
+---
+title: Test
+author: eduardo
+---
+
+# Section One
+
+Text in section one.
+
+## Section Two
+
+Text in section two.
+
+```remargin
+---
+id: xyz
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+---
+A comment at the end.
+```
+";
+    let system = system_with_doc(original);
+    let config = open_config();
+
+    delete_comments(&system, Path::new("/docs/test.md"), &config, &["xyz"]).unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    // The blank line between Section One and Section Two should be preserved.
+    assert!(
+        after.contains("Text in section one.\n\n## Section Two"),
+        "intentional blank line between sections was removed:\n{after}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Error cases
 // ---------------------------------------------------------------------------
 
