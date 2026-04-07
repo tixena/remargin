@@ -203,8 +203,14 @@ fn get_markdown() {
         .with_file(Path::new("/project/doc.md"), b"# Hello\nWorld")
         .unwrap();
 
-    let content =
-        document::get(&system, Path::new("/project"), Path::new("doc.md"), None, false).unwrap();
+    let content = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        false,
+    )
+    .unwrap();
     assert_eq!(content, "# Hello\nWorld");
 }
 
@@ -217,7 +223,13 @@ fn get_dotfile_hidden() {
         .with_file(Path::new("/project/.env"), b"SECRET=123")
         .unwrap();
 
-    let result = document::get(&system, Path::new("/project"), Path::new(".env"), None, false);
+    let result = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new(".env"),
+        None,
+        false,
+    );
     result.unwrap_err();
 }
 
@@ -230,7 +242,13 @@ fn get_disallowed_extension() {
         .with_file(Path::new("/project/main.rs"), b"fn main() {}")
         .unwrap();
 
-    let result = document::get(&system, Path::new("/project"), Path::new("main.rs"), None, false);
+    let result = document::get(
+        &system,
+        Path::new("/project"),
+        Path::new("main.rs"),
+        None,
+        false,
+    );
     result.unwrap_err();
 }
 
