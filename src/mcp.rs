@@ -318,6 +318,7 @@ fn desc_query() -> ToolDesc {
                 "expanded": { "type": "boolean", "description": "Include individual matching comments in each result (default: true via non-summary mode)", "default": false },
                 "pending": { "type": "boolean", "description": "Only documents with pending comments", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
+                "pretty": { "type": "boolean", "description": "Pretty-print results grouped by file with structured display", "default": false },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
                 "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" },
                 "summary": { "type": "boolean", "description": "Return only counts/summary, suppress comment data", "default": false }
@@ -984,6 +985,7 @@ fn handle_query(
 ) -> Result<Value> {
     let path_str = optional_str(params, "path").unwrap_or(".");
     let target = base_dir.join(path_str);
+    let pretty = optional_bool(params, "pretty");
 
     let since = optional_str(params, "since")
         .map(|s| {
@@ -992,21 +994,27 @@ fn handle_query(
         })
         .transpose()?;
 
+    let pending_for_str = optional_str(params, "pending_for").map(String::from);
+
     let filter = QueryFilter {
         author: optional_str(params, "author").map(String::from),
         comment_id: optional_str(params, "comment_id").map(String::from),
         expanded: optional_bool(params, "expanded"),
         pending: optional_bool(params, "pending"),
-        pending_for: optional_str(params, "pending_for").map(String::from),
+        pending_for: pending_for_str.clone(),
         since,
         summary: optional_bool(params, "summary"),
     };
 
     let results = query::query(system, &target, &filter)?;
 
-    let entries: Vec<Value> = results.iter().map(serialize_query_result).collect();
-
-    Ok(json!({ "results": entries }))
+    if pretty {
+        let output = display::format_query_pretty(&results, pending_for_str.as_deref());
+        Ok(json!({ "text": output }))
+    } else {
+        let entries: Vec<Value> = results.iter().map(serialize_query_result).collect();
+        Ok(json!({ "results": entries }))
+    }
 }
 
 /// Handle the `search` tool: search across documents for text matches.

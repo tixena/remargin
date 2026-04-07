@@ -9,6 +9,7 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
 
+use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{AuthorType, Comment};
 
 // ---------------------------------------------------------------------------
@@ -234,6 +235,161 @@ fn render_node(
     for child in &node.children {
         render_node(out, file_path, child, depth + 1, first);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Query pretty-print (flat, grouped by file)
+// ---------------------------------------------------------------------------
+
+/// Format cross-document query results as a pretty-printed flat display.
+///
+/// Comments are shown flat (not threaded), grouped by file path (sorted
+/// alphabetically). Each file group has a per-file header and footer with
+/// pending counts. A grand footer summarises totals across all files.
+///
+/// When `filter_name` is provided, pending counts read "pending for <name>";
+/// otherwise just "pending".
+#[must_use]
+pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -> String {
+    let mut out = String::new();
+
+    // Sort results alphabetically by path.
+    let mut sorted: Vec<&QueryResult> = results.iter().collect();
+    sorted.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let mut total_pending: usize = 0;
+    let file_count = sorted.len();
+    let mut first_file = true;
+
+    for result in &sorted {
+        if !first_file {
+            out.push('\n');
+        }
+        first_file = false;
+
+        let path_str = result.path.display().to_string();
+        let comment_count = result.comments.len();
+        let pending_count = count_pending_expanded(&result.comments);
+        total_pending += pending_count;
+
+        // Per-file header.
+        let pending_label = format_pending_label(pending_count, filter_name);
+        let _ = writeln!(
+            out,
+            "{path_str} ({comment_count} comments, {pending_label})"
+        );
+
+        // Sort comments by line number within this file (flat, not threaded).
+        let mut comments: Vec<&ExpandedComment> = result.comments.iter().collect();
+        comments.sort_by_key(|cm| cm.line);
+
+        for cm in &comments {
+            render_expanded_comment(&mut out, &path_str, cm);
+        }
+
+        // Per-file footer.
+        let _ = writeln!(out, "\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}");
+        let _ = write!(out, "{pending_label}");
+    }
+
+    // Grand footer.
+    let grand_pending_label = format_pending_label(total_pending, filter_name);
+    let _ = write!(
+        out,
+        "\n\n\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\n{grand_pending_label} across {file_count} files"
+    );
+
+    out
+}
+
+/// Render a single [`ExpandedComment`] in flat display format.
+fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComment) {
+    // Blank line before each comment.
+    out.push('\n');
+
+    // file:line link.
+    let _ = writeln!(out, "{file_path}:{}", cm.line);
+
+    // Header: id . author (type) . timestamp.
+    let author_type_str = match cm.author_type {
+        AuthorType::Agent => "agent",
+        AuthorType::Human => "human",
+    };
+    let ts_short = cm.ts.format("%Y-%m-%d %H:%M");
+    let _ = writeln!(
+        out,
+        "  {} \u{00b7} {} ({author_type_str}) \u{00b7} {ts_short}",
+        cm.id, cm.author
+    );
+
+    // Reply marker.
+    if let Some(parent_id) = &cm.reply_to {
+        let _ = writeln!(out, "  \u{2502} \u{2934} reply-to: {parent_id}");
+    }
+
+    // Addressees.
+    if !cm.to.is_empty() {
+        let _ = writeln!(out, "  \u{2502} to: {}", cm.to.join(", "));
+    }
+
+    // Content lines (truncated at MAX_CONTENT_LINES).
+    let content_lines: Vec<&str> = cm.content.lines().collect();
+    let truncate = content_lines.len() > MAX_CONTENT_LINES;
+    let display_lines = if truncate {
+        MAX_CONTENT_LINES - 1
+    } else {
+        content_lines.len()
+    };
+
+    for line in content_lines.iter().take(display_lines) {
+        let _ = writeln!(out, "  \u{2502} {line}");
+    }
+    if truncate {
+        let _ = writeln!(out, "  \u{2502} ...");
+    }
+
+    // Reactions (before status).
+    for (emoji, authors) in &cm.reactions {
+        let _ = writeln!(out, "  \u{2502} {emoji} {}", authors.join(", "));
+    }
+
+    // Status: acked or pending.
+    if cm.ack.is_empty() {
+        let _ = writeln!(out, "  \u{2502} pending");
+    } else {
+        for ack_entry in &cm.ack {
+            let ack_ts = ack_entry.ts.format("%Y-%m-%d %H:%M");
+            let _ = writeln!(
+                out,
+                "  \u{2502} \u{2713} acked by {} @ {ack_ts}",
+                ack_entry.author
+            );
+        }
+    }
+}
+
+/// Count pending comments among expanded query results.
+fn count_pending_expanded(comments: &[ExpandedComment]) -> usize {
+    comments.iter().filter(|cm| is_pending_expanded(cm)).count()
+}
+
+/// Check if an expanded comment is pending.
+fn is_pending_expanded(cm: &ExpandedComment) -> bool {
+    if cm.to.is_empty() {
+        return false;
+    }
+    let acked_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
+    cm.to
+        .iter()
+        .any(|addr| !acked_authors.contains(&addr.as_str()))
+}
+
+/// Format a pending count label, optionally including the filter name.
+fn format_pending_label(count: usize, filter_name: Option<&str>) -> String {
+    filter_name.map_or_else(
+        || format!("{count} pending"),
+        |name| format!("{count} pending for {name}"),
+    )
 }
 
 // ---------------------------------------------------------------------------

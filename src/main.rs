@@ -283,6 +283,9 @@ enum Commands {
         /// Only pending for this recipient.
         #[arg(long)]
         pending_for: Option<String>,
+        /// Pretty-print results grouped by file.
+        #[arg(long)]
+        pretty: bool,
         /// Only activity after this ISO 8601 timestamp.
         #[arg(long)]
         since: Option<String>,
@@ -465,6 +468,8 @@ struct QueryParams<'cmd> {
     pending: bool,
     /// Pending-for filter.
     pending_for: Option<&'cmd str>,
+    /// Pretty-print results grouped by file.
+    pretty: bool,
     /// Since timestamp filter.
     since: Option<&'cmd str>,
     /// Return only counts/summary, suppress comment data.
@@ -901,6 +906,7 @@ fn dispatch_with_config(
             expanded,
             pending,
             pending_for,
+            pretty,
             since,
             summary,
         } => {
@@ -912,6 +918,7 @@ fn dispatch_with_config(
                 path: path.as_str(),
                 pending: *pending,
                 pending_for: pending_for.as_deref(),
+                pretty: *pretty,
                 since: since.as_deref(),
                 summary: *summary,
             };
@@ -1482,6 +1489,10 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
             })
             .collect();
         print_output(true, &json!({ "results": entries }))
+    } else if params.pretty {
+        let filter_name = params.pending_for;
+        let output = display::format_query_pretty(&results, filter_name);
+        out_raw(&output)
     } else {
         for r in &results {
             out(&format!(

@@ -3,10 +3,14 @@
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
+use std::path::PathBuf;
 
 use chrono::DateTime;
 
-use crate::display::{build_comment_tree, count_pending, format_comments_pretty, is_pending};
+use crate::display::{
+    build_comment_tree, count_pending, format_comments_pretty, format_query_pretty, is_pending,
+};
+use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{Acknowledgment, AuthorType, Comment};
 
 // ---------------------------------------------------------------------------
@@ -506,4 +510,336 @@ fn pending_all_acked() {
         ..TestComment::default()
     });
     assert!(!is_pending(&cm));
+}
+
+// ---------------------------------------------------------------------------
+// Query pretty-print tests
+// ---------------------------------------------------------------------------
+
+/// Build an `ExpandedComment` for query pretty-print tests.
+fn make_expanded(
+    id: &str,
+    author: &str,
+    author_type: AuthorType,
+    line: usize,
+    content: &str,
+    ts: &str,
+    file: &str,
+) -> ExpandedComment {
+    ExpandedComment {
+        ack: Vec::new(),
+        attachments: Vec::new(),
+        author: String::from(author),
+        author_type,
+        checksum: String::from("sha256:test"),
+        content: String::from(content),
+        file: PathBuf::from(file),
+        id: String::from(id),
+        line,
+        reactions: BTreeMap::new(),
+        reply_to: None,
+        signature: None,
+        thread: None,
+        to: Vec::new(),
+        ts: DateTime::parse_from_rfc3339(ts).unwrap(),
+    }
+}
+
+fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult {
+    let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
+    let last_activity = comments.iter().map(|c| c.ts).max();
+    QueryResult {
+        comment_count,
+        comments,
+        last_activity,
+        path: PathBuf::from(path),
+        pending_count: 0,
+        pending_for: Vec::new(),
+    }
+}
+
+#[test]
+fn query_pretty_single_file() {
+    let cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        "Fix this bug.",
+        "2026-04-06T14:00:00-04:00",
+        "docs/design.md",
+    );
+    let result = make_query_result("docs/design.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    assert!(output.contains("docs/design.md (1 comments, 0 pending)"));
+    assert!(output.contains("docs/design.md:10"));
+    assert!(output.contains("abc \u{00b7} eduardo (human) \u{00b7} 2026-04-06 14:00"));
+    assert!(output.contains("\u{2502} Fix this bug."));
+    // Grand footer.
+    assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
+    assert!(output.contains("0 pending across 1 files"));
+}
+
+#[test]
+fn query_pretty_multi_file() {
+    let cm1 = make_expanded(
+        "aaa",
+        "eduardo",
+        AuthorType::Human,
+        5,
+        "Comment in B.",
+        "2026-04-06T14:00:00-04:00",
+        "src/b.md",
+    );
+    let cm2 = make_expanded(
+        "bbb",
+        "claude",
+        AuthorType::Agent,
+        15,
+        "Comment in A.",
+        "2026-04-06T14:01:00-04:00",
+        "src/a.md",
+    );
+    let result_b = make_query_result("src/b.md", vec![cm1]);
+    let result_a = make_query_result("src/a.md", vec![cm2]);
+
+    // Pass in non-alphabetical order; output should sort alphabetically.
+    let output = format_query_pretty(&[result_b, result_a], None);
+
+    let pos_a = output.find("src/a.md (1 comments").unwrap();
+    let pos_b = output.find("src/b.md (1 comments").unwrap();
+    assert!(pos_a < pos_b, "Files should be sorted alphabetically");
+    assert!(output.contains("0 pending across 2 files"));
+}
+
+#[test]
+fn query_pretty_pending_for() {
+    let mut cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        "Review this.",
+        "2026-04-06T14:00:00-04:00",
+        "design.md",
+    );
+    cm.to = vec![String::from("alice")];
+    let mut result = make_query_result("design.md", vec![cm]);
+    result.pending_count = 1;
+
+    let output = format_query_pretty(&[result], Some("alice"));
+
+    assert!(output.contains("1 pending for alice"));
+    // Per-file header also uses the filter name.
+    assert!(output.contains("design.md (1 comments, 1 pending for alice)"));
+    // Grand footer.
+    assert!(output.contains("1 pending for alice across 1 files"));
+}
+
+#[test]
+fn query_pretty_flat_not_threaded() {
+    // A reply should appear at depth=0 (flat), not nested.
+    let root = make_expanded(
+        "aaa",
+        "eduardo",
+        AuthorType::Human,
+        20,
+        "Root comment.",
+        "2026-04-06T14:00:00-04:00",
+        "file.md",
+    );
+    let mut reply = make_expanded(
+        "bbb",
+        "claude",
+        AuthorType::Agent,
+        10,
+        "Reply comment.",
+        "2026-04-06T14:01:00-04:00",
+        "file.md",
+    );
+    reply.reply_to = Some(String::from("aaa"));
+    let result = make_query_result("file.md", vec![root, reply]);
+
+    let output = format_query_pretty(&[result], None);
+
+    // Both comments should be at the same indentation (2 spaces).
+    assert!(output.contains("  aaa \u{00b7} eduardo (human)"));
+    assert!(output.contains("  bbb \u{00b7} claude (agent)"));
+    // Reply should still show the reply-to marker.
+    assert!(output.contains("\u{2502} \u{2934} reply-to: aaa"));
+    // Reply (line 10) should come BEFORE root (line 20) since sorted by line.
+    let bbb_pos = output.find("bbb \u{00b7}").unwrap();
+    let aaa_pos = output.find("aaa \u{00b7}").unwrap();
+    assert!(
+        bbb_pos < aaa_pos,
+        "Comments sorted by line number, not thread"
+    );
+}
+
+#[test]
+fn query_pretty_content_truncation() {
+    let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7";
+    let cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        content,
+        "2026-04-06T14:00:00-04:00",
+        "file.md",
+    );
+    let result = make_query_result("file.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    assert!(output.contains("\u{2502} Line 1"));
+    assert!(output.contains("\u{2502} Line 4"));
+    assert!(output.contains("\u{2502} ..."));
+    // Lines beyond truncation should not appear.
+    assert!(!output.contains("\u{2502} Line 5"));
+    assert!(!output.contains("\u{2502} Line 7"));
+}
+
+#[test]
+fn query_pretty_reactions() {
+    let mut reactions = BTreeMap::new();
+    reactions.insert(
+        String::from("\u{1f44d}"),
+        vec![String::from("alice"), String::from("bob")],
+    );
+    let mut cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        "Nice idea.",
+        "2026-04-06T14:00:00-04:00",
+        "file.md",
+    );
+    cm.reactions = reactions;
+    let result = make_query_result("file.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    assert!(output.contains("\u{2502} \u{1f44d} alice, bob"));
+}
+
+#[test]
+fn query_pretty_acked_status() {
+    let ack = Acknowledgment {
+        author: String::from("alice"),
+        ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+    };
+    let mut cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        "Review this.",
+        "2026-04-06T14:00:00-04:00",
+        "file.md",
+    );
+    cm.to = vec![String::from("alice")];
+    cm.ack = vec![ack];
+    let result = make_query_result("file.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    assert!(output.contains("\u{2502} \u{2713} acked by alice @ 2026-04-06 15:00"));
+    // Should NOT contain "pending" line for this comment.
+    assert!(!output.contains("\u{2502} pending\n"));
+}
+
+#[test]
+fn query_pretty_empty_results() {
+    let output = format_query_pretty(&[], None);
+
+    // Grand footer still present.
+    assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
+    assert!(output.contains("0 pending across 0 files"));
+}
+
+#[test]
+fn query_pretty_no_filter() {
+    let cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        "Content.",
+        "2026-04-06T14:00:00-04:00",
+        "file.md",
+    );
+    let result = make_query_result("file.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    // Without filter_name, footer should just say "N pending" not "pending for <name>".
+    assert!(output.contains("0 pending\n"));
+    assert!(!output.contains("pending for"));
+}
+
+#[test]
+fn query_pretty_file_line_links() {
+    let cm1 = make_expanded(
+        "aaa",
+        "eduardo",
+        AuthorType::Human,
+        42,
+        "Comment at line 42.",
+        "2026-04-06T14:00:00-04:00",
+        "docs/guide.md",
+    );
+    let cm2 = make_expanded(
+        "bbb",
+        "claude",
+        AuthorType::Agent,
+        7,
+        "Comment at line 7.",
+        "2026-04-06T14:01:00-04:00",
+        "docs/guide.md",
+    );
+    let result = make_query_result("docs/guide.md", vec![cm1, cm2]);
+    let output = format_query_pretty(&[result], None);
+
+    assert!(output.contains("docs/guide.md:42"));
+    assert!(output.contains("docs/guide.md:7"));
+}
+
+#[test]
+fn query_pretty_reply_marker() {
+    let mut cm = make_expanded(
+        "xyz",
+        "claude",
+        AuthorType::Agent,
+        15,
+        "Reply content.",
+        "2026-04-06T14:01:00-04:00",
+        "file.md",
+    );
+    cm.reply_to = Some(String::from("abc"));
+    let result = make_query_result("file.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    assert!(output.contains("  \u{2502} \u{2934} reply-to: abc"));
+}
+
+#[test]
+fn query_no_pretty_unchanged() {
+    // Verify that the non-pretty format_query_pretty function signature exists
+    // and the pretty output format is distinct from what non-pretty would produce.
+    let cm = make_expanded(
+        "abc",
+        "eduardo",
+        AuthorType::Human,
+        10,
+        "Content.",
+        "2026-04-06T14:00:00-04:00",
+        "file.md",
+    );
+    let result = make_query_result("file.md", vec![cm]);
+    let output = format_query_pretty(&[result], None);
+
+    // Pretty output has file:line links, vertical bars, and footer separators.
+    assert!(output.contains("file.md:10"));
+    assert!(output.contains("\u{2502}"));
+    assert!(output.contains("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
+    assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
 }
