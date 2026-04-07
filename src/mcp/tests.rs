@@ -1021,3 +1021,41 @@ fn non_reply_with_after_line_respected() {
         "comment with after_line=5 placed at line {new_line}, expected near line 6"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Elapsed time reporting
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tool_result_includes_elapsed_ms() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nSome text.\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comments",
+                "arguments": {
+                    "file": "doc.md"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert!(
+        result.get("elapsed_ms").is_some(),
+        "tool result should include elapsed_ms"
+    );
+    assert!(
+        result["elapsed_ms"].is_u64(),
+        "elapsed_ms should be a non-negative integer"
+    );
+}

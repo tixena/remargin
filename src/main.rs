@@ -7,6 +7,7 @@ use std::env;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
@@ -606,7 +607,8 @@ fn main() -> ExitCode {
         }
     };
 
-    match run(&cli, &system, &cwd) {
+    let start = Instant::now();
+    let exit = match run(&cli, &system, &cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             let exit_code = classify_error(&err);
@@ -618,7 +620,9 @@ fn main() -> ExitCode {
             }
             ExitCode::from(exit_code)
         }
-    }
+    };
+    eprintln!("elapsed: {}ms", start.elapsed().as_millis());
+    exit
 }
 
 // ---------------------------------------------------------------------------

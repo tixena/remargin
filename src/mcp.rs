@@ -8,6 +8,7 @@ mod tests;
 
 use std::io::{self, BufRead as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use os_shim::System;
@@ -1154,7 +1155,23 @@ fn process_message(
                 .cloned()
                 .unwrap_or_default();
 
-            let result = dispatch_tool(system, base_dir, config, tool_name, &arguments);
+            let start = Instant::now();
+            let mut result = dispatch_tool(system, base_dir, config, tool_name, &arguments);
+            let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+            // Inject elapsed_ms into the tool result's text JSON.
+            if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
+                && let Some(text_val) = content.first_mut().and_then(|c| c.get_mut("text"))
+                && let Some(text_str) = text_val.as_str()
+                && let Ok(mut parsed) = serde_json::from_str::<Value>(text_str)
+                && let Some(obj) = parsed.as_object_mut()
+            {
+                obj.insert(String::from("elapsed_ms"), Value::from(elapsed_ms));
+                *text_val = Value::String(
+                    serde_json::to_string_pretty(&parsed).unwrap_or_default(),
+                );
+            }
+
             Some(success_response(request_id, &result))
         }
         _ => Some(error_response(
