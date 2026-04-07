@@ -74,6 +74,13 @@ struct Cli {
 
 /// Global flags that override config file values.
 #[derive(clap::Args)]
+#[cfg_attr(
+    feature = "unrestricted",
+    expect(
+        clippy::struct_excessive_bools,
+        reason = "CLI flags are naturally boolean; struct_excessive_bools is not relevant here"
+    )
+)]
 struct GlobalFlags {
     /// Path to assets directory.
     #[arg(long)]
@@ -106,6 +113,11 @@ struct GlobalFlags {
     /// Author type: human or agent.
     #[arg(long, value_name = "human|agent")]
     r#type: Option<String>,
+
+    /// Bypass path sandbox checks (requires compile-time feature).
+    #[cfg(feature = "unrestricted")]
+    #[arg(long)]
+    unrestricted: bool,
 
     /// Enable verbose/tracing output.
     #[arg(long)]
@@ -699,9 +711,17 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         );
     }
     let registry = config::load_registry(system, cwd)?;
-    let resolved = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
+    #[cfg(not(feature = "unrestricted"))]
+    let final_config = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
 
-    dispatch_with_config(cli, system, cwd, &resolved)
+    #[cfg(feature = "unrestricted")]
+    let final_config = {
+        let mut c = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
+        c.unrestricted = cli.global.unrestricted;
+        c
+    };
+
+    dispatch_with_config(cli, system, cwd, &final_config)
 }
 
 /// Dispatch commands that require a loaded config.
@@ -748,10 +768,12 @@ fn dispatch_with_config(
         Commands::Edit { file, id, content } => {
             cmd_edit(system, cwd, config, file, id, content, json_mode)
         }
-        Commands::Get { path, start, end } => cmd_get(system, cwd, path, *start, *end, json_mode),
+        Commands::Get { path, start, end } => {
+            cmd_get(system, cwd, config, path, *start, *end, json_mode)
+        }
         Commands::Lint { file } => cmd_lint(system, cwd, file, json_mode),
         Commands::Ls { path } => cmd_ls(system, cwd, config, path, json_mode),
-        Commands::Metadata { path } => cmd_metadata(system, cwd, path, json_mode),
+        Commands::Metadata { path } => cmd_metadata(system, cwd, config, path, json_mode),
         Commands::Migrate { file, backup } => {
             cmd_migrate(system, cwd, config, file, dry_run, *backup, json_mode)
         }
@@ -1016,6 +1038,7 @@ fn cmd_edit(
 fn cmd_get(
     system: &dyn System,
     cwd: &Path,
+    config: &ResolvedConfig,
     path_str: &str,
     start: Option<usize>,
     end: Option<usize>,
@@ -1026,7 +1049,7 @@ fn cmd_get(
         (Some(s), Some(e)) => Some((s, e)),
         _ => None,
     };
-    let content = document::get(system, cwd, target, lines)?;
+    let content = document::get(system, cwd, target, lines, config.unrestricted)?;
     if json_mode {
         print_output(true, &json!({ "content": content }))
     } else {
@@ -1148,9 +1171,15 @@ fn cmd_ls(
     }
 }
 
-fn cmd_metadata(system: &dyn System, cwd: &Path, path_str: &str, json_mode: bool) -> Result<()> {
+fn cmd_metadata(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    path_str: &str,
+    json_mode: bool,
+) -> Result<()> {
     let target = Path::new(path_str);
-    let meta = document::metadata(system, cwd, target)?;
+    let meta = document::metadata(system, cwd, target, config.unrestricted)?;
 
     let mut result = json!({
         "comment_count": meta.comment_count,

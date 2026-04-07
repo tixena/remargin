@@ -102,6 +102,9 @@ pub struct ResolvedConfig {
     pub mode: Mode,
     /// Loaded registry (if found).
     pub registry: Option<Registry>,
+    /// Whether to bypass path sandbox checks.
+    /// Only settable via CLI when compiled with `--features unrestricted`.
+    pub unrestricted: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +204,7 @@ impl ResolvedConfig {
             key_path,
             mode,
             registry: reg,
+            unrestricted: false,
         })
     }
 }

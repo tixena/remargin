@@ -706,7 +706,7 @@ fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>)
         _ => None,
     };
 
-    let content = document::get(system, base_dir, target, lines)?;
+    let content = document::get(system, base_dir, target, lines, false)?;
 
     Ok(json!({ "content": content }))
 }
@@ -764,7 +764,7 @@ fn handle_metadata(
     let path_str = required_str(params, "path")?;
     let target = Path::new(path_str);
 
-    let meta = document::metadata(system, base_dir, target)?;
+    let meta = document::metadata(system, base_dir, target, false)?;
 
     let mut result = json!({
         "comment_count": meta.comment_count,

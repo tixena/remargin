@@ -78,7 +78,7 @@ pub fn ls(
     path: &Path,
     config: &ResolvedConfig,
 ) -> Result<Vec<ListEntry>> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path)?;
+    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?;
 
     let entries = system
         .read_dir(&resolved)
@@ -158,8 +158,9 @@ pub fn get(
     base_dir: &Path,
     path: &Path,
     lines: Option<(usize, usize)>,
+    unrestricted: bool,
 ) -> Result<String> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path)?;
+    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());
@@ -217,7 +218,8 @@ pub fn write(
     create: bool,
 ) -> Result<()> {
     let resolved = if create {
-        let target = allowlist::resolve_sandboxed_create(system, base_dir, path)?;
+        let target =
+            allowlist::resolve_sandboxed_create(system, base_dir, path, config.unrestricted)?;
         if system.read_to_string(&target).is_ok() {
             bail!(
                 "file already exists (use write without --create): {}",
@@ -226,7 +228,7 @@ pub fn write(
         }
         target
     } else {
-        allowlist::resolve_sandboxed(system, base_dir, path)?
+        allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?
     };
 
     if !allowlist::is_visible(&resolved, false) {
@@ -295,8 +297,13 @@ pub fn write(
 /// Returns an error if:
 /// - The path escapes the sandbox
 /// - The file cannot be read or parsed
-pub fn metadata(system: &dyn System, base_dir: &Path, path: &Path) -> Result<DocumentMetadata> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path)?;
+pub fn metadata(
+    system: &dyn System,
+    base_dir: &Path,
+    path: &Path,
+    unrestricted: bool,
+) -> Result<DocumentMetadata> {
+    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());

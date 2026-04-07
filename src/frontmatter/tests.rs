@@ -27,6 +27,7 @@ fn test_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        unrestricted: false,
     }
 }
 
@@ -272,6 +273,7 @@ fn no_identity_no_author() {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        unrestricted: false,
     };
     let mut mapping = Mapping::new();
     populate_user_fields(&mut mapping, "# Doc\n", &config);

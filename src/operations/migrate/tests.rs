@@ -22,6 +22,7 @@ fn open_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        unrestricted: false,
     }
 }
 

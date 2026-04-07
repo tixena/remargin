@@ -60,6 +60,7 @@ fn config_with_ignore(patterns: Vec<String>) -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        unrestricted: false,
     }
 }
 
@@ -72,6 +73,7 @@ fn open_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        unrestricted: false,
     }
 }
 
@@ -201,7 +203,8 @@ fn get_markdown() {
         .with_file(Path::new("/project/doc.md"), b"# Hello\nWorld")
         .unwrap();
 
-    let content = document::get(&system, Path::new("/project"), Path::new("doc.md"), None).unwrap();
+    let content =
+        document::get(&system, Path::new("/project"), Path::new("doc.md"), None, false).unwrap();
     assert_eq!(content, "# Hello\nWorld");
 }
 
@@ -214,7 +217,7 @@ fn get_dotfile_hidden() {
         .with_file(Path::new("/project/.env"), b"SECRET=123")
         .unwrap();
 
-    let result = document::get(&system, Path::new("/project"), Path::new(".env"), None);
+    let result = document::get(&system, Path::new("/project"), Path::new(".env"), None, false);
     result.unwrap_err();
 }
 
@@ -227,7 +230,7 @@ fn get_disallowed_extension() {
         .with_file(Path::new("/project/main.rs"), b"fn main() {}")
         .unwrap();
 
-    let result = document::get(&system, Path::new("/project"), Path::new("main.rs"), None);
+    let result = document::get(&system, Path::new("/project"), Path::new("main.rs"), None, false);
     result.unwrap_err();
 }
 
@@ -248,6 +251,7 @@ fn get_with_lines() {
         Path::new("/project"),
         Path::new("doc.md"),
         Some((2, 4)),
+        false,
     )
     .unwrap();
     assert_eq!(content, "line2\nline3\nline4");
@@ -269,6 +273,7 @@ fn get_escape_attempt() {
         Path::new("/project"),
         Path::new("../../etc/passwd"),
         None,
+        false,
     );
     result.unwrap_err();
 }
@@ -286,7 +291,8 @@ fn metadata_correct_counts() {
         .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
         .unwrap();
 
-    let meta = document::metadata(&system, Path::new("/project"), Path::new("doc.md")).unwrap();
+    let meta =
+        document::metadata(&system, Path::new("/project"), Path::new("doc.md"), false).unwrap();
     assert_eq!(meta.comment_count, 2);
     assert_eq!(meta.pending_count, 1); // abc is unacked
     assert_eq!(meta.pending_for, vec!["alice"]); // abc has to: [alice]
@@ -515,4 +521,224 @@ fn write_create_rejects_dotfile() {
         true,
     );
     result.unwrap_err();
+}
+
+// ---------------------------------------------------------------------------
+// Path sandbox tests: sandboxed (unrestricted = false)
+// ---------------------------------------------------------------------------
+
+// Note: MockSystem::canonicalize does not resolve `..` components, so parent
+// traversal tests use absolute paths (which canonicalize handles correctly).
+
+#[test]
+fn sandbox_blocks_absolute_escape() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_file(Path::new("/home/user/other.md"), b"# Other")
+        .unwrap();
+
+    let err = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("/home/user/other.md"),
+        false,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("path escapes sandbox"),
+        "expected 'path escapes sandbox', got: {err}"
+    );
+}
+
+#[test]
+fn sandbox_create_blocks_absolute_escape() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/other"))
+        .unwrap();
+
+    let err = allowlist::resolve_sandboxed_create(
+        &system,
+        Path::new("/project"),
+        Path::new("/other/new.md"),
+        false,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("path escapes sandbox"),
+        "expected 'path escapes sandbox', got: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Path sandbox tests: sandboxed (paths within sandbox)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sandbox_allows_child_path() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/project/src"))
+        .unwrap()
+        .with_file(Path::new("/project/src/main.rs"), b"fn main() {}")
+        .unwrap();
+
+    let result = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("src/main.rs"),
+        false,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/project/src/main.rs"));
+}
+
+#[test]
+fn sandbox_create_allows_child() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/project/src"))
+        .unwrap();
+
+    let result = allowlist::resolve_sandboxed_create(
+        &system,
+        Path::new("/project"),
+        Path::new("src/new.md"),
+        false,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/project/src/new.md"));
+}
+
+// ---------------------------------------------------------------------------
+// Path sandbox tests: unrestricted mode (unrestricted = true)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unrestricted_allows_absolute_path() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_file(Path::new("/home/user/file.md"), b"# Hello")
+        .unwrap();
+
+    let result = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("/home/user/file.md"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/home/user/file.md"));
+}
+
+#[test]
+fn unrestricted_allows_relative_within_sandbox() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/project/src"))
+        .unwrap()
+        .with_file(Path::new("/project/src/main.rs"), b"fn main() {}")
+        .unwrap();
+
+    let result = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("src/main.rs"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/project/src/main.rs"));
+}
+
+#[test]
+fn unrestricted_create_allows_absolute_escape() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/other"))
+        .unwrap();
+
+    let result = allowlist::resolve_sandboxed_create(
+        &system,
+        Path::new("/project"),
+        Path::new("/other/new.md"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/other/new.md"));
+}
+
+#[test]
+fn unrestricted_create_absolute() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/tmp"))
+        .unwrap();
+
+    let result = allowlist::resolve_sandboxed_create(
+        &system,
+        Path::new("/project"),
+        Path::new("/tmp/new.md"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/tmp/new.md"));
+}
+
+#[test]
+fn sandboxed_absolute_blocked_but_unrestricted_allows() {
+    // Same path: sandboxed blocks it, unrestricted allows it.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_file(Path::new("/home/user/notes.md"), b"# Notes")
+        .unwrap();
+
+    // Sandboxed: blocked.
+    let err = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("/home/user/notes.md"),
+        false,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("path escapes sandbox"),
+        "expected 'path escapes sandbox', got: {err}"
+    );
+
+    // Unrestricted: allowed.
+    let result = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("/home/user/notes.md"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/home/user/notes.md"));
 }
