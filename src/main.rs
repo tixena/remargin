@@ -1488,7 +1488,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
                 obj
             })
             .collect();
-        print_output(true, &json!({ "results": entries }))
+        print_output(true, &json!({ "base_path": params.path, "results": entries }))
     } else if params.pretty {
         let filter_name = params.pending_for;
         let output = display::format_query_pretty(&results, filter_name);
