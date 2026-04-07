@@ -231,11 +231,15 @@ When comments are addressed to you (via `to` field) or the user asks you to "pro
 4. **Reply** with a comment (via `reply_to`) that demonstrates you did the work — reference specifics, share conclusions, raise concerns. Do not reply with summaries of what the comment said back to the person who wrote it.
 5. **Ack** the comment only after all the above is complete. Ack means "I have fully addressed this." A premature ack is a lie — it tells the author their comment was handled when it wasn't.
 
+**When NOT to reply:**
+- When someone agrees with your comment (e.g., "Agreed with all", "Sounds good"), just ack their reply and move on. Do NOT create a new comment just to say "Acked." or "Noted." It adds zero information and creates a pending item the other person has to waste time on. Only reply if you have something substantive to add.
+
 **Common mistakes to avoid:**
 - Do NOT ack immediately after reading. Ack is not "I read this."
 - Do NOT reply with a surface-level summary. "Understood, phase 1 is CLI backend" adds nothing.
 - Do NOT ack and then start doing the work. The work must be done before the ack.
 - Do NOT skip referenced files. If the comment says "look at X", you must read X before acking.
+- Do NOT reply to agreements with "Acked." — that's noise, not communication.
 
 ### Multiple comments on the same file
 
@@ -275,6 +279,8 @@ The `comments` tool supports two output modes:
 
 - **Default (no flag)**: Returns JSON -- use when you need to process comment data programmatically (e.g., to ack, reply, filter, or reason over comments).
 - **`pretty=true`**: Returns a pre-formatted, human-readable threaded display -- use when the user asks to see comments interactively (e.g., "show me the comments", "what comments are pending", "review this document").
+
+**CRITICAL: MCP tool results are not visible to the user.** The user only sees the tool call indicator in their terminal, not the returned content. When using `pretty=true`, you **must** copy the full result into your text response so the user can actually see it. Calling the tool alone is not enough.
 
 ### When to use `pretty=true`
 
