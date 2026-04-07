@@ -81,24 +81,49 @@ Never delete another participant's comment unless the user explicitly tells you 
 
 | Tool | Purpose |
 |------|---------|
-| `comment` | Add a comment to a document (supports `reply_to`, `after_line`, `after_comment`, attachments) |
+| `comment` | Add a comment to a document (supports `reply_to`, `after_line`, `after_comment`, `auto_ack`, attachments) |
 | `comments` | List all comments in a document |
-| `batch` | Add multiple comments atomically (one write, one diff) |
+| `batch` | Add multiple comments atomically (one write, one diff; per-operation `auto_ack` support) |
 | `edit` | Edit an existing comment (cascading ack clear on children) |
 | `delete` | Delete one or more comments (cleans up attachments) |
-| `ack` | Acknowledge one or more comments |
+| `ack` | Acknowledge one or more comments (omit `file` to resolve by ID across folder tree, scoped by `path`) |
 | `react` | Add or remove an emoji reaction |
+
+#### `auto_ack` on comment and batch
+
+When replying to a comment (`reply_to`), pass `auto_ack=true` to acknowledge the parent comment in the same operation. This is a single atomic write — the reply is created and the parent is acked together.
+
+In `batch`, `auto_ack` is set per-operation, so each reply independently decides whether to ack its parent.
+
+`auto_ack` without `reply_to` is an error.
+
+#### Identity and author type overrides
+
+The write tools (`comment`, `batch`, `edit`, `delete`, `ack`, `react`) accept optional `identity` and `author_type` parameters to override the configured identity for that specific operation. Use these when acting on behalf of a different author.
+
+- `identity` (string) — override the author name
+- `author_type` (string) — override the author type: `"human"` or `"agent"`
+
+#### Folder-wide ack
+
+When `ack` is called without a `file` parameter, it searches the directory tree (scoped by `path`, default `"."`) to find which document contains the comment ID. If the ID is found in exactly one file, it acks it there. If found in multiple files, it returns an error (ambiguous). If not found, it returns an error.
 
 ### Search and Quality
 
 | Tool | Purpose |
 |------|---------|
-| `query` | Search across documents for comments — filter by `pending`, `pending_for`, `author`, `since` |
+| `query` | Search across documents for comments — filter by `pending`, `pending_for`, `author`, `since`, `comment_id`; use `expanded=true` to include matching comments inline |
 | `search` | Search across documents for text matches — supports `regex`, `scope` (all/body/comments), `context` lines, `ignore_case` |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
 | `migrate` | Convert old-format inline comments to remargin format |
 | `purge` | Strip all comments from a document |
+
+#### `expanded` on query
+
+Pass `expanded=true` to include the individual matching comments in each result, grouped by file. Only comments that match the active filters are included — not all comments in the file.
+
+Without `expanded`, query returns file-level summaries (path, comment count, pending count).
 
 ## Comment Format
 
@@ -167,6 +192,9 @@ remargin comment file="docs/design.md" content="This section needs more detail o
 
 ```
 remargin comment file="docs/design.md" content="Good point, I'll expand this." reply_to="abc"
+
+# Reply and acknowledge the parent in one step
+remargin comment file="docs/design.md" content="Addressed." reply_to="abc" auto_ack=true
 ```
 
 ### Add a comment after a specific line
@@ -185,6 +213,10 @@ remargin batch file="docs/design.md" comments=[{content: "First note", after_lin
 
 ```
 remargin ack file="docs/design.md" ids=["abc", "def"]
+
+# Folder-wide ack (finds the comment by ID across the directory tree)
+remargin ack ids=["abc"]
+remargin ack ids=["abc"] path="docs/"
 ```
 
 ### React to a comment
@@ -198,6 +230,8 @@ remargin react file="docs/design.md" id="abc" emoji="👍"
 ```
 remargin query path="docs/" pending=true
 remargin query path="." pending_for="eduardo"
+remargin query path="." pending_for="eduardo" expanded=true
+remargin query path="." comment_id="abc"
 ```
 
 ### Search for text across documents
@@ -253,7 +287,7 @@ Why: each `comment` call inserts a block into the file, shifting all subsequent 
 remargin batch file="docs/design.md" operations=[
   {content: "First note", after_line: 50},
   {content: "Second note", after_line: 80},
-  {content: "Reply to abc", reply_to: "abc"}
+  {content: "Reply to abc", reply_to: "abc", auto_ack: true}
 ]
 ```
 

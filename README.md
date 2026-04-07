@@ -74,61 +74,85 @@ mode: open
 ### Add a Comment to a Document
 
 ```bash
-remargin comment --file docs/design.md --content "This section needs more detail."
+remargin comment docs/design.md "This section needs more detail."
 ```
 
 ### Reply to a Comment
 
 ```bash
-remargin comment --file docs/design.md --content "Good point, I'll expand this." --reply-to abc
+remargin comment docs/design.md "Good point, I'll expand this." --reply-to abc
+```
+
+### Reply and Acknowledge in One Step
+
+```bash
+remargin comment docs/design.md "Addressed, see updated section." --reply-to abc --auto-ack
+```
+
+### Read Comment Body from a File
+
+```bash
+remargin comment docs/design.md -F review-notes.md
+echo "Quick note" | remargin comment docs/design.md -F -
 ```
 
 ### List Comments
 
 ```bash
-remargin comments --file docs/design.md
+remargin comments docs/design.md
+remargin comments docs/design.md --pretty
 ```
 
 ### Acknowledge a Comment
 
 ```bash
-remargin ack --file docs/design.md --ids abc def
+# Ack in a specific file
+remargin ack --file docs/design.md abc def
+
+# Folder-wide ack (finds the comment by ID across the directory tree)
+remargin ack abc
+remargin ack abc --path docs/
 ```
 
 ### React to a Comment
 
 ```bash
-remargin react --file docs/design.md --id abc --emoji "👍"
+remargin react docs/design.md abc "👍"
 ```
 
 ### Find Pending Comments Across Documents
 
 ```bash
-remargin query --path docs/ --pending
-remargin query --path . --pending-for your-name
+remargin query docs/ --pending
+remargin query . --pending-for your-name
+remargin query docs/ --pending-for your-name --expanded
+remargin query . --comment-id abc
 ```
 
 ### Search for Text
 
 ```bash
-remargin search --pattern "TODO" --path docs/
-remargin search --pattern "error|warning" --regex --ignore-case
+remargin search "TODO" --path docs/
+remargin search "error|warning" --regex --ignore-case
 ```
 
 ### Read and Write Documents
 
 ```bash
 # Read a file
-remargin get --path docs/design.md
+remargin get docs/design.md
+
+# Read with line numbers
+remargin get docs/design.md -n
 
 # Read a specific line range
-remargin get --path docs/design.md --start-line 10 --end-line 50
+remargin get docs/design.md --start-line 10 --end-line 50
 
 # Write (preserves all existing comments)
-remargin write --path docs/design.md --content "Updated content..."
+remargin write docs/design.md "Updated content..."
 
 # Create a new file
-remargin write --path docs/new-doc.md --content "# New Doc" --create
+remargin write docs/new-doc.md "# New Doc" --create
 ```
 
 ## Comment Format
@@ -259,29 +283,29 @@ remargin [OPTIONS] <COMMAND>
 
 | Command | Description |
 |---------|-------------|
-| `comment` | Create a comment (supports `--reply-to`, `--after-line`, `--after-comment`, `--to`, `--attachments`) |
-| `comments` | List all comments in a document |
-| `batch` | Create multiple comments atomically via `--ops` JSON |
+| `comment` | Create a comment (supports `--reply-to`, `--after-line`, `--after-comment`, `--to`, `--attach`, `--auto-ack`, `--comment-file`/`-F`) |
+| `comments` | List all comments in a document (supports `--pretty` for threaded tree display) |
+| `batch` | Create multiple comments atomically via `--ops` JSON (per-operation `auto_ack` support) |
 | `edit` | Edit an existing comment (cascading ack clear on children) |
 | `delete` | Delete one or more comments |
-| `ack` | Acknowledge one or more comments |
+| `ack` | Acknowledge one or more comments (supports folder-wide resolution by ID when `--file` is omitted) |
 | `react` | Add or remove an emoji reaction |
 
 ### Document Access
 
 | Command | Description |
 |---------|-------------|
-| `get` | Read a file's contents (with optional line range) |
+| `get` | Read a file's contents (with optional line range and `--line-numbers`/`-n`) |
 | `ls` | List files and directories |
-| `write` | Write document contents (comment-preserving) |
+| `write` | Write document contents (comment-preserving, `--create` for new files) |
 | `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
 
 ### Search and Quality
 
 | Command | Description |
 |---------|-------------|
-| `query` | Search across documents for comments (filter by pending, author, recipient, date) |
-| `search` | Full-text search across documents (supports regex, scope, context lines) |
+| `query` | Search across documents for comments (filter by `--pending`, `--pending-for`, `--author`, `--since`, `--comment-id`; `--expanded` for inline comment details) |
+| `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`) |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
 
@@ -292,6 +316,7 @@ remargin [OPTIONS] <COMMAND>
 | `migrate` | Convert old-format inline comments to remargin format |
 | `purge` | Strip all comments from a document |
 | `keygen` | Generate a new Ed25519 signing key pair |
+| `version` | Print version information |
 
 ### Integration
 
@@ -391,7 +416,7 @@ Every comment gets a SHA-256 checksum of its content (normalized whitespace). Th
 
 ```bash
 # Verify all checksums in a document
-remargin verify --file docs/design.md
+remargin verify docs/design.md
 ```
 
 ### Signatures
@@ -399,7 +424,7 @@ remargin verify --file docs/design.md
 In `strict` mode, comments must be signed with Ed25519 keys. Generate a key pair:
 
 ```bash
-remargin keygen --output ~/.remargin/keys/mykey
+remargin keygen ~/.remargin/keys/mykey
 ```
 
 This produces `mykey` (private) and `mykey.pub` (public). Add the public key to the registry and configure the private key in `.remargin.yaml`:
@@ -420,29 +445,35 @@ Every write operation enforces a strict invariant: the set of comment IDs before
 
 ```bash
 # Find documents with pending comments for you
-remargin query --path . --pending-for your-name
+remargin query . --pending-for your-name
+
+# See expanded details (matching comments grouped by file)
+remargin query . --pending-for your-name --expanded
 
 # Read the document
-remargin get --path docs/proposal.md
+remargin get docs/proposal.md
 
 # See the discussion
-remargin comments --file docs/proposal.md
+remargin comments docs/proposal.md --pretty
 
 # Add your review comments
-remargin comment --file docs/proposal.md --content "Needs error handling." --after-line 42
+remargin comment docs/proposal.md "Needs error handling." --after-line 42
 
 # Acknowledge comments addressed to you
-remargin ack --file docs/proposal.md --ids abc def
+remargin ack --file docs/proposal.md abc def
+
+# Or ack by ID without specifying the file
+remargin ack abc def
 
 # When review is complete, produce a clean version
-remargin purge --file docs/proposal.md
+remargin purge docs/proposal.md
 ```
 
 ### Batch Review
 
 ```bash
 # Add multiple comments in one atomic operation
-remargin batch --file docs/design.md --ops '[
+remargin batch docs/design.md --ops '[
   {"content": "Good approach here.", "after_line": 10},
   {"content": "Edge case: what if input is empty?", "after_line": 35},
   {"content": "This contradicts section 2.", "after_line": 78}
@@ -455,11 +486,25 @@ If you have documents using the older `user comments` / `agent comments` fenced 
 
 ```bash
 # Preview what would change
-remargin migrate --file docs/old-doc.md --dry-run
+remargin migrate docs/old-doc.md --dry-run
 
 # Convert
-remargin migrate --file docs/old-doc.md
+remargin migrate docs/old-doc.md
 ```
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Lint failure |
+| 3 | Integrity failure |
+| 4 | Missing attachment |
+| 5 | Comment preservation violation |
+| 6 | Skill error |
+| 7 | Comment not found (folder-wide ack) |
+| 8 | Ambiguous comment ID (found in multiple files) |
 
 ## Building
 
