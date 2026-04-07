@@ -24,7 +24,7 @@ use crate::operations::migrate;
 use crate::operations::purge;
 use crate::operations::query::{self, QueryFilter};
 use crate::operations::search;
-use crate::parser;
+use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
 
 // ---------------------------------------------------------------------------
@@ -73,7 +73,9 @@ fn desc_ack() -> ToolDesc {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Comment IDs to acknowledge"
-                }
+                },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "ids"]
         }),
@@ -104,7 +106,9 @@ fn desc_batch() -> ToolDesc {
                         "required": ["content"]
                     },
                     "description": "List of comment operations"
-                }
+                },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "operations"]
         }),
@@ -135,7 +139,9 @@ fn desc_comment() -> ToolDesc {
                     "default": []
                 },
                 "after_line": { "type": "integer", "description": "Insert after this line number (1-indexed)" },
-                "after_comment": { "type": "string", "description": "Insert after this comment ID" }
+                "after_comment": { "type": "string", "description": "Insert after this comment ID" },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "content"]
         }),
@@ -170,7 +176,9 @@ fn desc_delete() -> ToolDesc {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Comment IDs to delete"
-                }
+                },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "ids"]
         }),
@@ -187,7 +195,9 @@ fn desc_edit() -> ToolDesc {
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
                 "id": { "type": "string", "description": "Comment ID to edit" },
-                "content": { "type": "string", "description": "New comment body" }
+                "content": { "type": "string", "description": "New comment body" },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "id", "content"]
         }),
@@ -340,7 +350,9 @@ fn desc_react() -> ToolDesc {
                 "file": { "type": "string", "description": "Path to the document" },
                 "id": { "type": "string", "description": "Comment ID" },
                 "emoji": { "type": "string", "description": "Emoji to add/remove" },
-                "remove": { "type": "boolean", "description": "Remove instead of add", "default": false }
+                "remove": { "type": "boolean", "description": "Remove instead of add", "default": false },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "id", "emoji"]
         }),
@@ -492,6 +504,50 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Identity override helper
+// ---------------------------------------------------------------------------
+
+/// Apply `identity` and `author_type` overrides from tool parameters to a config.
+///
+/// Returns a cloned config with overrides applied if either `identity` or
+/// `author_type` is present in params. Returns `None` if no overrides.
+fn apply_identity_overrides(
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Option<ResolvedConfig>> {
+    let identity_override = optional_str(params, "identity");
+    let type_override = optional_str(params, "author_type");
+
+    if identity_override.is_none() && type_override.is_none() {
+        return Ok(None);
+    }
+
+    let mut overridden = config.clone();
+
+    if let Some(id) = identity_override {
+        overridden.identity = Some(String::from(id));
+    }
+
+    if let Some(type_str) = type_override {
+        overridden.author_type = Some(match type_str {
+            "human" => AuthorType::Human,
+            "agent" => AuthorType::Agent,
+            other => anyhow::bail!("unknown author type: {other:?}"),
+        });
+    }
+
+    Ok(Some(overridden))
+}
+
+/// Get the effective config, applying identity overrides if present.
+fn effective_config<'cfg>(
+    config: &'cfg ResolvedConfig,
+    overridden: Option<&'cfg ResolvedConfig>,
+) -> &'cfg ResolvedConfig {
+    overridden.unwrap_or(config)
+}
+
+// ---------------------------------------------------------------------------
 // Insert position helper
 // ---------------------------------------------------------------------------
 
@@ -565,9 +621,11 @@ fn handle_ack(
     let file = required_str(params, "file")?;
     let ids = string_array(params, "ids");
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    operations::ack_comments(system, &path, config, &id_refs)?;
+    operations::ack_comments(system, &path, cfg, &id_refs)?;
 
     Ok(json!({ "acknowledged": ids }))
 }
@@ -580,6 +638,8 @@ fn handle_batch(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
     let ops_value = params
         .get("operations")
         .and_then(Value::as_array)
@@ -608,7 +668,7 @@ fn handle_batch(
     }
 
     let path = base_dir.join(file);
-    let ids = operations::batch::batch_comment(system, &path, config, &batch_ops)?;
+    let ids = operations::batch::batch_comment(system, &path, cfg, &batch_ops)?;
 
     Ok(json!({ "ids": ids }))
 }
@@ -628,6 +688,8 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let position = resolve_insert_position(params, reply_to.as_deref());
 
@@ -640,7 +702,7 @@ fn handle_comment(
     };
 
     let path = base_dir.join(file);
-    let new_id = operations::create_comment(system, &path, config, &create_params)?;
+    let new_id = operations::create_comment(system, &path, cfg, &create_params)?;
 
     Ok(json!({ "id": new_id }))
 }
@@ -672,9 +734,11 @@ fn handle_delete(
     let file = required_str(params, "file")?;
     let ids = string_array(params, "ids");
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    operations::delete_comments(system, &path, config, &id_refs)?;
+    operations::delete_comments(system, &path, cfg, &id_refs)?;
 
     Ok(json!({ "deleted": ids }))
 }
@@ -689,9 +753,11 @@ fn handle_edit(
     let file = required_str(params, "file")?;
     let comment_id = required_str(params, "id")?;
     let new_content = required_str(params, "content")?;
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    operations::edit_comment(system, &path, config, comment_id, new_content)?;
+    operations::edit_comment(system, &path, cfg, comment_id, new_content)?;
 
     Ok(json!({ "edited": comment_id }))
 }
@@ -942,9 +1008,11 @@ fn handle_react(
     let comment_id = required_str(params, "id")?;
     let emoji = required_str(params, "emoji")?;
     let remove = optional_bool(params, "remove");
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    operations::react(system, &path, config, comment_id, emoji, remove)?;
+    operations::react(system, &path, cfg, comment_id, emoji, remove)?;
 
     let action = if remove { "removed" } else { "added" };
     Ok(json!({ "action": action, "emoji": emoji, "comment_id": comment_id }))

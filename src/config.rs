@@ -85,7 +85,7 @@ pub enum Mode {
 
 /// The final resolved configuration after merging the config file, registry,
 /// and CLI overrides.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ResolvedConfig {
     /// Assets directory.
