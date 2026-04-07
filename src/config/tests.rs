@@ -460,10 +460,9 @@ fn type_filter_skips_non_matching_finds_higher() {
         )
         .unwrap();
 
-    let config =
-        load_config_filtered(&system, Path::new("/home/project/src"), Some("human"))
-            .unwrap()
-            .unwrap();
+    let config = load_config_filtered(&system, Path::new("/home/project/src"), Some("human"))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.identity.as_deref(), Some("eduardo"));
     assert_eq!(config.author_type.as_deref(), Some("human"));
 }
@@ -483,8 +482,7 @@ fn type_filter_no_match() {
         )
         .unwrap();
 
-    let config =
-        load_config_filtered(&system, Path::new("/project/src"), Some("human")).unwrap();
+    let config = load_config_filtered(&system, Path::new("/project/src"), Some("human")).unwrap();
     assert!(config.is_none());
 }
 
@@ -548,10 +546,9 @@ fn type_filter_skips_config_without_type() {
         )
         .unwrap();
 
-    let config =
-        load_config_filtered(&system, Path::new("/project/sub"), Some("human"))
-            .unwrap()
-            .unwrap();
+    let config = load_config_filtered(&system, Path::new("/project/sub"), Some("human"))
+        .unwrap()
+        .unwrap();
     assert_eq!(config.identity.as_deref(), Some("eduardo"));
     assert_eq!(config.author_type.as_deref(), Some("human"));
 }
