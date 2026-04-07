@@ -13,7 +13,7 @@ use chrono::{DateTime, FixedOffset};
 use os_shim::System;
 
 use crate::document::allowlist;
-use crate::parser;
+use crate::parser::{self, Acknowledgment, AuthorType, Reactions};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -27,6 +27,8 @@ pub struct QueryFilter {
     pub author: Option<String>,
     /// Only include documents containing a comment with this structural ID.
     pub comment_id: Option<String>,
+    /// Include individual matching comments in each result.
+    pub expanded: bool,
     /// Only include documents with pending (unacked) comments.
     pub pending: bool,
     /// Only include documents with pending comments for this recipient.
@@ -35,12 +37,51 @@ pub struct QueryFilter {
     pub since: Option<DateTime<FixedOffset>>,
 }
 
+/// Owned comment data for inclusion in expanded query results.
+///
+/// Cloned from parsed [`parser::Comment`] because the parsed document is
+/// dropped after processing each file.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ExpandedComment {
+    /// Acknowledgments from other participants.
+    pub ack: Vec<Acknowledgment>,
+    /// Attached file references.
+    pub attachments: Vec<String>,
+    /// Author name or identifier.
+    pub author: String,
+    /// Whether the author is human or agent.
+    pub author_type: AuthorType,
+    /// Content integrity checksum.
+    pub checksum: String,
+    /// Comment body text.
+    pub content: String,
+    /// Unique short identifier.
+    pub id: String,
+    /// 1-indexed line number in the source document.
+    pub line: usize,
+    /// Emoji reactions mapped to lists of author IDs.
+    pub reactions: Reactions,
+    /// ID of the comment this is replying to.
+    pub reply_to: Option<String>,
+    /// Cryptographic signature.
+    pub signature: Option<String>,
+    /// Thread identifier grouping related comments.
+    pub thread: Option<String>,
+    /// Addressees of the comment.
+    pub to: Vec<String>,
+    /// Timestamp when the comment was created.
+    pub ts: DateTime<FixedOffset>,
+}
+
 /// A single result from a cross-document query.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct QueryResult {
     /// Total number of comments in the document.
     pub comment_count: u32,
+    /// Individual matching comments (populated only when `expanded` is set).
+    pub comments: Vec<ExpandedComment>,
     /// Most recent activity timestamp.
     pub last_activity: Option<DateTime<FixedOffset>>,
     /// Relative path to the document.
@@ -152,6 +193,22 @@ pub fn query(
             }
         }
 
+        // Collect expanded comments when requested.
+        let expanded_comments = if filter.expanded {
+            let matched: Vec<ExpandedComment> = comments
+                .iter()
+                .filter(|cm| comment_matches_filters(cm, filter))
+                .map(|cm| expanded_from_comment(cm))
+                .collect();
+            // If no individual comments match, skip this file entirely.
+            if matched.is_empty() {
+                continue;
+            }
+            matched
+        } else {
+            Vec::new()
+        };
+
         let relative = entry
             .path
             .strip_prefix(base_dir)
@@ -160,6 +217,7 @@ pub fn query(
 
         results.push(QueryResult {
             comment_count,
+            comments: expanded_comments,
             last_activity,
             path: relative,
             pending_count,
@@ -168,6 +226,58 @@ pub fn query(
     }
 
     Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Test whether a single comment matches all active filters.
+fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
+    if filter.pending && !cm.ack.is_empty() {
+        return false;
+    }
+    if let Some(target) = &filter.pending_for
+        && (!cm.ack.is_empty() || !cm.to.contains(target))
+    {
+        return false;
+    }
+    if let Some(target_author) = &filter.author
+        && cm.author != *target_author
+    {
+        return false;
+    }
+    if let Some(since) = &filter.since
+        && cm.ts < *since
+    {
+        return false;
+    }
+    if let Some(target_id) = &filter.comment_id
+        && cm.id != *target_id
+    {
+        return false;
+    }
+    true
+}
+
+/// Convert a parsed comment reference into an owned `ExpandedComment`.
+fn expanded_from_comment(cm: &parser::Comment) -> ExpandedComment {
+    ExpandedComment {
+        ack: cm.ack.clone(),
+        attachments: cm.attachments.clone(),
+        author: cm.author.clone(),
+        author_type: cm.author_type.clone(),
+        checksum: cm.checksum.clone(),
+        content: cm.content.clone(),
+        id: cm.id.clone(),
+        line: cm.line,
+        reactions: cm.reactions.clone(),
+        reply_to: cm.reply_to.clone(),
+        signature: cm.signature.clone(),
+        thread: cm.thread.clone(),
+        to: cm.to.clone(),
+        ts: cm.ts,
+    }
 }
 
 // ---------------------------------------------------------------------------

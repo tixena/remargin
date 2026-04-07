@@ -315,6 +315,7 @@ fn desc_query() -> ToolDesc {
             "properties": {
                 "path": { "type": "string", "description": "Base directory to search", "default": "." },
                 "comment_id": { "type": "string", "description": "Only documents containing a comment with this structural ID" },
+                "expanded": { "type": "boolean", "description": "Include individual matching comments in each result", "default": false },
                 "pending": { "type": "boolean", "description": "Only documents with pending comments", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
@@ -993,6 +994,7 @@ fn handle_query(
     let filter = QueryFilter {
         author: optional_str(params, "author").map(String::from),
         comment_id: optional_str(params, "comment_id").map(String::from),
+        expanded: optional_bool(params, "expanded"),
         pending: optional_bool(params, "pending"),
         pending_for: optional_str(params, "pending_for").map(String::from),
         since,
@@ -1227,7 +1229,45 @@ fn serialize_query_result(r: &query::QueryResult) -> Value {
     if let Some(ts) = &r.last_activity {
         map.insert("last_activity".into(), json!(ts.to_rfc3339()));
     }
+    if !r.comments.is_empty() {
+        map.insert(
+            "comments".into(),
+            json!(
+                r.comments
+                    .iter()
+                    .map(serialize_expanded_comment)
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
     obj
+}
+
+/// Serialize an [`ExpandedComment`](query::ExpandedComment) to a JSON value.
+fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
+    let author_type = match cm.author_type {
+        parser::AuthorType::Agent => "agent",
+        parser::AuthorType::Human => "human",
+    };
+    json!({
+        "id": cm.id,
+        "author": cm.author,
+        "author_type": author_type,
+        "content": cm.content,
+        "ts": cm.ts.to_rfc3339(),
+        "line": cm.line,
+        "to": cm.to,
+        "ack": cm.ack.iter().map(|a| json!({
+            "author": a.author,
+            "ts": a.ts.to_rfc3339(),
+        })).collect::<Vec<_>>(),
+        "reply_to": cm.reply_to,
+        "thread": cm.thread,
+        "reactions": cm.reactions,
+        "attachments": cm.attachments,
+        "checksum": cm.checksum,
+        "signature": cm.signature,
+    })
 }
 
 // ---------------------------------------------------------------------------

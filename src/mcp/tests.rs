@@ -17,6 +17,39 @@ use crate::parser::{self, AuthorType};
 // Constants
 // ---------------------------------------------------------------------------
 
+/// Document with two comments for expanded query tests.
+const DOC_EXPANDED: &str = "\
+---
+title: Expanded
+---
+
+```remargin
+---
+id: ex1
+author: alice
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [bob]
+checksum: sha256:ex1
+---
+Pending comment from alice.
+```
+
+```remargin
+---
+id: ex2
+author: bob
+type: agent
+ts: 2026-04-06T12:00:00-04:00
+to: [alice]
+checksum: sha256:ex2
+ack:
+  - alice@2026-04-06T13:00:00-04:00
+---
+Acked comment from bob.
+```
+";
+
 /// A document with a comment in the middle for reply placement tests.
 const DOC_WITH_COMMENT: &str = "\
 ---
@@ -1128,6 +1161,95 @@ fn mcp_query_comment_id_not_found_returns_empty() {
     let result = extract_tool_text(&response);
     let results = result["results"].as_array().unwrap();
     assert!(results.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// MCP query expanded tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_query_expanded_returns_comments() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_EXPANDED.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "expanded": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let results = result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1_usize);
+
+    let comments = results[0]["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 2_usize);
+
+    // Verify first comment fields.
+    assert_eq!(comments[0]["id"].as_str().unwrap(), "ex1");
+    assert_eq!(comments[0]["author"].as_str().unwrap(), "alice");
+    assert_eq!(comments[0]["author_type"].as_str().unwrap(), "human");
+    assert_eq!(
+        comments[0]["content"].as_str().unwrap(),
+        "Pending comment from alice."
+    );
+    assert!(
+        comments[0]["to"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("bob"))
+    );
+    assert!(comments[0]["ack"].as_array().unwrap().is_empty());
+
+    // Verify second comment.
+    assert_eq!(comments[1]["id"].as_str().unwrap(), "ex2");
+    assert_eq!(comments[1]["author_type"].as_str().unwrap(), "agent");
+    assert_eq!(comments[1]["ack"].as_array().unwrap().len(), 1_usize);
+}
+
+#[test]
+fn mcp_query_not_expanded_omits_comments() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_EXPANDED.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {}
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let results = result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1_usize);
+
+    // Without expanded, there should be no comments key.
+    assert!(results[0].get("comments").is_none());
 }
 
 // ---------------------------------------------------------------------------

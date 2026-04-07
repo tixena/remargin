@@ -274,6 +274,9 @@ enum Commands {
         /// Only documents containing a comment with this structural ID.
         #[arg(long)]
         comment_id: Option<String>,
+        /// Include individual matching comments in each result.
+        #[arg(long)]
+        expanded: bool,
         /// Only documents with pending (unacked) comments.
         #[arg(long)]
         pending: bool,
@@ -445,6 +448,8 @@ struct QueryParams<'cmd> {
     author: Option<&'cmd str>,
     /// Comment ID filter.
     comment_id: Option<&'cmd str>,
+    /// Include individual matching comments in each result.
+    expanded: bool,
     /// JSON output mode.
     json_mode: bool,
     /// Base path to search.
@@ -884,6 +889,7 @@ fn dispatch_with_config(
             path,
             author,
             comment_id,
+            expanded,
             pending,
             pending_for,
             since,
@@ -891,6 +897,7 @@ fn dispatch_with_config(
             let q = QueryParams {
                 author: author.as_deref(),
                 comment_id: comment_id.as_deref(),
+                expanded: *expanded,
                 json_mode,
                 path: path.as_str(),
                 pending: *pending,
@@ -1425,6 +1432,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     let mut filter = query::QueryFilter::default();
     filter.author = params.author.map(String::from);
     filter.comment_id = params.comment_id.map(String::from);
+    filter.expanded = params.expanded;
     filter.pending = params.pending;
     filter.pending_for = params.pending_for.map(String::from);
     filter.since = since_dt;
@@ -1447,6 +1455,17 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
                 if let Some(ts) = &r.last_activity {
                     map.insert("last_activity".into(), json!(ts.to_rfc3339()));
                 }
+                if !r.comments.is_empty() {
+                    map.insert(
+                        "comments".into(),
+                        json!(
+                            r.comments
+                                .iter()
+                                .map(serialize_expanded_comment)
+                                .collect::<Vec<_>>()
+                        ),
+                    );
+                }
                 obj
             })
             .collect();
@@ -1459,9 +1478,53 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
                 r.comment_count,
                 r.pending_count,
             ))?;
+            for cm in &r.comments {
+                let status = if cm.ack.is_empty() {
+                    "pending"
+                } else {
+                    "acked"
+                };
+                let author_type = match cm.author_type {
+                    parser::AuthorType::Agent => "agent",
+                    parser::AuthorType::Human => "human",
+                    _ => "unknown",
+                };
+                out(&format!(
+                    "  {} {} ({}) [{}] {}",
+                    cm.id, cm.author, author_type, status, cm.content,
+                ))?;
+            }
         }
         Ok(())
     }
+}
+
+/// Serialize an [`ExpandedComment`](query::ExpandedComment) to a JSON value.
+fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
+    let author_type = match cm.author_type {
+        parser::AuthorType::Agent => "agent",
+        parser::AuthorType::Human => "human",
+        _ => "unknown",
+    };
+    json!({
+        "id": cm.id,
+        "author": cm.author,
+        "author_type": author_type,
+        "content": cm.content,
+        "ts": cm.ts.to_rfc3339(),
+        "line": cm.line,
+        "to": cm.to,
+        "ack": cm.ack.iter().map(|a| json!({
+            "author": a.author,
+            "ts": a.ts.to_rfc3339(),
+        })).collect::<Vec<_>>(),
+        "reply_to": cm.reply_to,
+        "thread": cm.thread,
+        "reactions": cm.reactions,
+        "attachments": cm.attachments,
+        "checksum": cm.checksum,
+        "signature": cm.signature,
+    })
 }
 
 fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Result<()> {
