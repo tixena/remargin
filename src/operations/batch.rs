@@ -139,6 +139,16 @@ pub fn batch_comment(
         let resolved_attachments = copy_attachments(system, path, config, &op.attachments)
             .with_context(|| format!("batch operation {idx}: copying attachments"))?;
 
+        // Auto-populate `to` from the parent comment's author when replying
+        // without an explicit recipient list.
+        let effective_to: Vec<String> = if op.to.is_empty() {
+            reply_to
+                .and_then(|pid| doc.find_comment(pid))
+                .map_or_else(Vec::new, |parent| vec![parent.author.clone()])
+        } else {
+            op.to.clone()
+        };
+
         let now = Utc::now().fixed_offset();
         let mut comment = Comment {
             ack: Vec::new(),
@@ -154,7 +164,7 @@ pub fn batch_comment(
             reply_to: reply_to.map(String::from),
             signature: None,
             thread,
-            to: op.to.clone(),
+            to: effective_to,
             ts: now,
         };
 

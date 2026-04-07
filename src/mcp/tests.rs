@@ -1222,7 +1222,7 @@ fn mcp_query_expanded_returns_comments() {
 }
 
 #[test]
-fn mcp_query_not_expanded_omits_comments() {
+fn mcp_query_summary_omits_comments() {
     let base = Path::new("/docs");
     let system = MockSystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_EXPANDED.as_bytes())
@@ -1239,7 +1239,7 @@ fn mcp_query_not_expanded_omits_comments() {
             "method": "tools/call",
             "params": {
                 "name": "query",
-                "arguments": {}
+                "arguments": { "summary": true }
             }
         }),
     );
@@ -1248,7 +1248,7 @@ fn mcp_query_not_expanded_omits_comments() {
     let results = result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1_usize);
 
-    // Without expanded, there should be no comments key.
+    // With summary mode, there should be no comments key.
     assert!(results[0].get("comments").is_none());
 }
 

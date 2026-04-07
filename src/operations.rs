@@ -126,6 +126,17 @@ pub fn create_comment(
     let resolved_attachments = copy_attachments(system, path, config, params.attachments)
         .context("copying attachments")?;
 
+    // Auto-populate `to` from the parent comment's author when replying
+    // without an explicit recipient list.
+    let effective_to: Vec<String> = if params.to.is_empty() {
+        params
+            .reply_to
+            .and_then(|pid| doc.find_comment(pid))
+            .map_or_else(Vec::new, |parent| vec![parent.author.clone()])
+    } else {
+        params.to.to_vec()
+    };
+
     // Build the comment.
     let now = Utc::now().fixed_offset();
     let mut comment = Comment {
@@ -142,7 +153,7 @@ pub fn create_comment(
         reply_to: params.reply_to.map(String::from),
         signature: None,
         thread,
-        to: params.to.to_vec(),
+        to: effective_to,
         ts: now,
     };
 

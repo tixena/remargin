@@ -35,6 +35,8 @@ pub struct QueryFilter {
     pub pending_for: Option<String>,
     /// Only include documents with activity after this timestamp.
     pub since: Option<DateTime<FixedOffset>>,
+    /// Return only counts/summary, suppress comment data.
+    pub summary: bool,
 }
 
 /// Owned comment data for inclusion in expanded query results.
@@ -56,6 +58,8 @@ pub struct ExpandedComment {
     pub checksum: String,
     /// Comment body text.
     pub content: String,
+    /// Relative path to the file this comment belongs to.
+    pub file: PathBuf,
     /// Unique short identifier.
     pub id: String,
     /// 1-indexed line number in the source document.
@@ -80,7 +84,7 @@ pub struct ExpandedComment {
 pub struct QueryResult {
     /// Total number of comments in the document.
     pub comment_count: u32,
-    /// Individual matching comments (populated only when `expanded` is set).
+    /// Individual matching comments (populated by default; empty in summary mode).
     pub comments: Vec<ExpandedComment>,
     /// Most recent activity timestamp.
     pub last_activity: Option<DateTime<FixedOffset>>,
@@ -152,19 +156,9 @@ pub fn query(
         }
 
         let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
-        let pending: Vec<&&parser::Comment> =
-            comments.iter().filter(|cm| cm.ack.is_empty()).collect();
+        let pending: Vec<&&parser::Comment> = comments.iter().filter(|cm| is_pending(cm)).collect();
         let pending_count = u32::try_from(pending.len()).unwrap_or(u32::MAX);
-
-        let mut pending_for: Vec<String> = Vec::new();
-        for cm in &pending {
-            for recipient in &cm.to {
-                if !pending_for.contains(recipient) {
-                    pending_for.push(recipient.clone());
-                }
-            }
-        }
-        pending_for.sort();
+        let pending_for = collect_pending_recipients(&pending);
 
         let last_activity = comments.iter().map(|cm| cm.ts).max();
 
@@ -193,12 +187,20 @@ pub fn query(
             }
         }
 
-        // Collect expanded comments when requested.
-        let expanded_comments = if filter.expanded {
+        let relative = entry
+            .path
+            .strip_prefix(base_dir)
+            .unwrap_or(&entry.path)
+            .to_path_buf();
+
+        // Collect expanded comments unless summary-only mode is requested.
+        // When `expanded` is true OR `summary` is false, include comment data.
+        let include_comments = !filter.summary || filter.expanded;
+        let expanded_comments = if include_comments {
             let matched: Vec<ExpandedComment> = comments
                 .iter()
                 .filter(|cm| comment_matches_filters(cm, filter))
-                .map(|cm| expanded_from_comment(cm))
+                .map(|cm| expanded_from_comment(cm, &relative))
                 .collect();
             // If no individual comments match, skip this file entirely.
             if matched.is_empty() {
@@ -208,12 +210,6 @@ pub fn query(
         } else {
             Vec::new()
         };
-
-        let relative = entry
-            .path
-            .strip_prefix(base_dir)
-            .unwrap_or(&entry.path)
-            .to_path_buf();
 
         results.push(QueryResult {
             comment_count,
@@ -234,11 +230,11 @@ pub fn query(
 
 /// Test whether a single comment matches all active filters.
 fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
-    if filter.pending && !cm.ack.is_empty() {
+    if filter.pending && !is_pending(cm) {
         return false;
     }
     if let Some(target) = &filter.pending_for
-        && (!cm.ack.is_empty() || !cm.to.contains(target))
+        && !is_pending_for(cm, target)
     {
         return false;
     }
@@ -260,8 +256,44 @@ fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     true
 }
 
+/// Collect unique recipients who still have unacked comments, sorted.
+fn collect_pending_recipients(pending: &[&&parser::Comment]) -> Vec<String> {
+    let mut recipients: Vec<String> = Vec::new();
+    for cm in pending {
+        let ack_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
+        for recipient in &cm.to {
+            if !ack_authors.contains(&recipient.as_str()) && !recipients.contains(recipient) {
+                recipients.push(recipient.clone());
+            }
+        }
+    }
+    recipients.sort();
+    recipients
+}
+
+/// A comment is pending if it has at least one addressee (`to`) who has not
+/// acknowledged it. Broadcast comments (empty `to`) are never pending.
+fn is_pending(cm: &parser::Comment) -> bool {
+    if cm.to.is_empty() {
+        return false;
+    }
+    let ack_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
+    cm.to
+        .iter()
+        .any(|recipient| !ack_authors.contains(&recipient.as_str()))
+}
+
+/// A comment is pending for a specific `target` if `target` is in `to` and
+/// has not acknowledged it.
+fn is_pending_for(cm: &parser::Comment, target: &str) -> bool {
+    if !cm.to.contains(&String::from(target)) {
+        return false;
+    }
+    !cm.ack.iter().any(|a| a.author == target)
+}
+
 /// Convert a parsed comment reference into an owned `ExpandedComment`.
-fn expanded_from_comment(cm: &parser::Comment) -> ExpandedComment {
+fn expanded_from_comment(cm: &parser::Comment, file: &Path) -> ExpandedComment {
     ExpandedComment {
         ack: cm.ack.clone(),
         attachments: cm.attachments.clone(),
@@ -269,6 +301,7 @@ fn expanded_from_comment(cm: &parser::Comment) -> ExpandedComment {
         author_type: cm.author_type.clone(),
         checksum: cm.checksum.clone(),
         content: cm.content.clone(),
+        file: file.to_path_buf(),
         id: cm.id.clone(),
         line: cm.line,
         reactions: cm.reactions.clone(),

@@ -315,11 +315,12 @@ fn desc_query() -> ToolDesc {
             "properties": {
                 "path": { "type": "string", "description": "Base directory to search", "default": "." },
                 "comment_id": { "type": "string", "description": "Only documents containing a comment with this structural ID" },
-                "expanded": { "type": "boolean", "description": "Include individual matching comments in each result", "default": false },
+                "expanded": { "type": "boolean", "description": "Include individual matching comments in each result (default: true via non-summary mode)", "default": false },
                 "pending": { "type": "boolean", "description": "Only documents with pending comments", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
-                "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" }
+                "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" },
+                "summary": { "type": "boolean", "description": "Return only counts/summary, suppress comment data", "default": false }
             },
             "required": []
         }),
@@ -998,6 +999,7 @@ fn handle_query(
         pending: optional_bool(params, "pending"),
         pending_for: optional_str(params, "pending_for").map(String::from),
         since,
+        summary: optional_bool(params, "summary"),
     };
 
     let results = query::query(system, &target, &filter)?;
@@ -1254,6 +1256,7 @@ fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
         "author": cm.author,
         "author_type": author_type,
         "content": cm.content,
+        "file": cm.file.display().to_string(),
         "ts": cm.ts.to_rfc3339(),
         "line": cm.line,
         "to": cm.to,

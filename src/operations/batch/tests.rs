@@ -1010,3 +1010,69 @@ fn batch_auto_ack_without_reply_to_errors() {
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(content, MINIMAL_DOC);
 }
+
+// ===========================================================================
+// Batch reply-to auto-populate `to` tests (rem-3nm)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Test: batch reply auto-populates `to` from parent author
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_reply_auto_populates_to() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    let ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: false,
+        content: String::from("Batch reply."),
+        reply_to: Some(String::from("abc")),
+        to: Vec::new(),
+    }];
+
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&ids[0]).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("alice")],
+        "batch reply should auto-populate to from parent author (alice)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: batch reply with explicit `to` is NOT overridden
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_reply_explicit_to() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    let ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: false,
+        content: String::from("Batch reply with explicit to."),
+        reply_to: Some(String::from("abc")),
+        to: vec![String::from("bob")],
+    }];
+
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&ids[0]).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("bob")],
+        "explicit to should not be overridden in batch"
+    );
+}

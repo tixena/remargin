@@ -274,7 +274,7 @@ enum Commands {
         /// Only documents containing a comment with this structural ID.
         #[arg(long)]
         comment_id: Option<String>,
-        /// Include individual matching comments in each result.
+        /// Include individual matching comments in each result (default behavior).
         #[arg(long)]
         expanded: bool,
         /// Only documents with pending (unacked) comments.
@@ -286,6 +286,9 @@ enum Commands {
         /// Only activity after this ISO 8601 timestamp.
         #[arg(long)]
         since: Option<String>,
+        /// Return only counts/summary, suppress comment data.
+        #[arg(long)]
+        summary: bool,
     },
     /// Add or remove an emoji reaction.
     React {
@@ -443,6 +446,10 @@ struct GetParams<'cmd> {
 }
 
 /// Parameters for the query command.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "CLI flags are naturally boolean"
+)]
 struct QueryParams<'cmd> {
     /// Author filter.
     author: Option<&'cmd str>,
@@ -460,6 +467,8 @@ struct QueryParams<'cmd> {
     pending_for: Option<&'cmd str>,
     /// Since timestamp filter.
     since: Option<&'cmd str>,
+    /// Return only counts/summary, suppress comment data.
+    summary: bool,
 }
 
 /// Parameters for the search command.
@@ -893,6 +902,7 @@ fn dispatch_with_config(
             pending,
             pending_for,
             since,
+            summary,
         } => {
             let q = QueryParams {
                 author: author.as_deref(),
@@ -903,6 +913,7 @@ fn dispatch_with_config(
                 pending: *pending,
                 pending_for: pending_for.as_deref(),
                 since: since.as_deref(),
+                summary: *summary,
             };
             cmd_query(system, cwd, &q)
         }
@@ -1436,6 +1447,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     filter.pending = params.pending;
     filter.pending_for = params.pending_for.map(String::from);
     filter.since = since_dt;
+    filter.summary = params.summary;
 
     let results = query::query(system, &target, &filter)?;
 
@@ -1511,6 +1523,7 @@ fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
         "author": cm.author,
         "author_type": author_type,
         "content": cm.content,
+        "file": cm.file.display().to_string(),
         "ts": cm.ts.to_rfc3339(),
         "line": cm.line,
         "to": cm.to,

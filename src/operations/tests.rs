@@ -1037,3 +1037,146 @@ fn auto_ack_without_reply_to_no_file_modification() {
     let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(before, after, "file should not be modified on error");
 }
+
+// ===========================================================================
+// Reply-to auto-populate `to` tests (rem-3nm)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Test: reply auto-populates `to` from parent author
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reply_auto_populates_to() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    // Reply to "abc" (authored by "eduardo") without specifying `--to`.
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Reply with auto-to.",
+            position: &position,
+            reply_to: Some("abc"),
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&new_id).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("eduardo")],
+        "to should be auto-populated from parent author"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: reply with explicit --to is NOT overridden
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reply_explicit_to_not_overridden() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Reply with explicit to.",
+            position: &position,
+            reply_to: Some("abc"),
+            to: &[String::from("bob")],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&new_id).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("bob")],
+        "explicit to should not be overridden"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: root comment (no reply_to) with no --to stays empty
+// ---------------------------------------------------------------------------
+
+#[test]
+fn root_comment_no_auto_to() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Root comment, no to.",
+            position: &position,
+            reply_to: None,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment(&new_id).unwrap();
+    assert!(cm.to.is_empty(), "root comment should have empty to");
+}
+
+// ---------------------------------------------------------------------------
+// Test: reply to comment by different author auto-populates correctly
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reply_auto_populates_to_different_author() {
+    // Use the thread doc which has comments by "eduardo" and "alice".
+    let system = system_with_doc(&doc_with_thread());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    // Reply to "child1" authored by "alice".
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Reply to alice's comment.",
+            position: &position,
+            reply_to: Some("child1"),
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&new_id).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("alice")],
+        "to should auto-populate from child1's author (alice)"
+    );
+}

@@ -595,16 +595,19 @@ fn query_expanded_multiple_files() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 23: query_not_expanded_has_empty_comments
+// Test 23: query_summary_has_empty_comments
 // ---------------------------------------------------------------------------
 
 #[test]
-fn query_not_expanded_has_empty_comments() {
+fn query_summary_has_empty_comments() {
     let system = setup_expanded_system();
-    let filter = QueryFilter::default();
+    let filter = QueryFilter {
+        summary: true,
+        ..QueryFilter::default()
+    };
 
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
-    // Default (expanded=false) means comments vec is always empty.
+    // summary=true suppresses comment data.
     for r in &results {
         assert!(r.comments.is_empty());
     }
@@ -664,4 +667,512 @@ fn query_expanded_comment_fields_complete() {
     assert!(cm.attachments.is_empty());
     assert_eq!(cm.checksum, "sha256:c3c3");
     assert!(cm.signature.is_none());
+}
+
+// ===========================================================================
+// Pending count bug-fix tests (rem-s6f)
+// ===========================================================================
+
+/// Document with a broadcast comment (no `to` field) plus a directed comment.
+fn doc_broadcast_and_directed() -> &'static str {
+    "\
+---
+title: Mixed
+---
+
+```remargin
+---
+id: bcast
+author: bot
+type: agent
+ts: 2026-04-06T09:00:00-04:00
+checksum: sha256:bc1
+---
+Broadcast -- no to field.
+```
+
+```remargin
+---
+id: dir1
+author: alice
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [eduardo]
+checksum: sha256:d1d1
+---
+Directed to eduardo.
+```
+"
+}
+
+/// Document with a comment addressed to two people, only one of whom acked.
+fn doc_partially_acked() -> &'static str {
+    "\
+---
+title: Partial
+---
+
+```remargin
+---
+id: pa1
+author: alice
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [bob, carol]
+checksum: sha256:pa1
+ack:
+  - bob@2026-04-06T11:00:00-04:00
+---
+Partially acked: bob acked, carol did not.
+```
+"
+}
+
+/// Document with a comment fully acked by all recipients.
+fn doc_fully_acked_multi() -> &'static str {
+    "\
+---
+title: Fully Acked
+---
+
+```remargin
+---
+id: fa1
+author: alice
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [bob, carol]
+checksum: sha256:fa1
+ack:
+  - bob@2026-04-06T11:00:00-04:00
+  - carol@2026-04-06T12:00:00-04:00
+---
+Fully acked by both.
+```
+"
+}
+
+fn setup_pending_system() -> MockSystem {
+    MockSystem::new()
+        .with_dir(Path::new("/pend"))
+        .unwrap()
+        .with_file(
+            Path::new("/pend/mixed.md"),
+            doc_broadcast_and_directed().as_bytes(),
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/pend/partial.md"),
+            doc_partially_acked().as_bytes(),
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/pend/full.md"),
+            doc_fully_acked_multi().as_bytes(),
+        )
+        .unwrap()
+}
+
+// ---------------------------------------------------------------------------
+// Test 26: Broadcast comment (no `to`) is NOT counted as pending
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_to_not_pending() {
+    let system = setup_pending_system();
+    let filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    let mixed_result = results
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("mixed.md"))
+        .unwrap();
+
+    // mixed.md should appear because dir1 is pending, but pending_count
+    // should be 1 (only dir1), NOT 2 (bcast should not count).
+    assert_eq!(mixed_result.pending_count, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Test 27: Directed comment with no acks IS pending
+// ---------------------------------------------------------------------------
+
+#[test]
+fn to_with_no_ack_is_pending() {
+    let system = setup_pending_system();
+    let filter = QueryFilter::default();
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    let mixed = results
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("mixed.md"))
+        .unwrap();
+
+    assert_eq!(mixed.pending_count, 1);
+    assert!(mixed.pending_for.contains(&String::from("eduardo")));
+}
+
+// ---------------------------------------------------------------------------
+// Test 28: Fully acked comment is NOT pending
+// ---------------------------------------------------------------------------
+
+#[test]
+fn to_fully_acked_not_pending() {
+    let system = setup_pending_system();
+    let filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    // full.md has a fully-acked comment so it should NOT appear.
+    assert!(
+        !results
+            .iter()
+            .any(|r| r.path.to_str().unwrap().contains("full.md")),
+        "fully-acked document should not appear in pending results"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 29: Partially acked comment IS still pending
+// ---------------------------------------------------------------------------
+
+#[test]
+fn to_partially_acked_still_pending() {
+    let system = setup_pending_system();
+    let filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    let partial = results
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("partial.md"))
+        .unwrap();
+
+    assert_eq!(partial.pending_count, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Test 30: pending_count matches expanded comment count
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pending_count_matches_expanded() {
+    let system = setup_pending_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    for r in &results {
+        assert_eq!(
+            r.pending_count,
+            u32::try_from(r.comments.len()).unwrap(),
+            "pending_count should equal expanded comments length for {}",
+            r.path.display()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 31: pending_for excludes fully-acked recipients
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pending_for_excludes_fully_acked() {
+    let system = setup_pending_system();
+    let filter = QueryFilter::default();
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    let partial = results
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("partial.md"))
+        .unwrap();
+
+    // bob acked, carol did not. pending_for should contain carol but not bob.
+    assert!(
+        partial.pending_for.contains(&String::from("carol")),
+        "carol should be in pending_for"
+    );
+    assert!(
+        !partial.pending_for.contains(&String::from("bob")),
+        "bob should NOT be in pending_for (already acked)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 32: Broadcast comment never shows up in pending or pending_for
+// ---------------------------------------------------------------------------
+
+#[test]
+fn broadcast_comment_never_pending() {
+    // A single-file system with only a broadcast comment.
+    let broadcast_only = "\
+---
+title: Broadcast Only
+---
+
+```remargin
+---
+id: b1
+author: bot
+type: agent
+ts: 2026-04-06T09:00:00-04:00
+checksum: sha256:b1b1
+---
+No to field at all.
+```
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/bonly"))
+        .unwrap()
+        .with_file(Path::new("/bonly/note.md"), broadcast_only.as_bytes())
+        .unwrap();
+
+    let filter = QueryFilter::default();
+    let results = query(&system, Path::new("/bonly"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].pending_count, 0);
+    assert!(results[0].pending_for.is_empty());
+
+    // With --pending filter, document should not appear.
+    let pending_filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+    let pending_results = query(&system, Path::new("/bonly"), &pending_filter).unwrap();
+    assert!(
+        pending_results.is_empty(),
+        "broadcast-only doc should not appear in --pending results"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 33: pending_for filter with partially acked comment
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pending_for_partially_acked() {
+    let system = setup_pending_system();
+
+    // carol has not acked -- should find partial.md
+    let filter_carol = QueryFilter {
+        pending_for: Some(String::from("carol")),
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/pend"), &filter_carol).unwrap();
+    assert!(
+        results
+            .iter()
+            .any(|r| r.path.to_str().unwrap().contains("partial.md")),
+        "partial.md should appear for pending_for=carol"
+    );
+
+    // bob already acked -- should NOT find partial.md
+    let filter_bob = QueryFilter {
+        pending_for: Some(String::from("bob")),
+        ..QueryFilter::default()
+    };
+    let results_bob = query(&system, Path::new("/pend"), &filter_bob).unwrap();
+    assert!(
+        !results_bob
+            .iter()
+            .any(|r| r.path.to_str().unwrap().contains("partial.md")),
+        "partial.md should NOT appear for pending_for=bob (already acked)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 34: expanded pending_for with partial ack returns only unacked recipients
+// ---------------------------------------------------------------------------
+
+#[test]
+fn expanded_pending_for_partial_ack() {
+    let system = setup_pending_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending_for: Some(String::from("carol")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/pend"), &filter).unwrap();
+    let partial = results
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("partial.md"))
+        .unwrap();
+
+    assert_eq!(partial.comments.len(), 1);
+    assert_eq!(partial.comments[0].id, "pa1");
+}
+
+// ===========================================================================
+// Default expanded + file path tests (rem-frc)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Test 35: query default (no --expanded) includes comments
+// ---------------------------------------------------------------------------
+
+#[test]
+fn query_default_includes_comments() {
+    let system = setup_expanded_system();
+    // Default filter: no explicit expanded=true, no summary.
+    let filter = QueryFilter::default();
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    // Comments should be included by default (not empty).
+    for r in &results {
+        assert!(
+            !r.comments.is_empty(),
+            "default query should include comments for {}",
+            r.path.display()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 36: expanded comments have file path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn expanded_comments_have_file_path() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    for r in &results {
+        for cm in &r.comments {
+            assert_eq!(
+                cm.file, r.path,
+                "comment {}'s file field should match parent result path",
+                cm.id
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 37: query --summary suppresses comment data
+// ---------------------------------------------------------------------------
+
+#[test]
+fn query_summary_only() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        summary: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    // summary should still return results (with counts).
+    assert!(!results.is_empty());
+    for r in &results {
+        assert!(
+            r.comments.is_empty(),
+            "summary mode should suppress comments for {}",
+            r.path.display()
+        );
+        assert!(r.comment_count > 0, "should still have counts");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 38: --expanded flag still works (backward compat)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn backward_compat_expanded_flag() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    for r in &results {
+        assert!(
+            !r.comments.is_empty(),
+            "--expanded should include comments for {}",
+            r.path.display()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 39: file path on comments matches document path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn file_path_on_default_comments() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter::default();
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    let review = results
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("review.md"))
+        .unwrap();
+
+    for cm in &review.comments {
+        assert!(
+            cm.file.to_str().unwrap().contains("review.md"),
+            "comment {} file should be review.md, got {}",
+            cm.id,
+            cm.file.display()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 40: summary mode with --pending still filters correctly
+// ---------------------------------------------------------------------------
+
+#[test]
+fn summary_with_pending_filter() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        pending: true,
+        summary: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    for r in &results {
+        assert!(r.comments.is_empty(), "summary suppresses comments");
+        assert!(r.pending_count > 0, "pending filter still applies");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test 41: expanded overrides summary (expanded wins)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn expanded_overrides_summary() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        expanded: true,
+        summary: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    for r in &results {
+        assert!(
+            !r.comments.is_empty(),
+            "expanded=true should override summary for {}",
+            r.path.display()
+        );
+    }
 }
