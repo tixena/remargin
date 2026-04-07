@@ -1490,7 +1490,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
             .collect();
         print_output(
             true,
-            &json!({ "base_path": params.path, "results": entries }),
+            &json!({ "base_path": format!("{}/", params.path.trim_end_matches('/')), "results": entries }),
         )
     } else if params.pretty {
         let filter_name = params.pending_for;

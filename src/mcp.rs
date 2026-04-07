@@ -1013,7 +1013,9 @@ fn handle_query(
         Ok(json!({ "text": output }))
     } else {
         let entries: Vec<Value> = results.iter().map(serialize_query_result).collect();
-        Ok(json!({ "base_path": path_str, "results": entries }))
+        Ok(
+            json!({ "base_path": format!("{}/", path_str.trim_end_matches('/')), "results": entries }),
+        )
     }
 }
 
