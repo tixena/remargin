@@ -606,16 +606,20 @@ fn batch_after_line_beyond_document_length() {
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
-        after_line: Some(9999), // way beyond document length
+        after_line: Some(9999), // way beyond document length — clamps to append
         attachments: Vec::new(),
         auto_ack: false,
-        content: String::from("Should fail."),
+        content: String::from("Appended at end."),
         reply_to: None,
         to: Vec::new(),
     }];
 
-    let result = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops);
-    result.unwrap_err();
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+    assert_eq!(ids.len(), 1);
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    assert_eq!(doc.comments().len(), 1);
+    assert_eq!(doc.comments()[0].content, "Appended at end.");
 }
 
 #[test]

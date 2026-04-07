@@ -393,3 +393,49 @@ fn insert_after_nonexistent_comment() {
     );
     result.unwrap_err();
 }
+
+// ---------------------------------------------------------------------------
+// Test: AfterLine at exact document length (last line)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn insert_after_last_line() {
+    let doc_str = "Line 1\nLine 2\nLine 3\n";
+    let line_count = doc_str.split('\n').count();
+    let mut doc = parser::parse(doc_str).unwrap();
+    let new_comment = make_comment("last", "After last line.");
+    insert_comment(
+        &mut doc,
+        new_comment,
+        &InsertPosition::AfterLine(line_count),
+    )
+    .unwrap();
+
+    let markdown = doc.to_markdown();
+    assert!(markdown.contains("id: last"));
+
+    // Comment should appear after all body text.
+    let line3_pos = markdown.find("Line 3").unwrap();
+    let comment_pos = markdown.find("id: last").unwrap();
+    assert!(line3_pos < comment_pos);
+}
+
+// ---------------------------------------------------------------------------
+// Test: AfterLine beyond document length clamps to append
+// ---------------------------------------------------------------------------
+
+#[test]
+fn insert_after_line_beyond_length_clamps() {
+    let doc_str = "Line 1\nLine 2\n";
+    let mut doc = parser::parse(doc_str).unwrap();
+    let new_comment = make_comment("far", "Way past the end.");
+    insert_comment(&mut doc, new_comment, &InsertPosition::AfterLine(10000)).unwrap();
+
+    let markdown = doc.to_markdown();
+    assert!(markdown.contains("id: far"));
+
+    // Comment should appear after all body text (effectively appended).
+    let line2_pos = markdown.find("Line 2").unwrap();
+    let comment_pos = markdown.find("id: far").unwrap();
+    assert!(line2_pos < comment_pos);
+}

@@ -147,8 +147,8 @@ pub fn serialize_comment(comment: &Comment) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if `AfterComment` references a non-existent comment ID,
-/// or if `AfterLine` references a line beyond the document's length.
+/// Returns an error if `AfterComment` references a non-existent comment ID.
+/// `AfterLine` beyond the document length is clamped to append.
 pub fn insert_comment(
     doc: &mut ParsedDocument,
     comment: Comment,
@@ -188,19 +188,18 @@ pub fn insert_comment(
             let markdown = doc.to_markdown();
             let lines: Vec<&str> = markdown.split('\n').collect();
 
-            if *target_line > lines.len() {
-                bail!(
-                    "line {} is beyond document length ({})",
-                    target_line,
-                    lines.len()
-                );
-            }
+            // Clamp to document length so after-line beyond the end
+            // behaves as append rather than erroring.
+            let clamped = (*target_line).min(lines.len());
 
             // Find the byte offset after the target line.
             let mut byte_offset: usize = 0;
-            for line in lines.iter().take(*target_line) {
+            for line in lines.iter().take(clamped) {
                 byte_offset += line.len() + 1; // +1 for the newline
             }
+            // Clamp to string length: split('\n') on a trailing-newline
+            // string produces an empty final element whose +1 overshoots.
+            byte_offset = byte_offset.min(markdown.len());
 
             // Rebuild: text before + new comment + text after.
             let before = &markdown[..byte_offset];
