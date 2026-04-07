@@ -283,13 +283,13 @@ pub fn write(
 
             for old_id in &old_ids {
                 if !new_ids.contains(old_id) {
-                    bail!("comment {old_id:?} was removed; use remargin delete instead");
+                    bail!("comment {old_id:?} was removed — preservation check failed");
                 }
             }
 
             for new_id in &new_ids {
                 if !old_ids.contains(new_id) {
-                    bail!("unexpected comment {new_id:?} appeared; use remargin comment to add");
+                    bail!("unexpected comment {new_id:?} appeared — preservation check failed");
                 }
             }
 
@@ -299,7 +299,7 @@ pub fn write(
                     && new_comment.checksum != old_comment.checksum
                 {
                     bail!(
-                        "comment {:?} checksum was modified; use remargin edit instead",
+                        "comment {:?} checksum was modified — preservation check failed",
                         old_comment.id
                     );
                 }
