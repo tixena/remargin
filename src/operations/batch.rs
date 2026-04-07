@@ -21,8 +21,8 @@ use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
 use crate::linter;
-use crate::operations::copy_attachments;
-use crate::parser::{self, AuthorType, Comment};
+use crate::operations::{copy_attachments, find_comment_mut};
+use crate::parser::{self, Acknowledgment, AuthorType, Comment};
 use crate::writer::{self, InsertPosition};
 
 // ---------------------------------------------------------------------------
@@ -39,6 +39,8 @@ pub struct BatchCommentOp {
     pub after_line: Option<usize>,
     /// Attachment file paths.
     pub attachments: Vec<PathBuf>,
+    /// Automatically acknowledge the parent comment when replying.
+    pub auto_ack: bool,
     /// Comment body text.
     pub content: String,
     /// ID of the comment this replies to.
@@ -55,6 +57,7 @@ impl BatchCommentOp {
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content,
             reply_to: None,
             to: Vec::new(),
@@ -101,6 +104,13 @@ pub fn batch_comment(
     let markdown_before = doc.to_markdown();
     linter::lint_or_fail(&markdown_before)
         .context("document has structural issues before write")?;
+
+    // Validate auto_ack requires reply_to before any modifications.
+    for (idx, op) in operations.iter().enumerate() {
+        if op.auto_ack && op.reply_to.is_none() {
+            bail!("batch operation {idx}: auto_ack requires reply_to");
+        }
+    }
 
     let mut created_ids: Vec<String> = Vec::new();
 
@@ -166,6 +176,33 @@ pub fn batch_comment(
 
         writer::insert_comment(&mut doc, comment, &position)
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
+
+        // Auto-ack the parent comment in the same document write cycle.
+        if op.auto_ack
+            && let Some(parent_id) = &op.reply_to
+        {
+            let lines_before_ack = doc.to_markdown().matches('\n').count();
+
+            let parent = find_comment_mut(&mut doc, parent_id).with_context(|| {
+                format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
+            })?;
+            parent.ack.push(Acknowledgment {
+                author: String::from(identity),
+                ts: now,
+            });
+
+            // Track ack-induced line shift for subsequent AfterLine targets.
+            let lines_after_ack = doc.to_markdown().matches('\n').count();
+            let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
+            if ack_lines_added > 0
+                && let Some(parent_cm) = doc.find_comment(parent_id)
+            {
+                // Use the parent's original line as the shift anchor.
+                // The ack metadata is added to the parent's fence, so any
+                // AfterLine target at or after the parent's position shifts.
+                line_shifts.push((parent_cm.line, ack_lines_added));
+            }
+        }
 
         // Record the line shift if this was an AfterLine insertion.
         if let Some(original_target) = op.after_line {

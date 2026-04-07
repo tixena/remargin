@@ -5,12 +5,13 @@
 
 use std::path::Path;
 
+use os_shim::System as _;
 use os_shim::mock::MockSystem;
 use serde_json::{Value, json};
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::mcp;
-use crate::parser::AuthorType;
+use crate::parser::{self, AuthorType};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1267,4 +1268,121 @@ fn mcp_ack_without_file_ambiguous_returns_error() {
         text.contains("ambiguous"),
         "expected 'ambiguous' in error: {text}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// MCP auto-ack tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_comment_auto_ack() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // Reply to aaa with auto_ack.
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Reply with auto-ack.",
+                    "reply_to": "aaa",
+                    "auto_ack": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert!(result["id"].is_string());
+
+    // Verify the parent was acked.
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "tester");
+}
+
+#[test]
+fn mcp_comment_auto_ack_without_reply_to_errors() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody text.\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Top-level with auto-ack.",
+                    "auto_ack": true
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let result = &response["result"];
+    let content = result["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("--auto-ack requires --reply-to"),
+        "unexpected error: {text}"
+    );
+}
+
+#[test]
+fn mcp_batch_auto_ack_per_op() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "batch",
+                "arguments": {
+                    "file": "doc.md",
+                    "operations": [
+                        { "content": "Independent comment." },
+                        { "content": "Reply with ack.", "reply_to": "aaa", "auto_ack": true },
+                        { "content": "Reply without ack.", "reply_to": "aaa" }
+                    ]
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let ids = result["ids"].as_array().unwrap();
+    assert_eq!(ids.len(), 3_usize);
+
+    // Verify parent aaa was acked exactly once (from op1).
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "tester");
 }

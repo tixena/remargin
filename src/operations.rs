@@ -41,6 +41,8 @@ use crate::writer::{self, InsertPosition};
 pub struct CreateCommentParams<'params> {
     /// File attachments to include.
     pub attachments: &'params [PathBuf],
+    /// Automatically acknowledge the parent comment when replying.
+    pub auto_ack: bool,
     /// Comment body text.
     pub content: &'params str,
     /// Where to insert the comment in the document.
@@ -57,6 +59,7 @@ impl<'params> CreateCommentParams<'params> {
     pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
         Self {
             attachments: &[],
+            auto_ack: false,
             content,
             position,
             reply_to: None,
@@ -92,6 +95,11 @@ pub fn create_comment(
         .context("identity is required to create a comment")?;
 
     config.can_post(identity)?;
+
+    // Validate auto_ack requires reply_to.
+    if params.auto_ack && params.reply_to.is_none() {
+        bail!("--auto-ack requires --reply-to");
+    }
 
     let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
 
@@ -150,6 +158,18 @@ pub fn create_comment(
 
     // Insert comment.
     writer::insert_comment(&mut doc, comment, params.position)?;
+
+    // Auto-ack the parent comment in the same write cycle.
+    if params.auto_ack
+        && let Some(parent_id) = params.reply_to
+    {
+        let parent = find_comment_mut(&mut doc, parent_id)
+            .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
+        parent.ack.push(Acknowledgment {
+            author: String::from(identity),
+            ts: now,
+        });
+    }
 
     // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
@@ -549,7 +569,10 @@ fn copy_attachments(
 }
 
 /// Find a mutable reference to a comment by ID.
-fn find_comment_mut<'doc>(doc: &'doc mut ParsedDocument, id: &str) -> Option<&'doc mut Comment> {
+pub(crate) fn find_comment_mut<'doc>(
+    doc: &'doc mut ParsedDocument,
+    id: &str,
+) -> Option<&'doc mut Comment> {
     doc.segments.iter_mut().find_map(|seg| match seg {
         Segment::Comment(cm) if cm.id == id => Some(cm.as_mut()),
         Segment::Body(_) | Segment::Comment(_) | Segment::LegacyComment(_) => None,

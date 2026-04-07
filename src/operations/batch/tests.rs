@@ -77,6 +77,7 @@ fn simple_batch() {
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("First batch comment."),
             reply_to: None,
             to: Vec::new(),
@@ -85,6 +86,7 @@ fn simple_batch() {
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Second batch comment."),
             reply_to: None,
             to: Vec::new(),
@@ -93,6 +95,7 @@ fn simple_batch() {
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Third batch comment."),
             reply_to: None,
             to: Vec::new(),
@@ -122,6 +125,7 @@ fn batch_with_reply() {
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Root comment."),
             reply_to: None,
             to: Vec::new(),
@@ -139,6 +143,7 @@ fn batch_with_reply() {
         after_comment: None,
         after_line: None,
         attachments: Vec::new(),
+        auto_ack: false,
         content: String::from("Reply to root."),
         reply_to: Some(ids[0].clone()),
         to: Vec::new(),
@@ -169,6 +174,7 @@ fn batch_failure_rolls_back() {
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Good comment."),
             reply_to: None,
             to: Vec::new(),
@@ -177,6 +183,7 @@ fn batch_failure_rolls_back() {
             after_comment: None,
             after_line: None,
             attachments: vec![PathBuf::from("/nonexistent/file.png")],
+            auto_ack: false,
             content: String::from("Bad comment with missing attachment."),
             reply_to: None,
             to: Vec::new(),
@@ -224,6 +231,7 @@ Existing comment.
         after_comment: None,
         after_line: None,
         attachments: Vec::new(),
+        auto_ack: false,
         content: String::from("New batch comment."),
         reply_to: None,
         to: Vec::new(),
@@ -254,6 +262,7 @@ fn batch_two_after_line_comments_both_placed_correctly() {
             after_comment: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Comment after line one."),
             reply_to: None,
             to: Vec::new(),
@@ -262,6 +271,7 @@ fn batch_two_after_line_comments_both_placed_correctly() {
             after_comment: None,
             after_line: Some(13), // after "Line three."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Comment after line three."),
             reply_to: None,
             to: Vec::new(),
@@ -311,6 +321,7 @@ fn batch_after_line_reverse_order() {
             after_comment: None,
             after_line: Some(13), // after "Line three." (higher)
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Comment after line three."),
             reply_to: None,
             to: Vec::new(),
@@ -319,6 +330,7 @@ fn batch_after_line_reverse_order() {
             after_comment: None,
             after_line: Some(9), // after "Line one." (lower)
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Comment after line one."),
             reply_to: None,
             to: Vec::new(),
@@ -355,6 +367,7 @@ fn batch_three_after_line_same_region() {
             after_comment: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("First."),
             reply_to: None,
             to: Vec::new(),
@@ -363,6 +376,7 @@ fn batch_three_after_line_same_region() {
             after_comment: None,
             after_line: Some(11), // after "Line two."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Second."),
             reply_to: None,
             to: Vec::new(),
@@ -371,6 +385,7 @@ fn batch_three_after_line_same_region() {
             after_comment: None,
             after_line: Some(13), // after "Line three."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Third."),
             reply_to: None,
             to: Vec::new(),
@@ -414,6 +429,7 @@ fn batch_mixed_after_line_and_append() {
             after_comment: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Positioned comment."),
             reply_to: None,
             to: Vec::new(),
@@ -422,6 +438,7 @@ fn batch_mixed_after_line_and_append() {
             after_comment: None,
             after_line: None, // append
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Appended comment."),
             reply_to: None,
             to: Vec::new(),
@@ -430,6 +447,7 @@ fn batch_mixed_after_line_and_append() {
             after_comment: None,
             after_line: Some(13), // after "Line three."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Another positioned comment."),
             reply_to: None,
             to: Vec::new(),
@@ -494,6 +512,7 @@ Line after comment.
             after_comment: None,
             after_line: Some(19), // after "Line after comment."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("New comment at end."),
             reply_to: None,
             to: Vec::new(),
@@ -502,6 +521,7 @@ Line after comment.
             after_comment: None,
             after_line: None,
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Reply to root."),
             reply_to: Some(String::from("root")),
             to: Vec::new(),
@@ -540,6 +560,7 @@ fn batch_two_after_same_line() {
             after_comment: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("First at line 9."),
             reply_to: None,
             to: Vec::new(),
@@ -548,6 +569,7 @@ fn batch_two_after_same_line() {
             after_comment: None,
             after_line: Some(9), // also after "Line one."
             attachments: Vec::new(),
+            auto_ack: false,
             content: String::from("Second at line 9."),
             reply_to: None,
             to: Vec::new(),
@@ -586,6 +608,7 @@ fn batch_after_line_beyond_document_length() {
         after_comment: None,
         after_line: Some(9999), // way beyond document length
         attachments: Vec::new(),
+        auto_ack: false,
         content: String::from("Should fail."),
         reply_to: None,
         to: Vec::new(),
@@ -605,6 +628,7 @@ fn batch_after_line_zero() {
         after_comment: None,
         after_line: Some(0),
         attachments: Vec::new(),
+        auto_ack: false,
         content: String::from("At the very top."),
         reply_to: None,
         to: Vec::new(),
@@ -619,4 +643,366 @@ fn batch_after_line_zero() {
         assert_eq!(doc.comments().len(), 1);
     }
     // If it errors, that's also acceptable — just not corruption.
+}
+
+// ---------------------------------------------------------------------------
+// Batch auto-ack tests
+// ---------------------------------------------------------------------------
+
+/// A document with one existing comment for auto-ack reply tests.
+fn doc_with_comment() -> String {
+    String::from(
+        "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+Some body text.
+
+```remargin
+---
+id: abc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+---
+First comment.
+```
+",
+    )
+}
+
+#[test]
+fn batch_auto_ack_single_op() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    let ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: true,
+        content: String::from("Reply with auto-ack."),
+        reply_to: Some(String::from("abc")),
+        to: Vec::new(),
+    }];
+
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+    assert_eq!(ids.len(), 1);
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "eduardo");
+}
+
+#[test]
+fn batch_auto_ack_mixed_ops() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    // op0: create new comment, op1: reply to abc with auto_ack, op2: reply to abc without auto_ack
+    let ops = vec![
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("Independent comment."),
+            reply_to: None,
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: true,
+            content: String::from("Reply with auto-ack."),
+            reply_to: Some(String::from("abc")),
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("Reply without auto-ack."),
+            reply_to: Some(String::from("abc")),
+            to: Vec::new(),
+        },
+    ];
+
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+    assert_eq!(ids.len(), 3);
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+
+    // Parent abc should have exactly 1 ack (from op1, not op2).
+    let parent = doc.find_comment("abc").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "eduardo");
+}
+
+#[test]
+fn batch_auto_ack_forward_reference() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+
+    // op0: create a new comment, op1: reply to op0 with auto_ack.
+    // op1 cannot reference op0's ID directly (it's generated at runtime),
+    // so we create op0 first, then use the returned ID.
+
+    // First, create the parent.
+    let parent_ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: false,
+        content: String::from("Parent comment."),
+        reply_to: None,
+        to: Vec::new(),
+    }];
+
+    let parent_ids =
+        batch_comment(&system, Path::new("/docs/test.md"), &config, &parent_ops).unwrap();
+
+    // Now reply with auto_ack.
+    let reply_ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: true,
+        content: String::from("Reply with auto-ack to batch parent."),
+        reply_to: Some(parent_ids[0].clone()),
+        to: Vec::new(),
+    }];
+
+    let reply_ids =
+        batch_comment(&system, Path::new("/docs/test.md"), &config, &reply_ops).unwrap();
+    assert_eq!(reply_ids.len(), 1);
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment(&parent_ids[0]).unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "eduardo");
+}
+
+#[test]
+fn batch_auto_ack_shifts_subsequent_after_line() {
+    // Document with body text first, then an existing comment.
+    // The after_line target is in the body area BEFORE the comment,
+    // so it is not affected by the reply insertion but IS affected
+    // by ack-induced shifts if any occur above it.
+    let doc_content = "\
+---
+title: Test
+author: eduardo
+---
+
+# Heading
+
+Line before comment.
+
+```remargin
+---
+id: abc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+---
+First comment.
+```
+
+Line after comment.
+";
+    let system = system_with_doc(doc_content);
+    let config = open_config();
+
+    // op0: reply to abc with auto_ack (adds ack metadata, shifting lines)
+    // op1: insert after "Line after comment." using after_line
+    // Since op0 is AfterComment (not AfterLine), only the ack shift is
+    // tracked. We use Append for op1 instead to avoid the pre-existing
+    // limitation that AfterComment insertions don't contribute to line_shifts.
+    let ops = vec![
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: true,
+            content: String::from("Reply with ack."),
+            reply_to: Some(String::from("abc")),
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: Some(8), // after "Line before comment." (before the comment)
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("Positioned comment."),
+            reply_to: None,
+            to: Vec::new(),
+        },
+    ];
+
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+    assert_eq!(ids.len(), 2);
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+
+    // All three comments should exist.
+    assert_eq!(doc.comments().len(), 3);
+
+    // The positioned comment should still land in the right area.
+    let positioned = doc.find_comment(&ids[1]).unwrap();
+    assert_eq!(positioned.content, "Positioned comment.");
+
+    // Parent abc should be acked.
+    let parent = doc.find_comment("abc").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+}
+
+#[test]
+fn batch_auto_ack_multiple_shifts() {
+    // A document with two existing comments at different positions.
+    let doc_content = "\
+---
+title: Test
+author: eduardo
+---
+
+# Heading
+
+```remargin
+---
+id: aaa
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+---
+Comment aaa.
+```
+
+Middle text.
+
+```remargin
+---
+id: bbb
+author: alice
+type: human
+ts: 2026-04-06T13:00:00-04:00
+checksum: sha256:f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+---
+Comment bbb.
+```
+
+End text.
+";
+    let system = system_with_doc(doc_content);
+    let config = open_config();
+
+    // op0: reply to aaa with auto_ack
+    // op1: reply to bbb with auto_ack
+    // op2: after_line targeting "End text."
+    let ops = vec![
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: true,
+            content: String::from("Reply to aaa."),
+            reply_to: Some(String::from("aaa")),
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: true,
+            content: String::from("Reply to bbb."),
+            reply_to: Some(String::from("bbb")),
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: Some(31), // after "End text." in original doc
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("End positioned."),
+            reply_to: None,
+            to: Vec::new(),
+        },
+    ];
+
+    let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+    assert_eq!(ids.len(), 3);
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+
+    // 2 original + 3 new = 5 comments
+    assert_eq!(doc.comments().len(), 5);
+
+    // Both parents should be acked.
+    let parent_a = doc.find_comment("aaa").unwrap();
+    assert_eq!(parent_a.ack.len(), 1);
+    let parent_b = doc.find_comment("bbb").unwrap();
+    assert_eq!(parent_b.ack.len(), 1);
+
+    // The positioned comment should exist.
+    let end_cm = doc.find_comment(&ids[2]).unwrap();
+    assert_eq!(end_cm.content, "End positioned.");
+
+    // The replies should come after their respective parents.
+    let reply_a = doc.find_comment(&ids[0]).unwrap();
+    assert!(
+        reply_a.line > parent_a.line,
+        "Reply to aaa ({}) should be after aaa ({})",
+        reply_a.line,
+        parent_a.line
+    );
+    let reply_b = doc.find_comment(&ids[1]).unwrap();
+    assert!(
+        reply_b.line > parent_b.line,
+        "Reply to bbb ({}) should be after bbb ({})",
+        reply_b.line,
+        parent_b.line
+    );
+}
+
+#[test]
+fn batch_auto_ack_without_reply_to_errors() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+
+    let ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: true,
+        content: String::from("Top-level with auto-ack."),
+        reply_to: None,
+        to: Vec::new(),
+    }];
+
+    let result = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops);
+    assert!(result.is_err());
+    let err_msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        err_msg.contains("auto_ack requires reply_to"),
+        "unexpected error: {err_msg}"
+    );
+
+    // File should not be modified.
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(content, MINIMAL_DOC);
 }

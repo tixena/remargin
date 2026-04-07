@@ -103,7 +103,8 @@ fn desc_batch() -> ToolDesc {
                             "reply_to": { "type": "string" },
                             "attachments": { "type": "array", "items": { "type": "string" }, "default": [] },
                             "after_line": { "type": "integer" },
-                            "after_comment": { "type": "string" }
+                            "after_comment": { "type": "string" },
+                            "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying", "default": false }
                         },
                         "required": ["content"]
                     },
@@ -134,6 +135,7 @@ fn desc_comment() -> ToolDesc {
                     "default": []
                 },
                 "reply_to": { "type": "string", "description": "ID of the comment to reply to" },
+                "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying", "default": false },
                 "attachments": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -713,6 +715,7 @@ fn handle_batch(
                 .into_iter()
                 .map(PathBuf::from)
                 .collect(),
+            auto_ack: optional_bool(op_obj, "auto_ack"),
             content: String::from(content),
             reply_to: optional_str(op_obj, "reply_to").map(String::from),
             to: string_array(op_obj, "to"),
@@ -745,8 +748,11 @@ fn handle_comment(
 
     let position = resolve_insert_position(params, reply_to.as_deref());
 
+    let auto_ack = optional_bool(params, "auto_ack");
+
     let create_params = operations::CreateCommentParams {
         attachments: &attachments,
+        auto_ack,
         content,
         position: &position,
         reply_to: reply_to.as_deref(),

@@ -149,6 +149,7 @@ fn create_simple_comment() {
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "This is a new comment.",
             position: &position,
             reply_to: None,
@@ -190,6 +191,7 @@ fn create_with_attachment() {
         &config,
         &CreateCommentParams {
             attachments: &[PathBuf::from("/tmp/screenshot.png")],
+            auto_ack: false,
             content: "See attached.",
             position: &position,
             reply_to: None,
@@ -221,6 +223,7 @@ fn create_reply_auto_thread() {
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "Replying to abc.",
             position: &position,
             reply_to: Some("abc"),
@@ -447,6 +450,7 @@ fn preservation_invariant() {
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "Second comment.",
             position: &position,
             reply_to: None,
@@ -494,6 +498,7 @@ More text here.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "test comment",
             position: &position,
             reply_to: None,
@@ -542,6 +547,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "appended comment",
             position: &position,
             reply_to: None,
@@ -588,6 +594,7 @@ Some text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "after frontmatter",
             position: &position,
             reply_to: None,
@@ -634,6 +641,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "first",
             position: &InsertPosition::Append,
             reply_to: None,
@@ -648,6 +656,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "second",
             position: &InsertPosition::Append,
             reply_to: None,
@@ -662,6 +671,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "third",
             position: &InsertPosition::Append,
             reply_to: None,
@@ -708,6 +718,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "first",
             position: &InsertPosition::Append,
             reply_to: None,
@@ -722,6 +733,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "second",
             position: &InsertPosition::AfterComment(id1),
             reply_to: None,
@@ -736,6 +748,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
+            auto_ack: false,
             content: "third",
             position: &InsertPosition::AfterComment(id2.clone()),
             reply_to: None,
@@ -882,4 +895,145 @@ fn edit_nonexistent_comment() {
         "new content",
     );
     assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Auto-ack tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn auto_ack_on_reply() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let _reply_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: true,
+            content: "Reply with auto-ack.",
+            position: &position,
+            reply_to: Some("abc"),
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "eduardo");
+}
+
+#[test]
+fn auto_ack_preserves_reply_to() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let reply_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: true,
+            content: "Reply with auto-ack.",
+            position: &position,
+            reply_to: Some("abc"),
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&reply_id).unwrap();
+    assert_eq!(reply.reply_to.as_deref(), Some("abc"));
+    assert_eq!(reply.thread.as_deref(), Some("abc"));
+}
+
+#[test]
+fn auto_ack_false_does_not_ack() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let _reply_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Reply without auto-ack.",
+            position: &position,
+            reply_to: Some("abc"),
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert!(parent.ack.is_empty(), "parent should not be acked");
+}
+
+#[test]
+fn auto_ack_without_reply_to_errors() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let result = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: true,
+            content: "Top-level with auto-ack.",
+            position: &position,
+            reply_to: None,
+            to: &[],
+        },
+    );
+
+    let err_msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        err_msg.contains("--auto-ack requires --reply-to"),
+        "unexpected error: {err_msg}"
+    );
+}
+
+#[test]
+fn auto_ack_without_reply_to_no_file_modification() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let result = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: true,
+            content: "Top-level with auto-ack.",
+            position: &position,
+            reply_to: None,
+            to: &[],
+        },
+    );
+
+    result.unwrap_err();
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(before, after, "file should not be modified on error");
 }

@@ -170,6 +170,9 @@ enum Commands {
         /// Attachments to include.
         #[arg(long)]
         attach: Vec<PathBuf>,
+        /// Automatically acknowledge the parent comment when replying.
+        #[arg(long)]
+        auto_ack: bool,
         /// ID of the comment to reply to.
         #[arg(long)]
         reply_to: Option<String>,
@@ -403,6 +406,8 @@ struct CommentParams<'cmd> {
     after_line: Option<usize>,
     /// Attachments to include.
     attachments: &'cmd [PathBuf],
+    /// Automatically acknowledge the parent comment when replying.
+    auto_ack: bool,
     /// Comment body text.
     content: &'cmd str,
     /// Dry-run mode.
@@ -793,6 +798,7 @@ fn dispatch_with_config(
             after_comment,
             after_line,
             attach,
+            auto_ack,
             reply_to,
             to,
         } => {
@@ -800,6 +806,7 @@ fn dispatch_with_config(
                 after_comment: after_comment.as_deref(),
                 after_line: *after_line,
                 attachments: attach,
+                auto_ack: *auto_ack,
                 content,
                 dry_run,
                 file,
@@ -1005,10 +1012,15 @@ fn cmd_batch(
             .get("after_line")
             .and_then(Value::as_u64)
             .and_then(|v| usize::try_from(v).ok());
+        let auto_ack = op_obj
+            .get("auto_ack")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         let mut op = BatchCommentOp::new(String::from(content));
         op.after_comment = after_comment;
         op.after_line = after_line;
+        op.auto_ack = auto_ack;
         op.reply_to = reply_to;
         op.to = to;
         batch_ops.push(op);
@@ -1052,6 +1064,7 @@ fn cmd_comment(
 
     let mut params = operations::CreateCommentParams::new(cp.content, &position);
     params.attachments = cp.attachments;
+    params.auto_ack = cp.auto_ack;
     params.reply_to = cp.reply_to;
     params.to = cp.to;
 
