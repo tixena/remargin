@@ -261,17 +261,54 @@ fn find_file_upward(
 ///
 /// Returns an error if the file exists but cannot be read or parsed.
 pub fn load_config(system: &dyn System, start_dir: &Path) -> Result<Option<Config>> {
-    let path = find_file_upward(system, start_dir, CONFIG_FILENAME)?;
-    match path {
-        Some(found) => {
+    load_config_filtered(system, start_dir, None)
+}
+
+/// Load config by walking up from `start_dir`, optionally filtering by type.
+///
+/// If `type_filter` is `Some("human")`, only `.remargin.yaml` files with
+/// `type: human` are considered. Files with a different type (or no type
+/// field) are skipped and the walk continues upward.
+///
+/// If `type_filter` is `None`, the first `.remargin.yaml` found wins
+/// (existing behavior).
+///
+/// Returns `None` if no matching config was found in the entire walk.
+///
+/// # Errors
+///
+/// Returns an error if a config file exists but cannot be read or parsed.
+pub fn load_config_filtered(
+    system: &dyn System,
+    start_dir: &Path,
+    type_filter: Option<&str>,
+) -> Result<Option<Config>> {
+    let mut current = start_dir.to_path_buf();
+    loop {
+        let candidate = current.join(CONFIG_FILENAME);
+        if system
+            .exists(&candidate)
+            .with_context(|| format!("checking existence of {}", candidate.display()))?
+        {
             let content = system
-                .read_to_string(&found)
-                .with_context(|| format!("reading {}", found.display()))?;
+                .read_to_string(&candidate)
+                .with_context(|| format!("reading {}", candidate.display()))?;
             let config: Config = serde_yaml::from_str(&content)
-                .with_context(|| format!("parsing {}", found.display()))?;
-            Ok(Some(config))
+                .with_context(|| format!("parsing {}", candidate.display()))?;
+
+            match type_filter {
+                None => return Ok(Some(config)),
+                Some(filter) => {
+                    if config.author_type.as_deref() == Some(filter) {
+                        return Ok(Some(config));
+                    }
+                    // Type does not match; continue walking up.
+                }
+            }
         }
-        None => Ok(None),
+        if !current.pop() {
+            return Ok(None);
+        }
     }
 }
 

@@ -682,7 +682,22 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     }
 
     // Load config and registry.
-    let cfg = config::load_config(system, cwd)?;
+    // When --type is given without --identity, use it as a config selector:
+    // walk up skips .remargin.yaml files whose type does not match.
+    let type_filter = if cli.global.identity.is_none() {
+        cli.global.r#type.as_deref()
+    } else {
+        None
+    };
+    let cfg = config::load_config_filtered(system, cwd, type_filter)?;
+    if let Some(filter) = type_filter
+        && cfg.is_none()
+    {
+        anyhow::bail!(
+            "no .remargin.yaml with type {filter:?} found (searched from {} to /)",
+            cwd.display()
+        );
+    }
     let registry = config::load_registry(system, cwd)?;
     let resolved = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
 

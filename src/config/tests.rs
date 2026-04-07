@@ -7,7 +7,10 @@ use os_shim::mock::MockSystem;
 use crate::parser::AuthorType;
 
 use super::registry::RegistryParticipantStatus;
-use super::{CliOverrides, Mode, ResolvedConfig, load_config, load_registry, resolve_key_path};
+use super::{
+    CliOverrides, Mode, ResolvedConfig, load_config, load_config_filtered, load_registry,
+    resolve_key_path,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -406,4 +409,199 @@ participants:
         registry.participants["nostatus"].status,
         RegistryParticipantStatus::Active
     );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for type-filtered tests
+// ---------------------------------------------------------------------------
+
+/// Create a `.remargin.yaml` with identity and type.
+fn typed_config_yaml(identity: &str, author_type: &str) -> String {
+    format!("identity: {identity}\ntype: {author_type}\n")
+}
+
+// ---------------------------------------------------------------------------
+// Test: Type filter matches first config
+// ---------------------------------------------------------------------------
+
+#[test]
+fn type_filter_matches_first_config() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            typed_config_yaml("eduardo", "human").as_bytes(),
+        )
+        .unwrap();
+
+    let config = load_config_filtered(&system, Path::new("/project"), Some("human"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("eduardo"));
+    assert_eq!(config.author_type.as_deref(), Some("human"));
+}
+
+// ---------------------------------------------------------------------------
+// Test: Type filter skips non-matching, finds match higher up
+// ---------------------------------------------------------------------------
+
+#[test]
+fn type_filter_skips_non_matching_finds_higher() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/home/project/src"))
+        .unwrap()
+        .with_file(
+            Path::new("/home/project/src/.remargin.yaml"),
+            typed_config_yaml("agent_bot", "agent").as_bytes(),
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/home/.remargin.yaml"),
+            typed_config_yaml("eduardo", "human").as_bytes(),
+        )
+        .unwrap();
+
+    let config =
+        load_config_filtered(&system, Path::new("/home/project/src"), Some("human"))
+            .unwrap()
+            .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("eduardo"));
+    assert_eq!(config.author_type.as_deref(), Some("human"));
+}
+
+// ---------------------------------------------------------------------------
+// Test: Type filter finds no match
+// ---------------------------------------------------------------------------
+
+#[test]
+fn type_filter_no_match() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project/src"))
+        .unwrap()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            typed_config_yaml("agent_bot", "agent").as_bytes(),
+        )
+        .unwrap();
+
+    let config =
+        load_config_filtered(&system, Path::new("/project/src"), Some("human")).unwrap();
+    assert!(config.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Test: No filter (backward compat)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_filter_backward_compat() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            typed_config_yaml("agent_bot", "agent").as_bytes(),
+        )
+        .unwrap();
+
+    let config = load_config_filtered(&system, Path::new("/project"), None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("agent_bot"));
+    assert_eq!(config.author_type.as_deref(), Some("agent"));
+}
+
+// ---------------------------------------------------------------------------
+// Test: No filter, no type field in config (backward compat)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_filter_no_type_field() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            minimal_config_yaml("bob").as_bytes(),
+        )
+        .unwrap();
+
+    let config = load_config_filtered(&system, Path::new("/project"), None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("bob"));
+    assert!(config.author_type.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Test: Type filter with config missing type field (skips it)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn type_filter_skips_config_without_type() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project/sub"))
+        .unwrap()
+        .with_file(
+            Path::new("/project/sub/.remargin.yaml"),
+            minimal_config_yaml("bob").as_bytes(),
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            typed_config_yaml("eduardo", "human").as_bytes(),
+        )
+        .unwrap();
+
+    let config =
+        load_config_filtered(&system, Path::new("/project/sub"), Some("human"))
+            .unwrap()
+            .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("eduardo"));
+    assert_eq!(config.author_type.as_deref(), Some("human"));
+}
+
+// ---------------------------------------------------------------------------
+// Test: Multiple configs, filter selects correct one
+// ---------------------------------------------------------------------------
+
+#[test]
+fn type_filter_multiple_configs_selects_correct() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/a/b"))
+        .unwrap()
+        .with_file(
+            Path::new("/a/b/.remargin.yaml"),
+            typed_config_yaml("human_user", "human").as_bytes(),
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/a/.remargin.yaml"),
+            typed_config_yaml("agent_bot", "agent").as_bytes(),
+        )
+        .unwrap();
+
+    // Filter for agent from /a/b: should skip /a/b (human) and find /a (agent).
+    let config = load_config_filtered(&system, Path::new("/a/b"), Some("agent"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("agent_bot"));
+    assert_eq!(config.author_type.as_deref(), Some("agent"));
+}
+
+// ---------------------------------------------------------------------------
+// Test: load_config still works (wrapper test)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_config_wrapper_still_works() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project/src"))
+        .unwrap()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            typed_config_yaml("agent_bot", "agent").as_bytes(),
+        )
+        .unwrap();
+
+    // load_config (no filter) should return the first config found.
+    let config = load_config(&system, Path::new("/project/src"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.identity.as_deref(), Some("agent_bot"));
 }
