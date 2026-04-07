@@ -1059,3 +1059,212 @@ fn tool_result_includes_elapsed_ms() {
         "elapsed_ms should be a non-negative integer"
     );
 }
+
+// ---------------------------------------------------------------------------
+// query --comment-id via MCP
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_query_comment_id_finds_doc() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_dir(Path::new("/docs/sub"))
+        .unwrap()
+        .with_file(Path::new("/docs/sub/a.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/docs/sub/b.md"), b"# No comments\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "comment_id": "aaa"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let results = result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1_usize);
+    assert!(results[0]["path"].as_str().unwrap().contains("a.md"));
+}
+
+#[test]
+fn mcp_query_comment_id_not_found_returns_empty() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "comment_id": "nonexistent"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let results = result["results"].as_array().unwrap();
+    assert!(results.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Folder-wide ack via MCP
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_ack_without_file_resolves_from_tree() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    // Ack comment "aaa" without specifying file.
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "ack",
+                "arguments": {
+                    "ids": ["aaa"]
+                }
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "expected success but got error");
+    let result = extract_tool_text(&response);
+    assert_eq!(result["acknowledged"], json!(["aaa"]));
+}
+
+#[test]
+fn mcp_ack_without_file_scopes_to_path() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_dir(Path::new("/docs/sub"))
+        .unwrap()
+        .with_file(Path::new("/docs/sub/a.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    // Ack with path scoping to subdirectory.
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "ack",
+                "arguments": {
+                    "ids": ["aaa"],
+                    "path": "sub"
+                }
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "expected success but got error");
+}
+
+#[test]
+fn mcp_ack_without_file_not_found_returns_error() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "ack",
+                "arguments": {
+                    "ids": ["nonexistent"]
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let result = &response["result"];
+    let content = result["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("not found"),
+        "expected 'not found' in error: {text}"
+    );
+}
+
+#[test]
+fn mcp_ack_without_file_ambiguous_returns_error() {
+    let base = Path::new("/docs");
+    // Two documents with the same comment ID.
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/docs/b.md"), DOC_WITH_COMMENT.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "ack",
+                "arguments": {
+                    "ids": ["aaa"]
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let result = &response["result"];
+    let content = result["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("ambiguous"),
+        "expected 'ambiguous' in error: {text}"
+    );
+}

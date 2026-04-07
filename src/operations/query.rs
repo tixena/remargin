@@ -25,6 +25,8 @@ use crate::parser;
 pub struct QueryFilter {
     /// Only include documents with comments by this author.
     pub author: Option<String>,
+    /// Only include documents containing a comment with this structural ID.
+    pub comment_id: Option<String>,
     /// Only include documents with pending (unacked) comments.
     pub pending: bool,
     /// Only include documents with pending comments for this recipient.
@@ -101,6 +103,13 @@ pub fn query(
             continue;
         }
 
+        // Filter by comment ID if specified.
+        if let Some(target_id) = &filter.comment_id
+            && !comments.iter().any(|cm| cm.id == *target_id)
+        {
+            continue;
+        }
+
         let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
         let pending: Vec<&&parser::Comment> =
             comments.iter().filter(|cm| cm.ack.is_empty()).collect();
@@ -159,4 +168,54 @@ pub fn query(
     }
 
     Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: resolve a comment ID across a folder tree
+// ---------------------------------------------------------------------------
+
+/// Walk a directory tree and return all document paths that contain a comment
+/// with the given structural ID.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be walked.
+pub fn resolve_comment_id(
+    system: &dyn System,
+    base_dir: &Path,
+    comment_id: &str,
+) -> Result<Vec<PathBuf>> {
+    let entries = system
+        .walk_dir(base_dir, false, false)
+        .with_context(|| format!("walking directory {}", base_dir.display()))?;
+
+    let mut matches = Vec::new();
+
+    for entry in &entries {
+        if !entry.is_file {
+            continue;
+        }
+
+        let has_md_ext = entry
+            .path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+        if !has_md_ext || !allowlist::is_visible(&entry.path, false) {
+            continue;
+        }
+
+        let Ok(content) = system.read_to_string(&entry.path) else {
+            continue;
+        };
+
+        let Ok(doc) = parser::parse(&content) else {
+            continue;
+        };
+
+        if doc.find_comment(comment_id).is_some() {
+            matches.push(entry.path.clone());
+        }
+    }
+
+    Ok(matches)
 }

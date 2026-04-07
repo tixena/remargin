@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use clap::Parser;
 use os_shim::System;
 use os_shim::real::RealSystem;
@@ -52,6 +52,12 @@ const EXIT_PRESERVATION: u8 = 5;
 
 /// Skill error.
 const EXIT_SKILL: u8 = 6;
+
+/// Comment not found (folder-wide ack).
+const EXIT_NOT_FOUND: u8 = 7;
+
+/// Ambiguous comment ID (folder-wide ack -- found in multiple files).
+const EXIT_AMBIGUOUS: u8 = 8;
 
 // ---------------------------------------------------------------------------
 // CLI structure
@@ -131,11 +137,15 @@ struct GlobalFlags {
 enum Commands {
     /// Acknowledge one or more comments.
     Ack {
-        /// Path to the document (use - for stdin).
-        file: String,
+        /// Path to the document (use - for stdin). Omit to resolve by ID across the folder tree.
+        #[arg(long)]
+        file: Option<String>,
         /// Comment IDs to acknowledge.
         #[arg(required = true)]
         ids: Vec<String>,
+        /// Base directory to search when resolving by ID (default: .).
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// Create multiple comments atomically (JSON ops via --ops).
     Batch {
@@ -255,6 +265,9 @@ enum Commands {
         /// Only documents with comments by this author.
         #[arg(long)]
         author: Option<String>,
+        /// Only documents containing a comment with this structural ID.
+        #[arg(long)]
+        comment_id: Option<String>,
         /// Only documents with pending (unacked) comments.
         #[arg(long)]
         pending: bool,
@@ -422,6 +435,8 @@ struct GetParams<'cmd> {
 struct QueryParams<'cmd> {
     /// Author filter.
     author: Option<&'cmd str>,
+    /// Comment ID filter.
+    comment_id: Option<&'cmd str>,
     /// JSON output mode.
     json_mode: bool,
     /// Base path to search.
@@ -663,6 +678,10 @@ fn classify_error(err: &anyhow::Error) -> u8 {
         EXIT_PRESERVATION
     } else if msg.contains("skill") && msg.contains("not installed") {
         EXIT_SKILL
+    } else if msg.contains("ambiguous: comment") {
+        EXIT_AMBIGUOUS
+    } else if msg.contains("not found") {
+        EXIT_NOT_FOUND
     } else {
         EXIT_ERROR
     }
@@ -764,7 +783,9 @@ fn dispatch_with_config(
     let dry_run = cli.global.dry_run;
 
     match &cli.command {
-        Commands::Ack { file, ids } => cmd_ack(system, cwd, config, file, ids, json_mode),
+        Commands::Ack { file, ids, path } => {
+            cmd_ack(system, cwd, config, file.as_deref(), ids, path, json_mode)
+        }
         Commands::Batch { file, ops } => cmd_batch(system, cwd, config, file, ops, json_mode),
         Commands::Comment {
             file,
@@ -818,12 +839,14 @@ fn dispatch_with_config(
         Commands::Query {
             path,
             author,
+            comment_id,
             pending,
             pending_for,
             since,
         } => {
             let q = QueryParams {
                 author: author.as_deref(),
+                comment_id: comment_id.as_deref(),
                 json_mode,
                 path: path.as_str(),
                 pending: *pending,
@@ -899,13 +922,40 @@ fn cmd_ack(
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
-    file: &str,
+    file: Option<&str>,
     ids: &[String],
+    search_path: &str,
     json_mode: bool,
 ) -> Result<()> {
-    let path = resolve_doc_path(system, cwd, file)?;
-    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    operations::ack_comments(system, &path, config, &id_refs)?;
+    if let Some(doc_file) = file {
+        // Direct file path provided.
+        let path = resolve_doc_path(system, cwd, doc_file)?;
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        operations::ack_comments(system, &path, config, &id_refs)?;
+    } else {
+        // Folder-wide ack: resolve each ID across the folder tree.
+        let base_dir = cwd.join(search_path);
+        for comment_id in ids {
+            let matches = query::resolve_comment_id(system, &base_dir, comment_id)?;
+            match matches.len() {
+                0 => {
+                    bail!("comment {comment_id:?} not found");
+                }
+                1 => {
+                    let id_refs: Vec<&str> = vec![comment_id.as_str()];
+                    operations::ack_comments(system, &matches[0], config, &id_refs)?;
+                }
+                n => {
+                    let file_list: Vec<String> =
+                        matches.iter().map(|p| p.display().to_string()).collect();
+                    bail!(
+                        "ambiguous: comment {comment_id:?} found in {n} files: {}",
+                        file_list.join(", ")
+                    );
+                }
+            }
+        }
+    }
     print_output(json_mode, &json!({ "acknowledged": ids }))
 }
 
@@ -1324,6 +1374,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
 
     let mut filter = query::QueryFilter::default();
     filter.author = params.author.map(String::from);
+    filter.comment_id = params.comment_id.map(String::from);
     filter.pending = params.pending;
     filter.pending_for = params.pending_for.map(String::from);
     filter.since = since_dt;

@@ -65,20 +65,21 @@ struct ToolDesc {
 fn desc_ack() -> ToolDesc {
     ToolDesc {
         name: "ack",
-        description: "Acknowledge one or more comments",
+        description: "Acknowledge one or more comments. Omit file to resolve by ID across the folder tree.",
         schema: json!({
             "type": "object",
             "properties": {
-                "file": { "type": "string", "description": "Path to the document" },
+                "file": { "type": "string", "description": "Path to the document (omit to resolve by ID across the folder tree)" },
                 "ids": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Comment IDs to acknowledge"
                 },
+                "path": { "type": "string", "description": "Base directory to search when resolving by ID (default: .)", "default": "." },
                 "identity": { "type": "string", "description": "Override identity for this operation" },
                 "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
-            "required": ["file", "ids"]
+            "required": ["ids"]
         }),
     }
 }
@@ -311,6 +312,7 @@ fn desc_query() -> ToolDesc {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Base directory to search", "default": "." },
+                "comment_id": { "type": "string", "description": "Only documents containing a comment with this structural ID" },
                 "pending": { "type": "boolean", "description": "Only documents with pending comments", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
@@ -642,14 +644,40 @@ fn handle_ack(
     config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Value> {
-    let file = required_str(params, "file")?;
     let ids = string_array(params, "ids");
-    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let overridden = apply_identity_overrides(config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
-    let path = base_dir.join(file);
-    operations::ack_comments(system, &path, cfg, &id_refs)?;
+    if let Some(file) = optional_str(params, "file") {
+        // Direct file path provided.
+        let path = base_dir.join(file);
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        operations::ack_comments(system, &path, cfg, &id_refs)?;
+    } else {
+        // Folder-wide ack: resolve each ID across the folder tree.
+        let search_path = optional_str(params, "path").unwrap_or(".");
+        let search_dir = base_dir.join(search_path);
+        for comment_id in &ids {
+            let matches = query::resolve_comment_id(system, &search_dir, comment_id)?;
+            match matches.len() {
+                0 => {
+                    anyhow::bail!("comment {comment_id:?} not found");
+                }
+                1 => {
+                    let id_refs: Vec<&str> = vec![comment_id.as_str()];
+                    operations::ack_comments(system, &matches[0], cfg, &id_refs)?;
+                }
+                n => {
+                    let file_list: Vec<String> =
+                        matches.iter().map(|p| p.display().to_string()).collect();
+                    anyhow::bail!(
+                        "ambiguous: comment {comment_id:?} found in {n} files: {}",
+                        file_list.join(", ")
+                    );
+                }
+            }
+        }
+    }
 
     Ok(json!({ "acknowledged": ids }))
 }
@@ -958,6 +986,7 @@ fn handle_query(
 
     let filter = QueryFilter {
         author: optional_str(params, "author").map(String::from),
+        comment_id: optional_str(params, "comment_id").map(String::from),
         pending: optional_bool(params, "pending"),
         pending_for: optional_str(params, "pending_for").map(String::from),
         since,
