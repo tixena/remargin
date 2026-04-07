@@ -191,8 +191,28 @@ remargin search pattern="TODO|FIXME" regex=true ignore_case=true context=2
 2. `get` to read its contents
 3. `comments` to see existing discussion
 4. `comment` or `batch` to add your review comments
-5. `ack` to acknowledge comments addressed to you
+5. Process and `ack` comments addressed to you (see below)
 6. `query` to check for anything else pending
+
+### Processing comments addressed to you
+
+When comments are addressed to you (via `to` field) or the user asks you to "process" comments, follow this workflow **in order**. Ack is the **last step**, not the first.
+
+1. **Read** the comment and any referenced documents, links, or files mentioned in it
+2. **Reason** about what the comment is saying — what is the author asking, deciding, or informing you about?
+3. **Execute** any actionable items:
+   - If the comment asks you to read something, read it and form an understanding
+   - If the comment asks you to do work, do the work (create files, update docs, write code, create tasks)
+   - If the comment makes a decision, update your plans and any affected documents accordingly
+   - If the comment asks a question, reply with a substantive answer (not a summary of the question)
+4. **Reply** with a comment (via `reply_to`) that demonstrates you did the work — reference specifics, share conclusions, raise concerns. Do not reply with summaries of what the comment said back to the person who wrote it.
+5. **Ack** the comment only after all the above is complete. Ack means "I have fully addressed this." A premature ack is a lie — it tells the author their comment was handled when it wasn't.
+
+**Common mistakes to avoid:**
+- Do NOT ack immediately after reading. Ack is not "I read this."
+- Do NOT reply with a surface-level summary. "Understood, phase 1 is CLI backend" adds nothing.
+- Do NOT ack and then start doing the work. The work must be done before the ack.
+- Do NOT skip referenced files. If the comment says "look at X", you must read X before acking.
 
 ### Write document content
 
