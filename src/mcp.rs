@@ -1167,9 +1167,8 @@ fn process_message(
                 && let Some(obj) = parsed.as_object_mut()
             {
                 obj.insert(String::from("elapsed_ms"), Value::from(elapsed_ms));
-                *text_val = Value::String(
-                    serde_json::to_string_pretty(&parsed).unwrap_or_default(),
-                );
+                *text_val =
+                    Value::String(serde_json::to_string_pretty(&parsed).unwrap_or_default());
             }
 
             Some(success_response(request_id, &result))

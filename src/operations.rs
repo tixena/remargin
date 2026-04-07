@@ -463,8 +463,7 @@ fn collapse_body_segments(segments: &mut Vec<Segment>) {
     // two comments produces three consecutive newlines in the output.
     let len = segments.len();
     for pos in 0..len {
-        let is_whitespace_body =
-            matches!(&segments[pos], Segment::Body(t) if t.trim().is_empty());
+        let is_whitespace_body = matches!(&segments[pos], Segment::Body(t) if t.trim().is_empty());
         if !is_whitespace_body {
             continue;
         }
