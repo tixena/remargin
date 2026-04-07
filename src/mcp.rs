@@ -16,6 +16,7 @@ use serde_json::{Map, Value, json};
 
 use crate::config::{CliOverrides, ResolvedConfig, load_config, load_registry};
 use crate::crypto;
+use crate::display;
 use crate::document;
 use crate::linter;
 use crate::operations;
@@ -156,7 +157,8 @@ fn desc_comments() -> ToolDesc {
         schema: json!({
             "type": "object",
             "properties": {
-                "file": { "type": "string", "description": "Path to the document" }
+                "file": { "type": "string", "description": "Path to the document" },
+                "pretty": { "type": "boolean", "description": "Return human-readable threaded display instead of JSON", "default": false }
             },
             "required": ["file"]
         }),
@@ -450,6 +452,20 @@ fn tool_result_success(content: &Value) -> Value {
     })
 }
 
+/// Build an MCP tool result (success) with raw text content.
+///
+/// Unlike [`tool_result_success`], this puts the string directly into the
+/// `text` field without JSON-encoding it.  Use this for pre-formatted,
+/// human-readable output.
+fn tool_result_text(text: &str) -> Value {
+    json!({
+        "content": [{
+            "type": "text",
+            "text": text
+        }]
+    })
+}
+
 /// Build an MCP tool result (error).
 fn tool_result_error(message: &str) -> Value {
     json!({
@@ -602,7 +618,15 @@ fn dispatch_tool(
     };
 
     match result {
-        Ok(value) => tool_result_success(&value),
+        Ok(value) => {
+            // If the handler returned a pre-built MCP response (has "content"
+            // array), pass it through unchanged.  Otherwise wrap it.
+            if value.get("content").is_some_and(Value::is_array) {
+                value
+            } else {
+                tool_result_success(&value)
+            }
+        }
         Err(err) => tool_result_error(&format!("{err:#}")),
     }
 }
@@ -714,14 +738,19 @@ fn handle_comments(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
+    let pretty = optional_bool(params, "pretty");
 
     let path = base_dir.join(file);
     let doc = parser::parse_file(system, &path)?;
     let comments = doc.comments();
 
-    let result: Vec<Value> = comments.iter().map(|cm| serialize_comment(cm)).collect();
-
-    Ok(json!({ "comments": result }))
+    if pretty {
+        let formatted = display::format_comments_pretty(file, &comments);
+        Ok(tool_result_text(&formatted))
+    } else {
+        let result: Vec<Value> = comments.iter().map(|cm| serialize_comment(cm)).collect();
+        Ok(json!({ "comments": result }))
+    }
 }
 
 /// Handle the `delete` tool: delete one or more comments.

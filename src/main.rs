@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 use remargin::config::{self, CliOverrides, ResolvedConfig};
 use remargin::crypto;
+use remargin::display;
 use remargin::document;
 use remargin::linter;
 use remargin::mcp;
@@ -170,6 +171,9 @@ enum Commands {
     Comments {
         /// Path to the document (use - for stdin).
         file: String,
+        /// Pretty-print comments as a threaded tree.
+        #[arg(long)]
+        pretty: bool,
     },
     /// Delete one or more comments.
     Delete {
@@ -784,7 +788,7 @@ fn dispatch_with_config(
             };
             cmd_comment(system, cwd, config, &cp)
         }
-        Commands::Comments { file } => cmd_comments(system, cwd, file, json_mode),
+        Commands::Comments { file, pretty } => cmd_comments(system, cwd, file, json_mode, *pretty),
         Commands::Delete { file, ids } => cmd_delete(system, cwd, config, file, ids, json_mode),
         Commands::Edit { file, id, content } => {
             cmd_edit(system, cwd, config, file, id, content, json_mode)
@@ -1012,12 +1016,21 @@ fn cmd_comment(
     print_output(cp.json_mode, &json!({ "id": new_id }))
 }
 
-fn cmd_comments(system: &dyn System, cwd: &Path, file: &str, json_mode: bool) -> Result<()> {
+fn cmd_comments(
+    system: &dyn System,
+    cwd: &Path,
+    file: &str,
+    json_mode: bool,
+    pretty: bool,
+) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
     let doc = parser::parse_file(system, &path)?;
     let comments = doc.comments();
 
-    if json_mode {
+    if pretty {
+        let formatted = display::format_comments_pretty(file, &comments);
+        out(&formatted)
+    } else if json_mode {
         let result: Vec<Value> = comments.iter().map(|cm| comment_to_json(cm)).collect();
         out_json(&json!({ "comments": result }))
     } else {

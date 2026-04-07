@@ -1,0 +1,509 @@
+//! Tests for pretty-print comment display with threaded nesting.
+
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
+
+use chrono::DateTime;
+
+use crate::display::{build_comment_tree, count_pending, format_comments_pretty, is_pending};
+use crate::parser::{Acknowledgment, AuthorType, Comment};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Parameters for building a test comment.
+struct TestComment<'param> {
+    ack: Vec<Acknowledgment>,
+    author: &'param str,
+    author_type: AuthorType,
+    content: &'param str,
+    id: &'param str,
+    line: usize,
+    reactions: BTreeMap<String, Vec<String>>,
+    reply_to: Option<&'param str>,
+    to: Vec<&'param str>,
+    ts: &'param str,
+}
+
+impl Default for TestComment<'_> {
+    fn default() -> Self {
+        Self {
+            ack: Vec::new(),
+            author: "eduardo",
+            author_type: AuthorType::Human,
+            content: "Test content.",
+            id: "abc",
+            line: 10,
+            reactions: BTreeMap::new(),
+            reply_to: None,
+            to: Vec::new(),
+            ts: "2026-04-06T14:00:00-04:00",
+        }
+    }
+}
+
+fn build_comment(params: TestComment<'_>) -> Comment {
+    Comment {
+        ack: params.ack,
+        attachments: Vec::new(),
+        author: String::from(params.author),
+        author_type: params.author_type,
+        checksum: String::from("sha256:test"),
+        content: String::from(params.content),
+        fence_depth: 3,
+        id: String::from(params.id),
+        line: params.line,
+        reactions: params.reactions,
+        reply_to: params.reply_to.map(String::from),
+        signature: None,
+        thread: None,
+        to: params.to.into_iter().map(String::from).collect(),
+        ts: DateTime::parse_from_rfc3339(params.ts).unwrap(),
+    }
+}
+
+fn make_comment(id: &str, line: usize, ts: &str) -> Comment {
+    build_comment(TestComment {
+        id,
+        line,
+        ts,
+        ..TestComment::default()
+    })
+}
+
+fn make_reply(id: &str, line: usize, ts: &str, reply_to: &str) -> Comment {
+    build_comment(TestComment {
+        author: "claude",
+        author_type: AuthorType::Agent,
+        content: "Reply content.",
+        id,
+        line,
+        reply_to: Some(reply_to),
+        ts,
+        ..TestComment::default()
+    })
+}
+
+fn make_ack(author: &str, ts: &str) -> Acknowledgment {
+    Acknowledgment {
+        author: String::from(author),
+        ts: DateTime::parse_from_rfc3339(ts).unwrap(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tree building tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tree_single_root() {
+    let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    let comments: Vec<&Comment> = vec![&cm];
+    let forest = build_comment_tree(&comments);
+
+    assert_eq!(forest.len(), 1);
+    assert_eq!(forest[0].comment.id, "abc");
+    assert!(forest[0].children.is_empty());
+}
+
+#[test]
+fn tree_root_with_replies() {
+    let root = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    let reply_b = make_reply("bbb", 20, "2026-04-06T14:05:00-04:00", "abc");
+    let reply_c = make_reply("ccc", 30, "2026-04-06T14:03:00-04:00", "abc");
+    let comments: Vec<&Comment> = vec![&root, &reply_b, &reply_c];
+    let forest = build_comment_tree(&comments);
+
+    assert_eq!(forest.len(), 1);
+    assert_eq!(forest[0].comment.id, "abc");
+    assert_eq!(forest[0].children.len(), 2);
+    // Children sorted by ts: ccc (14:03) before bbb (14:05).
+    assert_eq!(forest[0].children[0].comment.id, "ccc");
+    assert_eq!(forest[0].children[1].comment.id, "bbb");
+}
+
+#[test]
+fn tree_deep_nesting() {
+    let a = make_comment("aaa", 10, "2026-04-06T14:00:00-04:00");
+    let b = make_reply("bbb", 20, "2026-04-06T14:01:00-04:00", "aaa");
+    let c = make_reply("ccc", 30, "2026-04-06T14:02:00-04:00", "bbb");
+    let d = make_reply("ddd", 40, "2026-04-06T14:03:00-04:00", "ccc");
+    let comments: Vec<&Comment> = vec![&a, &b, &c, &d];
+    let forest = build_comment_tree(&comments);
+
+    assert_eq!(forest.len(), 1);
+    assert_eq!(forest[0].comment.id, "aaa");
+    assert_eq!(forest[0].children[0].comment.id, "bbb");
+    assert_eq!(forest[0].children[0].children[0].comment.id, "ccc");
+    assert_eq!(
+        forest[0].children[0].children[0].children[0].comment.id,
+        "ddd"
+    );
+}
+
+#[test]
+fn tree_multiple_roots() {
+    let root_a = make_comment("aaa", 50, "2026-04-06T14:00:00-04:00");
+    let root_b = make_comment("bbb", 10, "2026-04-06T14:01:00-04:00");
+    let reply_c = make_reply("ccc", 55, "2026-04-06T14:02:00-04:00", "aaa");
+    let comments: Vec<&Comment> = vec![&root_a, &root_b, &reply_c];
+    let forest = build_comment_tree(&comments);
+
+    // Two roots sorted by line: bbb (line 10) before aaa (line 50).
+    assert_eq!(forest.len(), 2);
+    assert_eq!(forest[0].comment.id, "bbb");
+    assert_eq!(forest[1].comment.id, "aaa");
+    assert_eq!(forest[1].children.len(), 1);
+    assert_eq!(forest[1].children[0].comment.id, "ccc");
+}
+
+#[test]
+fn tree_orphan_reply() {
+    let orphan = make_reply("bbb", 10, "2026-04-06T14:00:00-04:00", "nonexistent");
+    let comments: Vec<&Comment> = vec![&orphan];
+    let forest = build_comment_tree(&comments);
+
+    // Orphan treated as root.
+    assert_eq!(forest.len(), 1);
+    assert_eq!(forest[0].comment.id, "bbb");
+}
+
+#[test]
+fn tree_children_sorted_by_ts() {
+    let root = make_comment("aaa", 10, "2026-04-06T12:00:00-04:00");
+    let late = make_reply("bbb", 20, "2026-04-06T14:00:00-04:00", "aaa");
+    let early = make_reply("ccc", 30, "2026-04-06T13:00:00-04:00", "aaa");
+    let comments: Vec<&Comment> = vec![&root, &late, &early];
+    let forest = build_comment_tree(&comments);
+
+    assert_eq!(forest[0].children[0].comment.id, "ccc");
+    assert_eq!(forest[0].children[1].comment.id, "bbb");
+}
+
+#[test]
+fn tree_roots_sorted_by_line() {
+    let a = make_comment("aaa", 50, "2026-04-06T14:00:00-04:00");
+    let b = make_comment("bbb", 10, "2026-04-06T14:01:00-04:00");
+    let comments: Vec<&Comment> = vec![&a, &b];
+    let forest = build_comment_tree(&comments);
+
+    assert_eq!(forest[0].comment.id, "bbb");
+    assert_eq!(forest[1].comment.id, "aaa");
+}
+
+#[test]
+fn tree_empty() {
+    let comments: Vec<&Comment> = vec![];
+    let forest = build_comment_tree(&comments);
+    assert!(forest.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Rendering tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_root_comment() {
+    let cm = build_comment(TestComment {
+        id: "abc",
+        author: "eduardo",
+        ts: "2026-04-06T14:32:00-04:00",
+        line: 25,
+        content: "The comment content goes here.",
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("docs/design.md", &comments);
+
+    assert!(output.contains("docs/design.md:25"));
+    assert!(output.contains("abc \u{00b7} eduardo (human) \u{00b7} 2026-04-06 14:32"));
+    assert!(output.contains("\u{2502} The comment content goes here."));
+}
+
+#[test]
+fn render_reply_indentation() {
+    let root = build_comment(TestComment {
+        id: "abc",
+        author: "eduardo",
+        ts: "2026-04-06T14:32:00-04:00",
+        line: 25,
+        content: "Root content.",
+        ..TestComment::default()
+    });
+    let reply = build_comment(TestComment {
+        id: "xyz",
+        author: "claude",
+        author_type: AuthorType::Agent,
+        ts: "2026-04-06T14:33:00-04:00",
+        line: 35,
+        content: "Reply content.",
+        reply_to: Some("abc"),
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&root, &reply];
+    let output = format_comments_pretty("file.md", &comments);
+
+    // Root header indented 2 spaces, reply header indented 4 spaces.
+    assert!(output.contains("  abc \u{00b7} eduardo (human)"));
+    assert!(output.contains("    xyz \u{00b7} claude (agent)"));
+}
+
+#[test]
+fn render_deep_indent() {
+    let a = make_comment("aaa", 10, "2026-04-06T14:00:00-04:00");
+    let b = make_reply("bbb", 20, "2026-04-06T14:01:00-04:00", "aaa");
+    let c = make_reply("ccc", 30, "2026-04-06T14:02:00-04:00", "bbb");
+    let comments: Vec<&Comment> = vec![&a, &b, &c];
+    let output = format_comments_pretty("file.md", &comments);
+
+    // Depth 0 = 2 spaces, depth 1 = 4, depth 2 = 6.
+    assert!(output.contains("      ccc \u{00b7}"));
+}
+
+#[test]
+fn render_threading_marker() {
+    let root = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    let reply = make_reply("xyz", 20, "2026-04-06T14:01:00-04:00", "abc");
+    let comments: Vec<&Comment> = vec![&root, &reply];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2502} \u{2934} reply-to: abc"));
+}
+
+#[test]
+fn render_pending_status() {
+    let cm = build_comment(TestComment {
+        id: "abc",
+        content: "Need your review.",
+        to: vec!["alice"],
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2502} pending"));
+}
+
+#[test]
+fn render_acked_status() {
+    let ack = make_ack("eduardo", "2026-04-06T15:00:00-04:00");
+    let cm = build_comment(TestComment {
+        id: "abc",
+        author: "claude",
+        author_type: AuthorType::Agent,
+        content: "Some content.",
+        ack: vec![ack],
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2502} \u{2713} acked by eduardo @ 2026-04-06 15:00"));
+}
+
+#[test]
+fn render_multiple_acks() {
+    let ack1 = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let ack2 = make_ack("bob", "2026-04-06T15:30:00-04:00");
+    let cm = build_comment(TestComment {
+        id: "abc",
+        to: vec!["alice", "bob"],
+        ack: vec![ack1, ack2],
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2713} acked by alice @ 2026-04-06 15:00"));
+    assert!(output.contains("\u{2713} acked by bob @ 2026-04-06 15:30"));
+}
+
+#[test]
+fn render_reactions() {
+    let mut reactions = BTreeMap::new();
+    reactions.insert(
+        String::from("\u{1f44d}"),
+        vec![String::from("jorge"), String::from("alice")],
+    );
+    let cm = build_comment(TestComment {
+        id: "abc",
+        content: "Nice idea.",
+        reactions,
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2502} \u{1f44d} jorge, alice"));
+}
+
+#[test]
+fn render_content_truncation() {
+    let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7";
+    let cm = build_comment(TestComment {
+        id: "abc",
+        content,
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2502} Line 1"));
+    assert!(output.contains("\u{2502} Line 2"));
+    assert!(output.contains("\u{2502} Line 3"));
+    assert!(output.contains("\u{2502} Line 4"));
+    assert!(output.contains("\u{2502} ..."));
+    // Lines 5, 6, 7 should NOT appear.
+    assert!(!output.contains("\u{2502} Line 5"));
+    assert!(!output.contains("\u{2502} Line 6"));
+    assert!(!output.contains("\u{2502} Line 7"));
+}
+
+#[test]
+fn render_addressees() {
+    let cm = build_comment(TestComment {
+        id: "abc",
+        content: "Review this.",
+        to: vec!["alice", "bob"],
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2502} to: alice, bob"));
+}
+
+#[test]
+fn render_footer() {
+    let cm1 = build_comment(TestComment {
+        id: "aaa",
+        line: 10,
+        ts: "2026-04-06T14:00:00-04:00",
+        to: vec!["alice"],
+        ..TestComment::default()
+    });
+    let cm2 = build_comment(TestComment {
+        id: "bbb",
+        line: 20,
+        ts: "2026-04-06T14:01:00-04:00",
+        to: vec!["bob"],
+        ..TestComment::default()
+    });
+    let ack = make_ack("charlie", "2026-04-06T15:00:00-04:00");
+    let cm3 = build_comment(TestComment {
+        id: "ccc",
+        line: 30,
+        ts: "2026-04-06T14:02:00-04:00",
+        to: vec!["charlie"],
+        ack: vec![ack],
+        ..TestComment::default()
+    });
+    let cm4 = make_comment("ddd", 40, "2026-04-06T14:03:00-04:00");
+    let cm5 = make_comment("eee", 50, "2026-04-06T14:04:00-04:00");
+    let comments: Vec<&Comment> = vec![&cm1, &cm2, &cm3, &cm4, &cm5];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
+    assert!(output.contains("5 comments \u{00b7} 2 pending"));
+}
+
+#[test]
+fn render_empty_footer() {
+    let comments: Vec<&Comment> = vec![];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
+    assert!(output.contains("0 comments \u{00b7} 0 pending"));
+}
+
+#[test]
+fn render_no_pending() {
+    let ack1 = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let cm1 = build_comment(TestComment {
+        id: "aaa",
+        to: vec!["alice"],
+        ack: vec![ack1],
+        ..TestComment::default()
+    });
+    // No `to` field, so not pending.
+    let cm2 = make_comment("bbb", 20, "2026-04-06T14:01:00-04:00");
+    let cm3 = make_comment("ccc", 30, "2026-04-06T14:02:00-04:00");
+    let comments: Vec<&Comment> = vec![&cm1, &cm2, &cm3];
+    let output = format_comments_pretty("file.md", &comments);
+
+    assert!(output.contains("3 comments \u{00b7} 0 pending"));
+}
+
+// ---------------------------------------------------------------------------
+// Negative / edge case tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_content_with_special_chars() {
+    let content = "Line with \u{2502} bar and `backticks` here";
+    let cm = build_comment(TestComment {
+        id: "abc",
+        content,
+        ..TestComment::default()
+    });
+    let comments: Vec<&Comment> = vec![&cm];
+    let output = format_comments_pretty("file.md", &comments);
+
+    // The special characters should appear literally.
+    assert!(output.contains("Line with \u{2502} bar and `backticks` here"));
+}
+
+#[test]
+fn render_orphan_mixed_with_roots() {
+    let root1 = make_comment("aaa", 10, "2026-04-06T14:00:00-04:00");
+    let root2 = make_comment("bbb", 30, "2026-04-06T14:01:00-04:00");
+    let orphan = make_reply("ccc", 20, "2026-04-06T14:02:00-04:00", "nonexistent");
+    let comments: Vec<&Comment> = vec![&root1, &root2, &orphan];
+    let output = format_comments_pretty("file.md", &comments);
+
+    // All 3 appear as roots in document order: aaa (10), ccc (20), bbb (30).
+    let aaa_pos = output.find("aaa \u{00b7}").unwrap();
+    let ccc_pos = output.find("ccc \u{00b7}").unwrap();
+    let bbb_pos = output.find("bbb \u{00b7}").unwrap();
+    assert!(aaa_pos < ccc_pos);
+    assert!(ccc_pos < bbb_pos);
+}
+
+#[test]
+fn render_comment_no_to_not_pending() {
+    let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    assert!(!is_pending(&cm));
+    assert_eq!(count_pending(&[&cm]), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Pending calculation tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pending_with_partial_ack() {
+    let ack = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let cm = build_comment(TestComment {
+        id: "abc",
+        to: vec!["alice", "bob"],
+        ack: vec![ack],
+        ..TestComment::default()
+    });
+    // alice acked but bob didn't -> still pending.
+    assert!(is_pending(&cm));
+}
+
+#[test]
+fn pending_all_acked() {
+    let ack1 = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let ack2 = make_ack("bob", "2026-04-06T15:30:00-04:00");
+    let cm = build_comment(TestComment {
+        id: "abc",
+        to: vec!["alice", "bob"],
+        ack: vec![ack1, ack2],
+        ..TestComment::default()
+    });
+    assert!(!is_pending(&cm));
+}

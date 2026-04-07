@@ -271,19 +271,32 @@ The `create` flag creates a new file. It will fail if the file already exists (t
 
 ## Comment Display Format
 
-When displaying comments to the user (after `comments`, `comment`, `batch`, or during a review), **always use this exact format**. This format enables ctrl+clickable `file:line` links in the terminal.
+The `comments` tool supports two output modes:
 
-### Starting a discussion or review
+- **Default (no flag)**: Returns JSON -- use when you need to process comment data programmatically (e.g., to ack, reply, filter, or reason over comments).
+- **`pretty=true`**: Returns a pre-formatted, human-readable threaded display -- use when the user asks to see comments interactively (e.g., "show me the comments", "what comments are pending", "review this document").
 
-When the user asks to review or discuss a document, show the document path as a clickable link first:
+### When to use `pretty=true`
+
+When the user asks to see, review, or display comments, use `pretty=true` and **pass the output through verbatim**. Do not paraphrase, summarize, or re-render the output. The tool produces the exact format needed for terminal display with ctrl+clickable `file:line` links.
 
 ```
-docs/design.md
+remargin comments file="docs/design.md" pretty=true
 ```
 
-Then display comments in the format below.
+### When to use default JSON
 
-### Single comment
+When you need to process comments programmatically -- to ack them, reply to them, filter them, or reason about their content -- use the default JSON output.
+
+```
+remargin comments file="docs/design.md"
+```
+
+### Pretty output format reference
+
+The `pretty=true` output uses this format (produced by the tool, not by the agent):
+
+#### Single comment
 
 ```
 docs/design.md:25
@@ -293,7 +306,7 @@ docs/design.md:25
   │ pending
 ```
 
-### Threaded reply (indented under parent)
+#### Threaded reply (indented under parent)
 
 ```
 docs/design.md:25
@@ -311,28 +324,30 @@ docs/design.md:25
     │ ✓ acked by eduardo @ 2026-04-06 15:00
 ```
 
-### Footer
+#### Footer
 
 ```
 ─────
 3 comments · 2 pending
 ```
 
-### Rules
+### Format rules
 
-1. **`file:line` per comment**: Every comment gets its own `path:line` link on a line by itself. This is required for ctrl+click to work in the terminal.
-2. **Repeat file path per comment**: Even in threads where multiple comments reference the same file, repeat the full `path:line` on each.
+These rules are enforced by the tool when `pretty=true`. They are documented here for reference only -- the agent does not need to implement them.
+
+1. **`file:line` per comment**: Every comment gets its own `path:line` link on a line by itself.
+2. **Repeat file path per comment**: Even in threads, repeat the full `path:line` on each.
 3. **Root comments indent 2 spaces**: The `id · author · timestamp` header line starts with 2 spaces.
 4. **Replies indent 2 more**: Each level of reply nesting adds 2 spaces (reply = 4 spaces, reply-to-reply = 6 spaces, etc.).
 5. **Content lines use `│` bar prefix**: All content lines start with `│` at the same indent as the header.
 6. **Threading marker**: Replies show `│ ⤷ reply-to: <id>` as the first content line.
 7. **Reactions before status**: If the comment has reactions, show them on their own line before the status line (e.g. `│ 👍 jorge, alice`).
 8. **Status as last content line**: Show `│ pending` or `│ ✓ acked by <who> @ <when>`.
-9. **Content truncation at 5 lines**: When content exceeds 5 lines, show the first 4 lines fully, then truncate the 5th line with `...`. Users can use `get` to read the full document.
-10. **Hide acked comments by default**: Do not show acked comments unless the user asks for them or you are displaying a full thread. This keeps the review focused on what needs attention.
-11. **Timestamp format**: Use short format in the header: `YYYY-MM-DD HH:MM` (no timezone, no seconds).
-12. **Blank line between comments**: Separate each comment block with a blank line.
-13. **Summary footer**: End with a `─────` separator and a line showing `N comments · M pending`.
+9. **Content truncation at 5 lines**: When content exceeds 5 lines, show the first 4 lines fully, then `│ ...` on the 5th line.
+10. **Timestamp format**: Use short format in the header: `YYYY-MM-DD HH:MM` (no timezone, no seconds).
+11. **Blank line between comments**: Separate each comment block with a blank line.
+12. **Summary footer**: End with a `─────` separator and a line showing `N comments · M pending`.
+13. **Addressees**: If the comment has a `to` field, show `│ to: name1, name2` before the content.
 
 ## Key Concepts
 
