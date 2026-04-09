@@ -24,7 +24,7 @@ const ALLOWED_EXTENSIONS: &[&str] = &[
 ];
 
 /// Extensions that are text-based (support `--lines`).
-const TEXT_EXTENSIONS: &[&str] = &["md", "txt", "csv", "xml", "json"];
+const TEXT_EXTENSIONS: &[&str] = &["md", "txt", "csv", "xml", "json", "pen"];
 
 /// Check if a path is visible (allowed extension, not a dotfile).
 /// Directories are always visible (for navigation).

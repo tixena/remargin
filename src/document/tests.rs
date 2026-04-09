@@ -111,6 +111,21 @@ fn allowlist_is_visible_rs() {
     assert!(!allowlist::is_visible(Path::new("main.rs"), false));
 }
 
+#[test]
+fn allowlist_is_text_pen() {
+    assert!(allowlist::is_text(Path::new("design.pen")));
+}
+
+#[test]
+fn allowlist_is_text_pen_uppercase() {
+    assert!(allowlist::is_text(Path::new("design.PEN")));
+}
+
+#[test]
+fn allowlist_is_text_png_still_false() {
+    assert!(!allowlist::is_text(Path::new("image.png")));
+}
+
 // ---------------------------------------------------------------------------
 // ls tests
 // ---------------------------------------------------------------------------
