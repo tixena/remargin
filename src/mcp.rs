@@ -552,11 +552,19 @@ fn apply_identity_overrides(
     }
 
     if let Some(type_str) = type_override {
-        overridden.author_type = Some(match type_str {
+        let new_type = match type_str {
             "human" => AuthorType::Human,
             "agent" => AuthorType::Agent,
             other => anyhow::bail!("unknown author type: {other:?}"),
-        });
+        };
+        if identity_override.is_none() && config.author_type.as_ref() != Some(&new_type) {
+            anyhow::bail!(
+                "author_type override {type_str:?} does not match resolved type {:?}; \
+                 provide an explicit identity",
+                config.author_type,
+            );
+        }
+        overridden.author_type = Some(new_type);
     }
 
     Ok(Some(overridden))

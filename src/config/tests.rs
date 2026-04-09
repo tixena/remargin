@@ -602,3 +602,49 @@ fn load_config_wrapper_still_works() {
         .unwrap();
     assert_eq!(config.identity.as_deref(), Some("agent_bot"));
 }
+
+// ---------------------------------------------------------------------------
+// Test: Agent type override must not silently inherit human identity
+// ---------------------------------------------------------------------------
+
+#[test]
+fn agent_override_rejects_inherited_human_identity() {
+    // Scenario: user has ~/.remargin.yaml with type: human and an identity.
+    // Workspace has no config. An agent operation walks up and finds the
+    // human config, then overrides author_type to "agent".
+    //
+    // Expected: error — the identity belongs to a human config; using it
+    // with agent type is a type mismatch. The agent should have its own
+    // identity configured, not silently borrow the human's.
+    let system = MockSystem::new()
+        .with_dir(Path::new("/home/user/project/src"))
+        .unwrap()
+        .with_file(
+            Path::new("/home/user/.remargin.yaml"),
+            typed_config_yaml("eduardo", "human").as_bytes(),
+        )
+        .unwrap();
+
+    // MCP path: load_config (no filter) finds the human config from home.
+    let config = load_config(&system, Path::new("/home/user/project/src"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.author_type.as_deref(), Some("human"));
+    assert_eq!(config.identity.as_deref(), Some("eduardo"));
+
+    // Agent operation overrides author_type but NOT identity.
+    let cli = CliOverrides {
+        author_type: Some("agent"),
+        ..CliOverrides::default()
+    };
+
+    // Should error: cannot use a human-sourced identity for an agent.
+    let result = ResolvedConfig::resolve(&system, Some(config), None, &cli);
+    assert!(
+        result.is_err(),
+        "expected error when agent type overrides human config identity, \
+         but got identity={:?} author_type={:?}",
+        result.as_ref().ok().and_then(|r| r.identity.clone()),
+        result.as_ref().ok().map(|r| r.author_type.clone()),
+    );
+}

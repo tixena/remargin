@@ -176,6 +176,21 @@ impl ResolvedConfig {
             mode: default_mode(),
         });
 
+        // If CLI overrides author_type to a different type than the config's,
+        // an explicit identity must also be provided — otherwise the config's
+        // identity (which belongs to a different role) would be silently
+        // inherited.
+        if let Some(cli_type) = cli.author_type
+            && let Some(config_type) = &base.author_type
+            && cli_type != config_type
+            && cli.identity.is_none()
+        {
+            bail!(
+                "author type override {cli_type:?} does not match config type \
+                 {config_type:?}; provide an explicit --identity for the {cli_type} role",
+            );
+        }
+
         let identity = cli.identity.map(String::from).or(base.identity);
 
         let author_type_str = cli.author_type.map(String::from).or(base.author_type);
