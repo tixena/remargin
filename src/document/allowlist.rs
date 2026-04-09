@@ -15,7 +15,8 @@ use os_shim::System;
 /// File extensions visible through remargin.
 const ALLOWED_EXTENSIONS: &[&str] = &[
     // Markdown/text/data
-    "md", "txt", "csv", "xml", "json", // Images
+    "md", "txt", "csv", "xml", "json", // Design
+    "pen",  // Images
     "png", "jpg", "jpeg", "gif", "svg", "webp", // Documents
     "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", // Audio
     "mp3", "wav", "ogg", "flac", "m4a", // Video
