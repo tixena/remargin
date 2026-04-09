@@ -311,6 +311,11 @@ enum Commands {
         #[command(subcommand)]
         action: RegistryAction,
     },
+    /// Remove a file from the managed document tree.
+    Rm {
+        /// Path to the file.
+        file: String,
+    },
     /// Search across documents for text matches.
     Search {
         /// Text or regex pattern to search for.
@@ -790,6 +795,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::Query { .. }
         | Commands::React { .. }
         | Commands::Registry { .. }
+        | Commands::Rm { .. }
         | Commands::Search { .. }
         | Commands::Verify { .. }
         | Commands::Write { .. } => {}
@@ -940,6 +946,7 @@ fn dispatch_with_config(
             cmd_react(system, cwd, config, &r)
         }
         Commands::Registry { action } => cmd_registry(system, cwd, action, json_mode),
+        Commands::Rm { file } => cmd_rm(system, cwd, config, file, json_mode),
         Commands::Search {
             pattern,
             path,
@@ -1691,6 +1698,28 @@ fn cmd_registry(
                 Ok(())
             }
         }
+    }
+}
+
+fn cmd_rm(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    file: &str,
+    json_mode: bool,
+) -> Result<()> {
+    let target = Path::new(file);
+    let result = document::rm(system, cwd, target, config)?;
+
+    if json_mode {
+        out_json(&json!({
+            "deleted": file,
+            "existed": result.existed,
+        }))
+    } else if result.existed {
+        out(&format!("deleted: {file}"))
+    } else {
+        out(&format!("already absent: {file}"))
     }
 }
 

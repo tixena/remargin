@@ -1,4 +1,4 @@
-//! Document access layer: ls, get, write, metadata.
+//! Document access layer: ls, get, write, rm, metadata.
 //!
 //! Agents never touch files directly. They use these functions to interact
 //! with the filesystem through path sandboxing, file type allowlisting,
@@ -37,6 +37,16 @@ pub struct ListEntry {
     pub remargin_pending: Option<u32>,
     /// File size in bytes (None for directories).
     pub size: Option<u64>,
+}
+
+/// Result of a file removal operation.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct RmResult {
+    /// Whether the file existed before removal.
+    pub existed: bool,
+    /// The path that was (or would have been) deleted.
+    pub path: PathBuf,
 }
 
 /// Metadata for a single document.
@@ -219,6 +229,51 @@ fn format_with_line_numbers(lines: &[&str], start_num: usize) -> String {
         .map(|(i, line)| format!("{:>width$}\u{2502} {line}", start_num + i))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// rm
+// ---------------------------------------------------------------------------
+
+/// Remove a file from the managed document tree.
+///
+/// The operation is **idempotent**: deleting a file that does not exist
+/// returns success with `existed: false`.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The path escapes the sandbox
+/// - The file is a dotfile or otherwise not visible
+/// - The path is a directory (only files are supported)
+pub fn rm(
+    system: &dyn System,
+    base_dir: &Path,
+    path: &Path,
+    config: &ResolvedConfig,
+) -> Result<RmResult> {
+    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?;
+
+    if system.is_dir(&resolved).unwrap_or(false) {
+        bail!("cannot remove directory: {}", path.display());
+    }
+
+    if !allowlist::is_visible(&resolved, false) {
+        bail!("file not visible: {}", path.display());
+    }
+
+    let existed = system.read_to_string(&resolved).is_ok();
+
+    if existed {
+        system
+            .remove_file(&resolved)
+            .with_context(|| format!("removing {}", resolved.display()))?;
+    }
+
+    Ok(RmResult {
+        existed,
+        path: path.to_path_buf(),
+    })
 }
 
 // ---------------------------------------------------------------------------

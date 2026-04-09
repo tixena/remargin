@@ -930,3 +930,113 @@ fn line_numbers_binary_rejected() {
         "expected binary error, got: {err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// rm tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rm_deletes_existing_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/notes.md"), b"# Notes")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("notes.md"),
+        &config,
+    )
+    .unwrap();
+
+    assert!(result.existed);
+    system
+        .read_to_string(Path::new("/project/notes.md"))
+        .unwrap_err();
+}
+
+#[test]
+fn rm_idempotent_missing_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("nonexistent.md"),
+        &config,
+    )
+    .unwrap();
+
+    assert!(!result.existed);
+}
+
+#[test]
+fn rm_rejects_hidden_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/.secret"), b"hidden")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new(".secret"),
+        &config,
+    );
+
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("not visible"),
+        "expected visibility error"
+    );
+}
+
+#[test]
+fn rm_rejects_path_outside_sandbox() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/etc/passwd"), b"root:x:0:0")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("../../etc/passwd"),
+        &config,
+    );
+
+    result.unwrap_err();
+}
+
+#[test]
+fn rm_rejects_directory() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project/subdir"))
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(&system, Path::new("/project"), Path::new("subdir"), &config);
+
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot remove directory"),
+        "expected directory error"
+    );
+}

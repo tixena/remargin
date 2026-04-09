@@ -328,26 +328,6 @@ fn desc_query() -> ToolDesc {
     }
 }
 
-/// Build the search tool descriptor.
-fn desc_search() -> ToolDesc {
-    ToolDesc {
-        name: "search",
-        description: "Search across documents for text matches",
-        schema: json!({
-            "type": "object",
-            "properties": {
-                "pattern": { "type": "string", "description": "Text or regex pattern to search for" },
-                "path": { "type": "string", "description": "Base directory to search", "default": "." },
-                "regex": { "type": "boolean", "description": "Treat pattern as a regex", "default": false },
-                "scope": { "type": "string", "description": "Search scope: all, body, or comments", "default": "all" },
-                "context": { "type": "integer", "description": "Lines of context around matches", "default": 0 },
-                "ignore_case": { "type": "boolean", "description": "Case-insensitive matching", "default": false }
-            },
-            "required": ["pattern"]
-        }),
-    }
-}
-
 /// Build the react tool descriptor.
 fn desc_react() -> ToolDesc {
     ToolDesc {
@@ -364,6 +344,41 @@ fn desc_react() -> ToolDesc {
                 "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
             "required": ["file", "id", "emoji"]
+        }),
+    }
+}
+
+/// Build the rm tool descriptor.
+fn desc_rm() -> ToolDesc {
+    ToolDesc {
+        name: "rm",
+        description: "Remove a file from the managed document tree (idempotent)",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Path to the file to delete" }
+            },
+            "required": ["path"]
+        }),
+    }
+}
+
+/// Build the search tool descriptor.
+fn desc_search() -> ToolDesc {
+    ToolDesc {
+        name: "search",
+        description: "Search across documents for text matches",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "pattern": { "type": "string", "description": "Text or regex pattern to search for" },
+                "path": { "type": "string", "description": "Base directory to search", "default": "." },
+                "regex": { "type": "boolean", "description": "Treat pattern as a regex", "default": false },
+                "scope": { "type": "string", "description": "Search scope: all, body, or comments", "default": "all" },
+                "context": { "type": "integer", "description": "Lines of context around matches", "default": 0 },
+                "ignore_case": { "type": "boolean", "description": "Case-insensitive matching", "default": false }
+            },
+            "required": ["pattern"]
         }),
     }
 }
@@ -417,8 +432,9 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_migrate(),
         desc_purge(),
         desc_query(),
-        desc_search(),
         desc_react(),
+        desc_rm(),
+        desc_search(),
         desc_verify(),
         desc_write(),
     ]
@@ -625,8 +641,9 @@ fn dispatch_tool(
         "migrate" => handle_migrate(system, base_dir, config, params),
         "purge" => handle_purge(system, base_dir, config, params),
         "query" => handle_query(system, base_dir, params),
-        "search" => handle_search(system, base_dir, params),
         "react" => handle_react(system, base_dir, config, params),
+        "rm" => handle_rm(system, base_dir, config, params),
+        "search" => handle_search(system, base_dir, params),
         "verify" => handle_verify(system, base_dir, params),
         "write" => handle_write(system, base_dir, config, params),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
@@ -1027,6 +1044,44 @@ fn handle_query(
     }
 }
 
+/// Handle the `react` tool: add or remove an emoji reaction.
+fn handle_react(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let file = required_str(params, "file")?;
+    let comment_id = required_str(params, "id")?;
+    let emoji = required_str(params, "emoji")?;
+    let remove = optional_bool(params, "remove");
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+
+    let path = base_dir.join(file);
+    operations::react(system, &path, cfg, comment_id, emoji, remove)?;
+
+    let action = if remove { "removed" } else { "added" };
+    Ok(json!({ "action": action, "emoji": emoji, "comment_id": comment_id }))
+}
+
+/// Handle the `rm` tool: remove a file from the managed document tree.
+fn handle_rm(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let path_str = required_str(params, "path")?;
+    let target = Path::new(path_str);
+    let result = document::rm(system, base_dir, target, config)?;
+
+    Ok(json!({
+        "deleted": path_str,
+        "existed": result.existed,
+    }))
+}
+
 /// Handle the `search` tool: search across documents for text matches.
 fn handle_search(
     system: &dyn System,
@@ -1081,27 +1136,6 @@ fn handle_search(
         .collect();
 
     Ok(json!({ "matches": matches }))
-}
-
-/// Handle the `react` tool: add or remove an emoji reaction.
-fn handle_react(
-    system: &dyn System,
-    base_dir: &Path,
-    config: &ResolvedConfig,
-    params: &Map<String, Value>,
-) -> Result<Value> {
-    let file = required_str(params, "file")?;
-    let comment_id = required_str(params, "id")?;
-    let emoji = required_str(params, "emoji")?;
-    let remove = optional_bool(params, "remove");
-    let overridden = apply_identity_overrides(config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
-
-    let path = base_dir.join(file);
-    operations::react(system, &path, cfg, comment_id, emoji, remove)?;
-
-    let action = if remove { "removed" } else { "added" };
-    Ok(json!({ "action": action, "emoji": emoji, "comment_id": comment_id }))
 }
 
 /// Handle the `verify` tool: verify comment integrity.

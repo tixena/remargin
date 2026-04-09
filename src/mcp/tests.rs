@@ -163,7 +163,7 @@ fn initialize_returns_capabilities() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tools_list_returns_all_17_tools() {
+fn tools_list_returns_all_18_tools() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -181,7 +181,7 @@ fn tools_list_returns_all_17_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 17_usize);
+    assert_eq!(tools.len(), 18_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -200,6 +200,7 @@ fn tools_list_returns_all_17_tools() {
     assert!(names.contains(&"write"));
     assert!(names.contains(&"metadata"));
     assert!(names.contains(&"query"));
+    assert!(names.contains(&"rm"));
     assert!(names.contains(&"search"));
     assert!(names.contains(&"purge"));
 }
@@ -1507,4 +1508,93 @@ fn mcp_batch_auto_ack_per_op() {
     let parent = doc.find_comment("aaa").unwrap();
     assert_eq!(parent.ack.len(), 1);
     assert_eq!(parent.ack[0].author, "tester");
+}
+
+// ---------------------------------------------------------------------------
+// rm tool tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_rm_deletes_file() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/target.md"), b"# To delete")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "rm",
+                "arguments": {
+                    "path": "target.md"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["deleted"].as_str().unwrap(), "target.md");
+    assert!(result["existed"].as_bool().unwrap());
+    system
+        .read_to_string(Path::new("/docs/target.md"))
+        .unwrap_err();
+}
+
+#[test]
+fn mcp_rm_idempotent() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new().with_dir(Path::new("/docs")).unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "rm",
+                "arguments": {
+                    "path": "nonexistent.md"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["deleted"].as_str().unwrap(), "nonexistent.md");
+    assert!(!result["existed"].as_bool().unwrap());
+}
+
+#[test]
+fn mcp_rm_missing_path_param() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "rm",
+                "arguments": {}
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
 }
