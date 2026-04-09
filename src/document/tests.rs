@@ -487,9 +487,9 @@ fn write_create_rejects_existing_file() {
     );
 }
 
-// Test: create fails if parent directory does not exist
+// Test: create auto-creates missing parent directories
 #[test]
-fn write_create_rejects_missing_parent() {
+fn write_create_auto_creates_parent_dirs() {
     let system = MockSystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -497,19 +497,100 @@ fn write_create_rejects_missing_parent() {
         .unwrap();
 
     let config = open_config();
+    let content = "---\ntitle: Nested\n---\n\n# Nested Document\n\nContent here.\n";
 
-    let result = document::write(
+    document::write(
         &system,
         Path::new("/project"),
-        Path::new("nonexistent/dir/new.md"),
-        "# New",
+        Path::new("newdir/subdir/file.md"),
+        content,
         &config,
         WriteOptions {
             create: true,
             ..Default::default()
         },
-    );
-    result.unwrap_err();
+    )
+    .unwrap();
+
+    // File was created with correct content.
+    let result = system
+        .read_to_string(Path::new("/project/newdir/subdir/file.md"))
+        .unwrap();
+    assert!(result.contains("Nested Document"));
+
+    // Parent directories were created.
+    assert!(system.is_dir(Path::new("/project/newdir")).unwrap());
+    assert!(system.is_dir(Path::new("/project/newdir/subdir")).unwrap());
+}
+
+// Test: create auto-creates deeply nested parent directories
+#[test]
+fn write_create_deeply_nested() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    let content = "---\ntitle: Deep\n---\n\n# Deep Document\n";
+
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("a/b/c/d/file.md"),
+        content,
+        &config,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/a/b/c/d/file.md"))
+        .unwrap();
+    assert!(result.contains("Deep Document"));
+
+    // All intermediate directories exist.
+    assert!(system.is_dir(Path::new("/project/a")).unwrap());
+    assert!(system.is_dir(Path::new("/project/a/b")).unwrap());
+    assert!(system.is_dir(Path::new("/project/a/b/c")).unwrap());
+    assert!(system.is_dir(Path::new("/project/a/b/c/d")).unwrap());
+}
+
+// Test: create with existing parent unchanged (no regression)
+#[test]
+fn write_create_existing_parent_unchanged() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/project/docs"))
+        .unwrap();
+
+    let config = open_config();
+    let content = "---\ntitle: Existing Parent\n---\n\n# Document\n";
+
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("docs/new.md"),
+        content,
+        &config,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/docs/new.md"))
+        .unwrap();
+    assert!(result.contains("Existing Parent"));
 }
 
 // Test: create fails if path escapes sandbox
@@ -585,6 +666,59 @@ fn write_create_rejects_dotfile() {
             create: true,
             ..Default::default()
         },
+    );
+    result.unwrap_err();
+}
+
+// Test: create with parent outside sandbox is rejected even when dirs need creation
+#[test]
+fn write_create_parent_outside_sandbox() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/"))
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("../../outside/file.md"),
+        "# Escape",
+        &config,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("escapes sandbox"),
+        "expected sandbox error, got: {err}"
+    );
+}
+
+// Test: write without --create still fails for missing parent (no auto-creation)
+#[test]
+fn write_no_create_missing_parent_still_fails() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("nonexistent/dir/doc.md"),
+        "---\ntitle: Test\n---\n\n# Test\n",
+        &config,
+        WriteOptions::new(),
     );
     result.unwrap_err();
 }
