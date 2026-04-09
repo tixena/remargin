@@ -408,7 +408,8 @@ fn desc_write() -> ToolDesc {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Path to the file" },
-                "content": { "type": "string", "description": "File content to write" },
+                "content": { "type": "string", "description": "File content to write (base64-encoded when binary=true)" },
+                "binary": { "type": "boolean", "description": "Content is base64-encoded binary data. Implies raw mode. Not supported for markdown (.md) files.", "default": false },
                 "create": { "type": "boolean", "description": "Create a new file (parent directory must exist, file must not)", "default": false },
                 "raw": { "type": "boolean", "description": "Write content exactly as provided, skipping frontmatter injection and comment preservation. Not supported for markdown (.md) files.", "default": false }
             },
@@ -1188,16 +1189,24 @@ fn handle_write(
 ) -> Result<Value> {
     let path_str = required_str(params, "path")?;
     let content = required_str(params, "content")?;
+    let binary = params
+        .get("binary")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let create = params
         .get("create")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let raw = params.get("raw").and_then(Value::as_bool).unwrap_or(false);
 
+    let opts = document::WriteOptions::new()
+        .binary(binary)
+        .create(create)
+        .raw(raw);
     let target = Path::new(path_str);
-    document::write(system, base_dir, target, content, config, create, raw)?;
+    document::write(system, base_dir, target, content, config, opts)?;
 
-    Ok(json!({ "written": path_str, "raw": raw }))
+    Ok(json!({ "written": path_str, "binary": binary, "raw": raw || binary }))
 }
 
 // ---------------------------------------------------------------------------

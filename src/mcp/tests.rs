@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System as _;
 use os_shim::mock::MockSystem;
 use serde_json::{Value, json};
@@ -1662,6 +1664,80 @@ fn mcp_write_raw_rejected_for_md() {
                     "path": "doc.md",
                     "content": "raw content",
                     "raw": true
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+// ---------------------------------------------------------------------------
+// Write --binary tests (MCP)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_write_binary_param() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new().with_dir(Path::new("/docs")).unwrap();
+    let config = test_config();
+    let content_bytes = b"binary MCP content";
+    let b64 = BASE64_STANDARD.encode(content_bytes);
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "output.png",
+                    "content": b64,
+                    "create": true,
+                    "binary": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["written"].as_str().unwrap(), "output.png");
+    assert!(result["binary"].as_bool().unwrap());
+    assert!(result["raw"].as_bool().unwrap());
+
+    let on_disk = system
+        .read_to_string(Path::new("/docs/output.png"))
+        .unwrap();
+    assert_eq!(on_disk.as_bytes(), content_bytes);
+}
+
+#[test]
+fn mcp_write_binary_rejected_for_md() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/doc.md"), b"# Hello")
+        .unwrap();
+    let config = test_config();
+    let b64 = BASE64_STANDARD.encode(b"binary md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "doc.md",
+                    "content": b64,
+                    "binary": true
                 }
             }
         }),

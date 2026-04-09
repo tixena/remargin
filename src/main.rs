@@ -358,6 +358,10 @@ enum Commands {
         path: String,
         /// File content to write (read from stdin if omitted).
         content: Option<String>,
+        /// Content is base64-encoded binary data (implies --raw).
+        /// Not supported for markdown (.md) files.
+        #[arg(long)]
+        binary: bool,
         /// Create a new file (parent directory must exist, file must not).
         #[arg(long)]
         create: bool,
@@ -521,14 +525,12 @@ struct ReactParams<'cmd> {
 struct WriteParams<'cmd> {
     /// File content (read from stdin if `None`).
     content: Option<&'cmd str>,
-    /// Create a new file.
-    create: bool,
     /// JSON output mode.
     json_mode: bool,
+    /// Write options (create, raw, binary).
+    opts: document::WriteOptions,
     /// Path to the file.
     path: &'cmd str,
-    /// Write content verbatim (skip frontmatter/comment management).
-    raw: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -990,6 +992,7 @@ fn dispatch_with_config(
         Commands::Write {
             path,
             content,
+            binary,
             create,
             raw,
         } => cmd_write(
@@ -998,10 +1001,12 @@ fn dispatch_with_config(
             config,
             &WriteParams {
                 content: content.as_deref(),
-                create: *create,
                 json_mode,
+                opts: document::WriteOptions::new()
+                    .binary(*binary)
+                    .create(*create)
+                    .raw(*raw),
                 path,
-                raw: *raw,
             },
         ),
         // Already handled in `run()`.
@@ -1952,8 +1957,15 @@ fn cmd_write(
         None => read_stdin()?,
     };
 
-    document::write(system, cwd, target, &body, config, wp.create, wp.raw)?;
-    print_output(wp.json_mode, &json!({ "written": wp.path, "raw": wp.raw }))
+    document::write(system, cwd, target, &body, config, wp.opts)?;
+    print_output(
+        wp.json_mode,
+        &json!({
+            "written": wp.path,
+            "binary": wp.opts.binary,
+            "raw": wp.opts.raw || wp.opts.binary,
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------

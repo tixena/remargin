@@ -13,6 +13,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 
 use crate::config::ResolvedConfig;
@@ -65,6 +67,51 @@ pub struct DocumentMetadata {
     pub pending_count: usize,
     /// Unique recipients on unacked comments.
     pub pending_for: Vec<String>,
+}
+
+/// Options for the `write` function.
+#[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
+pub struct WriteOptions {
+    /// Content is base64-encoded binary data (implies `raw`).
+    pub binary: bool,
+    /// Create a new file (parent dir must exist, file must not).
+    pub create: bool,
+    /// Write content verbatim (skip frontmatter/comment management).
+    pub raw: bool,
+}
+
+impl WriteOptions {
+    /// Set the `binary` flag.
+    #[must_use]
+    pub const fn binary(mut self, value: bool) -> Self {
+        self.binary = value;
+        self
+    }
+
+    /// Set the `create` flag.
+    #[must_use]
+    pub const fn create(mut self, value: bool) -> Self {
+        self.create = value;
+        self
+    }
+
+    /// Create default write options.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            binary: false,
+            create: false,
+            raw: false,
+        }
+    }
+
+    /// Set the `raw` flag.
+    #[must_use]
+    pub const fn raw(mut self, value: bool) -> Self {
+        self.raw = value;
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,21 +350,25 @@ pub fn write(
     path: &Path,
     content: &str,
     config: &ResolvedConfig,
-    create: bool,
-    raw: bool,
+    opts: WriteOptions,
 ) -> Result<()> {
-    // Raw mode is not supported for markdown files.
-    if raw {
-        let is_md = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-        if is_md {
-            bail!("raw mode is not supported for markdown files");
-        }
+    let is_md = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+    let raw = opts.raw || opts.binary;
+
+    // Binary mode is not supported for markdown files.
+    if opts.binary && is_md {
+        bail!("binary mode is not supported for markdown files");
     }
 
-    let resolved = if create {
+    // Raw mode is not supported for markdown files.
+    if opts.raw && is_md {
+        bail!("raw mode is not supported for markdown files");
+    }
+
+    let resolved = if opts.create {
         let target =
             allowlist::resolve_sandboxed_create(system, base_dir, path, config.unrestricted)?;
         if system.read_to_string(&target).is_ok() {
@@ -335,6 +386,17 @@ pub fn write(
         bail!("file not visible: {}", path.display());
     }
 
+    // Binary mode: decode base64 and write raw bytes.
+    if opts.binary {
+        let bytes = BASE64_STANDARD
+            .decode(content)
+            .context("invalid base64 content")?;
+        system
+            .write(&resolved, &bytes)
+            .with_context(|| format!("writing {}", resolved.display()))?;
+        return Ok(());
+    }
+
     // Raw mode: write content exactly as provided, no frontmatter or comments.
     if raw {
         system
@@ -347,7 +409,7 @@ pub fn write(
     let new_doc = parser::parse(content).context("parsing incoming content")?;
 
     // Comment preservation: only check when overwriting an existing file.
-    if !create {
+    if !opts.create {
         let existing_content = system.read_to_string(&resolved);
         if let Ok(old_content) = existing_content {
             let old_doc = parser::parse(&old_content).context("parsing existing document")?;

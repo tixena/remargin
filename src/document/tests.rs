@@ -1,12 +1,15 @@
 //! Tests for the document access layer.
 
+use std::io::Read as _;
 use std::path::Path;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System as _;
 use os_shim::mock::MockSystem;
 
 use crate::config::{Mode, ResolvedConfig};
-use crate::document::{self, allowlist};
+use crate::document::{self, WriteOptions, allowlist};
 use crate::parser::AuthorType;
 
 // ---------------------------------------------------------------------------
@@ -62,6 +65,13 @@ fn config_with_ignore(patterns: Vec<String>) -> ResolvedConfig {
         registry: None,
         unrestricted: false,
     }
+}
+
+fn read_bytes(system: &MockSystem, path: &Path) -> Vec<u8> {
+    let mut reader = system.open(path).unwrap();
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).unwrap();
+    buf
 }
 
 fn open_config() -> ResolvedConfig {
@@ -361,8 +371,7 @@ fn write_preserves_comments() {
         Path::new("doc.md"),
         &modified,
         &config,
-        false,
-        false,
+        WriteOptions::default(),
     )
     .unwrap();
 
@@ -407,8 +416,7 @@ First comment.
         Path::new("doc.md"),
         stripped,
         &config,
-        false,
-        false,
+        WriteOptions::default(),
     );
     result.unwrap_err();
 }
@@ -437,8 +445,10 @@ fn write_create_new_file() {
         Path::new("docs/new.md"),
         content,
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -465,8 +475,10 @@ fn write_create_rejects_existing_file() {
         Path::new("doc.md"),
         "# Overwrite attempt",
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     );
     let err = result.unwrap_err();
     assert!(
@@ -492,8 +504,10 @@ fn write_create_rejects_missing_parent() {
         Path::new("nonexistent/dir/new.md"),
         "# New",
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     );
     result.unwrap_err();
 }
@@ -517,8 +531,10 @@ fn write_create_rejects_escape() {
         Path::new("../../other/new.md"),
         "# Escape attempt",
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     );
     result.unwrap_err();
 }
@@ -540,8 +556,10 @@ fn write_create_rejects_disallowed_extension() {
         Path::new("script.rs"),
         "fn main() {}",
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     );
     result.unwrap_err();
 }
@@ -563,8 +581,10 @@ fn write_create_rejects_dotfile() {
         Path::new(".secret.md"),
         "# Hidden",
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     );
     result.unwrap_err();
 }
@@ -589,8 +609,10 @@ fn write_raw_pen_file() {
         Path::new("design.pen"),
         raw_json,
         &config,
-        false,
-        true,
+        WriteOptions {
+            raw: true,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -616,8 +638,10 @@ fn write_raw_json_file() {
         Path::new("data.json"),
         raw_content,
         &config,
-        false,
-        true,
+        WriteOptions {
+            raw: true,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -643,8 +667,11 @@ fn write_raw_create_new_file() {
         Path::new("new.json"),
         raw_content,
         &config,
-        true,
-        true,
+        WriteOptions {
+            create: true,
+            raw: true,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -673,8 +700,10 @@ fn write_raw_overwrites_without_comment_check() {
         Path::new("design.pen"),
         raw_content,
         &config,
-        false,
-        true,
+        WriteOptions {
+            raw: true,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -699,8 +728,10 @@ fn write_raw_rejected_for_markdown() {
         Path::new("doc.md"),
         "raw content",
         &config,
-        false,
-        true,
+        WriteOptions {
+            raw: true,
+            ..Default::default()
+        },
     );
     let err = result.unwrap_err();
     assert!(
@@ -726,8 +757,10 @@ fn write_default_still_adds_frontmatter() {
         Path::new("design.pen"),
         content,
         &config,
-        true,
-        false,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -739,6 +772,220 @@ fn write_default_still_adds_frontmatter() {
         result.contains("---"),
         "expected frontmatter injection, got: {result}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Write --binary tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn write_binary_png_content() {
+    // Minimal valid PNG header bytes.
+    let png_bytes: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    let b64 = BASE64_STANDARD.encode(png_bytes);
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("image.png"),
+        &b64,
+        &config,
+        WriteOptions {
+            binary: true,
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let on_disk = read_bytes(&system, Path::new("/project/image.png"));
+    assert_eq!(on_disk.as_slice(), png_bytes);
+}
+
+#[test]
+fn write_binary_implies_raw() {
+    let content_bytes = b"binary content here";
+    let b64 = BASE64_STANDARD.encode(content_bytes);
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("data.json"),
+        &b64,
+        &config,
+        WriteOptions {
+            binary: true,
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let on_disk = read_bytes(&system, Path::new("/project/data.json"));
+    // No frontmatter should be added since binary implies raw.
+    assert_eq!(on_disk.as_slice(), content_bytes);
+}
+
+#[test]
+fn write_binary_create_new_file() {
+    let content_bytes = b"new binary file";
+    let b64 = BASE64_STANDARD.encode(content_bytes);
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("output.png"),
+        &b64,
+        &config,
+        WriteOptions {
+            binary: true,
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let on_disk = read_bytes(&system, Path::new("/project/output.png"));
+    assert_eq!(on_disk.as_slice(), content_bytes);
+}
+
+#[test]
+fn write_binary_with_raw_flag() {
+    let content_bytes = b"binary takes precedence";
+    let b64 = BASE64_STANDARD.encode(content_bytes);
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("output.png"),
+        &b64,
+        &config,
+        WriteOptions {
+            binary: true,
+            create: true,
+            raw: true,
+        },
+    )
+    .unwrap();
+
+    let on_disk = read_bytes(&system, Path::new("/project/output.png"));
+    assert_eq!(on_disk.as_slice(), content_bytes);
+}
+
+#[test]
+fn write_binary_rejected_for_markdown() {
+    let b64 = BASE64_STANDARD.encode(b"binary md");
+
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"# Hello")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &b64,
+        &config,
+        WriteOptions {
+            binary: true,
+            ..Default::default()
+        },
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("binary mode is not supported for markdown files"),
+        "expected binary mode error, got: {err}"
+    );
+}
+
+#[test]
+fn write_binary_invalid_base64() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/image.png"), b"PNG")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("image.png"),
+        "not-valid-base64!!!@@@",
+        &config,
+        WriteOptions {
+            binary: true,
+            ..Default::default()
+        },
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("invalid base64"),
+        "expected base64 error, got: {err}"
+    );
+}
+
+#[test]
+fn write_non_binary_still_text() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "# Hello\n\nWorld",
+        &config,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    // Normal text write adds frontmatter.
+    assert!(
+        result.contains("---"),
+        "expected frontmatter, got: {result}"
+    );
+    assert!(result.contains("Hello"));
 }
 
 // ---------------------------------------------------------------------------
