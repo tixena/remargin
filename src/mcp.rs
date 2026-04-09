@@ -409,7 +409,8 @@ fn desc_write() -> ToolDesc {
             "properties": {
                 "path": { "type": "string", "description": "Path to the file" },
                 "content": { "type": "string", "description": "File content to write" },
-                "create": { "type": "boolean", "description": "Create a new file (parent directory must exist, file must not)", "default": false }
+                "create": { "type": "boolean", "description": "Create a new file (parent directory must exist, file must not)", "default": false },
+                "raw": { "type": "boolean", "description": "Write content exactly as provided, skipping frontmatter injection and comment preservation. Not supported for markdown (.md) files.", "default": false }
             },
             "required": ["path", "content"]
         }),
@@ -1191,11 +1192,12 @@ fn handle_write(
         .get("create")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let raw = params.get("raw").and_then(Value::as_bool).unwrap_or(false);
 
     let target = Path::new(path_str);
-    document::write(system, base_dir, target, content, config, create)?;
+    document::write(system, base_dir, target, content, config, create, raw)?;
 
-    Ok(json!({ "written": path_str }))
+    Ok(json!({ "written": path_str, "raw": raw }))
 }
 
 // ---------------------------------------------------------------------------

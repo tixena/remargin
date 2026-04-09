@@ -1598,3 +1598,74 @@ fn mcp_rm_missing_path_param() {
 
     assert!(is_tool_error(&response));
 }
+
+// ---------------------------------------------------------------------------
+// Write --raw tests (MCP)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_write_raw_param() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new().with_dir(Path::new("/docs")).unwrap();
+    let config = test_config();
+    let raw_content = r#"{"nodes":[{"id":"abc"}]}"#;
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "design.pen",
+                    "content": raw_content,
+                    "create": true,
+                    "raw": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["written"].as_str().unwrap(), "design.pen");
+    assert!(result["raw"].as_bool().unwrap());
+
+    let on_disk = system
+        .read_to_string(Path::new("/docs/design.pen"))
+        .unwrap();
+    assert_eq!(on_disk, raw_content);
+}
+
+#[test]
+fn mcp_write_raw_rejected_for_md() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/doc.md"), b"# Hello")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "doc.md",
+                    "content": "raw content",
+                    "raw": true
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}

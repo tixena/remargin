@@ -362,6 +362,7 @@ fn write_preserves_comments() {
         &modified,
         &config,
         false,
+        false,
     )
     .unwrap();
 
@@ -407,6 +408,7 @@ First comment.
         stripped,
         &config,
         false,
+        false,
     );
     result.unwrap_err();
 }
@@ -436,6 +438,7 @@ fn write_create_new_file() {
         content,
         &config,
         true,
+        false,
     )
     .unwrap();
 
@@ -463,6 +466,7 @@ fn write_create_rejects_existing_file() {
         "# Overwrite attempt",
         &config,
         true,
+        false,
     );
     let err = result.unwrap_err();
     assert!(
@@ -489,6 +493,7 @@ fn write_create_rejects_missing_parent() {
         "# New",
         &config,
         true,
+        false,
     );
     result.unwrap_err();
 }
@@ -513,6 +518,7 @@ fn write_create_rejects_escape() {
         "# Escape attempt",
         &config,
         true,
+        false,
     );
     result.unwrap_err();
 }
@@ -535,6 +541,7 @@ fn write_create_rejects_disallowed_extension() {
         "fn main() {}",
         &config,
         true,
+        false,
     );
     result.unwrap_err();
 }
@@ -557,8 +564,181 @@ fn write_create_rejects_dotfile() {
         "# Hidden",
         &config,
         true,
+        false,
     );
     result.unwrap_err();
+}
+
+// ---------------------------------------------------------------------------
+// Write --raw tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn write_raw_pen_file() {
+    let raw_json = r#"{"nodes":[{"id":"abc"}]}"#;
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/design.pen"), b"{}")
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("design.pen"),
+        raw_json,
+        &config,
+        false,
+        true,
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/design.pen"))
+        .unwrap();
+    assert_eq!(result, raw_json);
+}
+
+#[test]
+fn write_raw_json_file() {
+    let raw_content = r#"{"key": "value"}"#;
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/data.json"), b"{}")
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("data.json"),
+        raw_content,
+        &config,
+        false,
+        true,
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/data.json"))
+        .unwrap();
+    assert_eq!(result, raw_content);
+}
+
+#[test]
+fn write_raw_create_new_file() {
+    let raw_content = r#"{"created": true}"#;
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("new.json"),
+        raw_content,
+        &config,
+        true,
+        true,
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/new.json"))
+        .unwrap();
+    assert_eq!(result, raw_content);
+}
+
+#[test]
+fn write_raw_overwrites_without_comment_check() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(
+            Path::new("/project/design.pen"),
+            DOC_WITH_COMMENTS.as_bytes(),
+        )
+        .unwrap();
+
+    let config = open_config();
+    let raw_content = "completely different content";
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("design.pen"),
+        raw_content,
+        &config,
+        false,
+        true,
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/design.pen"))
+        .unwrap();
+    assert_eq!(result, raw_content);
+}
+
+#[test]
+fn write_raw_rejected_for_markdown() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"# Hello")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "raw content",
+        &config,
+        false,
+        true,
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("raw mode is not supported for markdown files"),
+        "expected raw mode error, got: {err}"
+    );
+}
+
+#[test]
+fn write_default_still_adds_frontmatter() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    let content = r#"{"nodes":[]}"#;
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("design.pen"),
+        content,
+        &config,
+        true,
+        false,
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/design.pen"))
+        .unwrap();
+    // Non-raw write adds frontmatter, so content should differ from raw input.
+    assert!(
+        result.contains("---"),
+        "expected frontmatter injection, got: {result}"
+    );
 }
 
 // ---------------------------------------------------------------------------

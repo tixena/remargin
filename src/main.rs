@@ -361,6 +361,10 @@ enum Commands {
         /// Create a new file (parent directory must exist, file must not).
         #[arg(long)]
         create: bool,
+        /// Write content exactly as provided, skipping frontmatter and comment
+        /// preservation. Not supported for markdown (.md) files.
+        #[arg(long)]
+        raw: bool,
     },
 }
 
@@ -511,6 +515,20 @@ struct ReactParams<'cmd> {
     json_mode: bool,
     /// Remove instead of add.
     remove: bool,
+}
+
+/// Parameters for the write command.
+struct WriteParams<'cmd> {
+    /// File content (read from stdin if `None`).
+    content: Option<&'cmd str>,
+    /// Create a new file.
+    create: bool,
+    /// JSON output mode.
+    json_mode: bool,
+    /// Path to the file.
+    path: &'cmd str,
+    /// Write content verbatim (skip frontmatter/comment management).
+    raw: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -973,14 +991,18 @@ fn dispatch_with_config(
             path,
             content,
             create,
+            raw,
         } => cmd_write(
             system,
             cwd,
             config,
-            path,
-            content.as_deref(),
-            *create,
-            json_mode,
+            &WriteParams {
+                content: content.as_deref(),
+                create: *create,
+                json_mode,
+                path,
+                raw: *raw,
+            },
         ),
         // Already handled in `run()`.
         Commands::Version
@@ -1921,20 +1943,17 @@ fn cmd_write(
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
-    path_str: &str,
-    content: Option<&str>,
-    create: bool,
-    json_mode: bool,
+    wp: &WriteParams<'_>,
 ) -> Result<()> {
-    let target = Path::new(path_str);
+    let target = Path::new(wp.path);
 
-    let body = match content {
+    let body = match wp.content {
         Some(s) => String::from(s),
         None => read_stdin()?,
     };
 
-    document::write(system, cwd, target, &body, config, create)?;
-    print_output(json_mode, &json!({ "written": path_str }))
+    document::write(system, cwd, target, &body, config, wp.create, wp.raw)?;
+    print_output(wp.json_mode, &json!({ "written": wp.path, "raw": wp.raw }))
 }
 
 // ---------------------------------------------------------------------------

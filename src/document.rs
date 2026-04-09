@@ -304,7 +304,19 @@ pub fn write(
     content: &str,
     config: &ResolvedConfig,
     create: bool,
+    raw: bool,
 ) -> Result<()> {
+    // Raw mode is not supported for markdown files.
+    if raw {
+        let is_md = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+        if is_md {
+            bail!("raw mode is not supported for markdown files");
+        }
+    }
+
     let resolved = if create {
         let target =
             allowlist::resolve_sandboxed_create(system, base_dir, path, config.unrestricted)?;
@@ -321,6 +333,14 @@ pub fn write(
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());
+    }
+
+    // Raw mode: write content exactly as provided, no frontmatter or comments.
+    if raw {
+        system
+            .write(&resolved, content.as_bytes())
+            .with_context(|| format!("writing {}", resolved.display()))?;
+        return Ok(());
     }
 
     // Parse the incoming content.
