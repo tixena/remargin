@@ -299,6 +299,17 @@ remargin write path="docs/design.md" content="Updated content here..."
 
 The `write` tool preserves all existing comments in the document. It will not destroy comment blocks.
 
+#### Non-markdown files: use `--raw`
+
+When the file you are writing is **not** a markdown file (e.g., `.json`, `.yaml`, `.toml`, `.pen`, `.txt`, or any other non-`.md` extension), pass `raw=true`. Raw mode writes the content verbatim, skipping frontmatter injection and comment preservation logic that only applies to markdown. Without `raw`, the write may inject markdown-specific metadata into your file.
+
+```
+remargin write path="config/settings.json" content='{"key": "value"}' raw=true
+remargin write path="assets/data.yaml" content="name: example" raw=true create=true
+```
+
+Note: `raw=true` is rejected for `.md` files — markdown documents always go through the comment-preserving write path.
+
 ### Create a new document
 
 ```
