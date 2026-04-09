@@ -1085,6 +1085,7 @@ dependencies = [
  "ssh-key",
  "tempfile",
  "thiserror",
+ "tixschema",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1408,6 +1409,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "tixschema"
+version = "0.1.0"
+source = "git+https://github.com/tixena/tixschema.git#f50a2d90b739a6961174137f25838a2b490b10b2"
+dependencies = [
+ "log",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn",
 ]
 
 [[package]]

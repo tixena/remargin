@@ -16,6 +16,7 @@ use anyhow::{Context as _, Result};
 use chrono::{DateTime, FixedOffset};
 use os_shim::System;
 use serde::Deserialize;
+use tixschema::model_schema;
 
 // ---------------------------------------------------------------------------
 // Public data structures
@@ -24,6 +25,7 @@ use serde::Deserialize;
 /// An acknowledgment of a comment by another participant.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[model_schema]
 pub struct Acknowledgment {
     /// Author who acknowledged.
     pub author: String,
@@ -34,6 +36,7 @@ pub struct Acknowledgment {
 /// Whether the comment author is a human or an AI agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+#[model_schema]
 pub enum AuthorType {
     /// An AI agent participant.
     Agent,
@@ -44,6 +47,7 @@ pub enum AuthorType {
 /// A parsed Remargin comment with all metadata fields.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[model_schema]
 pub struct Comment {
     /// Acknowledgments from other participants.
     pub ack: Vec<Acknowledgment>,
@@ -65,7 +69,7 @@ pub struct Comment {
     /// Zero means "not yet placed" (e.g. newly created, before write).
     pub line: usize,
     /// Emoji reactions mapped to lists of author IDs.
-    pub reactions: Reactions,
+    pub reactions: BTreeMap<String, Vec<String>>,
     /// ID of the comment this is replying to.
     pub reply_to: Option<String>,
     /// Cryptographic signature (e.g. "ed25519:base64...").

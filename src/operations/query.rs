@@ -6,14 +6,19 @@
 #[cfg(test)]
 mod tests;
 
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, FixedOffset};
 use os_shim::System;
+use tixschema::model_schema;
 
 use crate::document::allowlist;
-use crate::parser::{self, Acknowledgment, AuthorType, Reactions};
+use crate::parser::{self, Acknowledgment, AuthorType};
+use crate::parser::{acknowledgment_schema, author_type_schema};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -45,6 +50,7 @@ pub struct QueryFilter {
 /// dropped after processing each file.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[model_schema]
 pub struct ExpandedComment {
     /// Acknowledgments from other participants.
     pub ack: Vec<Acknowledgment>,
@@ -65,7 +71,7 @@ pub struct ExpandedComment {
     /// 1-indexed line number in the source document.
     pub line: usize,
     /// Emoji reactions mapped to lists of author IDs.
-    pub reactions: Reactions,
+    pub reactions: BTreeMap<String, Vec<String>>,
     /// ID of the comment this is replying to.
     pub reply_to: Option<String>,
     /// Cryptographic signature.
@@ -81,6 +87,7 @@ pub struct ExpandedComment {
 /// A single result from a cross-document query.
 #[derive(Debug)]
 #[non_exhaustive]
+#[model_schema]
 pub struct QueryResult {
     /// Total number of comments in the document.
     pub comment_count: u32,

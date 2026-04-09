@@ -17,6 +17,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 
+use tixschema::model_schema;
+
 use crate::config::ResolvedConfig;
 use crate::frontmatter;
 use crate::parser;
@@ -28,6 +30,7 @@ use crate::parser;
 /// A single entry from a directory listing.
 #[derive(Debug)]
 #[non_exhaustive]
+#[model_schema]
 pub struct ListEntry {
     /// Whether this entry is a directory.
     pub is_dir: bool,

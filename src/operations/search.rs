@@ -15,6 +15,8 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use regex::{Regex, RegexBuilder};
 
+use tixschema::model_schema;
+
 use crate::document::allowlist;
 use crate::parser::{self, Segment};
 
@@ -34,6 +36,7 @@ enum LineAttribution {
 /// Where a match was found within the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+#[model_schema]
 pub enum MatchLocation {
     /// In document body text (outside any comment block).
     Body,
@@ -49,6 +52,7 @@ struct Matcher {
 /// A single search match.
 #[derive(Debug)]
 #[non_exhaustive]
+#[model_schema]
 pub struct SearchMatch {
     /// Context lines after the match.
     pub after: Vec<String>,
