@@ -1,0 +1,10 @@
+{
+  "id": "remargin",
+  "name": "Remargin",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Inline review and structured commenting for markdown documents.",
+  "author": "Eduardo Burgos",
+  "authorUrl": "https://github.com/tixena",
+  "isDesktopOnly": true
+}
