@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ExpandedComment, QueryResult } from "@/generated";
+import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 
 interface InboxItem {

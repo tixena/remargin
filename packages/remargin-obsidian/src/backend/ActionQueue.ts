@@ -38,8 +38,9 @@ export class ActionQueue {
     if (this.running) return;
     this.running = true;
     try {
-      while (this.queue.length > 0) {
-        const next = this.queue.shift()!;
+      for (;;) {
+        const next = this.queue.shift();
+        if (!next) break;
         await next();
       }
     } finally {
@@ -51,11 +52,11 @@ export class ActionQueue {
     // Force save active editor if it matches the target file
     const leaf = this.app.workspace.activeLeaf;
     if (!leaf) return;
-    const view = leaf.view;
-    if ("save" in view && typeof view.save === "function") {
+    const view = leaf.view as unknown as { save?: () => Promise<void> };
+    if (typeof view.save === "function") {
       const file = this.app.workspace.getActiveFile();
       if (file && file.path === filePath) {
-        await (view as any).save();
+        await view.save();
       }
     }
   }
@@ -68,12 +69,21 @@ export class ActionQueue {
     const content = await this.app.vault.read(file);
 
     // Find and update any editor showing this file
+    interface EditorLike {
+      getCursor(): { line: number; ch: number };
+      lineCount(): number;
+      getLine(line: number): string;
+      setCursor(pos: { line: number; ch: number }): void;
+    }
+    interface MarkdownViewLike {
+      editor?: EditorLike;
+    }
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const state = leaf.getViewState();
       if (state.state?.file === filePath) {
-        const view = leaf.view;
-        if ("editor" in view && view.editor) {
-          const editor = (view as any).editor;
+        const view = leaf.view as unknown as MarkdownViewLike;
+        const editor = view.editor;
+        if (editor) {
           const cursor = editor.getCursor();
           await this.app.vault.modify(file, content);
           // Restore cursor (clamped to new doc length)
@@ -82,8 +92,9 @@ export class ActionQueue {
             const line = Math.min(cursor.line, lineCount - 1);
             const ch = Math.min(cursor.ch, editor.getLine(line)?.length ?? 0);
             editor.setCursor({ line, ch });
-          } catch {
+          } catch (err) {
             // cursor restoration is best-effort
+            console.debug("ActionQueue cursor restore failed:", err);
           }
           return;
         }

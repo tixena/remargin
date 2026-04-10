@@ -87,7 +87,8 @@ export default class RemarginPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
-    const vaultPath = (this.app.vault.adapter as any).basePath || "";
+    const adapter = this.app.vault.adapter as unknown as { basePath?: string };
+    const vaultPath = adapter.basePath ?? "";
     this.backend = new RemarginBackend(this.settings, vaultPath);
 
     this.addSettingTab(new RemarginSettingTab(this));

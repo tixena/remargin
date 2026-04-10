@@ -1,4 +1,4 @@
-import type { Comment } from "@/generated";
+import type { AuthorType, Comment } from "@/generated";
 
 export interface ParsedBlock {
   startLine: number;
@@ -35,7 +35,7 @@ interface YamlFields {
 }
 
 function parseSimpleYaml(lines: string[]): YamlFields {
-  const fields: YamlFields = {};
+  const bag: Record<string, unknown> = {};
   let currentKey = "";
   let currentList: string[] | null = null;
 
@@ -53,7 +53,7 @@ function parseSimpleYaml(lines: string[]): YamlFields {
 
     // Flush previous list
     if (currentList && currentKey) {
-      (fields as any)[currentKey] = currentList;
+      bag[currentKey] = currentList;
       currentList = null;
     }
 
@@ -74,25 +74,23 @@ function parseSimpleYaml(lines: string[]): YamlFields {
     // Inline list: [a, b, c]
     if (value.startsWith("[") && value.endsWith("]")) {
       const inner = value.slice(1, -1);
-      (fields as any)[key] = inner
-        ? inner.split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""))
-        : [];
+      bag[key] = inner ? inner.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")) : [];
       currentKey = "";
       continue;
     }
 
     // Simple scalar
-    (fields as any)[key] = value.replace(/^["']|["']$/g, "");
+    bag[key] = value.replace(/^["']|["']$/g, "");
     currentKey = key;
     currentList = null;
   }
 
   // Flush trailing list
   if (currentList && currentKey) {
-    (fields as any)[currentKey] = currentList;
+    bag[currentKey] = currentList;
   }
 
-  return fields;
+  return bag as YamlFields;
 }
 
 export function parseRemarginBlocks(text: string): ParsedBlock[] {
@@ -162,7 +160,7 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
             comment: {
               id: yaml.id,
               author: yaml.author,
-              author_type: yaml.author_type as any,
+              author_type: yaml.author_type as AuthorType | undefined,
               ts: yaml.ts,
               content,
               reply_to: yaml.reply_to,

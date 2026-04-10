@@ -3,5 +3,17 @@
   "extends": ["../biome.json"],
   "files": {
     "includes": ["**", "!main.js", "!main.js.map", "!**/*.js.map"]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["tailwind.config.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    }
+  ]
 }

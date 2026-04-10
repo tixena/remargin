@@ -1,4 +1,4 @@
-import { Check, Clock, MessageSquare, MoreHorizontal, Reply, Trash2 } from "lucide-react";
+import { Check, MessageSquare, MoreHorizontal, Reply, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,13 +29,15 @@ function buildThreadTree(comments: Comment[]): ThreadNode[] {
   const roots: ThreadNode[] = [];
 
   for (const c of comments) {
-    byId.set(c.id!, { comment: c, replies: [] });
+    byId.set(c.id, { comment: c, replies: [] });
   }
 
   for (const c of comments) {
-    const node = byId.get(c.id!)!;
-    if (c.reply_to && byId.has(c.reply_to)) {
-      byId.get(c.reply_to)!.replies.push(node);
+    const node = byId.get(c.id);
+    if (!node) continue;
+    const parent = c.reply_to ? byId.get(c.reply_to) : undefined;
+    if (parent) {
+      parent.replies.push(node);
     } else {
       roots.push(node);
     }
@@ -243,12 +245,12 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
             <Reply className="w-3 h-3 mr-0.5" />
             Reply
           </Button>
-          {comment.line != null && comment.line > 0 && (
+          {comment.line > 0 && (
             <Button
               variant="ghost"
               size="sm"
               className="h-5 px-1.5 text-[10px] text-text-faint hover:text-text-muted"
-              onClick={() => onGoToLine?.(comment.line!)}
+              onClick={() => onGoToLine?.(comment.line)}
             >
               <MessageSquare className="w-3 h-3 mr-0.5" />L{comment.line}
             </Button>
