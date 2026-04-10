@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/remargin", "crates/remargin-cli"]
+members = ["crates/remargin", "crates/remargin-core"]
 resolver = "2"
 
 [workspace.package]
@@ -10,7 +10,7 @@ license = "MIT"
 repository = "https://github.com/tixena/remargin"
 
 [workspace.dependencies]
-remargin = { path = "crates/remargin" }
+remargin-core = { path = "crates/remargin-core" }
 
 # CLI framework
 clap = { version = "4", features = ["derive", "env"] }

@@ -11,10 +11,10 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use remargin::document::list_entry_schema;
-use remargin::operations::query::{expanded_comment_schema, query_result_schema};
-use remargin::operations::search::{match_location_schema, search_match_schema};
-use remargin::parser::{acknowledgment_schema, author_type_schema, comment_schema};
+use remargin_core::document::list_entry_schema;
+use remargin_core::operations::query::{expanded_comment_schema, query_result_schema};
+use remargin_core::operations::search::{match_location_schema, search_match_schema};
+use remargin_core::parser::{acknowledgment_schema, author_type_schema, comment_schema};
 
 fn main() {
     let out_dir = Path::new("packages/remargin-obsidian/src/generated");

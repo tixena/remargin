@@ -1068,6 +1068,26 @@ name = "remargin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "os-shim",
+ "predicates",
+ "remargin-core",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "ssh-key",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "remargin-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "base64",
  "chrono",
  "ignore",
@@ -1084,26 +1104,6 @@ dependencies = [
  "thiserror",
  "tixschema",
  "tracing",
-]
-
-[[package]]
-name = "remargin-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "os-shim",
- "predicates",
- "remargin",
- "serde",
- "serde_json",
- "serde_yaml",
- "ssh-key",
- "tempfile",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
