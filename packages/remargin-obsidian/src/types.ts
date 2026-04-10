@@ -7,6 +7,7 @@ export interface RemarginSettings {
   authorName: string;
   keyFilePath: string;
   remarginMode: string;
+  sidebarSide: "left" | "right";
 }
 
 export const DEFAULT_SETTINGS: RemarginSettings = {
@@ -18,4 +19,5 @@ export const DEFAULT_SETTINGS: RemarginSettings = {
   authorName: "",
   keyFilePath: "",
   remarginMode: "open",
+  sidebarSide: "left",
 };

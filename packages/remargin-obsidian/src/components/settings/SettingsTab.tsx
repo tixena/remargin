@@ -115,6 +115,34 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
           />
         </SettingsField>
 
+        {/* Sidebar side */}
+        <SettingsField
+          label="Sidebar side"
+          description="Initial dock side when opening the Remargin sidebar. Applies the next time the view is opened; you can always drag it to the other side manually."
+        >
+          <ToggleGroup
+            type="single"
+            value={current.sidebarSide}
+            onValueChange={(value) => {
+              if (value) update("sidebarSide", value as "left" | "right");
+            }}
+            className="w-full"
+          >
+            <ToggleGroupItem
+              value="left"
+              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
+            >
+              Left
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="right"
+              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
+            >
+              Right
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </SettingsField>
+
         <Separator />
 
         {/* Identity configuration */}

@@ -173,7 +173,10 @@ export default class RemarginPlugin extends Plugin {
   async activateView() {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_REMARGIN);
     if (leaves.length === 0) {
-      const leaf = this.app.workspace.getRightLeaf(false);
+      const leaf =
+        this.settings.sidebarSide === "right"
+          ? this.app.workspace.getRightLeaf(false)
+          : this.app.workspace.getLeftLeaf(false);
       if (leaf) {
         await leaf.setViewState({
           type: VIEW_TYPE_REMARGIN,
