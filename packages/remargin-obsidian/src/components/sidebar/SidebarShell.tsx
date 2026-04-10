@@ -1,18 +1,10 @@
+import { FileText, Inbox, Mail, MessageSquare, Plus, RefreshCw, Terminal } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  MessageSquare,
-  Plus,
-  RefreshCw,
-  Terminal,
-  Inbox,
-  Mail,
-  FileText,
-} from "lucide-react";
-import { SectionHeader } from "./SectionHeader";
 import type RemarginPlugin from "@/main";
+import { SectionHeader } from "./SectionHeader";
 
 interface SidebarShellProps {
   plugin: RemarginPlugin;
@@ -51,9 +43,7 @@ export function SidebarShell({
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-accent" />
-          <span className="text-base font-semibold text-text-normal font-sans">
-            Remargin
-          </span>
+          <span className="text-base font-semibold text-text-normal font-sans">Remargin</span>
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="w-7 h-7">
@@ -70,16 +60,10 @@ export function SidebarShell({
         <div className="flex flex-col">
           {/* Prompt section */}
           <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
-            <SectionHeader
-              icon={Terminal}
-              title="Prompt"
-              open={promptOpen}
-            />
+            <SectionHeader icon={Terminal} title="Prompt" open={promptOpen} />
             <CollapsibleContent>
               {promptContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">
-                  No prompt configured.
-                </div>
+                <div className="px-4 py-3 text-xs text-text-faint">No prompt configured.</div>
               )}
             </CollapsibleContent>
           </Collapsible>
@@ -95,9 +79,7 @@ export function SidebarShell({
             />
             <CollapsibleContent>
               {sandboxContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">
-                  No staged comments.
-                </div>
+                <div className="px-4 py-3 text-xs text-text-faint">No staged comments.</div>
               )}
             </CollapsibleContent>
           </Collapsible>
@@ -113,9 +95,7 @@ export function SidebarShell({
             />
             <CollapsibleContent>
               {inboxContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">
-                  No pending comments.
-                </div>
+                <div className="px-4 py-3 text-xs text-text-faint">No pending comments.</div>
               )}
             </CollapsibleContent>
           </Collapsible>
@@ -145,9 +125,7 @@ export function SidebarShell({
       </ScrollArea>
 
       {/* Footer */}
-      {footerContent && (
-        <div className="border-t border-bg-border">{footerContent}</div>
-      )}
+      {footerContent && <div className="border-t border-bg-border">{footerContent}</div>}
     </div>
   );
 }

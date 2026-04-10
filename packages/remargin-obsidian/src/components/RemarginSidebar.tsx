@@ -1,8 +1,8 @@
+import type { TFile } from "obsidian";
 import { useEffect, useState } from "react";
-import { TFile } from "obsidian";
-import { SidebarShell } from "@/components/sidebar/SidebarShell";
-import { PromptSection } from "@/components/sidebar/PromptSection";
 import { InboxSection } from "@/components/sidebar/InboxSection";
+import { PromptSection } from "@/components/sidebar/PromptSection";
+import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
 import type RemarginPlugin from "@/main";
 
@@ -30,9 +30,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       activeFile={activeFile}
       promptContent={<PromptSection file={activeFile} />}
       inboxContent={<InboxSection />}
-      threadContent={
-        activeFile ? <ThreadedComments file={activeFile} /> : undefined
-      }
+      threadContent={activeFile ? <ThreadedComments file={activeFile} /> : undefined}
     />
   );
 }

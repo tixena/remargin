@@ -1,29 +1,17 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Check, Clock, MessageSquare, MoreHorizontal, Reply, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  Check,
-  Clock,
-  MessageSquare,
-  Reply,
-  MoreHorizontal,
-  Trash2,
-} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useBackend } from "@/hooks/useBackend";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Comment } from "@/generated";
+import { useBackend } from "@/hooks/useBackend";
 
 interface ThreadedCommentsProps {
   file: string;
@@ -66,11 +54,7 @@ function errorMessage(err: unknown): string {
   }
 }
 
-export function ThreadedComments({
-  file,
-  onReply,
-  onGoToLine,
-}: ThreadedCommentsProps) {
+export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedCommentsProps) {
   const backend = useBackend();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,9 +108,7 @@ export function ThreadedComments({
   );
 
   if (loading) {
-    return (
-      <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>
-    );
+    return <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>;
   }
 
   if (error) {
@@ -139,11 +121,7 @@ export function ThreadedComments({
   }
 
   if (threads.length === 0) {
-    return (
-      <div className="px-4 py-3 text-xs text-text-faint">
-        No comments in this file.
-      </div>
-    );
+    return <div className="px-4 py-3 text-xs text-text-faint">No comments in this file.</div>;
   }
 
   return (
@@ -174,14 +152,7 @@ interface CommentThreadProps {
   onGoToLine?: (line: number) => void;
 }
 
-function CommentThread({
-  node,
-  depth,
-  onAck,
-  onDelete,
-  onReply,
-  onGoToLine,
-}: CommentThreadProps) {
+function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: CommentThreadProps) {
   const { comment } = node;
   const isPending = (comment.ack?.length ?? 0) === 0;
 
@@ -205,12 +176,8 @@ function CommentThread({
             >
               {comment.author_type === "Agent" ? "AI" : "H"}
             </Badge>
-            <span className="text-xs font-medium text-text-normal truncate">
-              {comment.author}
-            </span>
-            {isPending && (
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            )}
+            <span className="text-xs font-medium text-text-normal truncate">{comment.author}</span>
+            {isPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
           </div>
           <div className="flex items-center gap-1">
             <TooltipProvider>
@@ -233,11 +200,7 @@ function CommentThread({
           <div className="flex items-center gap-1 text-[10px] text-text-faint">
             <span>to:</span>
             {comment.to.map((r) => (
-              <Badge
-                key={r}
-                variant="outline"
-                className="px-1 py-0 text-[9px]"
-              >
+              <Badge key={r} variant="outline" className="px-1 py-0 text-[9px]">
                 {r}
               </Badge>
             ))}
@@ -245,25 +208,18 @@ function CommentThread({
         )}
 
         {/* Content */}
-        <p className="text-xs text-text-muted whitespace-pre-wrap break-words">
-          {comment.content}
-        </p>
+        <p className="text-xs text-text-muted whitespace-pre-wrap break-words">{comment.content}</p>
 
         {/* Reactions */}
-        {comment.reactions &&
-          Object.keys(comment.reactions).length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {Object.entries(comment.reactions).map(([emoji, authors]) => (
-                <Badge
-                  key={emoji}
-                  variant="outline"
-                  className="px-1.5 py-0 text-[10px] gap-0.5"
-                >
-                  {emoji} {authors.length}
-                </Badge>
-              ))}
-            </div>
-          )}
+        {comment.reactions && Object.keys(comment.reactions).length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {Object.entries(comment.reactions).map(([emoji, authors]) => (
+              <Badge key={emoji} variant="outline" className="px-1.5 py-0 text-[10px] gap-0.5">
+                {emoji} {authors.length}
+              </Badge>
+            ))}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center gap-1 -ml-1">
@@ -294,8 +250,7 @@ function CommentThread({
               className="h-5 px-1.5 text-[10px] text-text-faint hover:text-text-muted"
               onClick={() => onGoToLine?.(comment.line!)}
             >
-              <MessageSquare className="w-3 h-3 mr-0.5" />
-              L{comment.line}
+              <MessageSquare className="w-3 h-3 mr-0.5" />L{comment.line}
             </Button>
           )}
           <DropdownMenu>

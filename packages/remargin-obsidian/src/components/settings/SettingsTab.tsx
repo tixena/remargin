@@ -1,7 +1,6 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -9,9 +8,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { SettingsField } from "./SettingsField";
 import type { RemarginSettings } from "@/types";
+import { SettingsField } from "./SettingsField";
 
 interface SettingsTabProps {
   settings: RemarginSettings;
@@ -26,10 +26,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
   const [testMessage, setTestMessage] = useState("");
 
   const update = useCallback(
-    <K extends keyof RemarginSettings>(
-      field: K,
-      value: RemarginSettings[K]
-    ) => {
+    <K extends keyof RemarginSettings>(field: K, value: RemarginSettings[K]) => {
       setCurrent((prev) => {
         const next = { ...prev, [field]: value };
         onSave(next);
@@ -58,9 +55,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
       setTestMessage(`${result} — OK`);
     } catch (err) {
       setTestState("error");
-      setTestMessage(
-        err instanceof Error ? err.message : "Unknown error"
-      );
+      setTestMessage(err instanceof Error ? err.message : "Unknown error");
     }
   }, [current.remarginPath]);
 
@@ -68,9 +63,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
     <div className="flex flex-col h-full bg-bg-primary rounded-lg">
       {/* Header */}
       <div className="flex flex-col gap-1 p-5 px-6 border-b border-bg-border">
-        <h2 className="text-xl font-semibold text-text-normal font-sans">
-          Remargin
-        </h2>
+        <h2 className="text-xl font-semibold text-text-normal font-sans">Remargin</h2>
         <p className="text-xs text-text-muted font-sans">
           Document commenting system for inline review workflows.
         </p>
@@ -236,9 +229,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
               />
               <span
                 className={`font-mono text-xs ${
-                  testState === "success"
-                    ? "text-green-500"
-                    : "text-red-400"
+                  testState === "success" ? "text-green-500" : "text-red-400"
                 }`}
               >
                 {testMessage}

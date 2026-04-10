@@ -1,9 +1,9 @@
+import autoprefixer from "autoprefixer";
 import esbuild from "esbuild";
+import { readFile } from "fs/promises";
+import { dirname, resolve } from "path";
 import postcss from "postcss";
 import tailwindcss from "tailwindcss";
-import autoprefixer from "autoprefixer";
-import { readFile } from "fs/promises";
-import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

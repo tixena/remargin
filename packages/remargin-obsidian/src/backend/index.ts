@@ -1,11 +1,11 @@
-export { RemarginBackend } from "./RemarginBackend";
 export { ActionQueue } from "./ActionQueue";
+export { RemarginBackend } from "./RemarginBackend";
 export type {
-  CommentOpts,
-  QueryOpts,
-  GetOpts,
-  WriteOpts,
-  SearchOpts,
   BatchCommentOp,
+  CommentOpts,
+  GetOpts,
   IdentityInfo,
+  QueryOpts,
+  SearchOpts,
+  WriteOpts,
 } from "./types";

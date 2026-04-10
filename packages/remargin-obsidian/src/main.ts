@@ -1,9 +1,9 @@
-import { Plugin, PluginSettingTab, ItemView, WorkspaceLeaf } from "obsidian";
-import { createRoot, Root } from "react-dom/client";
+import { ItemView, Plugin, PluginSettingTab, type WorkspaceLeaf } from "obsidian";
 import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { RemarginBackend } from "./backend";
 import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
-import { RemarginBackend } from "./backend";
 import { BackendContext } from "./hooks/useBackend";
 // Editor extensions disabled — see rem-359. Re-enable after fixing the
 // visual regression they cause in Live Preview and reading mode.
@@ -17,7 +17,10 @@ export const VIEW_TYPE_REMARGIN = "remargin-sidebar";
 class RemarginView extends ItemView {
   private root: Root | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private plugin: RemarginPlugin) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    private plugin: RemarginPlugin
+  ) {
     super(leaf);
   }
 
@@ -95,10 +98,7 @@ export default class RemarginPlugin extends Plugin {
     // this.registerEditorExtension([commentWidgetPlugin]);
     // this.registerMarkdownPostProcessor(remarginPostProcessor);
 
-    this.registerView(
-      VIEW_TYPE_REMARGIN,
-      (leaf) => new RemarginView(leaf, this)
-    );
+    this.registerView(VIEW_TYPE_REMARGIN, (leaf) => new RemarginView(leaf, this));
 
     // Commands
     this.addCommand({
@@ -140,9 +140,7 @@ export default class RemarginPlugin extends Plugin {
         const { parseRemarginBlocks } = await import("./parser");
         const text = editor.getValue();
         const blocks = parseRemarginBlocks(text);
-        const block = blocks.find(
-          (b) => line >= b.startLine && line <= b.endLine
-        );
+        const block = blocks.find((b) => line >= b.startLine && line <= b.endLine);
         if (block?.comment.id) {
           await this.backend.ack(file.path, [block.comment.id]);
         }
@@ -169,9 +167,7 @@ export default class RemarginPlugin extends Plugin {
     // the resolved path. Otherwise fall back to manual mode.
     this.settings = { ...DEFAULT_SETTINGS };
     try {
-      const vaultPath =
-        (this.app.vault.adapter as unknown as { basePath?: string })
-          .basePath ?? "";
+      const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
       const probe = new RemarginBackend(this.settings, vaultPath);
       const info = await probe.identity("human");
       if (info.found && info.path) {
@@ -190,9 +186,7 @@ export default class RemarginPlugin extends Plugin {
     await this.saveData(settings);
 
     if (previousSide !== settings.sidebarSide) {
-      for (const leaf of this.app.workspace.getLeavesOfType(
-        VIEW_TYPE_REMARGIN
-      )) {
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REMARGIN)) {
         leaf.detach();
       }
       await this.activateView();

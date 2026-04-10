@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { Check, Clock, FileText } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,9 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Check, Clock, FileText } from "lucide-react";
+import type { ExpandedComment, QueryResult } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
-import type { QueryResult, ExpandedComment } from "@/generated";
 
 interface InboxItem {
   file: string;
@@ -48,9 +48,7 @@ export function InboxSection() {
           flat.push({ file: result.path, comment });
         }
       }
-      flat.sort((a, b) =>
-        (b.comment.ts ?? "").localeCompare(a.comment.ts ?? "")
-      );
+      flat.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
       setItems(flat);
       setError(null);
     } catch (err) {
@@ -80,19 +78,14 @@ export function InboxSection() {
   );
 
   if (loading) {
-    return (
-      <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>
-    );
+    return <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>;
   }
 
   return (
     <div className="flex flex-col">
       {/* Filter bar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-bg-border">
-        <Select
-          value={filter}
-          onValueChange={(v) => setFilter(v as "all" | "pending")}
-        >
+        <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "pending")}>
           <SelectTrigger className="h-7 text-xs w-28">
             <SelectValue />
           </SelectTrigger>
@@ -112,9 +105,7 @@ export function InboxSection() {
           </div>
         ) : items.length === 0 ? (
           <div className="px-4 py-3 text-xs text-text-faint">
-            {filter === "pending"
-              ? "No pending comments."
-              : "No comments found."}
+            {filter === "pending" ? "No pending comments." : "No comments found."}
           </div>
         ) : (
           <div className="flex flex-col">

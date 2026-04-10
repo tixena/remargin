@@ -5,8 +5,12 @@
   "description": "Remargin plugin for Obsidian",
   "main": "main.js",
   "scripts": {
+    "generate-types": "cd ../.. && cargo run --bin generate_types && cd packages/remargin-obsidian && pnpm exec biome check --write src/generated/",
+    "predev": "pnpm run generate-types",
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production"
+    "prebuild": "pnpm run generate-types",
+    "build": "node esbuild.config.mjs production",
+    "lint": "pnpm exec biome check --write --diagnostic-level=error"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",

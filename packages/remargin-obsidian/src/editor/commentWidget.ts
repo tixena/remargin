@@ -1,13 +1,13 @@
+import { RangeSetBuilder } from "@codemirror/state";
 import {
   Decoration,
-  DecorationSet,
-  EditorView,
+  type DecorationSet,
+  type EditorView,
   ViewPlugin,
-  ViewUpdate,
+  type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { RangeSetBuilder } from "@codemirror/state";
-import { parseRemarginBlocks, type ParsedBlock } from "@/parser";
+import { type ParsedBlock, parseRemarginBlocks } from "@/parser";
 
 class CommentBlockWidget extends WidgetType {
   constructor(
@@ -28,8 +28,7 @@ class CommentBlockWidget extends WidgetType {
     badge.className = `remargin-badge remargin-badge-${
       this.block.comment.author_type === "Agent" ? "agent" : "human"
     }`;
-    badge.textContent =
-      this.block.comment.author_type === "Agent" ? "AI" : "H";
+    badge.textContent = this.block.comment.author_type === "Agent" ? "AI" : "H";
     header.appendChild(badge);
 
     const author = document.createElement("span");
@@ -53,8 +52,7 @@ class CommentBlockWidget extends WidgetType {
     if (!this.collapsed) {
       const content = document.createElement("div");
       content.className = "remargin-comment-content";
-      content.textContent =
-        this.block.comment.content?.split("\n")[0] ?? "";
+      content.textContent = this.block.comment.content?.split("\n")[0] ?? "";
       wrapper.appendChild(content);
     }
 
@@ -89,11 +87,7 @@ function buildDecorations(view: EditorView): DecorationSet {
     if (from >= to) continue;
 
     const widget = new CommentBlockWidget(block, false);
-    builder.add(
-      from,
-      to,
-      Decoration.replace({ widget, block: true })
-    );
+    builder.add(from, to, Decoration.replace({ widget, block: true }));
   }
 
   return builder.finish();

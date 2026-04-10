@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { useBackend } from "@/hooks/useBackend";
 
 interface PromptSectionProps {
@@ -49,18 +49,12 @@ export function PromptSection({ file, onCommentAdded }: PromptSectionProps) {
         value={content}
         onChange={(e) => setContent(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={
-          file
-            ? "Add a comment to this file..."
-            : "Open a file to add comments"
-        }
+        placeholder={file ? "Add a comment to this file..." : "Open a file to add comments"}
         disabled={!file}
         className="w-full min-h-[80px] p-2 text-xs font-mono bg-bg-primary border border-bg-border rounded-sm text-text-normal placeholder:text-text-faint resize-y focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
       />
       <div className="flex items-center justify-between">
-        <span className="text-[9px] text-text-faint">
-          Ctrl+Enter to send
-        </span>
+        <span className="text-[9px] text-text-faint">Ctrl+Enter to send</span>
         <Button
           size="sm"
           className="h-6 px-2 text-[10px] bg-accent text-white hover:bg-accent-hover"

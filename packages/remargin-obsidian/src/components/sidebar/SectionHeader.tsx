@@ -1,6 +1,6 @@
-import { CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 interface SectionHeaderProps {
@@ -31,9 +31,7 @@ export function SectionHeader({
           <Badge
             className={cn(
               "px-1.5 py-0 text-[10px] font-semibold leading-4 rounded-full",
-              badgeVariant === "warning"
-                ? "bg-amber-400 text-bg-primary"
-                : "bg-accent text-white"
+              badgeVariant === "warning" ? "bg-amber-400 text-bg-primary" : "bg-accent text-white"
             )}
           >
             {badge}

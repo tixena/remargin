@@ -1,0 +1,17 @@
+{
+  "name": "remargin-packages",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "pnpm run -r lint"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.14"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+    ]
+  }
+}

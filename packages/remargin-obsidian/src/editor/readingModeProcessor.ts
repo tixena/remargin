@@ -1,4 +1,4 @@
-import { MarkdownPostProcessorContext } from "obsidian";
+import type { MarkdownPostProcessorContext } from "obsidian";
 
 /**
  * Post-processor for reading mode that replaces remargin fenced code
@@ -6,13 +6,8 @@ import { MarkdownPostProcessorContext } from "obsidian";
  *
  * Registered via `this.registerMarkdownPostProcessor()` in main.ts.
  */
-export function remarginPostProcessor(
-  el: HTMLElement,
-  _ctx: MarkdownPostProcessorContext
-): void {
-  const codeBlocks = el.querySelectorAll<HTMLElement>(
-    'pre > code.language-remargin'
-  );
+export function remarginPostProcessor(el: HTMLElement, _ctx: MarkdownPostProcessorContext): void {
+  const codeBlocks = el.querySelectorAll<HTMLElement>("pre > code.language-remargin");
 
   for (const code of codeBlocks) {
     const pre = code.parentElement;
@@ -47,7 +42,10 @@ export function remarginPostProcessor(
       }
     }
 
-    const content = lines.slice(yamlEnd + 1).join("\n").trim();
+    const content = lines
+      .slice(yamlEnd + 1)
+      .join("\n")
+      .trim();
 
     // Build widget
     const widget = document.createElement("div");
@@ -60,8 +58,7 @@ export function remarginPostProcessor(
     badge.className = `remargin-badge remargin-badge-${
       fields.author_type?.toLowerCase() === "agent" ? "agent" : "human"
     }`;
-    badge.textContent =
-      fields.author_type?.toLowerCase() === "agent" ? "AI" : "H";
+    badge.textContent = fields.author_type?.toLowerCase() === "agent" ? "AI" : "H";
     header.appendChild(badge);
 
     const author = document.createElement("span");

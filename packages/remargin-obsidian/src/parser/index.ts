@@ -1,1 +1,1 @@
-export { parseRemarginBlocks, type ParsedBlock } from "./parseRemarginBlocks";
+export { type ParsedBlock, parseRemarginBlocks } from "./parseRemarginBlocks";

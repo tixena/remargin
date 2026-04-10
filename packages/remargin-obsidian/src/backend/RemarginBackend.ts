@@ -1,24 +1,24 @@
 import { exec } from "child_process";
 import { z } from "zod/v4";
 import {
-  Comment$Schema,
-  ListEntry$Schema,
-  QueryResult$Schema,
-  SearchMatch$Schema,
   type Comment,
-  type QueryResult,
+  Comment$Schema,
   type ListEntry,
+  ListEntry$Schema,
+  type QueryResult,
+  QueryResult$Schema,
   type SearchMatch,
+  SearchMatch$Schema,
 } from "@/generated";
 import type { RemarginSettings } from "@/types";
 import type {
-  CommentOpts,
-  QueryOpts,
-  GetOpts,
-  WriteOpts,
-  SearchOpts,
   BatchCommentOp,
+  CommentOpts,
+  GetOpts,
   IdentityInfo,
+  QueryOpts,
+  SearchOpts,
+  WriteOpts,
 } from "./types";
 
 function shellescape(arg: string): string {
@@ -56,15 +56,11 @@ function parseEnvelope<T>(raw: string, schema: z.ZodType<T>, label: string): T {
   try {
     payload = JSON.parse(raw);
   } catch (err) {
-    throw new Error(
-      `remargin ${label}: could not parse JSON (${(err as Error).message})`
-    );
+    throw new Error(`remargin ${label}: could not parse JSON (${(err as Error).message})`);
   }
   const result = schema.safeParse(payload);
   if (!result.success) {
-    throw new Error(
-      `remargin ${label}: output did not match schema: ${result.error.message}`
-    );
+    throw new Error(`remargin ${label}: output did not match schema: ${result.error.message}`);
   }
   return result.data;
 }
@@ -99,11 +95,7 @@ export class RemarginBackend {
     return parseEnvelope(raw, ListEnvelope$Schema, "ls").entries;
   }
 
-  async write(
-    path: string,
-    content: string,
-    opts?: WriteOpts
-  ): Promise<void> {
+  async write(path: string, content: string, opts?: WriteOpts): Promise<void> {
     const args: string[] = ["write", path, content];
     if (opts?.create) args.push("--create");
     if (opts?.raw) args.push("--raw");
@@ -122,15 +114,10 @@ export class RemarginBackend {
     return parseEnvelope(raw, CommentsEnvelope$Schema, "comments").comments;
   }
 
-  async comment(
-    file: string,
-    content: string,
-    opts?: CommentOpts
-  ): Promise<string> {
+  async comment(file: string, content: string, opts?: CommentOpts): Promise<string> {
     const args: string[] = ["comment", file, content];
     if (opts?.replyTo) args.push("--reply-to", opts.replyTo);
-    if (opts?.afterLine != null)
-      args.push("--after-line", String(opts.afterLine));
+    if (opts?.afterLine != null) args.push("--after-line", String(opts.afterLine));
     if (opts?.afterComment) args.push("--after-comment", opts.afterComment);
     if (opts?.autoAck) args.push("--auto-ack");
     if (opts?.to) {
@@ -165,10 +152,7 @@ export class RemarginBackend {
     await this.exec(["react", file, id, emoji]);
   }
 
-  async batch(
-    file: string,
-    operations: BatchCommentOp[]
-  ): Promise<string[]> {
+  async batch(file: string, operations: BatchCommentOp[]): Promise<string[]> {
     const ops = operations.map((op) => {
       const obj: Record<string, unknown> = { content: op.content };
       if (op.replyTo) obj["reply_to"] = op.replyTo;
@@ -178,12 +162,7 @@ export class RemarginBackend {
       if (op.to) obj["to"] = op.to;
       return obj;
     });
-    const raw = await this.exec([
-      "batch",
-      file,
-      "--ops",
-      JSON.stringify(ops),
-    ]);
+    const raw = await this.exec(["batch", file, "--ops", JSON.stringify(ops)]);
     const parsed = JSON.parse(raw);
     return parsed.ids as string[];
   }
@@ -202,10 +181,7 @@ export class RemarginBackend {
     return parseEnvelope(raw, QueryEnvelope$Schema, "query").results;
   }
 
-  async search(
-    pattern: string,
-    opts?: SearchOpts
-  ): Promise<SearchMatch[]> {
+  async search(pattern: string, opts?: SearchOpts): Promise<SearchMatch[]> {
     const args: string[] = ["search", pattern];
     if (opts?.path) args.push("--path", opts.path);
     if (opts?.scope) args.push("--scope", opts.scope);
@@ -253,11 +229,7 @@ export class RemarginBackend {
     const identityArgs = skipIdentity ? [] : this.buildIdentityArgs();
     // The CLI parses global flags before the subcommand, so identity/JSON
     // flags must come first.
-    const fullArgs = [
-      ...identityArgs,
-      ...(useJson ? ["--json"] : []),
-      ...args,
-    ];
+    const fullArgs = [...identityArgs, ...(useJson ? ["--json"] : []), ...args];
 
     const cmd = [shellescape(binary), ...fullArgs.map(shellescape)].join(" ");
 
@@ -267,11 +239,7 @@ export class RemarginBackend {
           if (error.killed) {
             reject(new Error(`remargin timed out after ${timeout}ms`));
           } else if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            reject(
-              new Error(
-                `remargin binary not found at "${binary}". Check plugin settings.`
-              )
-            );
+            reject(new Error(`remargin binary not found at "${binary}". Check plugin settings.`));
           } else {
             const detail = stderr.trim() || error.message;
             // Surface the command that failed so users can reproduce it.
@@ -285,10 +253,7 @@ export class RemarginBackend {
   }
 
   private buildIdentityArgs(): string[] {
-    if (
-      this.settings.identityMode === "config" &&
-      this.settings.configFilePath
-    ) {
+    if (this.settings.identityMode === "config" && this.settings.configFilePath) {
       return ["--config", this.settings.configFilePath];
     }
     const args: string[] = [];

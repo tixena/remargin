@@ -1,9 +1,9 @@
-import { useState, useCallback } from "react";
+import { FileText, FolderTree, List, Send } from "lucide-react";
+import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { FileText, FolderTree, List, Send } from "lucide-react";
 
 interface SandboxSectionProps {
   touchedFiles: string[];
@@ -11,11 +11,7 @@ interface SandboxSectionProps {
   onSubmit?: (stagedFiles: string[]) => void;
 }
 
-export function SandboxSection({
-  touchedFiles,
-  onOpenFile,
-  onSubmit,
-}: SandboxSectionProps) {
+export function SandboxSection({ touchedFiles, onOpenFile, onSubmit }: SandboxSectionProps) {
   const [staged, setStaged] = useState<Set<string>>(new Set(touchedFiles));
   const [viewMode, setViewMode] = useState<"flat" | "tree">("tree");
 
@@ -42,11 +38,7 @@ export function SandboxSection({
   }, [touchedFiles, staged, onSubmit]);
 
   if (touchedFiles.length === 0) {
-    return (
-      <div className="px-4 py-3 text-xs text-text-faint">
-        No staged comments.
-      </div>
-    );
+    return <div className="px-4 py-3 text-xs text-text-faint">No staged comments.</div>;
   }
 
   return (
@@ -82,10 +74,7 @@ export function SandboxSection({
       <ScrollArea className="max-h-40">
         <div className="flex flex-col">
           {touchedFiles.map((file) => (
-            <div
-              key={file}
-              className="flex items-center gap-2 px-4 py-1.5 hover:bg-bg-hover"
-            >
+            <div key={file} className="flex items-center gap-2 px-4 py-1.5 hover:bg-bg-hover">
               <Checkbox
                 checked={staged.has(file)}
                 onCheckedChange={() => toggleStaged(file)}

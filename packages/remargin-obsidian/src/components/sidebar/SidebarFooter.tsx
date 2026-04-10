@@ -1,10 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBackend } from "@/hooks/useBackend";
 
 interface SidebarFooterProps {
@@ -12,10 +7,7 @@ interface SidebarFooterProps {
   pendingCount: number;
 }
 
-export function SidebarFooter({
-  commentCount,
-  pendingCount,
-}: SidebarFooterProps) {
+export function SidebarFooter({ commentCount, pendingCount }: SidebarFooterProps) {
   const backend = useBackend();
   const [cliStatus, setCliStatus] = useState<"connected" | "error" | "checking">("checking");
   const [cliVersion, setCliVersion] = useState("");
@@ -64,9 +56,7 @@ export function SidebarFooter({
           </TooltipTrigger>
           <TooltipContent>
             <p className="text-xs">
-              {cliStatus === "connected"
-                ? cliVersion
-                : "Check remargin binary path in settings"}
+              {cliStatus === "connected" ? cliVersion : "Check remargin binary path in settings"}
             </p>
           </TooltipContent>
         </Tooltip>
