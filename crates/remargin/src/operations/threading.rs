@@ -9,10 +9,6 @@ mod tests;
 
 use crate::parser::Comment;
 
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
-
 /// A tree of comment threads.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -30,10 +26,6 @@ pub struct ThreadNode {
     /// The comment at this node.
     pub comment_id: String,
 }
-
-// ---------------------------------------------------------------------------
-// Thread tree building
-// ---------------------------------------------------------------------------
 
 /// Build a thread tree from a list of comments.
 ///
@@ -68,10 +60,6 @@ fn build_node(comment: &Comment, all_comments: &[&Comment]) -> ThreadNode {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Descendant resolution
-// ---------------------------------------------------------------------------
-
 /// Find all descendants of a comment (for cascading operations).
 ///
 /// Returns IDs of all children, grandchildren, etc. in depth-first order.
@@ -91,10 +79,6 @@ pub fn find_descendants(comments: &[&Comment], ancestor_id: &str) -> Vec<String>
 
     result
 }
-
-// ---------------------------------------------------------------------------
-// Thread root resolution
-// ---------------------------------------------------------------------------
 
 /// Resolve the thread root for a new reply.
 ///

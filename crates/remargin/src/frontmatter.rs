@@ -15,16 +15,8 @@ use serde_yaml::{Mapping, Value};
 use crate::config::ResolvedConfig;
 use crate::parser::{Comment, ParsedDocument, Segment};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /// Frontmatter delimiter.
 const FRONTMATTER_DELIMITER: &str = "---";
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Ensure a document has frontmatter. If missing, add it.
 /// If present, merge (add missing user fields, recompute remargin fields).
@@ -126,10 +118,6 @@ pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Frontmatter extraction and writing
-// ---------------------------------------------------------------------------
 
 /// Extract the body text from a document (all body segments concatenated).
 fn extract_body_text(doc: &ParsedDocument) -> String {

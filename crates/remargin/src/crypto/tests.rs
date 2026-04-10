@@ -14,10 +14,6 @@ use crate::crypto::{
 };
 use crate::parser::{AuthorType, Comment};
 
-// ---------------------------------------------------------------------------
-// Test key pair (Ed25519, generated with ssh-keygen, no passphrase)
-// ---------------------------------------------------------------------------
-
 const TEST_PRIVATE_KEY: &str = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -30,11 +26,6 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 
 const TEST_PUBLIC_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+wwXvHwYjjSVOO1PyMrur+yoibLd5o/hmV test@remargin";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Create a minimal comment for testing.
 fn make_comment(content: &str) -> Comment {
     Comment {
         ack: Vec::new(),
@@ -55,24 +46,17 @@ fn make_comment(content: &str) -> Comment {
     }
 }
 
-/// Create a `MockSystem` with the test private key loaded.
 fn system_with_key() -> MockSystem {
     MockSystem::new()
         .with_file(Path::new("/keys/ed25519"), TEST_PRIVATE_KEY.as_bytes())
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Whitespace normalization tests
-// ---------------------------------------------------------------------------
-
-// Test: CRLF is converted to LF.
 #[test]
 fn normalize_crlf_to_lf() {
     assert_eq!(normalize_whitespace("Hello\r\nworld"), "Hello\nworld");
 }
 
-// Test: Trailing whitespace is stripped from each line.
 #[test]
 fn normalize_trailing_whitespace() {
     assert_eq!(
@@ -81,13 +65,11 @@ fn normalize_trailing_whitespace() {
     );
 }
 
-// Test: Leading and trailing newlines are trimmed.
 #[test]
 fn normalize_leading_trailing_newlines() {
     assert_eq!(normalize_whitespace("\n\nHello\n\n"), "Hello");
 }
 
-// Test: Combined normalization.
 #[test]
 fn normalize_combined() {
     assert_eq!(
@@ -96,20 +78,13 @@ fn normalize_combined() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Checksum tests
-// ---------------------------------------------------------------------------
-
-// Test 1: Basic checksum produces consistent sha256 hash.
 #[test]
 fn basic_checksum() {
     let checksum = compute_checksum("Hello world");
     assert!(checksum.starts_with("sha256:"));
-    // Same input always produces same output.
     assert_eq!(checksum, compute_checksum("Hello world"));
 }
 
-// Test 2: Different content produces different checksums.
 #[test]
 fn different_content_different_checksum() {
     let c1 = compute_checksum("Hello");
@@ -117,13 +92,11 @@ fn different_content_different_checksum() {
     assert_ne!(c1, c2);
 }
 
-// Test 3: CRLF vs LF produces same checksum (whitespace normalization).
 #[test]
 fn crlf_vs_lf_same_checksum() {
     assert_eq!(compute_checksum("Hello\r\n"), compute_checksum("Hello\n"));
 }
 
-// Test 4: Trailing whitespace difference produces same checksum.
 #[test]
 fn trailing_whitespace_same_checksum() {
     assert_eq!(
@@ -132,14 +105,12 @@ fn trailing_whitespace_same_checksum() {
     );
 }
 
-// Test 5: verify_checksum returns true for unmodified comment.
 #[test]
 fn verify_checksum_pass() {
     let comment = make_comment("This is a test comment.");
     assert!(verify_checksum(&comment));
 }
 
-// Test 6: verify_checksum returns false for modified content.
 #[test]
 fn verify_checksum_fail() {
     let mut comment = make_comment("Original content");
@@ -147,11 +118,6 @@ fn verify_checksum_fail() {
     assert!(!verify_checksum(&comment));
 }
 
-// ---------------------------------------------------------------------------
-// Reaction checksum tests
-// ---------------------------------------------------------------------------
-
-// Test 9: Reaction checksum changes when a reaction is added.
 #[test]
 fn reaction_checksum_changes_on_add() {
     let mut reactions1: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -166,18 +132,15 @@ fn reaction_checksum_changes_on_add() {
     );
 }
 
-// Test: Adding a reaction does not change the content checksum.
 #[test]
 fn reaction_does_not_affect_content_checksum() {
     let comment = make_comment("Test content");
     let checksum_before = compute_checksum(&comment.content);
 
-    // compute_checksum only looks at content, not reactions.
     let checksum_after = compute_checksum(&comment.content);
     assert_eq!(checksum_before, checksum_after);
 }
 
-// Test: Reaction checksum is deterministic regardless of author order.
 #[test]
 fn reaction_checksum_deterministic_order() {
     let mut reactions: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -186,30 +149,18 @@ fn reaction_checksum_deterministic_order() {
         vec![String::from("bob"), String::from("alice")],
     );
 
-    // Authors are sorted internally, so the checksum is consistent.
     let c1 = compute_reaction_checksum(&reactions);
     let c2 = compute_reaction_checksum(&reactions);
     assert_eq!(c1, c2);
 }
 
-// ---------------------------------------------------------------------------
-// Ack independence
-// ---------------------------------------------------------------------------
-
-// Test 10: Adding an ack does NOT change the content checksum.
 #[test]
 fn ack_does_not_affect_content_checksum() {
     let comment = make_comment("Test content");
     let checksum = compute_checksum(&comment.content);
-    // Ack changes don't touch content, so the checksum stays the same.
     assert_eq!(checksum, compute_checksum(&comment.content));
 }
 
-// ---------------------------------------------------------------------------
-// Signature tests
-// ---------------------------------------------------------------------------
-
-// Test: Signature round-trip -- sign with private key, verify with public.
 #[test]
 fn signature_round_trip() {
     let system = system_with_key();
@@ -222,7 +173,6 @@ fn signature_round_trip() {
     assert!(result, "signature verification should succeed");
 }
 
-// Test: Signature verification fails when content is tampered.
 #[test]
 fn signature_tamper_content() {
     let system = system_with_key();
@@ -231,14 +181,12 @@ fn signature_tamper_content() {
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
-    // Tamper with the content.
     comment.content = String::from("Tampered content");
 
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(!result, "verification should fail after content tampering");
 }
 
-// Test: Signature verification fails when metadata (author) is tampered.
 #[test]
 fn signature_tamper_author() {
     let system = system_with_key();
@@ -247,14 +195,12 @@ fn signature_tamper_author() {
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
-    // Tamper with the author.
     comment.author = String::from("mallory");
 
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(!result, "verification should fail after author tampering");
 }
 
-// Test: Key loading uses os-shim System.
 #[test]
 fn key_loading_via_system() {
     let system = MockSystem::new()
@@ -267,7 +213,6 @@ fn key_loading_via_system() {
     assert!(result.unwrap().starts_with("ed25519:"));
 }
 
-// Test: Verify fails for comment with no signature.
 #[test]
 fn verify_no_signature() {
     let comment = make_comment("Test");
@@ -278,7 +223,6 @@ fn verify_no_signature() {
     );
 }
 
-// Test: Signature with all optional fields populated.
 #[test]
 fn signature_with_all_fields() {
     let system = system_with_key();

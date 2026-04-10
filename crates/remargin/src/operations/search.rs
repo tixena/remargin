@@ -21,10 +21,6 @@ use tixschema::model_schema;
 use crate::document::allowlist;
 use crate::parser::{self, Segment};
 
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
-
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]
 enum LineAttribution {
@@ -104,10 +100,6 @@ pub enum SearchScope {
     Comments,
 }
 
-// ---------------------------------------------------------------------------
-// Implementations
-// ---------------------------------------------------------------------------
-
 impl Matcher {
     fn is_match(&self, text: &str) -> bool {
         self.regex.is_match(text)
@@ -155,10 +147,6 @@ impl SearchOptions {
         self
     }
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Search across markdown documents in a directory tree.
 ///
@@ -216,10 +204,6 @@ pub fn search(
 
     Ok(results)
 }
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
 /// Build a `Matcher` from the search options.
 fn build_matcher(options: &SearchOptions) -> Result<Matcher> {

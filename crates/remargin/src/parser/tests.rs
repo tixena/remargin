@@ -6,10 +6,6 @@ use os_shim::mock::MockSystem;
 
 use super::{AuthorType, LegacyRole, Segment, parse, parse_file};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Build a minimal valid remargin block.
 fn minimal_block(id: &str) -> String {
     format!(
@@ -41,10 +37,6 @@ fn block_with_content(id: &str, content: &str) -> String {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Simple comment
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_simple_comment() {
     let doc = minimal_block("abc");
@@ -57,10 +49,6 @@ fn test_simple_comment() {
     assert_eq!(comments[0].checksum, "sha256:abc123");
     assert_eq!(comments[0].fence_depth, 3);
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Multiple comments with body text
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_multiple_comments_with_body() {
@@ -86,10 +74,6 @@ fn test_multiple_comments_with_body() {
     assert!(body_count >= 3, "expected at least 3 body segments");
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Required fields only (optional fields default)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_required_fields_only() {
     let doc = minimal_block("xyz");
@@ -103,10 +87,6 @@ fn test_required_fields_only() {
     assert!(c.ack.is_empty());
     assert!(c.reactions.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: All fields present
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_all_fields_present() {
@@ -154,10 +134,6 @@ This is the comment body.
     assert_eq!(c.content, "This is the comment body.");
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: Empty content
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_empty_content() {
     let doc = minimal_block("empty");
@@ -165,10 +141,6 @@ fn test_empty_content() {
     let c = parsed.comments()[0];
     assert!(c.content.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Legacy user comment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_legacy_user_comment() {
@@ -185,10 +157,6 @@ This is legacy feedback.
     assert_eq!(legacy[0].content, "This is legacy feedback.\n");
 }
 
-// ---------------------------------------------------------------------------
-// Test 7: Legacy done marker
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_legacy_done_marker() {
     let doc = "\
@@ -202,10 +170,6 @@ Addressed in previous revision.
     assert_eq!(legacy[0].role, LegacyRole::User);
     assert_eq!(legacy[0].done_date.as_deref(), Some("2026-04-05"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 7b: Legacy agent comment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_legacy_agent_comment() {
@@ -221,10 +185,6 @@ This is an agent response.
     assert!(legacy[0].done_date.is_none());
 }
 
-// ---------------------------------------------------------------------------
-// Test 8: Mixed old and new
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_mixed_old_and_new() {
     let doc = format!(
@@ -235,10 +195,6 @@ fn test_mixed_old_and_new() {
     assert_eq!(parsed.comments().len(), 1);
     assert_eq!(parsed.legacy_comments().len(), 1);
 }
-
-// ---------------------------------------------------------------------------
-// Test 9: Round-trip fidelity
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_round_trip_simple() {
@@ -254,10 +210,6 @@ fn test_round_trip_simple() {
     assert_eq!(reparsed.comments()[0].id, "rt1");
     assert_eq!(reparsed.comments()[0].content, "Body of the comment.");
 }
-
-// ---------------------------------------------------------------------------
-// Test 10: Malformed YAML
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_malformed_yaml_error() {
@@ -275,10 +227,6 @@ this is not: [valid: yaml: at: all
         "expected descriptive error, got: {err_msg}"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Test 11: 4-backtick wrapper containing 3-backtick blocks
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_four_backtick_wrapper() {
@@ -308,10 +256,6 @@ End of comment.
     assert!(c.content.contains("print(\"hello\")"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 11a: 6-backtick wrapper with 5-backtick content
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_six_backtick_wrapper() {
     let doc = "\
@@ -340,20 +284,12 @@ Done quoting.
     assert!(comments[0].content.contains("`````remargin"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 11b: 3-backtick wrapper (minimal)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_three_backtick_minimal() {
     let doc = minimal_block("min3");
     let parsed = parse(&doc).unwrap();
     assert_eq!(parsed.comments()[0].fence_depth, 3);
 }
-
-// ---------------------------------------------------------------------------
-// Test 11c: Same-depth not confused
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_same_depth_not_confused() {
@@ -384,10 +320,6 @@ More text.
     assert!(c.content.contains("some code"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 12: No comments (plain markdown)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_no_comments() {
     let doc = "# Just a Title\n\nSome text.\n\n```python\nprint('hello')\n```\n";
@@ -395,10 +327,6 @@ fn test_no_comments() {
     assert!(parsed.comments().is_empty());
     assert!(parsed.legacy_comments().is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 13: File I/O with MockSystem
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_parse_file_with_mock_system() {
@@ -411,10 +339,6 @@ fn test_parse_file_with_mock_system() {
     assert_eq!(parsed.comments()[0].id, "file1");
 }
 
-// ---------------------------------------------------------------------------
-// Test: comment_ids helper
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_comment_ids() {
     let doc = format!("{}{}", minimal_block("aa1"), minimal_block("bb2"));
@@ -425,10 +349,6 @@ fn test_comment_ids() {
     assert_eq!(ids.len(), 2);
 }
 
-// ---------------------------------------------------------------------------
-// Test: find_comment helper
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_find_comment() {
     let doc = format!("{}{}", minimal_block("fc1"), minimal_block("fc2"));
@@ -437,10 +357,6 @@ fn test_find_comment() {
     assert!(parsed.find_comment("fc2").is_some());
     assert!(parsed.find_comment("nonexistent").is_none());
 }
-
-// ---------------------------------------------------------------------------
-// Test: Legacy singular form ("user comment" without "s")
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_legacy_singular_form() {
@@ -454,10 +370,6 @@ Singular form feedback.
     assert_eq!(legacy.len(), 1);
     assert_eq!(legacy[0].role, LegacyRole::User);
 }
-
-// ---------------------------------------------------------------------------
-// Test: Content with trailing newlines preserved
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_content_multiline() {
@@ -480,20 +392,12 @@ Line three after blank.
     assert_eq!(c.content, "Line one.\n\nLine three after blank.");
 }
 
-// ---------------------------------------------------------------------------
-// Test: parse_file error on missing file
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_parse_file_missing() {
     let system = MockSystem::new();
     let result = parse_file(&system, Path::new("/nonexistent.md"));
     result.unwrap_err();
 }
-
-// ---------------------------------------------------------------------------
-// Test: Line number for comment at start of file
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_line_number_at_start() {
@@ -503,10 +407,6 @@ fn test_line_number_at_start() {
     assert_eq!(c.line, 1, "comment at start of file should be line 1");
 }
 
-// ---------------------------------------------------------------------------
-// Test: Line number after body text
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_line_number_after_body() {
     // "# Title\n\nBody text.\n\n" = 4 lines, comment starts on line 5
@@ -515,10 +415,6 @@ fn test_line_number_after_body() {
     let c = parsed.comments()[0];
     assert_eq!(c.line, 5, "comment after 4 lines of body should be line 5");
 }
-
-// ---------------------------------------------------------------------------
-// Test: Line numbers for multiple comments
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_line_numbers_multiple_comments() {
@@ -536,10 +432,6 @@ fn test_line_numbers_multiple_comments() {
     assert_eq!(comments[1].line, 11);
 }
 
-// ---------------------------------------------------------------------------
-// Test: Legacy comment line number
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_legacy_comment_line_number() {
     let doc = "# Title\n\nSome text.\n\n```user comments\nOld feedback.\n```\n";
@@ -549,10 +441,6 @@ fn test_legacy_comment_line_number() {
     // "# Title\n\nSome text.\n\n" = 4 lines, legacy starts at line 5
     assert_eq!(legacy[0].line, 5);
 }
-
-// ---------------------------------------------------------------------------
-// Test: Line number preserved through round-trip
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_line_number_round_trip() {
@@ -573,10 +461,6 @@ fn test_line_number_round_trip() {
         "line number should be recomputed identically after round-trip"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Test: JSON shape matches the generated tixschema for Comment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_comment_json_shape_matches_schema() {

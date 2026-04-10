@@ -9,10 +9,6 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::operations::migrate::migrate;
 use crate::parser::{self, AuthorType};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn open_config() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -25,10 +21,6 @@ fn open_config() -> ResolvedConfig {
         unrestricted: false,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 1: Migrate user comment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn migrate_user_comment() {
@@ -58,10 +50,6 @@ This is feedback from the user.
     assert_eq!(cm.author_type, AuthorType::Human);
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: Migrate agent comment with done marker
-// ---------------------------------------------------------------------------
-
 #[test]
 fn migrate_agent_with_done_marker() {
     let doc = "\
@@ -89,10 +77,6 @@ Agent response.
     assert_eq!(cm.ack[0].author, "legacy-user");
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Dry run
-// ---------------------------------------------------------------------------
-
 #[test]
 fn dry_run_no_changes() {
     let doc = "\
@@ -115,10 +99,6 @@ Feedback.
     assert_eq!(parsed.legacy_comments().len(), 1);
 }
 
-// ---------------------------------------------------------------------------
-// Test 4: No legacy comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_legacy_comments() {
     let doc = "# Just plain markdown\n";
@@ -130,10 +110,6 @@ fn no_legacy_comments() {
     let results = migrate(&system, Path::new("/docs/test.md"), &config, false, false).unwrap();
     assert!(results.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Backup created
-// ---------------------------------------------------------------------------
 
 #[test]
 fn backup_created() {

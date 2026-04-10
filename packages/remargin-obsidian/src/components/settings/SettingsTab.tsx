@@ -61,7 +61,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
   return (
     <div className="flex flex-col h-full bg-bg-primary rounded-lg">
-      {/* Header */}
       <div className="flex flex-col gap-1 p-5 px-6 border-b border-bg-border">
         <h2 className="text-xl font-semibold text-text-normal font-sans">Remargin</h2>
         <p className="text-xs text-text-muted font-sans">
@@ -69,9 +68,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
         </p>
       </div>
 
-      {/* Body */}
       <div className="flex flex-col gap-5 p-5 px-6 overflow-y-auto">
-        {/* Remargin binary path */}
         <SettingsField
           label="Remargin binary path"
           description="Path to the remargin CLI binary. Use an absolute path or ensure it's in your PATH."
@@ -83,7 +80,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
           />
         </SettingsField>
 
-        {/* Claude binary path */}
         <SettingsField
           label="Claude binary path"
           description="Path to the claude CLI binary for AI-assisted commenting."
@@ -95,7 +91,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
           />
         </SettingsField>
 
-        {/* Working directory */}
         <SettingsField
           label="Working directory"
           description="Base directory for remargin operations. Leave empty to use vault root."
@@ -108,7 +103,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
           />
         </SettingsField>
 
-        {/* Sidebar side */}
         <SettingsField
           label="Sidebar side"
           description="Initial dock side when opening the Remargin sidebar. Applies the next time the view is opened; you can always drag it to the other side manually."
@@ -138,7 +132,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <Separator />
 
-        {/* Identity configuration */}
         <SettingsField
           label="Identity configuration"
           description="Your personal identity lives in ~/.remargin.yaml. The vault-root .remargin.yaml is for the reply agent, not you — don't point this at that file. Use Manual to type author and key path directly."
@@ -189,7 +182,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
           )}
         </SettingsField>
 
-        {/* Remargin mode */}
         <SettingsField
           label="Remargin mode"
           description="Controls comment integrity enforcement level."
@@ -211,7 +203,6 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <Separator />
 
-        {/* Test CLI */}
         <div className="flex items-center gap-3">
           <Button
             onClick={handleTestCli}

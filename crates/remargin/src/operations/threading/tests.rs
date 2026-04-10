@@ -9,10 +9,6 @@ use chrono::DateTime;
 use crate::operations::threading::{build_thread_tree, find_descendants, resolve_thread_root};
 use crate::parser::{AuthorType, Comment};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comment {
     Comment {
         ack: Vec::new(),
@@ -33,10 +29,6 @@ fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comme
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Reply to root -- thread = parent ID
-// ---------------------------------------------------------------------------
-
 #[test]
 fn reply_to_root_thread_is_parent_id() {
     let root = make_comment("root", None, None);
@@ -45,10 +37,6 @@ fn reply_to_root_thread_is_parent_id() {
     let thread = resolve_thread_root(&comments, "root");
     assert_eq!(thread, "root");
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Reply to reply -- thread inherited
-// ---------------------------------------------------------------------------
 
 #[test]
 fn reply_to_reply_inherits_thread() {
@@ -60,10 +48,6 @@ fn reply_to_reply_inherits_thread() {
     assert_eq!(thread, "root"); // Inherited from child's thread field
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Dangling parent -- no crash
-// ---------------------------------------------------------------------------
-
 #[test]
 fn dangling_parent_no_crash() {
     let comments: Vec<&Comment> = Vec::new();
@@ -71,10 +55,6 @@ fn dangling_parent_no_crash() {
     let thread = resolve_thread_root(&comments, "nonexistent");
     assert_eq!(thread, "nonexistent"); // Falls back to the reply_to value
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: Thread tree -- 5 comments in 2 threads
-// ---------------------------------------------------------------------------
 
 #[test]
 fn thread_tree_two_threads() {
@@ -100,10 +80,6 @@ fn thread_tree_two_threads() {
     assert_eq!(tree.roots[1].children.len(), 1);
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: Find descendants -- 3-level chain
-// ---------------------------------------------------------------------------
-
 #[test]
 fn find_descendants_three_levels() {
     let root = make_comment("root", None, None);
@@ -117,10 +93,6 @@ fn find_descendants_three_levels() {
     assert!(descendants.contains(&String::from("child")));
     assert!(descendants.contains(&String::from("grandchild")));
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: No replies -- all are roots
-// ---------------------------------------------------------------------------
 
 #[test]
 fn no_replies_all_roots() {

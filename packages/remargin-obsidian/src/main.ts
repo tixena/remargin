@@ -5,8 +5,6 @@ import { RemarginBackend } from "./backend";
 import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
 import { BackendContext } from "./hooks/useBackend";
-// Editor extensions disabled — see rem-359. Re-enable after fixing the
-// visual regression they cause in Live Preview and reading mode.
 // import { commentWidgetPlugin } from "./editor/commentWidget";
 // import { remarginPostProcessor } from "./editor/readingModeProcessor";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
@@ -93,15 +91,11 @@ export default class RemarginPlugin extends Plugin {
 
     this.addSettingTab(new RemarginSettingTab(this));
 
-    // Editor extensions (CM6 widget + reading-mode processor) are
-    // disabled — see rem-359. They caused visual regressions in the
-    // markdown editor. Re-enable once rewritten.
     // this.registerEditorExtension([commentWidgetPlugin]);
     // this.registerMarkdownPostProcessor(remarginPostProcessor);
 
     this.registerView(VIEW_TYPE_REMARGIN, (leaf) => new RemarginView(leaf, this));
 
-    // Commands
     this.addCommand({
       id: "open-sidebar",
       name: "Open sidebar",
@@ -116,7 +110,6 @@ export default class RemarginPlugin extends Plugin {
         if (!file) return;
         const line = editor.getCursor().line + 1;
         this.activateView();
-        // TODO: pass line context to sidebar prompt section
         console.log(`New comment at line ${line} in ${file.path}`);
       },
     });
@@ -125,7 +118,6 @@ export default class RemarginPlugin extends Plugin {
       id: "refresh",
       name: "Refresh comments",
       callback: () => {
-        // Trigger a refresh by re-activating the view
         this.activateView();
       },
     });
@@ -137,7 +129,6 @@ export default class RemarginPlugin extends Plugin {
         const file = this.app.workspace.getActiveFile();
         if (!file) return;
         const line = editor.getCursor().line + 1;
-        // Find the comment block at this line
         const { parseRemarginBlocks } = await import("./parser");
         const text = editor.getValue();
         const blocks = parseRemarginBlocks(text);

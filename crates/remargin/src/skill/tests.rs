@@ -7,10 +7,6 @@ use os_shim::mock::MockSystem;
 
 use crate::skill::{self, SkillStatus};
 
-// ---------------------------------------------------------------------------
-// Test 1: Install project-local
-// ---------------------------------------------------------------------------
-
 #[test]
 fn install_project() {
     let system = MockSystem::new()
@@ -28,10 +24,6 @@ fn install_project() {
         .unwrap();
     assert!(content.contains("remargin"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Install global
-// ---------------------------------------------------------------------------
 
 #[test]
 fn install_global() {
@@ -52,10 +44,6 @@ fn install_global() {
         .unwrap();
     assert!(content.contains("remargin"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 3: Uninstall
-// ---------------------------------------------------------------------------
 
 #[test]
 fn uninstall_removes_dir() {
@@ -78,10 +66,6 @@ fn uninstall_removes_dir() {
     assert!(!exists);
 }
 
-// ---------------------------------------------------------------------------
-// Test 4: Test not installed
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_not_installed() {
     let system = MockSystem::new()
@@ -93,10 +77,6 @@ fn test_not_installed() {
     let status = skill::test_status(&system, false).unwrap();
     assert_eq!(status, SkillStatus::NotInstalled);
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Test outdated
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_outdated() {
@@ -120,10 +100,6 @@ fn test_outdated() {
     let status = skill::test_status(&system, false).unwrap();
     assert_eq!(status, SkillStatus::Outdated);
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Test up to date
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_up_to_date() {

@@ -6,10 +6,6 @@ use os_shim::mock::MockSystem;
 
 use super::{MatchLocation, SearchOptions, SearchScope, search};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Build minimal search options for a literal pattern.
 fn literal_opts(pattern: &str) -> SearchOptions {
     SearchOptions {
@@ -37,10 +33,6 @@ fn remargin_block(id: &str, content: &str) -> String {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Literal match in body text
-// ---------------------------------------------------------------------------
-
 #[test]
 fn literal_match_in_body() {
     let base = Path::new("/docs");
@@ -58,10 +50,6 @@ fn literal_match_in_body() {
     assert!(results[0].text.contains("notification"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: Literal match in comment
-// ---------------------------------------------------------------------------
-
 #[test]
 fn literal_match_in_comment() {
     let base = Path::new("/docs");
@@ -78,10 +66,6 @@ fn literal_match_in_comment() {
     assert_eq!(results[0].location, MatchLocation::Comment);
     assert_eq!(results[0].comment_id.as_deref(), Some("abc"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 3: Scope body only
-// ---------------------------------------------------------------------------
 
 #[test]
 fn scope_body_only() {
@@ -102,10 +86,6 @@ fn scope_body_only() {
     assert_eq!(results[0].location, MatchLocation::Body);
 }
 
-// ---------------------------------------------------------------------------
-// Test 4: Scope comments only
-// ---------------------------------------------------------------------------
-
 #[test]
 fn scope_comments_only() {
     let base = Path::new("/docs");
@@ -124,10 +104,6 @@ fn scope_comments_only() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].location, MatchLocation::Comment);
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Regex pattern
-// ---------------------------------------------------------------------------
 
 #[test]
 fn regex_pattern() {
@@ -151,10 +127,6 @@ fn regex_pattern() {
     assert_eq!(results.len(), 2);
 }
 
-// ---------------------------------------------------------------------------
-// Test 6: Case insensitive
-// ---------------------------------------------------------------------------
-
 #[test]
 fn case_insensitive() {
     let base = Path::new("/docs");
@@ -171,10 +143,6 @@ fn case_insensitive() {
     let results = search(&system, base, base, &opts).unwrap();
     assert_eq!(results.len(), 2);
 }
-
-// ---------------------------------------------------------------------------
-// Test 7: Context lines
-// ---------------------------------------------------------------------------
 
 #[test]
 fn context_lines() {
@@ -195,10 +163,6 @@ fn context_lines() {
     assert_eq!(results[0].after, vec!["line 4"]);
 }
 
-// ---------------------------------------------------------------------------
-// Test 8: No matches
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_matches() {
     let base = Path::new("/docs");
@@ -209,10 +173,6 @@ fn no_matches() {
     let results = search(&system, base, base, &literal_opts("nonexistent")).unwrap();
     assert!(results.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 9: Non-markdown files skipped
-// ---------------------------------------------------------------------------
 
 #[test]
 fn non_markdown_skipped() {
@@ -228,10 +188,6 @@ fn non_markdown_skipped() {
     assert_eq!(results[0].path.to_str().unwrap(), "test.md");
 }
 
-// ---------------------------------------------------------------------------
-// Test 10: Empty pattern rejected
-// ---------------------------------------------------------------------------
-
 #[test]
 fn empty_pattern_rejected() {
     let base = Path::new("/docs");
@@ -240,10 +196,6 @@ fn empty_pattern_rejected() {
     let result = search(&system, base, base, &literal_opts(""));
     result.unwrap_err();
 }
-
-// ---------------------------------------------------------------------------
-// Test 11: Multiple files
-// ---------------------------------------------------------------------------
 
 #[test]
 fn multiple_files() {
@@ -257,10 +209,6 @@ fn multiple_files() {
     let results = search(&system, base, base, &literal_opts("hello")).unwrap();
     assert_eq!(results.len(), 2);
 }
-
-// ---------------------------------------------------------------------------
-// Test: JSON shape of SearchMatch matches the generated tixschema
-// ---------------------------------------------------------------------------
 
 #[test]
 fn search_match_json_shape_matches_schema() {

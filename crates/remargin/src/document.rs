@@ -1,7 +1,6 @@
 //! Document access layer: ls, get, write, rm, metadata.
 //!
-//! Agents never touch files directly. They use these functions to interact
-//! with the filesystem through path sandboxing, file type allowlisting,
+//! All filesystem access goes through path sandboxing, file type allowlisting,
 //! and dotfile hiding.
 
 pub mod allowlist;
@@ -24,22 +23,12 @@ use crate::config::ResolvedConfig;
 use crate::frontmatter;
 use crate::parser;
 
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
-
 /// A single entry from a directory listing.
-///
-/// Serializes to JSON that matches the `ListEntry` tixschema: `path` is
-/// rendered as a string and all `Option` fields are skipped when `None`
-/// so the generated Zod `strictObject` schema accepts them as `undefined`.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 #[model_schema]
 pub struct ListEntry {
-    /// Whether this entry is a directory.
     pub is_dir: bool,
-    /// Relative path from the base directory.
     pub path: PathBuf,
     /// Only populated for markdown files with remargin comments.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,7 +36,7 @@ pub struct ListEntry {
     /// Only populated for markdown files with remargin comments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remargin_pending: Option<u32>,
-    /// File size in bytes (None for directories).
+    /// `None` for directories.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
 }
@@ -56,9 +45,7 @@ pub struct ListEntry {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RmResult {
-    /// Whether the file existed before removal.
     pub existed: bool,
-    /// The path that was (or would have been) deleted.
     pub path: PathBuf,
 }
 
@@ -66,15 +53,10 @@ pub struct RmResult {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct DocumentMetadata {
-    /// Number of remargin comments in the document.
     pub comment_count: usize,
-    /// Parsed frontmatter (if present).
     pub frontmatter: Option<serde_yaml::Value>,
-    /// Most recent activity timestamp.
     pub last_activity: Option<String>,
-    /// Total line count.
     pub line_count: usize,
-    /// Number of comments with no ack entries.
     pub pending_count: usize,
     /// Unique recipients on unacked comments.
     pub pending_for: Vec<String>,
@@ -84,30 +66,27 @@ pub struct DocumentMetadata {
 #[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct WriteOptions {
-    /// Content is base64-encoded binary data (implies `raw`).
+    /// Base64-encoded binary data; implies `raw`.
     pub binary: bool,
-    /// Create a new file (parent dir must exist, file must not).
+    /// Parent dir must exist, file must not.
     pub create: bool,
-    /// Write content verbatim (skip frontmatter/comment management).
+    /// Skip frontmatter/comment management.
     pub raw: bool,
 }
 
 impl WriteOptions {
-    /// Set the `binary` flag.
     #[must_use]
     pub const fn binary(mut self, value: bool) -> Self {
         self.binary = value;
         self
     }
 
-    /// Set the `create` flag.
     #[must_use]
     pub const fn create(mut self, value: bool) -> Self {
         self.create = value;
         self
     }
 
-    /// Create default write options.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -117,17 +96,12 @@ impl WriteOptions {
         }
     }
 
-    /// Set the `raw` flag.
     #[must_use]
     pub const fn raw(mut self, value: bool) -> Self {
         self.raw = value;
         self
     }
 }
-
-// ---------------------------------------------------------------------------
-// ls
-// ---------------------------------------------------------------------------
 
 /// List files and directories at the given path.
 ///
@@ -160,7 +134,6 @@ pub fn ls(
             continue;
         };
 
-        // Check ignore patterns.
         if ignore_set.contains(filename) {
             continue;
         }
@@ -177,7 +150,6 @@ pub fn ls(
             system.metadata(entry_path).ok().map(|m| m.len)
         };
 
-        // For markdown files, try to get remargin metadata.
         let has_md_extension = Path::new(filename)
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
@@ -187,7 +159,6 @@ pub fn ls(
             (None, None)
         };
 
-        // Make path relative to resolved dir.
         let relative = entry_path
             .strip_prefix(&resolved)
             .unwrap_or(entry_path)
@@ -205,12 +176,6 @@ pub fn ls(
     Ok(result)
 }
 
-// ---------------------------------------------------------------------------
-// get
-// ---------------------------------------------------------------------------
-
-/// Read a file's contents.
-///
 /// Returns an error for dotfiles, disallowed extensions, and paths outside
 /// the sandbox.
 ///
@@ -272,8 +237,6 @@ pub fn get(
     }
 }
 
-/// Format lines with right-aligned line numbers and a pipe separator.
-///
 /// `start_num` is the 1-indexed line number of the first line in the slice.
 fn format_with_line_numbers(lines: &[&str], start_num: usize) -> String {
     if lines.is_empty() {
@@ -289,14 +252,8 @@ fn format_with_line_numbers(lines: &[&str], start_num: usize) -> String {
         .join("\n")
 }
 
-// ---------------------------------------------------------------------------
-// rm
-// ---------------------------------------------------------------------------
-
-/// Remove a file from the managed document tree.
-///
-/// The operation is **idempotent**: deleting a file that does not exist
-/// returns success with `existed: false`.
+/// Idempotent: deleting a file that does not exist returns success with
+/// `existed: false`.
 ///
 /// # Errors
 ///
@@ -334,10 +291,6 @@ pub fn rm(
     })
 }
 
-// ---------------------------------------------------------------------------
-// write
-// ---------------------------------------------------------------------------
-
 /// Write document contents with comment preservation enforcement.
 ///
 /// The payload must include all existing comment blocks with their original
@@ -369,12 +322,10 @@ pub fn write(
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
     let raw = opts.raw || opts.binary;
 
-    // Binary mode is not supported for markdown files.
     if opts.binary && is_md {
         bail!("binary mode is not supported for markdown files");
     }
 
-    // Raw mode is not supported for markdown files.
     if opts.raw && is_md {
         bail!("raw mode is not supported for markdown files");
     }
@@ -397,7 +348,6 @@ pub fn write(
         bail!("file not visible: {}", path.display());
     }
 
-    // Binary mode: decode base64 and write raw bytes.
     if opts.binary {
         let bytes = BASE64_STANDARD
             .decode(content)
@@ -408,7 +358,6 @@ pub fn write(
         return Ok(());
     }
 
-    // Raw mode: write content exactly as provided, no frontmatter or comments.
     if raw {
         system
             .write(&resolved, content.as_bytes())
@@ -416,7 +365,6 @@ pub fn write(
         return Ok(());
     }
 
-    // Parse the incoming content.
     let new_doc = parser::parse(content).context("parsing incoming content")?;
 
     // Comment preservation: only check when overwriting an existing file.
@@ -425,7 +373,6 @@ pub fn write(
         if let Ok(old_content) = existing_content {
             let old_doc = parser::parse(&old_content).context("parsing existing document")?;
 
-            // Check comment preservation: all original comment IDs must be present.
             let old_ids: HashSet<&str> = old_doc.comment_ids();
             let new_ids: HashSet<&str> = new_doc.comment_ids();
 
@@ -441,7 +388,6 @@ pub fn write(
                 }
             }
 
-            // Verify checksums match for existing comments.
             for old_comment in old_doc.comments() {
                 if let Some(new_comment) = new_doc.find_comment(&old_comment.id)
                     && new_comment.checksum != old_comment.checksum
@@ -455,7 +401,6 @@ pub fn write(
         }
     }
 
-    // Update frontmatter if needed.
     let mut final_doc = new_doc;
     frontmatter::ensure_frontmatter(&mut final_doc, config)?;
 
@@ -467,12 +412,6 @@ pub fn write(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// metadata
-// ---------------------------------------------------------------------------
-
-/// Get metadata for a document.
-///
 /// # Errors
 ///
 /// Returns an error if:
@@ -519,7 +458,6 @@ pub fn metadata(
         .max()
         .map(|ts| ts.to_rfc3339());
 
-    // Parse frontmatter.
     let fm = extract_frontmatter(&content);
 
     Ok(DocumentMetadata {
@@ -532,11 +470,6 @@ pub fn metadata(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Extract YAML frontmatter from content (returns None if not present).
 fn extract_frontmatter(content: &str) -> Option<serde_yaml::Value> {
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") {
@@ -556,7 +489,6 @@ fn extract_frontmatter(content: &str) -> Option<serde_yaml::Value> {
     serde_yaml::from_str(&yaml_str).ok()
 }
 
-/// Try to get remargin metadata for a markdown file.
 fn get_remargin_metadata(system: &dyn System, path: &Path) -> (Option<u32>, Option<String>) {
     let Ok(content) = system.read_to_string(path) else {
         return (None, None);

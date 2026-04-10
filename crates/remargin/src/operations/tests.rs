@@ -12,10 +12,6 @@ use crate::operations::{
 use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// A minimal valid remargin document for testing.
 const MINIMAL_DOC: &str = "\
 ---
@@ -133,10 +129,6 @@ fn system_with_doc(content: &str) -> MockSystem {
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Create simple comment
-// ---------------------------------------------------------------------------
-
 #[test]
 fn create_simple_comment() {
     let system = system_with_doc(MINIMAL_DOC);
@@ -167,10 +159,6 @@ fn create_simple_comment() {
     assert_eq!(comments[0].content, "This is a new comment.");
     assert!(comments[0].checksum.starts_with("sha256:"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Create with attachment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn create_with_attachment() {
@@ -207,10 +195,6 @@ fn create_with_attachment() {
     assert!(cm.attachments[0].contains("screenshot.png"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 4: Create reply -- thread auto-populated
-// ---------------------------------------------------------------------------
-
 #[test]
 fn create_reply_auto_thread() {
     let system = system_with_doc(&doc_with_comment());
@@ -239,10 +223,6 @@ fn create_reply_auto_thread() {
     assert_eq!(reply.thread.as_deref(), Some("abc"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: Ack single
-// ---------------------------------------------------------------------------
-
 #[test]
 fn ack_single_comment() {
     let system = system_with_doc(&doc_with_comment());
@@ -256,10 +236,6 @@ fn ack_single_comment() {
     assert_eq!(cm.ack.len(), 1);
     assert_eq!(cm.ack[0].author, "eduardo");
 }
-
-// ---------------------------------------------------------------------------
-// Test 7: React add
-// ---------------------------------------------------------------------------
 
 #[test]
 fn react_add_emoji() {
@@ -282,10 +258,6 @@ fn react_add_emoji() {
     assert!(cm.reactions.contains_key("thumbsup"));
     assert!(cm.reactions["thumbsup"].contains(&String::from("eduardo")));
 }
-
-// ---------------------------------------------------------------------------
-// Test 8: React remove
-// ---------------------------------------------------------------------------
 
 #[test]
 fn react_remove_emoji() {
@@ -333,10 +305,6 @@ Content.
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 10: Delete simple
-// ---------------------------------------------------------------------------
-
 #[test]
 fn delete_simple_comment() {
     let system = system_with_doc(&doc_with_comment());
@@ -348,10 +316,6 @@ fn delete_simple_comment() {
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 13: Edit content -- checksum recalculated, ack cleared
-// ---------------------------------------------------------------------------
 
 #[test]
 fn edit_content_recomputes_checksum() {
@@ -396,10 +360,6 @@ Original content.
     assert!(cm.ack.is_empty(), "ack should be cleared after edit");
 }
 
-// ---------------------------------------------------------------------------
-// Test 14: Edit cascade -- ack cleared on edited comment and children
-// ---------------------------------------------------------------------------
-
 #[test]
 fn edit_cascade_clears_acks() {
     let system = system_with_doc(&doc_with_thread());
@@ -433,10 +393,6 @@ fn edit_cascade_clears_acks() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 16: Preservation invariant
-// ---------------------------------------------------------------------------
-
 #[test]
 fn preservation_invariant() {
     let system = system_with_doc(&doc_with_comment());
@@ -467,10 +423,6 @@ fn preservation_invariant() {
     // Original comment still present.
     assert!(doc.find_comment("abc").is_some());
 }
-
-// ---------------------------------------------------------------------------
-// Delete whitespace normalization tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn delete_restores_original_whitespace() {
@@ -778,10 +730,6 @@ Some body text.
     );
 }
 
-// ---------------------------------------------------------------------------
-// Delete collapse unit tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn delete_collapses_adjacent_body_segments() {
     use crate::parser::{ParsedDocument, Segment};
@@ -850,10 +798,6 @@ A comment at the end.
     );
 }
 
-// ---------------------------------------------------------------------------
-// Error cases
-// ---------------------------------------------------------------------------
-
 #[test]
 fn ack_nonexistent_comment() {
     let system = system_with_doc(&doc_with_comment());
@@ -896,10 +840,6 @@ fn edit_nonexistent_comment() {
     );
     assert!(result.is_err());
 }
-
-// ---------------------------------------------------------------------------
-// Auto-ack tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn auto_ack_on_reply() {
@@ -1042,10 +982,6 @@ fn auto_ack_without_reply_to_no_file_modification() {
 // Reply-to auto-populate `to` tests (rem-3nm)
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Test: reply auto-populates `to` from parent author
-// ---------------------------------------------------------------------------
-
 #[test]
 fn reply_auto_populates_to() {
     let system = system_with_doc(&doc_with_comment());
@@ -1078,10 +1014,6 @@ fn reply_auto_populates_to() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test: reply with explicit --to is NOT overridden
-// ---------------------------------------------------------------------------
-
 #[test]
 fn reply_explicit_to_not_overridden() {
     let system = system_with_doc(&doc_with_comment());
@@ -1113,10 +1045,6 @@ fn reply_explicit_to_not_overridden() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test: root comment (no reply_to) with no --to stays empty
-// ---------------------------------------------------------------------------
-
 #[test]
 fn root_comment_no_auto_to() {
     let system = system_with_doc(MINIMAL_DOC);
@@ -1143,10 +1071,6 @@ fn root_comment_no_auto_to() {
     let cm = doc.find_comment(&new_id).unwrap();
     assert!(cm.to.is_empty(), "root comment should have empty to");
 }
-
-// ---------------------------------------------------------------------------
-// Test: reply to comment by different author auto-populates correctly
-// ---------------------------------------------------------------------------
 
 #[test]
 fn reply_auto_populates_to_different_author() {

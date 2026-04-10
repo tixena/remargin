@@ -1,10 +1,8 @@
 import type { MarkdownPostProcessorContext } from "obsidian";
 
 /**
- * Post-processor for reading mode that replaces remargin fenced code
- * blocks with styled comment widgets.
- *
- * Registered via `this.registerMarkdownPostProcessor()` in main.ts.
+ * Replaces remargin fenced code blocks with styled comment widgets in
+ * reading mode.
  */
 export function remarginPostProcessor(el: HTMLElement, _ctx: MarkdownPostProcessorContext): void {
   const codeBlocks = el.querySelectorAll<HTMLElement>("pre > code.language-remargin");
@@ -16,7 +14,6 @@ export function remarginPostProcessor(el: HTMLElement, _ctx: MarkdownPostProcess
     const raw = code.textContent ?? "";
     const lines = raw.split("\n");
 
-    // Parse YAML header between --- markers
     let yamlStart = -1;
     let yamlEnd = -1;
     for (let i = 0; i < lines.length; i++) {
@@ -32,7 +29,6 @@ export function remarginPostProcessor(el: HTMLElement, _ctx: MarkdownPostProcess
 
     if (yamlStart === -1 || yamlEnd === -1) continue;
 
-    // Extract fields from YAML
     const yamlLines = lines.slice(yamlStart + 1, yamlEnd);
     const fields: Record<string, string> = {};
     for (const line of yamlLines) {
@@ -47,7 +43,6 @@ export function remarginPostProcessor(el: HTMLElement, _ctx: MarkdownPostProcess
       .join("\n")
       .trim();
 
-    // Build widget
     const widget = document.createElement("div");
     widget.className = "remargin-reading-widget";
 

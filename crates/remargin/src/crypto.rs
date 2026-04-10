@@ -1,12 +1,6 @@
 //! Checksum (SHA-256) and signature (Ed25519) operations.
-//!
-//! Every Remargin comment has a SHA-256 checksum of its content for integrity
-//! verification, and optionally an Ed25519 signature covering content + metadata
-//! for authentication. Reactions have their own independent checksum.
 
-/// Minimal hex encoding module.
 mod hex {
-    /// Encode bytes as lowercase hexadecimal string.
     pub fn encode<T: AsRef<[u8]>>(bytes: T) -> String {
         use core::fmt::Write as _;
         let mut out = String::with_capacity(bytes.as_ref().len() * 2);
@@ -32,16 +26,8 @@ use ssh_key::{HashAlg, PrivateKey, PublicKey};
 
 use crate::parser::{AuthorType, Comment, Reactions};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /// Namespace used for SSH signature operations (PROTOCOL.sshsig).
 const SIGNATURE_NAMESPACE: &str = "remargin";
-
-// ---------------------------------------------------------------------------
-// Whitespace normalization
-// ---------------------------------------------------------------------------
 
 /// Normalize whitespace for deterministic checksumming.
 ///
@@ -57,12 +43,6 @@ pub fn normalize_whitespace(content: &str) -> String {
     String::from(trimmed)
 }
 
-// ---------------------------------------------------------------------------
-// Checksum
-// ---------------------------------------------------------------------------
-
-/// Compute SHA-256 checksum of comment content.
-///
 /// Applies whitespace normalization before hashing. Returns a string
 /// in the format `sha256:<hex>`.
 #[must_use]
@@ -72,11 +52,11 @@ pub fn compute_checksum(content: &str) -> String {
     format!("sha256:{}", hex::encode(hash))
 }
 
-/// Compute SHA-256 checksum for a reactions map.
+/// Returns a string in the format `sha256:<hex>`.
 ///
-/// The reactions are serialized in sorted order (`BTreeMap` guarantees key order,
+/// Reactions are serialized in sorted order (`BTreeMap` guarantees key order,
 /// and each author list is sorted before hashing) to produce a deterministic
-/// checksum. Returns a string in the format `sha256:<hex>`.
+/// checksum.
 #[must_use]
 pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
     let mut payload = String::new();
@@ -89,11 +69,7 @@ pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
     format!("sha256:{}", hex::encode(hash))
 }
 
-/// Compute Ed25519 signature over content + metadata.
-///
-/// Reads the private key from `private_key_path` using the os-shim `System`
-/// trait, then signs the canonical payload. Returns a string in the format
-/// `ed25519:<base64>`.
+/// Returns a signature string in the format `ed25519:<base64>`.
 ///
 /// # Errors
 ///
@@ -125,14 +101,11 @@ pub fn compute_signature(
     Ok(format!("ed25519:{encoded}"))
 }
 
-/// Verify a comment's checksum matches its content.
 #[must_use]
 pub fn verify_checksum(comment: &Comment) -> bool {
     compute_checksum(&comment.content) == comment.checksum
 }
 
-/// Verify a comment's signature against a public key string.
-///
 /// The `public_key_str` should be an OpenSSH-formatted public key
 /// (e.g. `ssh-ed25519 AAAA... comment`).
 ///
@@ -171,11 +144,7 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
     }
 }
 
-// ---------------------------------------------------------------------------
-// Signature payload (private)
-// ---------------------------------------------------------------------------
-
-/// Build the canonical payload for signing/verification.
+/// Canonical payload for signing/verification.
 ///
 /// Signed fields (in order): id, author, type, ts, to, reply-to, thread,
 /// attachments, content.

@@ -12,10 +12,6 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::document::{self, WriteOptions, allowlist};
 use crate::parser::AuthorType;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /// A markdown document with comments for metadata testing.
 const DOC_WITH_COMMENTS: &str = "\
 ---
@@ -50,10 +46,6 @@ Second comment (acked).
 ```
 ";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn config_with_ignore(patterns: Vec<String>) -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -86,10 +78,6 @@ fn open_config() -> ResolvedConfig {
         unrestricted: false,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Allowlist unit tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn allowlist_is_text_md() {
@@ -136,11 +124,6 @@ fn allowlist_is_text_png_still_false() {
     assert!(!allowlist::is_text(Path::new("image.png")));
 }
 
-// ---------------------------------------------------------------------------
-// ls tests
-// ---------------------------------------------------------------------------
-
-// Test 1: ls visible files
 #[test]
 fn ls_visible_files() {
     let system = MockSystem::new()
@@ -167,7 +150,6 @@ fn ls_visible_files() {
     assert!(!names.contains(&String::from(".env")));
 }
 
-// Test 2: ls dot-directory hidden
 #[test]
 fn ls_dot_directory_hidden() {
     let system = MockSystem::new()
@@ -191,7 +173,6 @@ fn ls_dot_directory_hidden() {
     assert!(!names.contains(&String::from(".git")));
 }
 
-// Test 3: ls ignore patterns
 #[test]
 fn ls_ignore_patterns() {
     let system = MockSystem::new()
@@ -215,11 +196,6 @@ fn ls_ignore_patterns() {
     assert!(!names.contains(&String::from("node_modules")));
 }
 
-// ---------------------------------------------------------------------------
-// get tests
-// ---------------------------------------------------------------------------
-
-// Test 5: get markdown
 #[test]
 fn get_markdown() {
     let system = MockSystem::new()
@@ -240,7 +216,6 @@ fn get_markdown() {
     assert_eq!(content, "# Hello\nWorld");
 }
 
-// Test 7: get dotfile -- not visible
 #[test]
 fn get_dotfile_hidden() {
     let system = MockSystem::new()
@@ -260,7 +235,6 @@ fn get_dotfile_hidden() {
     result.unwrap_err();
 }
 
-// Test 8: get disallowed extension
 #[test]
 fn get_disallowed_extension() {
     let system = MockSystem::new()
@@ -280,7 +254,6 @@ fn get_disallowed_extension() {
     result.unwrap_err();
 }
 
-// Test 9: get --lines
 #[test]
 fn get_with_lines() {
     let system = MockSystem::new()
@@ -304,7 +277,6 @@ fn get_with_lines() {
     assert_eq!(content, "line2\nline3\nline4");
 }
 
-// Test 10: get escape attempt
 #[test]
 fn get_escape_attempt() {
     let system = MockSystem::new()
@@ -326,11 +298,6 @@ fn get_escape_attempt() {
     result.unwrap_err();
 }
 
-// ---------------------------------------------------------------------------
-// metadata tests
-// ---------------------------------------------------------------------------
-
-// Test 14: metadata
 #[test]
 fn metadata_correct_counts() {
     let system = MockSystem::new()
@@ -348,11 +315,6 @@ fn metadata_correct_counts() {
     assert!(meta.frontmatter.is_some());
 }
 
-// ---------------------------------------------------------------------------
-// Write tests
-// ---------------------------------------------------------------------------
-
-// Test 11: write preserves comments
 #[test]
 fn write_preserves_comments() {
     let system = MockSystem::new()
@@ -379,7 +341,6 @@ fn write_preserves_comments() {
     assert!(result.contains("Updated Test"));
 }
 
-// Test 12: write missing comment -- rejected
 #[test]
 fn write_missing_comment_rejected() {
     let system = MockSystem::new()
@@ -421,11 +382,6 @@ First comment.
     result.unwrap_err();
 }
 
-// ---------------------------------------------------------------------------
-// Write --create tests
-// ---------------------------------------------------------------------------
-
-// Test: create new file succeeds
 #[test]
 fn write_create_new_file() {
     let system = MockSystem::new()
@@ -458,7 +414,6 @@ fn write_create_new_file() {
     assert!(result.contains("New Document"));
 }
 
-// Test: create fails if file already exists
 #[test]
 fn write_create_rejects_existing_file() {
     let system = MockSystem::new()
@@ -487,7 +442,6 @@ fn write_create_rejects_existing_file() {
     );
 }
 
-// Test: create auto-creates missing parent directories
 #[test]
 fn write_create_auto_creates_parent_dirs() {
     let system = MockSystem::new()
@@ -523,7 +477,6 @@ fn write_create_auto_creates_parent_dirs() {
     assert!(system.is_dir(Path::new("/project/newdir/subdir")).unwrap());
 }
 
-// Test: create auto-creates deeply nested parent directories
 #[test]
 fn write_create_deeply_nested() {
     let system = MockSystem::new()
@@ -560,7 +513,6 @@ fn write_create_deeply_nested() {
     assert!(system.is_dir(Path::new("/project/a/b/c/d")).unwrap());
 }
 
-// Test: create with existing parent unchanged (no regression)
 #[test]
 fn write_create_existing_parent_unchanged() {
     let system = MockSystem::new()
@@ -593,7 +545,6 @@ fn write_create_existing_parent_unchanged() {
     assert!(result.contains("Existing Parent"));
 }
 
-// Test: create fails if path escapes sandbox
 #[test]
 fn write_create_rejects_escape() {
     let system = MockSystem::new()
@@ -620,7 +571,6 @@ fn write_create_rejects_escape() {
     result.unwrap_err();
 }
 
-// Test: create rejects non-visible extensions
 #[test]
 fn write_create_rejects_disallowed_extension() {
     let system = MockSystem::new()
@@ -645,7 +595,6 @@ fn write_create_rejects_disallowed_extension() {
     result.unwrap_err();
 }
 
-// Test: create rejects dotfiles
 #[test]
 fn write_create_rejects_dotfile() {
     let system = MockSystem::new()
@@ -670,7 +619,6 @@ fn write_create_rejects_dotfile() {
     result.unwrap_err();
 }
 
-// Test: create with parent outside sandbox is rejected even when dirs need creation
 #[test]
 fn write_create_parent_outside_sandbox() {
     let system = MockSystem::new()
@@ -701,7 +649,6 @@ fn write_create_parent_outside_sandbox() {
     );
 }
 
-// Test: write without --create still fails for missing parent (no auto-creation)
 #[test]
 fn write_no_create_missing_parent_still_fails() {
     let system = MockSystem::new()
@@ -722,10 +669,6 @@ fn write_no_create_missing_parent_still_fails() {
     );
     result.unwrap_err();
 }
-
-// ---------------------------------------------------------------------------
-// Write --raw tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn write_raw_pen_file() {
@@ -907,10 +850,6 @@ fn write_default_still_adds_frontmatter() {
         "expected frontmatter injection, got: {result}"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Write --binary tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn write_binary_png_content() {
@@ -1122,10 +1061,6 @@ fn write_non_binary_still_text() {
     assert!(result.contains("Hello"));
 }
 
-// ---------------------------------------------------------------------------
-// Path sandbox tests: sandboxed (unrestricted = false)
-// ---------------------------------------------------------------------------
-
 // Note: MockSystem::canonicalize does not resolve `..` components, so parent
 // traversal tests use absolute paths (which canonicalize handles correctly).
 
@@ -1175,10 +1110,6 @@ fn sandbox_create_blocks_absolute_escape() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Path sandbox tests: sandboxed (paths within sandbox)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn sandbox_allows_child_path() {
     let system = MockSystem::new()
@@ -1220,10 +1151,6 @@ fn sandbox_create_allows_child() {
     .unwrap();
     assert_eq!(result, Path::new("/project/src/new.md"));
 }
-
-// ---------------------------------------------------------------------------
-// Path sandbox tests: unrestricted mode (unrestricted = true)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn unrestricted_allows_absolute_path() {
@@ -1341,10 +1268,6 @@ fn sandboxed_absolute_blocked_but_unrestricted_allows() {
     .unwrap();
     assert_eq!(result, Path::new("/home/user/notes.md"));
 }
-
-// ---------------------------------------------------------------------------
-// get --line-numbers tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn line_numbers_full_file() {
@@ -1507,10 +1430,6 @@ fn line_numbers_binary_rejected() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// rm tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn rm_deletes_existing_file() {
     let system = MockSystem::new()
@@ -1616,10 +1535,6 @@ fn rm_rejects_directory() {
         "expected directory error"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Test: JSON shape of ListEntry matches the generated tixschema
-// ---------------------------------------------------------------------------
 
 #[test]
 fn list_entry_json_shape_matches_schema() {

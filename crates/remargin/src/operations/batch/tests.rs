@@ -9,10 +9,6 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::parser::{self, AuthorType};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const MINIMAL_DOC: &str = "\
 ---
 title: Test
@@ -63,10 +59,6 @@ fn system_with_doc(content: &str) -> MockSystem {
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Simple batch -- 3 independent comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn simple_batch() {
     let system = system_with_doc(MINIMAL_DOC);
@@ -110,10 +102,6 @@ fn simple_batch() {
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 3);
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Batch with reply
-// ---------------------------------------------------------------------------
 
 #[test]
 fn batch_with_reply() {
@@ -160,10 +148,6 @@ fn batch_with_reply() {
     assert_eq!(reply.thread.as_deref(), Some(ids[0].as_str()));
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Batch failure -- missing attachment
-// ---------------------------------------------------------------------------
-
 #[test]
 fn batch_failure_rolls_back() {
     let system = system_with_doc(MINIMAL_DOC);
@@ -198,10 +182,6 @@ fn batch_failure_rolls_back() {
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Preservation check
-// ---------------------------------------------------------------------------
 
 #[test]
 fn preservation_check() {
@@ -246,10 +226,6 @@ Existing comment.
     assert!(doc.find_comment("existing").is_some());
     assert!(doc.find_comment(&ids[0]).is_some());
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Batch with multiple after_line positions (BUG rem-dbf)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn batch_two_after_line_comments_both_placed_correctly() {
@@ -595,10 +571,6 @@ fn batch_two_after_same_line() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Negative tests for after_line batch
-// ---------------------------------------------------------------------------
-
 #[test]
 fn batch_after_line_beyond_document_length() {
     let system = system_with_doc(MULTILINE_DOC);
@@ -648,10 +620,6 @@ fn batch_after_line_zero() {
     }
     // If it errors, that's also acceptable — just not corruption.
 }
-
-// ---------------------------------------------------------------------------
-// Batch auto-ack tests
-// ---------------------------------------------------------------------------
 
 /// A document with one existing comment for auto-ack reply tests.
 fn doc_with_comment() -> String {
@@ -1015,10 +983,6 @@ fn batch_auto_ack_without_reply_to_errors() {
 // Batch reply-to auto-populate `to` tests (rem-3nm)
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Test: batch reply auto-populates `to` from parent author
-// ---------------------------------------------------------------------------
-
 #[test]
 fn batch_reply_auto_populates_to() {
     let system = system_with_doc(&doc_with_comment());
@@ -1045,10 +1009,6 @@ fn batch_reply_auto_populates_to() {
         "batch reply should auto-populate to from parent author (alice)"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Test: batch reply with explicit `to` is NOT overridden
-// ---------------------------------------------------------------------------
 
 #[test]
 fn batch_reply_explicit_to() {

@@ -25,10 +25,6 @@ use crate::operations::{copy_attachments, find_comment_mut};
 use crate::parser::{self, Acknowledgment, AuthorType, Comment};
 use crate::writer::{self, InsertPosition};
 
-// ---------------------------------------------------------------------------
-// Batch input
-// ---------------------------------------------------------------------------
-
 /// A single comment creation operation within a batch.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -65,10 +61,6 @@ impl BatchCommentOp {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 /// Execute a batch of comment operations atomically.
 ///
 /// Parses the document once, applies all operations, writes once.
@@ -100,7 +92,6 @@ pub fn batch_comment(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    // Lint before.
     let markdown_before = doc.to_markdown();
     linter::lint_or_fail(&markdown_before)
         .context("document has structural issues before write")?;
@@ -168,7 +159,6 @@ pub fn batch_comment(
             ts: now,
         };
 
-        // Sign if required.
         if config.requires_signature(identity) {
             if let Some(key_path) = &config.key_path {
                 let sig = compute_signature(&comment, key_path, system)?;
@@ -224,10 +214,8 @@ pub fn batch_comment(
         created_ids.push(new_id);
     }
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
-    // Lint after.
     let markdown_after = doc.to_markdown();
     linter::lint_or_fail(&markdown_after)
         .context("document has structural issues after batch write")?;
@@ -239,10 +227,6 @@ pub fn batch_comment(
 
     Ok(created_ids)
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Resolve the insertion position for a batch operation, adjusting
 /// `AfterLine` targets for lines added by previous insertions.

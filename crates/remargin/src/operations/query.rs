@@ -21,10 +21,6 @@ use crate::document::allowlist;
 use crate::parser::{self, Acknowledgment, AuthorType};
 use crate::parser::{acknowledgment_schema, author_type_schema};
 
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
-
 /// Filter for cross-document queries.
 #[derive(Debug, Default)]
 #[non_exhaustive]
@@ -114,10 +110,6 @@ pub struct QueryResult {
     /// Unique recipients on unacked comments.
     pub pending_for: Vec<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Query across documents in a directory tree.
 ///
@@ -243,10 +235,6 @@ pub fn query(
     Ok(results)
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
 /// Test whether a single comment matches all active filters.
 fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     if filter.pending && !is_pending(cm) {
@@ -331,10 +319,6 @@ fn expanded_from_comment(cm: &parser::Comment, file: &Path) -> ExpandedComment {
         ts: cm.ts,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Shared helper: resolve a comment ID across a folder tree
-// ---------------------------------------------------------------------------
 
 /// Walk a directory tree and return all document paths that contain a comment
 /// with the given structural ID.

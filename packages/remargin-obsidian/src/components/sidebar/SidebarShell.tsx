@@ -39,7 +39,6 @@ export function SidebarShell({
 
   return (
     <div className="flex flex-col h-full bg-bg-primary">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-accent" />
@@ -55,10 +54,8 @@ export function SidebarShell({
         </div>
       </div>
 
-      {/* Scrollable body */}
       <ScrollArea className="flex-1">
         <div className="flex flex-col">
-          {/* Prompt section */}
           <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
             <SectionHeader icon={Terminal} title="Prompt" open={promptOpen} />
             <CollapsibleContent>
@@ -68,7 +65,6 @@ export function SidebarShell({
             </CollapsibleContent>
           </Collapsible>
 
-          {/* Sandbox section */}
           <Collapsible open={sandboxOpen} onOpenChange={setSandboxOpen}>
             <SectionHeader
               icon={Inbox}
@@ -84,7 +80,6 @@ export function SidebarShell({
             </CollapsibleContent>
           </Collapsible>
 
-          {/* Inbox section */}
           <Collapsible open={inboxOpen} onOpenChange={setInboxOpen}>
             <SectionHeader
               icon={Mail}
@@ -100,7 +95,6 @@ export function SidebarShell({
             </CollapsibleContent>
           </Collapsible>
 
-          {/* Thread section */}
           <Collapsible open={threadOpen} onOpenChange={setThreadOpen}>
             <div className="flex items-center gap-2 px-4 py-2 bg-bg-border border-t border-bg-border">
               <FileText className="w-3.5 h-3.5 text-text-faint" />
@@ -124,7 +118,6 @@ export function SidebarShell({
         </div>
       </ScrollArea>
 
-      {/* Footer */}
       {footerContent && <div className="border-t border-bg-border">{footerContent}</div>}
     </div>
   );

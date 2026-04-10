@@ -83,7 +83,6 @@ export function InboxSection() {
 
   return (
     <div className="flex flex-col">
-      {/* Filter bar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-bg-border">
         <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "pending")}>
           <SelectTrigger className="h-7 text-xs w-28">
@@ -96,7 +95,6 @@ export function InboxSection() {
         </Select>
       </div>
 
-      {/* Items */}
       <ScrollArea className="max-h-64">
         {error ? (
           <div className="px-4 py-3 text-xs text-red-400 whitespace-pre-wrap break-words">

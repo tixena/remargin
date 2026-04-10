@@ -26,7 +26,7 @@ export function PromptSection({ file, onCommentAdded }: PromptSectionProps) {
       setContent("");
       onCommentAdded?.();
     } catch {
-      // TODO: error handling
+      // no-op
     } finally {
       setSubmitting(false);
     }

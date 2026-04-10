@@ -9,10 +9,6 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::operations::purge::purge;
 use crate::parser::{self, AuthorType};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn open_config() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -68,10 +64,6 @@ Text after.
 "
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Simple purge
-// ---------------------------------------------------------------------------
-
 #[test]
 fn simple_purge() {
     let system = MockSystem::new()
@@ -88,10 +80,6 @@ fn simple_purge() {
     assert!(doc.comments().is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: Body text preserved
-// ---------------------------------------------------------------------------
-
 #[test]
 fn body_text_preserved() {
     let system = MockSystem::new()
@@ -106,10 +94,6 @@ fn body_text_preserved() {
     assert!(content.contains("More text between."));
     assert!(content.contains("Text after."));
 }
-
-// ---------------------------------------------------------------------------
-// Test 3: Frontmatter cleanup
-// ---------------------------------------------------------------------------
 
 #[test]
 fn frontmatter_cleanup() {
@@ -129,10 +113,6 @@ fn frontmatter_cleanup() {
     assert!(!content.contains("remargin_last_activity"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 4: Dry run
-// ---------------------------------------------------------------------------
-
 #[test]
 fn dry_run() {
     let system = MockSystem::new()
@@ -150,10 +130,6 @@ fn dry_run() {
     assert_eq!(doc.comments().len(), 2);
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: No comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_comments() {
     let plain = "---\ntitle: Plain\n---\n\n# Just text\n";
@@ -166,10 +142,6 @@ fn no_comments() {
 
     assert_eq!(result.comments_removed, 0);
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: No double blank lines after purge
-// ---------------------------------------------------------------------------
 
 #[test]
 fn no_excessive_blank_lines() {

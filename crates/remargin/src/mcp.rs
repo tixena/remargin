@@ -28,10 +28,6 @@ use crate::operations::search;
 use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /// Standard JSON-RPC: invalid params.
 const INVALID_PARAMS: i64 = -32602;
 
@@ -46,10 +42,6 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Server name reported in the initialize response.
 const SERVER_NAME: &str = "remargin";
-
-// ---------------------------------------------------------------------------
-// Tool descriptors
-// ---------------------------------------------------------------------------
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -442,10 +434,6 @@ fn tool_descriptors() -> Vec<ToolDesc> {
     ]
 }
 
-// ---------------------------------------------------------------------------
-// JSON-RPC helpers
-// ---------------------------------------------------------------------------
-
 /// Build a JSON-RPC success response.
 fn success_response(id: &Value, result: &Value) -> Value {
     json!({
@@ -502,10 +490,6 @@ fn tool_result_error(message: &str) -> Value {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Parameter extraction helpers
-// ---------------------------------------------------------------------------
-
 /// Extract an optional bool field from a JSON object.
 fn optional_bool(params: &Map<String, Value>, field: &str) -> bool {
     params.get(field).and_then(Value::as_bool).unwrap_or(false)
@@ -543,10 +527,6 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
         })
         .unwrap_or_default()
 }
-
-// ---------------------------------------------------------------------------
-// Identity override helper
-// ---------------------------------------------------------------------------
 
 /// Apply `identity` and `author_type` overrides from tool parameters to a config.
 ///
@@ -596,10 +576,6 @@ fn effective_config<'cfg>(
     overridden.unwrap_or(config)
 }
 
-// ---------------------------------------------------------------------------
-// Insert position helper
-// ---------------------------------------------------------------------------
-
 /// Resolve insertion position from tool parameters.
 fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) -> InsertPosition {
     // Replies always go after their parent — explicit placement is ignored.
@@ -614,10 +590,6 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
     }
     InsertPosition::Append
 }
-
-// ---------------------------------------------------------------------------
-// Tool dispatch
-// ---------------------------------------------------------------------------
 
 /// Dispatch a tool call to the appropriate library function.
 ///
@@ -664,10 +636,6 @@ fn dispatch_tool(
         Err(err) => tool_result_error(&format!("{err:#}")),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tool handlers
-// ---------------------------------------------------------------------------
 
 /// Handle the `ack` tool: acknowledge one or more comments.
 fn handle_ack(
@@ -1209,10 +1177,6 @@ fn handle_write(
     Ok(json!({ "written": path_str, "binary": binary, "raw": raw || binary }))
 }
 
-// ---------------------------------------------------------------------------
-// Serialization helpers
-// ---------------------------------------------------------------------------
-
 /// Serialize a comment to a JSON value for the `comments` tool response.
 fn serialize_comment(cm: &parser::Comment) -> Value {
     let author_type = match cm.author_type {
@@ -1336,10 +1300,6 @@ fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Message processing
-// ---------------------------------------------------------------------------
-
 /// Process a single JSON-RPC request and return a response (or `None` for notifications).
 fn process_message(
     system: &dyn System,
@@ -1431,10 +1391,6 @@ fn process_message(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public API: run the server
-// ---------------------------------------------------------------------------
-
 /// Run the MCP server, reading JSON-RPC messages from stdin and writing
 /// responses to stdout.
 ///
@@ -1483,10 +1439,6 @@ pub fn run(system: &dyn System, base_dir: &Path, overrides: &CliOverrides<'_>) -
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Testable process function (no I/O)
-// ---------------------------------------------------------------------------
 
 /// Process a single JSON-RPC request string and return the response string.
 ///

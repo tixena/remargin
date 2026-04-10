@@ -11,16 +11,8 @@ use core::fmt::Write as _;
 
 use anyhow::{Result, anyhow};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /// Required fields in every remargin block's YAML header.
 const REQUIRED_REMARGIN_FIELDS: &[&str] = &["id", "author", "type", "ts", "checksum"];
-
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
 
 /// A single lint error with its line number and message.
 #[derive(Debug)]
@@ -31,10 +23,6 @@ pub struct LintError {
     /// Human-readable description of the structural issue.
     pub message: String,
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Run structural lint checks on a markdown document.
 ///
@@ -67,10 +55,6 @@ pub fn lint_or_fail(content: &str) -> Result<()> {
         Err(anyhow!("Lint errors:\n{}", format_errors(&errors)))
     }
 }
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
 
 /// Check for unclosed fenced code blocks and fence depth mismatches.
 ///

@@ -14,16 +14,8 @@ use anyhow::{Context as _, Result, bail};
 use include_dir::{Dir, include_dir};
 use os_shim::System;
 
-// ---------------------------------------------------------------------------
-// Embedded skill directory
-// ---------------------------------------------------------------------------
-
 /// Skill files embedded at compile time from the `skill/` directory.
 static SKILL_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/skill");
-
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
 
 /// Installation status of the skill.
 #[derive(Debug, PartialEq, Eq)]
@@ -36,10 +28,6 @@ pub enum SkillStatus {
     /// The skill matches the embedded version exactly.
     UpToDate,
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Install the skill by extracting embedded files.
 ///
@@ -119,10 +107,6 @@ pub fn uninstall(system: &dyn System, global: bool) -> Result<()> {
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Resolve the skill installation path.
 fn resolve_skill_path(system: &dyn System, global: bool) -> Result<PathBuf> {

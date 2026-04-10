@@ -17,10 +17,6 @@ use serde_yaml::Value;
 use crate::config::ResolvedConfig;
 use crate::parser::{self, Segment};
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 /// Result of a purge operation.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -96,10 +92,6 @@ pub fn purge(
         comments_removed,
     })
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Clean up remargin_* fields from frontmatter.
 fn clean_frontmatter(doc: &mut parser::ParsedDocument) {

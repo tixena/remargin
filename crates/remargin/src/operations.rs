@@ -1,8 +1,4 @@
 //! Comment operations: create, ack, react, delete, edit.
-//!
-//! The five core write operations that agents and users perform on remargin
-//! documents. Each operation enforces mode rules, computes checksums,
-//! optionally signs, and maintains the comment preservation invariant.
 
 pub mod batch;
 pub mod migrate;
@@ -32,29 +28,19 @@ use crate::linter;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::writer::{self, InsertPosition};
 
-// ---------------------------------------------------------------------------
-// Create comment input
-// ---------------------------------------------------------------------------
-
 /// Parameters for creating a new comment.
 #[non_exhaustive]
 pub struct CreateCommentParams<'params> {
-    /// File attachments to include.
     pub attachments: &'params [PathBuf],
     /// Automatically acknowledge the parent comment when replying.
     pub auto_ack: bool,
-    /// Comment body text.
     pub content: &'params str,
-    /// Where to insert the comment in the document.
     pub position: &'params InsertPosition,
-    /// ID of the comment this replies to.
     pub reply_to: Option<&'params str>,
-    /// Addressees of the comment.
     pub to: &'params [String],
 }
 
 impl<'params> CreateCommentParams<'params> {
-    /// Create new comment parameters.
     #[must_use]
     pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
         Self {
@@ -67,10 +53,6 @@ impl<'params> CreateCommentParams<'params> {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Create comment
-// ---------------------------------------------------------------------------
 
 /// Create a new comment in a document.
 ///
@@ -96,7 +78,6 @@ pub fn create_comment(
 
     config.can_post(identity)?;
 
-    // Validate auto_ack requires reply_to.
     if params.auto_ack && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
     }
@@ -105,24 +86,19 @@ pub fn create_comment(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    // Lint before.
     let markdown_before = doc.to_markdown();
     linter::lint_or_fail(&markdown_before)
         .context("document has structural issues before write")?;
 
-    // Generate unique ID.
     let existing_ids = doc.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    // Compute checksum.
     let checksum = compute_checksum(params.content);
 
-    // Determine thread field from reply_to.
     let thread = params
         .reply_to
         .map(|parent_id| resolve_thread(&doc, parent_id));
 
-    // Copy attachments to assets directory.
     let resolved_attachments = copy_attachments(system, path, config, params.attachments)
         .context("copying attachments")?;
 
@@ -137,7 +113,6 @@ pub fn create_comment(
         params.to.to_vec()
     };
 
-    // Build the comment.
     let now = Utc::now().fixed_offset();
     let mut comment = Comment {
         ack: Vec::new(),
@@ -157,7 +132,6 @@ pub fn create_comment(
         ts: now,
     };
 
-    // Sign if required.
     if config.requires_signature(identity) {
         if let Some(key_path) = &config.key_path {
             let sig = compute_signature(&comment, key_path, system)?;
@@ -167,7 +141,6 @@ pub fn create_comment(
         }
     }
 
-    // Insert comment.
     writer::insert_comment(&mut doc, comment, params.position)?;
 
     // Auto-ack the parent comment in the same write cycle.
@@ -182,14 +155,11 @@ pub fn create_comment(
         });
     }
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
-    // Write with preservation check.
     let expected_added: HashSet<String> = HashSet::from([new_id.clone()]);
     let expected_removed: HashSet<String> = HashSet::new();
 
-    // Lint after.
     let markdown_after = doc.to_markdown();
     linter::lint_or_fail(&markdown_after).context("document has structural issues after write")?;
 
@@ -197,10 +167,6 @@ pub fn create_comment(
 
     Ok(new_id)
 }
-
-// ---------------------------------------------------------------------------
-// Ack comments
-// ---------------------------------------------------------------------------
 
 /// Acknowledge one or more comments.
 ///
@@ -237,19 +203,13 @@ pub fn ack_comments(
         });
     }
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
-    // Write with preservation check (no ID changes).
     let empty: HashSet<String> = HashSet::new();
     writer::write_document(system, path, &doc, &empty, &empty)?;
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// React
-// ---------------------------------------------------------------------------
 
 /// Add or remove an emoji reaction.
 ///
@@ -296,22 +256,15 @@ pub fn react(
         }
     }
 
-    // Recompute reaction checksum (content checksum stays the same).
     let _reaction_checksum = compute_reaction_checksum(&cm.reactions);
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
-    // Write with preservation check (no ID changes).
     let empty: HashSet<String> = HashSet::new();
     writer::write_document(system, path, &doc, &empty, &empty)?;
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Delete comments
-// ---------------------------------------------------------------------------
 
 /// Delete one or more comments.
 ///
@@ -328,30 +281,24 @@ pub fn delete_comments(
 ) -> Result<()> {
     let mut doc = parser::parse_file(system, path)?;
 
-    // Collect attachment paths from comments to be deleted.
     let deleted_attachments: Vec<String> = comment_ids
         .iter()
         .filter_map(|cid| doc.find_comment(cid))
         .flat_map(|cm| cm.attachments.clone())
         .collect();
 
-    // Verify all IDs exist.
     for comment_id in comment_ids {
         if doc.find_comment(comment_id).is_none() {
             bail!("comment {comment_id:?} not found for deletion");
         }
     }
 
-    // Remove the comment segments.
     let id_set: HashSet<&str> = comment_ids.iter().copied().collect();
     doc.segments
         .retain(|seg| !matches!(seg, Segment::Comment(cm) if id_set.contains(cm.id.as_str())));
 
-    // Normalize whitespace: merge adjacent Body segments and collapse
-    // runs of 3+ consecutive newlines down to 2 (at most one blank line).
     collapse_body_segments(&mut doc.segments);
 
-    // Clean up orphaned attachments.
     let remaining_attachments: HashSet<String> = doc
         .comments()
         .iter()
@@ -369,20 +316,14 @@ pub fn delete_comments(
         }
     }
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
-    // Write with preservation check.
     let expected_added: HashSet<String> = HashSet::new();
     let expected_removed: HashSet<String> = comment_ids.iter().map(|s| String::from(*s)).collect();
     writer::write_document(system, path, &doc, &expected_added, &expected_removed)?;
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Edit comment
-// ---------------------------------------------------------------------------
 
 /// Edit a comment's content. Cascading consequences:
 /// - Recomputes checksum and signature
@@ -405,18 +346,14 @@ pub fn edit_comment(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    // Find the comment to edit.
     let cm = find_comment_mut(&mut doc, comment_id)
         .with_context(|| format!("comment {comment_id:?} not found"))?;
 
-    // Update content and recompute checksum.
     cm.content = String::from(new_content);
     cm.checksum = compute_checksum(new_content);
 
-    // Clear ack on the edited comment.
     cm.ack.clear();
 
-    // Recompute signature if needed.
     if let Some(author) = identity
         && config.requires_signature(author)
         && let Some(key_path) = &config.key_path
@@ -433,19 +370,13 @@ pub fn edit_comment(
         }
     }
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
-    // Write with preservation check (no ID changes).
     let empty: HashSet<String> = HashSet::new();
     writer::write_document(system, path, &doc, &empty, &empty)?;
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Merge adjacent `Body` segments and collapse runs of 3+ consecutive
 /// newlines down to 2 (at most one blank line).  This prevents surplus
@@ -555,7 +486,6 @@ fn copy_attachments(
 
     let mut result = Vec::new();
     for src_path in attachments {
-        // Validate the source file exists.
         if !system.exists(src_path).unwrap_or(false) {
             bail!("attachment not found: {}", src_path.display());
         }
@@ -571,7 +501,6 @@ fn copy_attachments(
             .copy(src_path, &dest_path)
             .with_context(|| format!("copying attachment {}", src_path.display()))?;
 
-        // Store relative path from document directory.
         let relative = format!("{}/{filename}", config.assets_dir);
         result.push(relative);
     }
@@ -579,7 +508,6 @@ fn copy_attachments(
     Ok(result)
 }
 
-/// Find a mutable reference to a comment by ID.
 pub(crate) fn find_comment_mut<'doc>(
     doc: &'doc mut ParsedDocument,
     id: &str,

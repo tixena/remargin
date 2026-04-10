@@ -17,10 +17,6 @@ use os_shim::System;
 
 use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
 
-// ---------------------------------------------------------------------------
-// Insertion positions
-// ---------------------------------------------------------------------------
-
 /// Where to insert a new comment in a document.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -32,10 +28,6 @@ pub enum InsertPosition {
     /// Place at the end of the document.
     Append,
 }
-
-// ---------------------------------------------------------------------------
-// Fence depth calculation
-// ---------------------------------------------------------------------------
 
 /// Determine the minimum fence depth needed to wrap content that may
 /// contain backtick sequences.  Returns at least 3.
@@ -59,10 +51,6 @@ fn required_fence_depth(content: &str) -> usize {
     let min_depth = max_backticks + 1;
     if min_depth < 3 { 3 } else { min_depth }
 }
-
-// ---------------------------------------------------------------------------
-// Comment serialization
-// ---------------------------------------------------------------------------
 
 /// Serialize a `Comment` into a remargin fenced code block string.
 ///
@@ -138,10 +126,6 @@ pub fn serialize_comment(comment: &Comment) -> String {
     let _ = writeln!(out, "{fence}");
     out
 }
-
-// ---------------------------------------------------------------------------
-// Insertion
-// ---------------------------------------------------------------------------
 
 /// Insert a new comment into the parsed document at the given position.
 ///
@@ -228,10 +212,6 @@ fn serialize_comment_from_segment(segment: &Segment) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Comment preservation invariant
-// ---------------------------------------------------------------------------
-
 /// Verify that a modification preserved comment integrity.
 ///
 /// The expected state is: `after = (before - expected_removed) + expected_added`.
@@ -275,10 +255,6 @@ pub fn verify_preservation(
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Document write
-// ---------------------------------------------------------------------------
 
 /// Write a `ParsedDocument` to disk, enforcing the preservation invariant.
 ///

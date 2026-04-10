@@ -49,7 +49,6 @@ export class ActionQueue {
   }
 
   private async saveFile(filePath: string): Promise<void> {
-    // Force save active editor if it matches the target file
     const leaf = this.app.workspace.activeLeaf;
     if (!leaf) return;
     const view = leaf.view as unknown as { save?: () => Promise<void> };
@@ -65,10 +64,8 @@ export class ActionQueue {
     const file = this.app.vault.getAbstractFileByPath(filePath);
     if (!(file instanceof TFile)) return;
 
-    // Read fresh content from disk
     const content = await this.app.vault.read(file);
 
-    // Find and update any editor showing this file
     interface EditorLike {
       getCursor(): { line: number; ch: number };
       lineCount(): number;
@@ -86,14 +83,12 @@ export class ActionQueue {
         if (editor) {
           const cursor = editor.getCursor();
           await this.app.vault.modify(file, content);
-          // Restore cursor (clamped to new doc length)
           try {
             const lineCount = editor.lineCount();
             const line = Math.min(cursor.line, lineCount - 1);
             const ch = Math.min(cursor.ch, editor.getLine(line)?.length ?? 0);
             editor.setCursor({ line, ch });
           } catch (err) {
-            // cursor restoration is best-effort
             console.debug("ActionQueue cursor restore failed:", err);
           }
           return;
@@ -101,7 +96,6 @@ export class ActionQueue {
       }
     }
 
-    // No open editor — just trigger a vault cache refresh
     await this.app.vault.modify(file, content);
   }
 }

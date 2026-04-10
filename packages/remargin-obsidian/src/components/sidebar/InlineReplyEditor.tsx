@@ -31,7 +31,7 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
       setContent("");
       onSubmitted();
     } catch {
-      // TODO: error handling
+      // no-op
     } finally {
       setSubmitting(false);
     }

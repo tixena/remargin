@@ -43,7 +43,6 @@ export function SandboxSection({ touchedFiles, onOpenFile, onSubmit }: SandboxSe
 
   return (
     <div className="flex flex-col">
-      {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-1.5 border-b border-bg-border">
         <div className="flex items-center gap-2">
           <Checkbox
@@ -70,7 +69,6 @@ export function SandboxSection({ touchedFiles, onOpenFile, onSubmit }: SandboxSe
         </ToggleGroup>
       </div>
 
-      {/* File list */}
       <ScrollArea className="max-h-40">
         <div className="flex flex-col">
           {touchedFiles.map((file) => (
@@ -92,7 +90,6 @@ export function SandboxSection({ touchedFiles, onOpenFile, onSubmit }: SandboxSe
         </div>
       </ScrollArea>
 
-      {/* Submit */}
       <div className="flex items-center justify-end px-4 py-2 border-t border-bg-border">
         <Button
           size="sm"

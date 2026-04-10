@@ -7,10 +7,6 @@ use os_shim::mock::MockSystem;
 use crate::operations::query::{QueryFilter, query, resolve_comment_id};
 use crate::parser::AuthorType;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn doc_with_pending() -> &'static str {
     "\
 ---
@@ -72,10 +68,6 @@ fn setup_system() -> MockSystem {
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Query all -- finds documents with comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_all_with_comments() {
     let system = setup_system();
@@ -85,10 +77,6 @@ fn query_all_with_comments() {
     // Should find 2 files (pending.md and done.md), not plain.md
     assert_eq!(results.len(), 2);
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Query pending only
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_pending_only() {
@@ -104,10 +92,6 @@ fn query_pending_only() {
     assert_eq!(results[0].pending_count, 1);
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Query pending_for specific recipient
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_pending_for_alice() {
     let system = setup_system();
@@ -120,10 +104,6 @@ fn query_pending_for_alice() {
     assert_eq!(results.len(), 1);
     assert!(results[0].pending_for.contains(&String::from("alice")));
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: Query by author
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_by_author() {
@@ -138,10 +118,6 @@ fn query_by_author() {
     assert!(results[0].path.to_str().unwrap().contains("done.md"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: Empty directory
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_empty_dir() {
     let system = MockSystem::new().with_dir(Path::new("/empty")).unwrap();
@@ -150,10 +126,6 @@ fn query_empty_dir() {
     let results = query(&system, Path::new("/empty"), &filter).unwrap();
     assert!(results.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Query with --comment-id finds the document containing that comment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_by_comment_id_finds_matching_doc() {
@@ -168,10 +140,6 @@ fn query_by_comment_id_finds_matching_doc() {
     assert!(results[0].path.to_str().unwrap().contains("pending.md"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 7: Query with --comment-id in multi-doc folder returns only match
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_by_comment_id_returns_only_matching_doc() {
     let system = setup_system();
@@ -185,10 +153,6 @@ fn query_by_comment_id_returns_only_matching_doc() {
     assert_eq!(results.len(), 1);
     assert!(results[0].path.to_str().unwrap().contains("done.md"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 8: Query with --comment-id combined with --author
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_by_comment_id_combined_with_author() {
@@ -214,10 +178,6 @@ fn query_by_comment_id_combined_with_author() {
     assert!(results_mismatch.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// Test 9: Query with --comment-id combined with --pending
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_by_comment_id_combined_with_pending() {
     let system = setup_system();
@@ -242,10 +202,6 @@ fn query_by_comment_id_combined_with_pending() {
     assert!(results_acked.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// Test 10: Query with --comment-id that does not exist returns empty results
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_by_comment_id_not_found_returns_empty() {
     let system = setup_system();
@@ -257,10 +213,6 @@ fn query_by_comment_id_not_found_returns_empty() {
     let results = query(&system, Path::new("/project"), &filter).unwrap();
     assert!(results.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 11: Query with --comment-id on empty folder returns empty results
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_by_comment_id_empty_folder_returns_empty() {
@@ -274,14 +226,6 @@ fn query_by_comment_id_empty_folder_returns_empty() {
     assert!(results.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// resolve_comment_id tests
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Test 12: resolve_comment_id finds a single document
-// ---------------------------------------------------------------------------
-
 #[test]
 fn resolve_comment_id_finds_single_doc() {
     let system = setup_system();
@@ -290,20 +234,12 @@ fn resolve_comment_id_finds_single_doc() {
     assert!(matches[0].to_str().unwrap().contains("pending.md"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 13: resolve_comment_id returns empty for nonexistent ID
-// ---------------------------------------------------------------------------
-
 #[test]
 fn resolve_comment_id_not_found() {
     let system = setup_system();
     let matches = resolve_comment_id(&system, Path::new("/project"), "nonexistent").unwrap();
     assert!(matches.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 14: resolve_comment_id returns multiple docs when ID duplicated
-// ---------------------------------------------------------------------------
 
 #[test]
 fn resolve_comment_id_ambiguous() {
@@ -319,10 +255,6 @@ fn resolve_comment_id_ambiguous() {
     let matches = resolve_comment_id(&system, Path::new("/multi"), "abc").unwrap();
     assert_eq!(matches.len(), 2);
 }
-
-// ---------------------------------------------------------------------------
-// Test 15: resolve_comment_id scopes to subdirectory
-// ---------------------------------------------------------------------------
 
 #[test]
 fn resolve_comment_id_scopes_to_subdir() {
@@ -420,10 +352,6 @@ fn setup_expanded_system() -> MockSystem {
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Test 16: query_expanded_returns_comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_expanded_returns_comments() {
     let system = setup_expanded_system();
@@ -445,10 +373,6 @@ fn query_expanded_returns_comments() {
     assert_eq!(review.comments[1].id, "c2");
     assert_eq!(review.comments[2].id, "c3");
 }
-
-// ---------------------------------------------------------------------------
-// Test 17: query_expanded_pending_filters_comments
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_expanded_pending_filters_comments() {
@@ -472,10 +396,6 @@ fn query_expanded_pending_filters_comments() {
     assert!(ids.contains(&"c2"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 18: query_expanded_pending_for_filters_comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_expanded_pending_for_filters_comments() {
     let system = setup_expanded_system();
@@ -496,10 +416,6 @@ fn query_expanded_pending_for_filters_comments() {
     assert!(review.comments[0].to.contains(&String::from("alice")));
 }
 
-// ---------------------------------------------------------------------------
-// Test 19: query_expanded_author_filters_comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_expanded_author_filters_comments() {
     let system = setup_expanded_system();
@@ -517,10 +433,6 @@ fn query_expanded_author_filters_comments() {
     assert_eq!(review.comments[0].id, "c2");
     assert_eq!(review.comments[0].author, "bob");
 }
-
-// ---------------------------------------------------------------------------
-// Test 20: query_expanded_since_filters_comments
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_expanded_since_filters_comments() {
@@ -542,10 +454,6 @@ fn query_expanded_since_filters_comments() {
     assert_eq!(review.comments[0].id, "c3");
 }
 
-// ---------------------------------------------------------------------------
-// Test 21: query_expanded_combined_filters
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_expanded_combined_filters() {
     let system = setup_expanded_system();
@@ -565,10 +473,6 @@ fn query_expanded_combined_filters() {
     assert_eq!(review.comments.len(), 1);
     assert_eq!(review.comments[0].id, "c1");
 }
-
-// ---------------------------------------------------------------------------
-// Test 22: query_expanded_multiple_files
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_expanded_multiple_files() {
@@ -594,10 +498,6 @@ fn query_expanded_multiple_files() {
     assert_eq!(other.comments[0].author, "carol");
 }
 
-// ---------------------------------------------------------------------------
-// Test 23: query_summary_has_empty_comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_summary_has_empty_comments() {
     let system = setup_expanded_system();
@@ -612,10 +512,6 @@ fn query_summary_has_empty_comments() {
         assert!(r.comments.is_empty());
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 24: query_expanded_no_matching_comments
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_expanded_no_matching_comments() {
@@ -632,10 +528,6 @@ fn query_expanded_no_matching_comments() {
     // per-comment filter also finds nothing, so result is empty.
     assert!(results.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Test 25: query_expanded_comment_fields_complete
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_expanded_comment_fields_complete() {
@@ -773,10 +665,6 @@ fn setup_pending_system() -> MockSystem {
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Test 26: Broadcast comment (no `to`) is NOT counted as pending
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_to_not_pending() {
     let system = setup_pending_system();
@@ -796,10 +684,6 @@ fn no_to_not_pending() {
     assert_eq!(mixed_result.pending_count, 1);
 }
 
-// ---------------------------------------------------------------------------
-// Test 27: Directed comment with no acks IS pending
-// ---------------------------------------------------------------------------
-
 #[test]
 fn to_with_no_ack_is_pending() {
     let system = setup_pending_system();
@@ -814,10 +698,6 @@ fn to_with_no_ack_is_pending() {
     assert_eq!(mixed.pending_count, 1);
     assert!(mixed.pending_for.contains(&String::from("eduardo")));
 }
-
-// ---------------------------------------------------------------------------
-// Test 28: Fully acked comment is NOT pending
-// ---------------------------------------------------------------------------
 
 #[test]
 fn to_fully_acked_not_pending() {
@@ -837,10 +717,6 @@ fn to_fully_acked_not_pending() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 29: Partially acked comment IS still pending
-// ---------------------------------------------------------------------------
-
 #[test]
 fn to_partially_acked_still_pending() {
     let system = setup_pending_system();
@@ -857,10 +733,6 @@ fn to_partially_acked_still_pending() {
 
     assert_eq!(partial.pending_count, 1);
 }
-
-// ---------------------------------------------------------------------------
-// Test 30: pending_count matches expanded comment count
-// ---------------------------------------------------------------------------
 
 #[test]
 fn pending_count_matches_expanded() {
@@ -881,10 +753,6 @@ fn pending_count_matches_expanded() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 31: pending_for excludes fully-acked recipients
-// ---------------------------------------------------------------------------
 
 #[test]
 fn pending_for_excludes_fully_acked() {
@@ -907,10 +775,6 @@ fn pending_for_excludes_fully_acked() {
         "bob should NOT be in pending_for (already acked)"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Test 32: Broadcast comment never shows up in pending or pending_for
-// ---------------------------------------------------------------------------
 
 #[test]
 fn broadcast_comment_never_pending() {
@@ -955,10 +819,6 @@ No to field at all.
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 33: pending_for filter with partially acked comment
-// ---------------------------------------------------------------------------
-
 #[test]
 fn pending_for_partially_acked() {
     let system = setup_pending_system();
@@ -990,10 +850,6 @@ fn pending_for_partially_acked() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 34: expanded pending_for with partial ack returns only unacked recipients
-// ---------------------------------------------------------------------------
-
 #[test]
 fn expanded_pending_for_partial_ack() {
     let system = setup_pending_system();
@@ -1017,10 +873,6 @@ fn expanded_pending_for_partial_ack() {
 // Default expanded + file path tests (rem-frc)
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Test 35: query default (no --expanded) includes comments
-// ---------------------------------------------------------------------------
-
 #[test]
 fn query_default_includes_comments() {
     let system = setup_expanded_system();
@@ -1037,10 +889,6 @@ fn query_default_includes_comments() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 36: expanded comments have file path
-// ---------------------------------------------------------------------------
 
 #[test]
 fn expanded_comments_have_file_path() {
@@ -1061,10 +909,6 @@ fn expanded_comments_have_file_path() {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 37: query --summary suppresses comment data
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_summary_only() {
@@ -1087,10 +931,6 @@ fn query_summary_only() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test 38: --expanded flag still works (backward compat)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn backward_compat_expanded_flag() {
     let system = setup_expanded_system();
@@ -1108,10 +948,6 @@ fn backward_compat_expanded_flag() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 39: file path on comments matches document path
-// ---------------------------------------------------------------------------
 
 #[test]
 fn file_path_on_default_comments() {
@@ -1134,10 +970,6 @@ fn file_path_on_default_comments() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test 40: summary mode with --pending still filters correctly
-// ---------------------------------------------------------------------------
-
 #[test]
 fn summary_with_pending_filter() {
     let system = setup_expanded_system();
@@ -1153,10 +985,6 @@ fn summary_with_pending_filter() {
         assert!(r.pending_count > 0, "pending filter still applies");
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test 41: expanded overrides summary (expanded wins)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn expanded_overrides_summary() {
@@ -1176,10 +1004,6 @@ fn expanded_overrides_summary() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test: JSON shape of QueryResult matches the generated tixschema
-// ---------------------------------------------------------------------------
 
 #[test]
 fn query_result_json_shape_matches_schema() {

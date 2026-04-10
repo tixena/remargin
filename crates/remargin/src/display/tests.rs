@@ -13,10 +13,6 @@ use crate::display::{
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{Acknowledgment, AuthorType, Comment};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Parameters for building a test comment.
 struct TestComment<'param> {
     ack: Vec<Acknowledgment>,
@@ -96,10 +92,6 @@ fn make_ack(author: &str, ts: &str) -> Acknowledgment {
         ts: DateTime::parse_from_rfc3339(ts).unwrap(),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tree building tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn tree_single_root() {
@@ -203,10 +195,6 @@ fn tree_empty() {
     let forest = build_comment_tree(&comments);
     assert!(forest.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Rendering tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn render_root_comment() {
@@ -440,10 +428,6 @@ fn render_no_pending() {
     assert!(output.contains("3 comments \u{00b7} 0 pending"));
 }
 
-// ---------------------------------------------------------------------------
-// Negative / edge case tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn render_content_with_special_chars() {
     let content = "Line with \u{2502} bar and `backticks` here";
@@ -482,10 +466,6 @@ fn render_comment_no_to_not_pending() {
     assert_eq!(count_pending(&[&cm]), 0);
 }
 
-// ---------------------------------------------------------------------------
-// Pending calculation tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn pending_with_partial_ack() {
     let ack = make_ack("alice", "2026-04-06T15:00:00-04:00");
@@ -511,10 +491,6 @@ fn pending_all_acked() {
     });
     assert!(!is_pending(&cm));
 }
-
-// ---------------------------------------------------------------------------
-// Query pretty-print tests
-// ---------------------------------------------------------------------------
 
 /// Build an `ExpandedComment` for query pretty-print tests.
 fn make_expanded(

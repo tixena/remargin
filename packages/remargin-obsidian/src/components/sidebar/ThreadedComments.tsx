@@ -166,7 +166,6 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
         }`}
         style={{ paddingLeft: `${16 + depth * 16}px` }}
       >
-        {/* Header row */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <Badge
@@ -197,7 +196,6 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
           </div>
         </div>
 
-        {/* To line */}
         {comment.to && comment.to.length > 0 && (
           <div className="flex items-center gap-1 text-[10px] text-text-faint">
             <span>to:</span>
@@ -209,10 +207,8 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
           </div>
         )}
 
-        {/* Content */}
         <p className="text-xs text-text-muted whitespace-pre-wrap break-words">{comment.content}</p>
 
-        {/* Reactions */}
         {comment.reactions && Object.keys(comment.reactions).length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">
             {Object.entries(comment.reactions).map(([emoji, authors]) => (
@@ -223,7 +219,6 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
           </div>
         )}
 
-        {/* Actions */}
         <div className="flex items-center gap-1 -ml-1">
           {isPending && (
             <Button
@@ -278,7 +273,6 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
         </div>
       </div>
 
-      {/* Nested replies */}
       {node.replies.map((reply) => (
         <CommentThread
           key={reply.comment.id}

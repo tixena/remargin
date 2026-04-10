@@ -16,10 +16,6 @@ use super::{
     InsertPosition, insert_comment, serialize_comment, verify_preservation, write_document,
 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Build a minimal comment for testing.
 fn make_comment(id: &str, content: &str) -> Comment {
     Comment {
@@ -41,10 +37,6 @@ fn make_comment(id: &str, content: &str) -> Comment {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Simple serialize
-// ---------------------------------------------------------------------------
-
 #[test]
 fn simple_serialize() {
     let comment = make_comment("abc", "Hello world.");
@@ -58,10 +50,6 @@ fn simple_serialize() {
     assert!(output.contains("Hello world.\n"));
     assert!(output.ends_with("```\n"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Full serialize with all fields
-// ---------------------------------------------------------------------------
 
 #[test]
 fn full_serialize() {
@@ -118,20 +106,12 @@ fn full_serialize() {
     assert!(checksum_pos < sig_pos);
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Fence depth 3 (no backticks in content)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn fence_depth_three_no_backticks() {
     let comment = make_comment("fd3", "No backticks here.");
     let output = serialize_comment(&comment);
     assert!(output.starts_with("```remargin\n"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: Fence depth 4 (content has ``` code blocks)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn fence_depth_four_code_blocks() {
@@ -140,20 +120,12 @@ fn fence_depth_four_code_blocks() {
     assert!(output.starts_with("````remargin\n"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 5: Fence depth 6 (content quotes a 5-backtick block)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn fence_depth_six_deep_nesting() {
     let comment = make_comment("fd6", "`````remargin\nquoted block\n`````");
     let output = serialize_comment(&comment);
     assert!(output.starts_with("``````remargin\n"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Insert after comment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn insert_after_comment() {
@@ -183,10 +155,6 @@ Some text after.
     assert_eq!(ids, vec!["abc", "new1"]);
 }
 
-// ---------------------------------------------------------------------------
-// Test 7: Insert after line
-// ---------------------------------------------------------------------------
-
 #[test]
 fn insert_after_line() {
     let doc_str = "Line 1\nLine 2\nLine 3\n";
@@ -206,10 +174,6 @@ fn insert_after_line() {
     assert!(comment_pos < line3_pos);
 }
 
-// ---------------------------------------------------------------------------
-// Test 8: Append
-// ---------------------------------------------------------------------------
-
 #[test]
 fn append_comment() {
     let doc_str = "# Title\n\nSome text.\n";
@@ -225,10 +189,6 @@ fn append_comment() {
     let comment_pos = markdown.find("id: end1").unwrap();
     assert!(text_pos < comment_pos);
 }
-
-// ---------------------------------------------------------------------------
-// Test 9: Round-trip (serialize -> parse -> serialize)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn round_trip_serialize() {
@@ -247,10 +207,6 @@ fn round_trip_serialize() {
     assert_eq!(doc2.comments()[0].content, "Round-trip test body.");
 }
 
-// ---------------------------------------------------------------------------
-// Test 10: Preservation pass
-// ---------------------------------------------------------------------------
-
 #[test]
 fn preservation_pass() {
     let mut before = HashSet::new();
@@ -268,10 +224,6 @@ fn preservation_pass() {
 
     verify_preservation(&before, &after, &added, &removed).unwrap();
 }
-
-// ---------------------------------------------------------------------------
-// Test 11: Preservation fail (unexpected addition)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn preservation_fail_unexpected() {
@@ -292,10 +244,6 @@ fn preservation_fail_unexpected() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 12: Write with MockSystem
-// ---------------------------------------------------------------------------
-
 #[test]
 fn write_with_mock_system() {
     let comment = make_comment("wrt1", "Written comment.");
@@ -313,10 +261,6 @@ fn write_with_mock_system() {
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert!(content.contains("id: wrt1"));
 }
-
-// ---------------------------------------------------------------------------
-// Insert whitespace tests (no surplus newlines)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn insert_after_line_no_double_newline() {
@@ -377,10 +321,6 @@ fn insert_append_no_double_newline() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test: AfterComment with nonexistent ID
-// ---------------------------------------------------------------------------
-
 #[test]
 fn insert_after_nonexistent_comment() {
     let doc_str = "# Just text\n";
@@ -393,10 +333,6 @@ fn insert_after_nonexistent_comment() {
     );
     result.unwrap_err();
 }
-
-// ---------------------------------------------------------------------------
-// Test: AfterLine at exact document length (last line)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn insert_after_last_line() {
@@ -419,10 +355,6 @@ fn insert_after_last_line() {
     let comment_pos = markdown.find("id: last").unwrap();
     assert!(line3_pos < comment_pos);
 }
-
-// ---------------------------------------------------------------------------
-// Test: AfterLine beyond document length clamps to append
-// ---------------------------------------------------------------------------
 
 #[test]
 fn insert_after_line_beyond_length_clamps() {

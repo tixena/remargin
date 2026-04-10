@@ -64,17 +64,12 @@ fn pick_length(existing_ids: &HashSet<&str>) -> u32 {
     length
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
     use super::{CHARSET_SIZE, INITIAL_LENGTH, generate, pick_length};
 
-    // Test 1: Empty set produces 3-char ID.
     #[test]
     fn empty_set_produces_three_char_id() {
         let existing: HashSet<&str> = HashSet::new();
@@ -82,7 +77,6 @@ mod tests {
         assert_eq!(id.len(), INITIAL_LENGTH as usize);
     }
 
-    // Test 2: Small set produces 3-char ID, no collision.
     #[test]
     fn small_set_no_collision() {
         let mut existing: HashSet<&str> = HashSet::new();
@@ -95,7 +89,6 @@ mod tests {
         assert!(!existing.contains(id.as_str()));
     }
 
-    // Test 3: Large set causes length increase.
     #[test]
     fn large_set_increases_length() {
         // 36^3 = 46656.  Threshold is 50%, so >23328 IDs at length 3 should bump.
@@ -129,7 +122,6 @@ mod tests {
         assert!(!existing.contains(id.as_str()));
     }
 
-    // Test 4: Character set is strictly a-z0-9.
     #[test]
     fn character_set_valid() {
         let existing: HashSet<&str> = HashSet::new();
@@ -144,7 +136,6 @@ mod tests {
         }
     }
 
-    // Test 5: No collision across sequential generation.
     #[test]
     fn no_collision_sequential() {
         let mut existing: HashSet<&str> = HashSet::new();

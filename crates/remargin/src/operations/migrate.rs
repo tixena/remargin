@@ -23,10 +23,6 @@ use crate::id;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, LegacyRole, Segment};
 use crate::writer;
 
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
-
 /// Record of a migrated comment.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -36,10 +32,6 @@ pub struct MigratedComment {
     /// The original role (user or agent).
     pub original_role: String,
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Migrate all legacy comments in a document to Remargin format.
 ///
@@ -167,7 +159,6 @@ pub fn migrate(
 
     doc.segments = new_segments;
 
-    // Update frontmatter.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
     // Write.
@@ -177,10 +168,6 @@ pub fn migrate(
 
     Ok(results)
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// Collect comment IDs from segments built so far.
 fn collect_ids_from_segments(segments: &[Segment]) -> HashSet<&str> {

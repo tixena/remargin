@@ -75,8 +75,6 @@ export class RemarginBackend {
     this.settings = settings;
   }
 
-  // -- Document access --------------------------------------------------------
-
   async get(path: string, opts?: GetOpts): Promise<string> {
     const args: string[] = ["get", path];
     if (opts?.startLine != null) args.push("--start", String(opts.startLine));
@@ -84,8 +82,6 @@ export class RemarginBackend {
     if (opts?.lineNumbers) args.push("--line-numbers");
     const raw = await this.exec(args);
     const parsed = JSON.parse(raw) as { content?: string; lines?: unknown };
-    // When --line-numbers is set the CLI returns { lines: [...] }; otherwise
-    // { content: "..." }. The callers here only use the plain-content form.
     if (typeof parsed.content === "string") return parsed.content;
     return raw;
   }
@@ -106,8 +102,6 @@ export class RemarginBackend {
     const raw = await this.exec(["rm", path]);
     return JSON.parse(raw);
   }
-
-  // -- Comments ---------------------------------------------------------------
 
   async comments(file: string): Promise<Comment[]> {
     const raw = await this.exec(["comments", file]);
@@ -167,8 +161,6 @@ export class RemarginBackend {
     return parsed.ids as string[];
   }
 
-  // -- Search & query ---------------------------------------------------------
-
   async query(path: string, opts?: QueryOpts): Promise<QueryResult[]> {
     const args: string[] = ["query", path];
     if (opts?.pending) args.push("--pending");
@@ -192,8 +184,6 @@ export class RemarginBackend {
     return parseEnvelope(raw, SearchEnvelope$Schema, "search").matches;
   }
 
-  // -- Utility ----------------------------------------------------------------
-
   async version(): Promise<string> {
     const raw = await this.exec(["--version"], {
       useJson: false,
@@ -214,8 +204,6 @@ export class RemarginBackend {
     const parsed = JSON.parse(raw) as IdentityInfo;
     return parsed;
   }
-
-  // -- Internal ---------------------------------------------------------------
 
   private async exec(
     args: string[],

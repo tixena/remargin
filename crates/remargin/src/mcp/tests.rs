@@ -15,10 +15,6 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::mcp;
 use crate::parser::{self, AuthorType};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /// Document with two comments for expanded query tests.
 const DOC_EXPANDED: &str = "\
 ---
@@ -76,10 +72,6 @@ Original comment.
 Body paragraph two.
 ";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Create a default config for testing.
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -129,10 +121,6 @@ fn is_tool_error(response: &Value) -> bool {
     response["result"]["isError"].as_bool().unwrap_or(false)
 }
 
-// ---------------------------------------------------------------------------
-// Initialize
-// ---------------------------------------------------------------------------
-
 #[test]
 fn initialize_returns_capabilities() {
     let base = Path::new("/docs");
@@ -159,10 +147,6 @@ fn initialize_returns_capabilities() {
     assert!(response["result"]["capabilities"]["tools"].is_object());
     assert_eq!(response["result"]["serverInfo"]["name"], "remargin");
 }
-
-// ---------------------------------------------------------------------------
-// Tools list
-// ---------------------------------------------------------------------------
 
 #[test]
 fn tools_list_returns_all_18_tools() {
@@ -235,10 +219,6 @@ fn tools_list_all_have_input_schema() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Comment tool
-// ---------------------------------------------------------------------------
-
 #[test]
 fn comment_creates_and_returns_id() {
     let base = Path::new("/docs");
@@ -267,10 +247,6 @@ fn comment_creates_and_returns_id() {
     assert!(result["id"].is_string());
     assert!(!result["id"].as_str().unwrap().is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Comments tool (list)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn comments_lists_created_comment() {
@@ -328,10 +304,6 @@ fn comments_lists_created_comment() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Error response
-// ---------------------------------------------------------------------------
-
 #[test]
 fn comment_missing_required_field_returns_error() {
     let base = Path::new("/docs");
@@ -357,10 +329,6 @@ fn comment_missing_required_field_returns_error() {
 
     assert!(is_tool_error(&response));
 }
-
-// ---------------------------------------------------------------------------
-// Batch
-// ---------------------------------------------------------------------------
 
 #[test]
 fn batch_creates_multiple_comments() {
@@ -394,10 +362,6 @@ fn batch_creates_multiple_comments() {
     let ids = result["ids"].as_array().unwrap();
     assert_eq!(ids.len(), 3_usize);
 }
-
-// ---------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------
 
 #[test]
 fn search_finds_text_in_document() {
@@ -439,10 +403,6 @@ fn search_finds_text_in_document() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ls
-// ---------------------------------------------------------------------------
-
 #[test]
 fn ls_lists_directory() {
     let base = Path::new("/docs");
@@ -475,10 +435,6 @@ fn ls_lists_directory() {
     assert!(entries.len() >= 2_usize);
 }
 
-// ---------------------------------------------------------------------------
-// get
-// ---------------------------------------------------------------------------
-
 #[test]
 fn get_reads_file_content() {
     let base = Path::new("/docs");
@@ -508,10 +464,6 @@ fn get_reads_file_content() {
     assert!(content.contains("Line 3"));
 }
 
-// ---------------------------------------------------------------------------
-// Unknown method
-// ---------------------------------------------------------------------------
-
 #[test]
 fn unknown_method_returns_error() {
     let base = Path::new("/docs");
@@ -534,10 +486,6 @@ fn unknown_method_returns_error() {
     assert_eq!(response["error"]["code"], -32_601_i32);
 }
 
-// ---------------------------------------------------------------------------
-// Notification (no id) returns no response
-// ---------------------------------------------------------------------------
-
 #[test]
 fn notification_returns_no_response() {
     let base = Path::new("/docs");
@@ -553,10 +501,6 @@ fn notification_returns_no_response() {
     let response = mcp::process_request(&system, base, &config, &request_str).unwrap();
     assert!(response.is_none());
 }
-
-// ---------------------------------------------------------------------------
-// Unknown tool
-// ---------------------------------------------------------------------------
 
 #[test]
 fn unknown_tool_returns_error() {
@@ -581,10 +525,6 @@ fn unknown_tool_returns_error() {
 
     assert!(is_tool_error(&response));
 }
-
-// ---------------------------------------------------------------------------
-// Lint
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lint_returns_ok_for_valid_document() {
@@ -613,10 +553,6 @@ fn lint_returns_ok_for_valid_document() {
     assert!(result["ok"].as_bool().unwrap());
     assert!(result["errors"].as_array().unwrap().is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Verify
-// ---------------------------------------------------------------------------
 
 #[test]
 fn verify_checks_checksum_integrity() {
@@ -667,10 +603,6 @@ fn verify_checks_checksum_integrity() {
     assert!(results[0]["checksum_ok"].as_bool().unwrap());
     assert_eq!(results[0]["signature"], "not_checked");
 }
-
-// ---------------------------------------------------------------------------
-// Purge
-// ---------------------------------------------------------------------------
 
 #[test]
 fn purge_dry_run_reports_count() {
@@ -728,10 +660,6 @@ fn purge_dry_run_reports_count() {
     assert_eq!(result["comments_removed"], 2_i32);
 }
 
-// ---------------------------------------------------------------------------
-// Metadata
-// ---------------------------------------------------------------------------
-
 #[test]
 fn metadata_returns_document_info() {
     let base = Path::new("/docs");
@@ -775,10 +703,6 @@ fn metadata_returns_document_info() {
     assert!(result["line_count"].as_u64().unwrap() > 0_u64);
 }
 
-// ---------------------------------------------------------------------------
-// JSON-RPC protocol conformance
-// ---------------------------------------------------------------------------
-
 #[test]
 fn response_includes_jsonrpc_version() {
     let base = Path::new("/docs");
@@ -821,10 +745,6 @@ fn response_preserves_string_id() {
 
     assert_eq!(response["id"], "request-abc");
 }
-
-// ---------------------------------------------------------------------------
-// Reply placement tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn reply_placed_after_parent_not_appended() {
@@ -1059,10 +979,6 @@ fn non_reply_with_after_line_respected() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Elapsed time reporting
-// ---------------------------------------------------------------------------
-
 #[test]
 fn tool_result_includes_elapsed_ms() {
     let base = Path::new("/docs");
@@ -1096,10 +1012,6 @@ fn tool_result_includes_elapsed_ms() {
         "elapsed_ms should be a non-negative integer"
     );
 }
-
-// ---------------------------------------------------------------------------
-// query --comment-id via MCP
-// ---------------------------------------------------------------------------
 
 #[test]
 fn mcp_query_comment_id_finds_doc() {
@@ -1165,10 +1077,6 @@ fn mcp_query_comment_id_not_found_returns_empty() {
     let results = result["results"].as_array().unwrap();
     assert!(results.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// MCP query expanded tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn mcp_query_expanded_returns_comments() {
@@ -1254,10 +1162,6 @@ fn mcp_query_summary_omits_comments() {
     // With summary mode, there should be no comments key.
     assert!(results[0].get("comments").is_none());
 }
-
-// ---------------------------------------------------------------------------
-// Folder-wide ack via MCP
-// ---------------------------------------------------------------------------
 
 #[test]
 fn mcp_ack_without_file_resolves_from_tree() {
@@ -1395,10 +1299,6 @@ fn mcp_ack_without_file_ambiguous_returns_error() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// MCP auto-ack tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn mcp_comment_auto_ack() {
     let base = Path::new("/docs");
@@ -1512,10 +1412,6 @@ fn mcp_batch_auto_ack_per_op() {
     assert_eq!(parent.ack[0].author, "tester");
 }
 
-// ---------------------------------------------------------------------------
-// rm tool tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn mcp_rm_deletes_file() {
     let base = Path::new("/docs");
@@ -1601,10 +1497,6 @@ fn mcp_rm_missing_path_param() {
     assert!(is_tool_error(&response));
 }
 
-// ---------------------------------------------------------------------------
-// Write --raw tests (MCP)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn mcp_write_raw_param() {
     let base = Path::new("/docs");
@@ -1671,10 +1563,6 @@ fn mcp_write_raw_rejected_for_md() {
 
     assert!(is_tool_error(&response));
 }
-
-// ---------------------------------------------------------------------------
-// Write --binary tests (MCP)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn mcp_write_binary_param() {

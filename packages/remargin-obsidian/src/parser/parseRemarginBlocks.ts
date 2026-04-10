@@ -42,7 +42,6 @@ function parseSimpleYaml(lines: string[]): YamlFields {
   for (const line of lines) {
     const trimmed = line.trimEnd();
 
-    // List item continuation
     if (trimmed.startsWith("  - ") || trimmed.startsWith("    - ")) {
       const value = trimmed.replace(/^\s*-\s*/, "");
       if (currentList) {
@@ -51,13 +50,11 @@ function parseSimpleYaml(lines: string[]): YamlFields {
       continue;
     }
 
-    // Flush previous list
     if (currentList && currentKey) {
       bag[currentKey] = currentList;
       currentList = null;
     }
 
-    // Key: value pair
     const match = trimmed.match(/^(\w+):\s*(.*)/);
     if (!match) continue;
 
@@ -65,13 +62,11 @@ function parseSimpleYaml(lines: string[]): YamlFields {
     const value = rawValue.trim();
 
     if (value === "" || value === "[]") {
-      // Start of list or empty
       currentKey = key;
       currentList = [];
       continue;
     }
 
-    // Inline list: [a, b, c]
     if (value.startsWith("[") && value.endsWith("]")) {
       const inner = value.slice(1, -1);
       bag[key] = inner ? inner.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")) : [];
@@ -79,13 +74,11 @@ function parseSimpleYaml(lines: string[]): YamlFields {
       continue;
     }
 
-    // Simple scalar
     bag[key] = value.replace(/^["']|["']$/g, "");
     currentKey = key;
     currentList = null;
   }
 
-  // Flush trailing list
   if (currentList && currentKey) {
     bag[currentKey] = currentList;
   }
@@ -128,17 +121,14 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
       case State.YamlHeader: {
         if (line.trim() === "---") {
           if (yamlClosed) {
-            // Second --- closes YAML, transition to content
             state = State.Content;
           } else {
             yamlClosed = true;
           }
         } else if (yamlClosed) {
-          // After first ---, accumulate YAML
           yamlLines.push(line);
         } else {
-          // Before first ---, this is malformed
-          // Try to recover — treat as body text
+          // Malformed before first --- — recover by treating as body.
           state = State.Body;
         }
         break;
@@ -147,7 +137,6 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
       case State.Content: {
         const closingFence = "`".repeat(fenceDepth);
         if (line.trim() === closingFence) {
-          // Block complete
           const yaml = parseSimpleYaml(yamlLines);
           const content = contentLines.join("\n");
           const block: ParsedBlock = {
@@ -192,7 +181,6 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
     }
   }
 
-  // Handle unclosed block
   if (state !== State.Body) {
     results.push({
       startLine: blockStartLine,

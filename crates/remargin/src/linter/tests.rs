@@ -2,10 +2,6 @@
 
 use crate::linter::{lint, lint_or_fail};
 
-// ---------------------------------------------------------------------------
-// Helper
-// ---------------------------------------------------------------------------
-
 /// Lint content and collect error messages.
 fn lint_messages(content: &str) -> Vec<String> {
     lint(content)
@@ -23,10 +19,6 @@ fn lint_pairs(content: &str) -> Vec<(usize, String)> {
         .map(|err| (err.line, err.message))
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Test 1: Valid document -- no errors
-// ---------------------------------------------------------------------------
 
 #[test]
 fn valid_document() {
@@ -62,10 +54,6 @@ def hello():
     assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: Unclosed fence
-// ---------------------------------------------------------------------------
-
 #[test]
 fn unclosed_fence() {
     let doc = "\
@@ -81,10 +69,6 @@ def hello():
     assert!(errors[0].1.contains("unclosed fenced code block"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Invalid frontmatter
-// ---------------------------------------------------------------------------
-
 #[test]
 fn invalid_frontmatter() {
     let doc = "\
@@ -96,10 +80,6 @@ fn invalid_frontmatter() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("invalid YAML in frontmatter"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: Invalid remargin YAML
-// ---------------------------------------------------------------------------
 
 #[test]
 fn invalid_remargin_yaml() {
@@ -114,10 +94,6 @@ fn invalid_remargin_yaml() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("invalid YAML in remargin block header"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Missing required field
-// ---------------------------------------------------------------------------
 
 #[test]
 fn missing_required_field() {
@@ -136,10 +112,6 @@ Missing the id field.
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("missing required field: id"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 6: Fence depth mismatch (opened with 4, "closed" with 3)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn fence_depth_mismatch() {
@@ -162,10 +134,6 @@ some code
     assert!(errors[0].1.contains("4 backticks"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 7: Nested fences valid (4-backtick block with 3-backtick content)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn nested_fences_valid() {
     let doc = "\
@@ -179,10 +147,6 @@ print('hello')
     let errors = lint(doc).unwrap();
     assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
 }
-
-// ---------------------------------------------------------------------------
-// Test 8: Multiple errors
-// ---------------------------------------------------------------------------
 
 #[test]
 fn multiple_errors() {
@@ -210,10 +174,6 @@ unclosed four-backtick block
     );
 }
 
-// ---------------------------------------------------------------------------
-// Test 9: No fences (plain markdown)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_fences_clean() {
     let doc = "\
@@ -227,10 +187,6 @@ Some paragraph text.
     let errors = lint(doc).unwrap();
     assert!(errors.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// lint_or_fail tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lint_or_fail_clean() {
@@ -247,10 +203,6 @@ fn lint_or_fail_with_errors() {
     assert!(msg.contains("Lint errors"));
     assert!(msg.contains("unclosed fenced code block"));
 }
-
-// ---------------------------------------------------------------------------
-// Frontmatter edge cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn no_frontmatter_is_fine() {
@@ -270,10 +222,6 @@ no closing marker
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("unclosed YAML frontmatter"));
 }
-
-// ---------------------------------------------------------------------------
-// Remargin block edge cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn remargin_no_yaml_header() {
@@ -337,10 +285,6 @@ Content.
     assert!(errors.iter().any(|e| e.contains("ts")));
     assert!(errors.iter().any(|e| e.contains("checksum")));
 }
-
-// ---------------------------------------------------------------------------
-// Error line numbers
-// ---------------------------------------------------------------------------
 
 #[test]
 fn error_line_numbers_correct() {

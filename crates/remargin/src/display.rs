@@ -1,8 +1,4 @@
 //! Pretty-print comment display with threaded nesting.
-//!
-//! This module formats remargin comments as a human-readable threaded tree.
-//! Root comments are sorted by line number (document order), replies are
-//! nested under their parents sorted by timestamp ascending.
 
 extern crate alloc;
 
@@ -12,31 +8,15 @@ use core::fmt::Write as _;
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{AuthorType, Comment};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// Maximum content lines before truncation.
 const MAX_CONTENT_LINES: usize = 5;
 
-// ---------------------------------------------------------------------------
-// Tree data structure
-// ---------------------------------------------------------------------------
-
-/// A node in the comment tree, holding a reference to the comment and its
-/// children (direct replies).
+/// A node in the comment tree: a comment plus its direct replies.
 pub(crate) struct CommentNode<'cm> {
     /// Direct replies, sorted by timestamp ascending.
     pub children: Vec<Self>,
-    /// The comment at this node.
     pub comment: &'cm Comment,
 }
 
-// ---------------------------------------------------------------------------
-// Tree building
-// ---------------------------------------------------------------------------
-
-/// Build a node and its descendants recursively.
 fn build_node<'cm>(
     idx: usize,
     comments: &[&'cm Comment],
@@ -64,14 +44,12 @@ fn build_node<'cm>(
 ///
 /// Children: sorted by timestamp ascending (conversation order).
 pub(crate) fn build_comment_tree<'cm>(comments: &[&'cm Comment]) -> Vec<CommentNode<'cm>> {
-    // Build an ID set for quick lookup.
     let id_set: BTreeMap<&str, usize> = comments
         .iter()
         .enumerate()
         .map(|(i, cm)| (cm.id.as_str(), i))
         .collect();
 
-    // Build a children map: parent_id -> list of child indices.
     let mut children_map: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     let mut root_indices: Vec<usize> = Vec::new();
 
@@ -84,10 +62,8 @@ pub(crate) fn build_comment_tree<'cm>(comments: &[&'cm Comment]) -> Vec<CommentN
         }
     }
 
-    // Sort roots by line number ascending.
     root_indices.sort_by_key(|&i| comments[i].line);
 
-    // Sort each children list by timestamp ascending.
     for children in children_map.values_mut() {
         children.sort_by(|&a, &b| comments[a].ts.cmp(&comments[b].ts));
     }
@@ -98,19 +74,12 @@ pub(crate) fn build_comment_tree<'cm>(comments: &[&'cm Comment]) -> Vec<CommentN
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// Pending calculation
-// ---------------------------------------------------------------------------
-
-/// Count the number of pending comments.
-///
 /// A comment is pending if it has a non-empty `to` field and at least one
 /// addressee has not acknowledged it.
 pub(crate) fn count_pending(comments: &[&Comment]) -> usize {
     comments.iter().filter(|cm| is_pending(cm)).count()
 }
 
-/// Check if a comment is pending.
 pub(crate) fn is_pending(cm: &Comment) -> bool {
     if cm.to.is_empty() {
         return false;
@@ -121,15 +90,8 @@ pub(crate) fn is_pending(cm: &Comment) -> bool {
         .any(|addr| !acked_authors.contains(&addr.as_str()))
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-/// Format comments from a document as a pretty-printed threaded display.
-///
 /// Root comments are sorted by line number (document order).
 /// Replies are nested under their parents, sorted by timestamp ascending.
-/// Returns the formatted string ready for display.
 #[must_use]
 pub fn format_comments_pretty(file_path: &str, comments: &[&Comment]) -> String {
     let forest = build_comment_tree(comments);
@@ -141,7 +103,6 @@ pub fn format_comments_pretty(file_path: &str, comments: &[&Comment]) -> String 
         render_node(&mut out, file_path, node, 0, &mut first);
     }
 
-    // Footer.
     let total = comments.len();
     let pending = count_pending(comments);
     let _ = writeln!(out, "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}");
@@ -150,8 +111,6 @@ pub fn format_comments_pretty(file_path: &str, comments: &[&Comment]) -> String 
     out
 }
 
-/// Render a single comment node at the given depth, writing to `out`.
-///
 /// `depth` controls indentation: 0 = root (2 spaces), 1 = reply (4 spaces), etc.
 /// `first` tracks whether this is the first comment (no leading blank line).
 fn render_node(
@@ -164,17 +123,14 @@ fn render_node(
     let cm = node.comment;
     let indent = " ".repeat((depth + 1) * 2);
 
-    // Blank line between comments (not before the first one).
     if *first {
         *first = false;
     } else {
         out.push('\n');
     }
 
-    // file:line link.
     let _ = writeln!(out, "{file_path}:{}", cm.line);
 
-    // Header: id . author (type) . timestamp.
     let author_type_str = match cm.author_type {
         AuthorType::Agent => "agent",
         AuthorType::Human => "human",
@@ -186,17 +142,14 @@ fn render_node(
         cm.id, cm.author
     );
 
-    // Threading marker for replies.
     if let Some(parent_id) = &cm.reply_to {
         let _ = writeln!(out, "{indent}\u{2502} \u{2934} reply-to: {parent_id}");
     }
 
-    // Addressees.
     if !cm.to.is_empty() {
         let _ = writeln!(out, "{indent}\u{2502} to: {}", cm.to.join(", "));
     }
 
-    // Content lines (truncated at MAX_CONTENT_LINES).
     let content_lines: Vec<&str> = cm.content.lines().collect();
     let truncate = content_lines.len() > MAX_CONTENT_LINES;
     let display_lines = if truncate {
@@ -212,12 +165,10 @@ fn render_node(
         let _ = writeln!(out, "{indent}\u{2502} ...");
     }
 
-    // Reactions (before status).
     for (emoji, authors) in &cm.reactions {
         let _ = writeln!(out, "{indent}\u{2502} {emoji} {}", authors.join(", "));
     }
 
-    // Status: acked or pending.
     if cm.ack.is_empty() {
         let _ = writeln!(out, "{indent}\u{2502} pending");
     } else {
@@ -231,15 +182,10 @@ fn render_node(
         }
     }
 
-    // Recursively render children.
     for child in &node.children {
         render_node(out, file_path, child, depth + 1, first);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Query pretty-print (flat, grouped by file)
-// ---------------------------------------------------------------------------
 
 /// Format cross-document query results as a pretty-printed flat display.
 ///
@@ -253,7 +199,6 @@ fn render_node(
 pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -> String {
     let mut out = String::new();
 
-    // Sort results alphabetically by path.
     let mut sorted: Vec<&QueryResult> = results.iter().collect();
     sorted.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -272,14 +217,12 @@ pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -
         let pending_count = count_pending_expanded(&result.comments);
         total_pending += pending_count;
 
-        // Per-file header.
         let pending_label = format_pending_label(pending_count, filter_name);
         let _ = writeln!(
             out,
             "{path_str} ({comment_count} comments, {pending_label})"
         );
 
-        // Sort comments by line number within this file (flat, not threaded).
         let mut comments: Vec<&ExpandedComment> = result.comments.iter().collect();
         comments.sort_by_key(|cm| cm.line);
 
@@ -287,12 +230,10 @@ pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -
             render_expanded_comment(&mut out, &path_str, cm);
         }
 
-        // Per-file footer.
         let _ = writeln!(out, "\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}");
         let _ = write!(out, "{pending_label}");
     }
 
-    // Grand footer.
     let grand_pending_label = format_pending_label(total_pending, filter_name);
     let _ = write!(
         out,
@@ -302,15 +243,11 @@ pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -
     out
 }
 
-/// Render a single [`ExpandedComment`] in flat display format.
 fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComment) {
-    // Blank line before each comment.
     out.push('\n');
 
-    // file:line link.
     let _ = writeln!(out, "{file_path}:{}", cm.line);
 
-    // Header: id . author (type) . timestamp.
     let author_type_str = match cm.author_type {
         AuthorType::Agent => "agent",
         AuthorType::Human => "human",
@@ -322,17 +259,14 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
         cm.id, cm.author
     );
 
-    // Reply marker.
     if let Some(parent_id) = &cm.reply_to {
         let _ = writeln!(out, "  \u{2502} \u{2934} reply-to: {parent_id}");
     }
 
-    // Addressees.
     if !cm.to.is_empty() {
         let _ = writeln!(out, "  \u{2502} to: {}", cm.to.join(", "));
     }
 
-    // Content lines (truncated at MAX_CONTENT_LINES).
     let content_lines: Vec<&str> = cm.content.lines().collect();
     let truncate = content_lines.len() > MAX_CONTENT_LINES;
     let display_lines = if truncate {
@@ -348,12 +282,10 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
         let _ = writeln!(out, "  \u{2502} ...");
     }
 
-    // Reactions (before status).
     for (emoji, authors) in &cm.reactions {
         let _ = writeln!(out, "  \u{2502} {emoji} {}", authors.join(", "));
     }
 
-    // Status: acked or pending.
     if cm.ack.is_empty() {
         let _ = writeln!(out, "  \u{2502} pending");
     } else {
@@ -368,12 +300,10 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
     }
 }
 
-/// Count pending comments among expanded query results.
 fn count_pending_expanded(comments: &[ExpandedComment]) -> usize {
     comments.iter().filter(|cm| is_pending_expanded(cm)).count()
 }
 
-/// Check if an expanded comment is pending.
 fn is_pending_expanded(cm: &ExpandedComment) -> bool {
     if cm.to.is_empty() {
         return false;
@@ -384,17 +314,12 @@ fn is_pending_expanded(cm: &ExpandedComment) -> bool {
         .any(|addr| !acked_authors.contains(&addr.as_str()))
 }
 
-/// Format a pending count label, optionally including the filter name.
 fn format_pending_label(count: usize, filter_name: Option<&str>) -> String {
     filter_name.map_or_else(
         || format!("{count} pending"),
         |name| format!("{count} pending for {name}"),
     )
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests;

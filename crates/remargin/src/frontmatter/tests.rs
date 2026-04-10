@@ -13,10 +13,6 @@ use crate::frontmatter::{
 };
 use crate::parser::{Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Create a default `ResolvedConfig` for testing.
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -67,10 +63,6 @@ fn get_value<'map>(mapping: &'map Mapping, key: &str) -> Option<&'map Value> {
     mapping.get(Value::String(String::from(key)))
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: No frontmatter -- frontmatter gets added
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_frontmatter_adds_frontmatter() {
     let config = test_config();
@@ -85,10 +77,6 @@ fn no_frontmatter_adds_frontmatter() {
     assert!(markdown.contains("created:"));
     assert!(markdown.contains("remargin_pending: 0"));
 }
-
-// ---------------------------------------------------------------------------
-// Test 2: Existing frontmatter -- title preserved, remargin fields added
-// ---------------------------------------------------------------------------
 
 #[test]
 fn existing_frontmatter_preserved() {
@@ -106,10 +94,6 @@ fn existing_frontmatter_preserved() {
     assert!(markdown.contains("remargin_pending: 0"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Title from heading
-// ---------------------------------------------------------------------------
-
 #[test]
 fn title_from_heading() {
     assert_eq!(
@@ -122,10 +106,6 @@ fn title_from_heading() {
 fn title_from_heading_none() {
     assert_eq!(extract_title_from_heading("No heading here"), None);
 }
-
-// ---------------------------------------------------------------------------
-// Test 4: Pending count
-// ---------------------------------------------------------------------------
 
 #[test]
 fn pending_count() {
@@ -148,10 +128,6 @@ fn pending_count() {
     let pending = get_value(&mapping, "remargin_pending").unwrap();
     assert_eq!(pending.as_u64().unwrap(), 2); // cm1 and cm2 are unacked
 }
-
-// ---------------------------------------------------------------------------
-// Test 5: Pending for
-// ---------------------------------------------------------------------------
 
 #[test]
 fn pending_for() {
@@ -179,10 +155,6 @@ fn pending_for() {
     assert_eq!(names, vec!["alice", "eduardo"]);
 }
 
-// ---------------------------------------------------------------------------
-// Test 6: Last activity
-// ---------------------------------------------------------------------------
-
 #[test]
 fn last_activity() {
     let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
@@ -206,10 +178,6 @@ fn last_activity() {
     assert!(ts_str.contains("16:00:00"));
 }
 
-// ---------------------------------------------------------------------------
-// Test 7: No comments -- remargin_pending is 0
-// ---------------------------------------------------------------------------
-
 #[test]
 fn no_comments_zero_pending() {
     let comments: Vec<&Comment> = Vec::new();
@@ -222,10 +190,6 @@ fn no_comments_zero_pending() {
     let last = get_value(&mapping, "remargin_last_activity").unwrap();
     assert!(last.is_null());
 }
-
-// ---------------------------------------------------------------------------
-// Test 8: User field preserved even when heading differs
-// ---------------------------------------------------------------------------
 
 #[test]
 fn user_field_preserved() {
@@ -245,10 +209,6 @@ fn user_field_preserved() {
     assert_eq!(title.as_str().unwrap(), "Custom"); // Not overwritten.
 }
 
-// ---------------------------------------------------------------------------
-// Test: Author populated from config identity
-// ---------------------------------------------------------------------------
-
 #[test]
 fn author_from_config() {
     let config = test_config();
@@ -258,10 +218,6 @@ fn author_from_config() {
     let author = get_value(&mapping, "author").unwrap();
     assert_eq!(author.as_str().unwrap(), "eduardo");
 }
-
-// ---------------------------------------------------------------------------
-// Test: No identity in config -- author field not added
-// ---------------------------------------------------------------------------
 
 #[test]
 fn no_identity_no_author() {

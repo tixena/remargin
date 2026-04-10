@@ -8,10 +8,6 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Result, bail};
 use os_shim::System;
 
-// ---------------------------------------------------------------------------
-// Allowlist
-// ---------------------------------------------------------------------------
-
 /// File extensions visible through remargin.
 const ALLOWED_EXTENSIONS: &[&str] = &[
     // Markdown/text/data
@@ -57,10 +53,6 @@ pub fn is_text(path: &Path) -> bool {
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| TEXT_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }
-
-// ---------------------------------------------------------------------------
-// Path sandboxing
-// ---------------------------------------------------------------------------
 
 /// Resolve and sandbox a path. Returns an error if it escapes the base directory.
 ///
