@@ -23,6 +23,11 @@ default = ["zod", "jsonschema"]
 unrestricted = ["remargin-core/unrestricted"]
 zod = ["remargin-core/zod"]
 jsonschema = ["remargin-core/jsonschema"]
+# Embed the Obsidian plugin (main.js + manifest.json) and expose the
+# `remargin obsidian install|uninstall` subcommand. Requires
+# `pnpm -C packages/remargin-obsidian build` to have run first so the
+# artifacts exist at compile time — see `just build-cli-obsidian`.
+obsidian = []
 
 [dependencies]
 remargin-core.workspace = true

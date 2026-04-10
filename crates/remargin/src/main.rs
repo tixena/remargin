@@ -1,5 +1,8 @@
 //! Remargin CLI binary.
 
+#[cfg(feature = "obsidian")]
+mod obsidian;
+
 use std::env;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -242,6 +245,12 @@ enum Commands {
         #[arg(long)]
         backup: bool,
     },
+    /// Install or uninstall the embedded Obsidian plugin in a vault.
+    #[cfg(feature = "obsidian")]
+    Obsidian {
+        #[command(subcommand)]
+        action: ObsidianAction,
+    },
     /// Strip all comments from a document.
     Purge {
         /// Path to the document.
@@ -401,6 +410,24 @@ enum McpAction {
     Test,
     /// Remove remargin MCP server from Claude Code.
     Uninstall,
+}
+
+/// Obsidian plugin install/uninstall actions.
+#[cfg(feature = "obsidian")]
+#[derive(clap::Subcommand)]
+enum ObsidianAction {
+    /// Install or upgrade the plugin in the current vault.
+    Install {
+        /// Vault directory. Defaults to the current working directory.
+        #[arg(long)]
+        vault_path: Option<PathBuf>,
+    },
+    /// Remove the plugin from the current vault.
+    Uninstall {
+        /// Vault directory. Defaults to the current working directory.
+        #[arg(long)]
+        vault_path: Option<PathBuf>,
+    },
 }
 
 struct CommentParams<'cmd> {
@@ -697,6 +724,10 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             return cmd_identity(system, cwd, author_type.as_deref(), cli.global.json);
         }
         Commands::Keygen { output } => return cmd_keygen(system, output),
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { action } => {
+            return cmd_obsidian(system, cwd, action, cli.global.json);
+        }
         Commands::Skill { action } => return cmd_skill(system, action, cli.global.json),
         Commands::Ack { .. }
         | Commands::Batch { .. }
@@ -911,6 +942,8 @@ fn dispatch_with_config(
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
         | Commands::Skill { .. } => Ok(()),
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { .. } => Ok(()),
     }
 }
 
@@ -1574,6 +1607,57 @@ fn cmd_rm(
         out(&format!("deleted: {file}"))
     } else {
         out(&format!("already absent: {file}"))
+    }
+}
+
+#[cfg(feature = "obsidian")]
+fn cmd_obsidian(
+    system: &dyn System,
+    cwd: &Path,
+    action: &ObsidianAction,
+    json_mode: bool,
+) -> Result<()> {
+    match action {
+        ObsidianAction::Install { vault_path } => {
+            let report = obsidian::install(system, cwd, vault_path.as_deref())?;
+            if json_mode {
+                print_output(true, &report.to_json())
+            } else {
+                eprintln!("{}", report.to_text());
+                Ok(())
+            }
+        }
+        ObsidianAction::Uninstall { vault_path } => {
+            let status = obsidian::uninstall(system, cwd, vault_path.as_deref())?;
+            match status {
+                obsidian::UninstallStatus::Removed { plugin_dir } => {
+                    if json_mode {
+                        print_output(
+                            true,
+                            &json!({
+                                "uninstalled": plugin_dir.display().to_string(),
+                            }),
+                        )
+                    } else {
+                        eprintln!("Uninstalled remargin plugin from {}", plugin_dir.display());
+                        Ok(())
+                    }
+                }
+                obsidian::UninstallStatus::NotInstalled { plugin_dir } => {
+                    if json_mode {
+                        print_output(
+                            true,
+                            &json!({
+                                "not_installed": plugin_dir.display().to_string(),
+                            }),
+                        )
+                    } else {
+                        eprintln!("remargin plugin not installed at {}", plugin_dir.display());
+                        Ok(())
+                    }
+                }
+            }
+        }
     }
 }
 
