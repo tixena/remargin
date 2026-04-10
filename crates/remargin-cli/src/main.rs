@@ -1,7 +1,4 @@
-//! # `Remargin`
-//!
-//! `Remargin` is a command-line tool for enhanced inline review of markdown documents.
-//! It provides comment parsing, writing, threading, signatures, and cross-document queries.
+//! Remargin CLI binary.
 
 use std::env;
 use std::io::{self, Read as _, Write as _};
@@ -32,48 +29,17 @@ use remargin::parser;
 use remargin::skill;
 use remargin::writer::InsertPosition;
 
-// ---------------------------------------------------------------------------
-// Exit codes
-// ---------------------------------------------------------------------------
-
-/// General error.
 const EXIT_ERROR: u8 = 1;
-
-/// Lint failure.
 const EXIT_LINT: u8 = 2;
-
-/// Integrity failure.
 const EXIT_INTEGRITY: u8 = 3;
-
-/// Missing attachment.
 const EXIT_ATTACHMENT: u8 = 4;
-
-/// Comment preservation violation.
 const EXIT_PRESERVATION: u8 = 5;
-
-/// Skill error.
 const EXIT_SKILL: u8 = 6;
-
-/// Comment not found (folder-wide ack).
 const EXIT_NOT_FOUND: u8 = 7;
-
-/// Ambiguous comment ID (folder-wide ack -- found in multiple files).
 const EXIT_AMBIGUOUS: u8 = 8;
 
-// ---------------------------------------------------------------------------
-// Global timing
-// ---------------------------------------------------------------------------
-
-/// Process start time, captured early in `main()`. Used by `out_json` to
-/// decorate JSON payloads with an `elapsed_ms` field and by `main()` to print
-/// the human-readable `elapsed: Xms` trailer in non-JSON mode.
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
-// ---------------------------------------------------------------------------
-// CLI structure
-// ---------------------------------------------------------------------------
-
-/// Enhanced inline review protocol for markdown.
 #[derive(Parser)]
 #[command(
     name = "remargin",
@@ -81,16 +47,13 @@ static START_TIME: OnceLock<Instant> = OnceLock::new();
     about = "Enhanced inline review protocol for markdown"
 )]
 struct Cli {
-    /// Subcommand to execute.
     #[command(subcommand)]
     command: Commands,
 
-    /// Global flags shared by all subcommands.
     #[command(flatten)]
     global: GlobalFlags,
 }
 
-/// Global flags that override config file values.
 #[derive(clap::Args)]
 #[cfg_attr(
     feature = "unrestricted",
@@ -440,155 +403,94 @@ enum McpAction {
     Uninstall,
 }
 
-// ---------------------------------------------------------------------------
-// Parameter structs (to reduce argument count)
-// ---------------------------------------------------------------------------
-
-/// Parameters for the comment command.
 struct CommentParams<'cmd> {
-    /// Insert after this comment ID.
     after_comment: Option<&'cmd str>,
-    /// Insert after this line number.
     after_line: Option<usize>,
-    /// Attachments to include.
     attachments: &'cmd [PathBuf],
-    /// Automatically acknowledge the parent comment when replying.
     auto_ack: bool,
-    /// Comment body text.
     content: &'cmd str,
-    /// Dry-run mode.
     dry_run: bool,
-    /// Path to the document.
     file: &'cmd str,
-    /// JSON output mode.
     json_mode: bool,
-    /// ID of the comment to reply to.
     reply_to: Option<&'cmd str>,
-    /// Addressees.
     to: &'cmd [String],
 }
 
-/// Parameters for the get command.
 struct GetParams<'cmd> {
-    /// End line (1-indexed, inclusive).
     end: Option<usize>,
-    /// JSON output mode.
     json_mode: bool,
-    /// Show line numbers in output.
     line_numbers: bool,
-    /// Path to the file.
     path: &'cmd str,
-    /// Start line (1-indexed).
     start: Option<usize>,
 }
 
-/// Parameters for the query command.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "CLI flags are naturally boolean"
 )]
 struct QueryParams<'cmd> {
-    /// Author filter.
     author: Option<&'cmd str>,
-    /// Comment ID filter.
     comment_id: Option<&'cmd str>,
-    /// Include individual matching comments in each result.
     expanded: bool,
-    /// JSON output mode.
     json_mode: bool,
-    /// Base path to search.
     path: &'cmd str,
-    /// Pending filter.
     pending: bool,
-    /// Pending-for filter.
     pending_for: Option<&'cmd str>,
-    /// Pretty-print results grouped by file.
     pretty: bool,
-    /// Since timestamp filter.
     since: Option<&'cmd str>,
-    /// Return only counts/summary, suppress comment data.
     summary: bool,
 }
 
-/// Parameters for the search command.
 struct SearchParams<'cmd> {
-    /// Context lines around matches.
     context: usize,
-    /// Case-insensitive matching.
     ignore_case: bool,
-    /// JSON output mode.
     json_mode: bool,
-    /// Base directory to search.
     path: &'cmd str,
-    /// Search pattern (literal or regex).
     pattern: &'cmd str,
-    /// Regex mode.
     regex: bool,
-    /// Search scope: all, body, or comments.
     scope: &'cmd str,
 }
 
-/// Parameters for the react command.
 struct ReactParams<'cmd> {
-    /// Emoji to add/remove.
     emoji: &'cmd str,
-    /// Path to the document.
     file: &'cmd str,
-    /// Comment ID.
     id: &'cmd str,
-    /// JSON output mode.
     json_mode: bool,
-    /// Remove instead of add.
     remove: bool,
 }
 
-/// Parameters for the write command.
 struct WriteParams<'cmd> {
-    /// File content (read from stdin if `None`).
     content: Option<&'cmd str>,
-    /// JSON output mode.
     json_mode: bool,
-    /// Write options (create, raw, binary).
     opts: document::WriteOptions,
-    /// Path to the file.
     path: &'cmd str,
 }
 
-// ---------------------------------------------------------------------------
-// Output helpers
-// ---------------------------------------------------------------------------
-
-/// Write a line to stdout.
 fn out(msg: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{msg}").context("writing to stdout")
 }
 
-/// Write raw content to stdout (no trailing newline).
 fn out_raw(msg: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     write!(stdout, "{msg}").context("writing to stdout")
 }
 
-/// Write JSON output to stdout. Decorates object payloads with an
-/// `elapsed_ms` field so every `--json` response carries timing info.
+/// Decorates object payloads with an `elapsed_ms` field so every `--json`
+/// response carries timing info.
 fn out_json(value: &Value) -> Result<()> {
     let decorated = inject_elapsed_ms(value);
     out(&serde_json::to_string_pretty(&decorated).unwrap_or_default())
 }
 
-/// Return the number of milliseconds elapsed since `START_TIME` was set.
-/// Returns 0 if `START_TIME` has not been initialized (should never happen in
-/// practice because `main()` sets it before any command runs).
 fn elapsed_ms() -> u64 {
     START_TIME.get().map_or(0, |t| {
         u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
     })
 }
 
-/// If `value` is a JSON object, return a clone with an `elapsed_ms` field
-/// inserted. Non-object values are returned unchanged so future non-object
-/// top-level outputs pass through without silent corruption.
+/// Non-object values pass through unchanged so future non-object top-level
+/// outputs are not silently corrupted.
 fn inject_elapsed_ms(value: &Value) -> Value {
     if let Value::Object(map) = value {
         let mut new_map = map.clone();
@@ -598,7 +500,6 @@ fn inject_elapsed_ms(value: &Value) -> Value {
     value.clone()
 }
 
-/// Print output as JSON or text.
 fn print_output(json_mode: bool, value: &Value) -> Result<()> {
     if json_mode {
         out_json(value)
@@ -607,7 +508,6 @@ fn print_output(json_mode: bool, value: &Value) -> Result<()> {
     }
 }
 
-/// Print a JSON value as human-readable text.
 fn print_text_output(value: &Value) -> Result<()> {
     match value {
         Value::String(s) => out(s),
@@ -630,7 +530,6 @@ fn print_text_output(value: &Value) -> Result<()> {
     }
 }
 
-/// Read all of stdin to a string.
 fn read_stdin() -> Result<String> {
     let mut buf = String::new();
     io::stdin()
@@ -639,8 +538,6 @@ fn read_stdin() -> Result<String> {
     Ok(buf)
 }
 
-/// Resolve comment body from either a positional argument or a file.
-///
 /// Exactly one of `content` or `comment_file` must be provided. When
 /// `comment_file` is `"-"`, the body is read from stdin.
 fn resolve_comment_content(
@@ -670,7 +567,6 @@ fn resolve_comment_content(
     }
 }
 
-/// Resolve document path, supporting "-" for stdin.
 fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathBuf> {
     if file == "-" {
         let input = read_stdin()?;
@@ -684,7 +580,6 @@ fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathB
     }
 }
 
-/// Get the author type string from a comment.
 const fn author_type_str(at: &parser::AuthorType) -> &'static str {
     match at {
         parser::AuthorType::Human => "human",
@@ -693,7 +588,6 @@ const fn author_type_str(at: &parser::AuthorType) -> &'static str {
     }
 }
 
-/// Truncate content for display.
 fn truncate_content(content: &str, max_len: usize) -> String {
     let first_line = content.lines().next().unwrap_or("");
     if first_line.len() > max_len {
@@ -702,10 +596,6 @@ fn truncate_content(content: &str, max_len: usize) -> String {
         String::from(first_line)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
 
 fn main() -> ExitCode {
     // Capture the start time before parsing so `elapsed_ms` includes clap's
@@ -760,11 +650,6 @@ fn main() -> ExitCode {
     exit
 }
 
-// ---------------------------------------------------------------------------
-// Error classification
-// ---------------------------------------------------------------------------
-
-/// Classify an error into an exit code by inspecting the error chain.
 fn classify_error(err: &anyhow::Error) -> u8 {
     let msg = format!("{err:#}");
     if msg.contains("Lint error") {
@@ -786,11 +671,6 @@ fn classify_error(err: &anyhow::Error) -> u8 {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Command dispatch
-// ---------------------------------------------------------------------------
-
-/// Build CLI overrides from global flags.
 fn build_overrides(global: &GlobalFlags) -> CliOverrides<'_> {
     let mut overrides = CliOverrides::default();
     overrides.assets_dir = global.assets_dir.as_deref();
@@ -801,7 +681,6 @@ fn build_overrides(global: &GlobalFlags) -> CliOverrides<'_> {
     overrides
 }
 
-/// Run the selected command.
 fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     let overrides = build_overrides(&cli.global);
 
@@ -871,7 +750,6 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     dispatch_with_config(cli, system, cwd, &final_config)
 }
 
-/// Dispatch commands that require a loaded config.
 #[expect(
     clippy::too_many_lines,
     reason = "dispatch function maps all CLI subcommands"
@@ -1028,7 +906,6 @@ fn dispatch_with_config(
                 path,
             },
         ),
-        // Already handled in `run()`.
         Commands::Version
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
@@ -1036,10 +913,6 @@ fn dispatch_with_config(
         | Commands::Skill { .. } => Ok(()),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Command handlers
-// ---------------------------------------------------------------------------
 
 fn cmd_ack(
     system: &dyn System,
@@ -1051,12 +924,10 @@ fn cmd_ack(
     json_mode: bool,
 ) -> Result<()> {
     if let Some(doc_file) = file {
-        // Direct file path provided.
         let path = resolve_doc_path(system, cwd, doc_file)?;
         let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
         operations::ack_comments(system, &path, config, &id_refs)?;
     } else {
-        // Folder-wide ack: resolve each ID across the folder tree.
         let base_dir = cwd.join(search_path);
         for comment_id in ids {
             let matches = query::resolve_comment_id(system, &base_dir, comment_id)?;
@@ -1146,7 +1017,6 @@ fn cmd_batch(
     print_output(json_mode, &json!({ "ids": created_ids }))
 }
 
-/// Resolve comment insertion position.  Replies always go after their parent.
 fn resolve_comment_position(
     reply_to: Option<&str>,
     after_comment: Option<&str>,
@@ -1210,9 +1080,6 @@ fn cmd_comments(
         let formatted = display::format_comments_pretty(file, &comments);
         out(&formatted)
     } else if json_mode {
-        // Rely on the `Serialize` impl of `parser::Comment` so the output
-        // stays in lockstep with the tixschema-generated schemas. See
-        // `src/parser.rs` for the skip-if-none and PascalCase details.
         out_json(&json!({ "comments": comments }))
     } else {
         for cm in &comments {
@@ -1275,7 +1142,6 @@ fn cmd_get(
     };
 
     if gp.json_mode && gp.line_numbers {
-        // Structured JSON output with line numbers.
         let content = document::get(system, cwd, target, lines, false, config.unrestricted)?;
         let start_num = lines.map_or(1, |(s, _)| s);
         let json_lines: Vec<Value> = content
@@ -1414,8 +1280,6 @@ fn cmd_ls(
     let entries = document::ls(system, cwd, target, config)?;
 
     if json_mode {
-        // `document::ListEntry` derives `Serialize` so the JSON shape is
-        // kept in sync with the generated tixschema automatically.
         print_output(true, &json!({ "entries": entries }))
     } else {
         for entry in &entries {
@@ -1537,9 +1401,6 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     let results = query::query(system, &target, &filter)?;
 
     if params.json_mode {
-        // `query::QueryResult` and `query::ExpandedComment` derive
-        // `Serialize` so their JSON shape is guaranteed to match the
-        // generated tixschema. No hand-rolled field list here.
         print_output(
             true,
             &json!({
@@ -1598,9 +1459,6 @@ fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Res
     let results = search::search(system, cwd, &target, &options)?;
 
     if params.json_mode {
-        // `search::SearchMatch` derives `Serialize`; the generated
-        // tixschema expects `location` as `"Body"`/`"Comment"`, which is
-        // what the default enum serialization emits.
         print_output(true, &json!({ "matches": results }))
     } else {
         for m in &results {
@@ -1936,10 +1794,6 @@ fn cmd_write(
         }),
     )
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

@@ -1240,15 +1240,15 @@ fn query_result_json_shape_matches_schema() {
         );
     }
 
-    // Schema uses `author_type` with PascalCase enum values, not `type`.
+    // Schema uses `author_type` with lowercase enum values, not `type`.
     assert!(
         !comment.contains_key("type"),
         "legacy `type` key must not appear in serialized ExpandedComment"
     );
     let author_type = comment["author_type"].as_str().unwrap();
     assert!(
-        matches!(author_type, "Human" | "Agent"),
-        "author_type must be PascalCase, got {author_type:?}"
+        matches!(author_type, "human" | "agent"),
+        "author_type must be lowercase, got {author_type:?}"
     );
 
     // `file` must render as a string path (what Zod `z.string()` expects),

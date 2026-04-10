@@ -26,9 +26,9 @@ class CommentBlockWidget extends WidgetType {
 
     const badge = document.createElement("span");
     badge.className = `remargin-badge remargin-badge-${
-      this.block.comment.author_type === "Agent" ? "agent" : "human"
+      this.block.comment.author_type === "agent" ? "agent" : "human"
     }`;
-    badge.textContent = this.block.comment.author_type === "Agent" ? "AI" : "H";
+    badge.textContent = this.block.comment.author_type === "agent" ? "AI" : "H";
     header.appendChild(badge);
 
     const author = document.createElement("span");

@@ -1,8 +1,4 @@
 //! Configuration loader: `.remargin.yaml` walk-up resolution.
-//!
-//! This module handles loading and resolving Remargin configuration from
-//! `.remargin.yaml` files found by walking up the directory tree, as well as
-//! merging with CLI overrides and the participant registry.
 
 pub mod registry;
 
@@ -18,33 +14,17 @@ use serde::Deserialize;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::parser::AuthorType;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// File name for the local Remargin config (gitignored).
 const CONFIG_FILENAME: &str = ".remargin.yaml";
-
-/// File name for the participant registry (can be committed).
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
-
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
 
 /// CLI overrides that take precedence over config file values.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct CliOverrides<'cli> {
-    /// Override for assets directory.
     pub assets_dir: Option<&'cli str>,
-    /// Override for author type.
     pub author_type: Option<&'cli str>,
-    /// Override for identity.
     pub identity: Option<&'cli str>,
-    /// Override for signing key path.
     pub key: Option<&'cli str>,
-    /// Override for mode.
     pub mode: Option<&'cli str>,
 }
 
@@ -52,20 +32,14 @@ pub struct CliOverrides<'cli> {
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
 pub struct Config {
-    /// Assets directory (relative to document location).
     #[serde(default = "default_assets_dir")]
     pub assets_dir: String,
-    /// Default author type.
     #[serde(rename = "type")]
     pub author_type: Option<String>,
-    /// Default identity for this machine.
     pub identity: Option<String>,
-    /// Ignore patterns for ls/query (glob syntax).
     #[serde(default)]
     pub ignore: Vec<String>,
-    /// Path to signing key.
     pub key: Option<String>,
-    /// Registry mode: open, registered, or strict.
     #[serde(default = "default_mode")]
     pub mode: Mode,
 }
@@ -75,11 +49,8 @@ pub struct Config {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Mode {
-    /// Anyone can post comments.
     Open,
-    /// Only registered participants can post.
     Registered,
-    /// Registered participants only, and signatures are required.
     Strict,
 }
 
@@ -88,28 +59,16 @@ pub enum Mode {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ResolvedConfig {
-    /// Assets directory.
     pub assets_dir: String,
-    /// Resolved author type.
     pub author_type: Option<AuthorType>,
-    /// Resolved identity.
     pub identity: Option<String>,
-    /// Ignore patterns.
     pub ignore: Vec<String>,
-    /// Resolved path to signing key.
     pub key_path: Option<PathBuf>,
-    /// Enforcement mode.
     pub mode: Mode,
-    /// Loaded registry (if found).
     pub registry: Option<Registry>,
-    /// Whether to bypass path sandbox checks.
     /// Only settable via CLI when compiled with `--features unrestricted`.
     pub unrestricted: bool,
 }
-
-// ---------------------------------------------------------------------------
-// Impl blocks
-// ---------------------------------------------------------------------------
 
 impl ResolvedConfig {
     /// Check if a participant is allowed to post (mode + registry enforcement).
@@ -224,23 +183,13 @@ impl ResolvedConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Defaults
-// ---------------------------------------------------------------------------
-
-/// Default assets directory name.
 fn default_assets_dir() -> String {
     String::from("assets")
 }
 
-/// Default enforcement mode.
 const fn default_mode() -> Mode {
     Mode::Open
 }
-
-// ---------------------------------------------------------------------------
-// Walk-up file resolution
-// ---------------------------------------------------------------------------
 
 /// Walk up from `start_dir` looking for a file with the given name.
 /// Returns the path to the first found file, or `None`.
@@ -267,10 +216,6 @@ fn find_file_upward(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Config loading
-// ---------------------------------------------------------------------------
 
 /// Load config by walking up from `start_dir`.
 ///
@@ -336,7 +281,6 @@ pub fn load_config_filtered_with_path(
                     if config.author_type.as_deref() == Some(filter) {
                         return Ok(Some((candidate, config)));
                     }
-                    // Type does not match; continue walking up.
                 }
             }
         }
@@ -368,12 +312,6 @@ pub fn load_registry(system: &dyn System, start_dir: &Path) -> Result<Option<Reg
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parsing helpers
-// ---------------------------------------------------------------------------
-
-/// Parse a string into an `AuthorType`.
-///
 /// # Errors
 ///
 /// Returns an error for unknown type strings.
@@ -385,8 +323,6 @@ fn parse_author_type(type_str: &str) -> Result<AuthorType> {
     }
 }
 
-/// Parse a string into a `Mode`.
-///
 /// # Errors
 ///
 /// Returns an error for unknown mode strings.
@@ -398,10 +334,6 @@ fn parse_mode(mode_str: &str) -> Result<Mode> {
         other => bail!("unknown mode: {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Key path resolution
-// ---------------------------------------------------------------------------
 
 /// Resolve the key path shorthand:
 /// - Plain name (no `/` or `~`) maps to `~/.ssh/<name>`

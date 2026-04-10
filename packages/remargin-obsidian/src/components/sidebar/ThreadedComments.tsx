@@ -171,12 +171,12 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
           <div className="flex items-center gap-1.5 min-w-0">
             <Badge
               className={`px-1 py-0 text-[9px] font-semibold ${
-                comment.author_type === "Agent"
+                comment.author_type === "agent"
                   ? "bg-purple-400 text-white"
                   : "bg-blue-400 text-white"
               }`}
             >
-              {comment.author_type === "Agent" ? "AI" : "H"}
+              {comment.author_type === "agent" ? "AI" : "H"}
             </Badge>
             <span className="text-xs font-medium text-text-normal truncate">{comment.author}</span>
             {isPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}

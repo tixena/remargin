@@ -632,10 +632,11 @@ fn test_comment_json_shape_matches_schema() {
         );
     }
 
-    // `author_type` must use the PascalCase enum value the schema
-    // declares (`Human`/`Agent`) — not the legacy lowercase `type` key
+    // `author_type` must use the lowercase enum value the schema
+    // declares (`human`/`agent`) — matching the fence wire format,
+    // checksum input, and human display. Not the legacy `type` key
     // the CLI used to hand-write.
-    assert_eq!(obj["author_type"], serde_json::json!("Human"));
+    assert_eq!(obj["author_type"], serde_json::json!("human"));
     assert!(
         !obj.contains_key("type"),
         "legacy `type` key must not appear in serialized Comment"
@@ -681,15 +682,15 @@ fn test_minimal_comment_json_skips_none_and_defaults_collections() {
 }
 
 #[test]
-fn test_author_type_serializes_pascalcase() {
+fn test_author_type_serializes_lowercase() {
     let human = super::AuthorType::Human;
     let agent = super::AuthorType::Agent;
     assert_eq!(
         serde_json::to_value(&human).unwrap(),
-        serde_json::json!("Human")
+        serde_json::json!("human")
     );
     assert_eq!(
         serde_json::to_value(&agent).unwrap(),
-        serde_json::json!("Agent")
+        serde_json::json!("agent")
     );
 }
