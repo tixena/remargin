@@ -5,6 +5,8 @@ import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
 import { RemarginBackend } from "./backend";
 import { BackendContext } from "./hooks/useBackend";
+import { commentWidgetPlugin } from "./editor/commentWidget";
+import { remarginPostProcessor } from "./editor/readingModeProcessor";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
 
@@ -84,6 +86,12 @@ export default class RemarginPlugin extends Plugin {
     this.backend = new RemarginBackend(this.settings, vaultPath);
 
     this.addSettingTab(new RemarginSettingTab(this));
+
+    // Register CM6 editor extension for Live Preview mode
+    this.registerEditorExtension([commentWidgetPlugin]);
+
+    // Register reading mode post-processor
+    this.registerMarkdownPostProcessor(remarginPostProcessor);
 
     this.registerView(
       VIEW_TYPE_REMARGIN,
