@@ -18,11 +18,22 @@ interface InboxItem {
   comment: ExpandedComment;
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 export function InboxSection() {
   const backend = useBackend();
   const [filter, setFilter] = useState<"all" | "pending">("pending");
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -37,10 +48,15 @@ export function InboxSection() {
           flat.push({ file: result.path, comment });
         }
       }
-      flat.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
+      flat.sort((a, b) =>
+        (b.comment.ts ?? "").localeCompare(a.comment.ts ?? "")
+      );
       setItems(flat);
-    } catch {
+      setError(null);
+    } catch (err) {
+      console.error("InboxSection.refresh failed:", err);
       setItems([]);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -55,8 +71,9 @@ export function InboxSection() {
       try {
         await backend.ack(file, [id]);
         await refresh();
-      } catch {
-        // TODO: error handling
+      } catch (err) {
+        console.error("InboxSection.ack failed:", err);
+        setError(errorMessage(err));
       }
     },
     [backend, refresh]
@@ -88,9 +105,16 @@ export function InboxSection() {
 
       {/* Items */}
       <ScrollArea className="max-h-64">
-        {items.length === 0 ? (
+        {error ? (
+          <div className="px-4 py-3 text-xs text-red-400 whitespace-pre-wrap break-words">
+            <div className="font-semibold mb-1">Failed to load inbox</div>
+            <div className="font-mono text-[10px]">{error}</div>
+          </div>
+        ) : items.length === 0 ? (
           <div className="px-4 py-3 text-xs text-text-faint">
-            {filter === "pending" ? "No pending comments." : "No comments found."}
+            {filter === "pending"
+              ? "No pending comments."
+              : "No comments found."}
           </div>
         ) : (
           <div className="flex flex-col">

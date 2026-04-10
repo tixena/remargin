@@ -56,6 +56,16 @@ function buildThreadTree(comments: Comment[]): ThreadNode[] {
   return roots;
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 export function ThreadedComments({
   file,
   onReply,
@@ -64,14 +74,18 @@ export function ThreadedComments({
   const backend = useBackend();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const result = await backend.comments(file);
       setComments(result);
-    } catch {
+      setError(null);
+    } catch (err) {
+      console.error("ThreadedComments.refresh failed:", err);
       setComments([]);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -88,8 +102,9 @@ export function ThreadedComments({
       try {
         await backend.ack(file, [id]);
         await refresh();
-      } catch {
-        // TODO: error handling
+      } catch (err) {
+        console.error("ThreadedComments.ack failed:", err);
+        setError(errorMessage(err));
       }
     },
     [backend, file, refresh]
@@ -100,8 +115,9 @@ export function ThreadedComments({
       try {
         await backend.deleteComments(file, [id]);
         await refresh();
-      } catch {
-        // TODO: error handling
+      } catch (err) {
+        console.error("ThreadedComments.delete failed:", err);
+        setError(errorMessage(err));
       }
     },
     [backend, file, refresh]
@@ -110,6 +126,15 @@ export function ThreadedComments({
   if (loading) {
     return (
       <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-4 py-3 text-xs text-red-400 whitespace-pre-wrap break-words">
+        <div className="font-semibold mb-1">Failed to load comments</div>
+        <div className="font-mono text-[10px]">{error}</div>
+      </div>
     );
   }
 

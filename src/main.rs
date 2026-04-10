@@ -7,6 +7,7 @@ use std::env;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, bail};
@@ -58,6 +59,15 @@ const EXIT_NOT_FOUND: u8 = 7;
 
 /// Ambiguous comment ID (folder-wide ack -- found in multiple files).
 const EXIT_AMBIGUOUS: u8 = 8;
+
+// ---------------------------------------------------------------------------
+// Global timing
+// ---------------------------------------------------------------------------
+
+/// Process start time, captured early in `main()`. Used by `out_json` to
+/// decorate JSON payloads with an `elapsed_ms` field and by `main()` to print
+/// the human-readable `elapsed: Xms` trailer in non-JSON mode.
+static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // CLI structure
@@ -560,9 +570,32 @@ fn out_raw(msg: &str) -> Result<()> {
     write!(stdout, "{msg}").context("writing to stdout")
 }
 
-/// Write JSON output to stdout.
+/// Write JSON output to stdout. Decorates object payloads with an
+/// `elapsed_ms` field so every `--json` response carries timing info.
 fn out_json(value: &Value) -> Result<()> {
-    out(&serde_json::to_string_pretty(value).unwrap_or_default())
+    let decorated = inject_elapsed_ms(value);
+    out(&serde_json::to_string_pretty(&decorated).unwrap_or_default())
+}
+
+/// Return the number of milliseconds elapsed since `START_TIME` was set.
+/// Returns 0 if `START_TIME` has not been initialized (should never happen in
+/// practice because `main()` sets it before any command runs).
+fn elapsed_ms() -> u64 {
+    START_TIME.get().map_or(0, |t| {
+        u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
+    })
+}
+
+/// If `value` is a JSON object, return a clone with an `elapsed_ms` field
+/// inserted. Non-object values are returned unchanged so future non-object
+/// top-level outputs pass through without silent corruption.
+fn inject_elapsed_ms(value: &Value) -> Value {
+    if let Value::Object(map) = value {
+        let mut new_map = map.clone();
+        new_map.insert(String::from("elapsed_ms"), json!(elapsed_ms()));
+        return Value::Object(new_map);
+    }
+    value.clone()
 }
 
 /// Print output as JSON or text.
@@ -716,6 +749,10 @@ fn truncate_content(content: &str, max_len: usize) -> String {
 // ---------------------------------------------------------------------------
 
 fn main() -> ExitCode {
+    // Capture the start time before parsing so `elapsed_ms` includes clap's
+    // argument-parsing overhead.
+    let _: Result<_, _> = START_TIME.set(Instant::now());
+
     let cli = Cli::parse();
 
     if cli.global.verbose {
@@ -737,21 +774,30 @@ fn main() -> ExitCode {
         }
     };
 
-    let start = Instant::now();
     let exit = match run(&cli, &system, &cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             let exit_code = classify_error(&err);
             if cli.global.json {
-                let error_json = json!({ "error": format!("{err:#}") });
-                eprintln!("{error_json}");
+                let error_json = inject_elapsed_ms(&json!({ "error": format!("{err:#}") }));
+                eprintln!(
+                    "{}",
+                    serde_json::to_string_pretty(&error_json).unwrap_or_default()
+                );
             } else {
                 eprintln!("error: {err:#}");
             }
             ExitCode::from(exit_code)
         }
     };
-    eprintln!("elapsed: {}ms", start.elapsed().as_millis());
+
+    // In JSON mode the elapsed value is already embedded in the payload;
+    // printing a stray `elapsed: Xms` line here would corrupt consumers that
+    // merge stdout and stderr.
+    if !cli.global.json {
+        eprintln!("elapsed: {}ms", elapsed_ms());
+    }
+
     exit
 }
 
