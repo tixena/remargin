@@ -7,4 +7,5 @@ export type {
   WriteOpts,
   SearchOpts,
   BatchCommentOp,
+  IdentityInfo,
 } from "./types";

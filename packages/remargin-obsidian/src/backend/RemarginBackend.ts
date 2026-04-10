@@ -18,6 +18,7 @@ import type {
   WriteOpts,
   SearchOpts,
   BatchCommentOp,
+  IdentityInfo,
 } from "./types";
 
 function shellescape(arg: string): string {
@@ -202,21 +203,38 @@ export class RemarginBackend {
   // -- Utility ----------------------------------------------------------------
 
   async version(): Promise<string> {
-    const raw = await this.exec(["--version"], { useJson: false });
+    const raw = await this.exec(["--version"], {
+      useJson: false,
+      skipIdentity: true,
+    });
     return raw.trim();
+  }
+
+  /**
+   * Ask the CLI to resolve an identity config by walking up from the vault.
+   * Does not pass any identity flags (so it can run before settings are
+   * populated).
+   */
+  async identity(type?: "human" | "agent"): Promise<IdentityInfo> {
+    const args = ["identity"];
+    if (type) args.push("--type", type);
+    const raw = await this.exec(args, { skipIdentity: true });
+    const parsed = JSON.parse(raw) as IdentityInfo;
+    return parsed;
   }
 
   // -- Internal ---------------------------------------------------------------
 
   private async exec(
     args: string[],
-    opts?: { timeout?: number; useJson?: boolean }
+    opts?: { timeout?: number; useJson?: boolean; skipIdentity?: boolean }
   ): Promise<string> {
     const binary = this.settings.remarginPath || "remargin";
     const cwd = this.settings.workingDirectory || this.vaultPath;
     const timeout = opts?.timeout ?? 30000;
     const useJson = opts?.useJson ?? true;
-    const identityArgs = this.buildIdentityArgs();
+    const skipIdentity = opts?.skipIdentity ?? false;
+    const identityArgs = skipIdentity ? [] : this.buildIdentityArgs();
     const fullArgs = [
       ...identityArgs,
       ...(useJson ? ["--json"] : []),

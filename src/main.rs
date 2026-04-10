@@ -222,6 +222,17 @@ enum Commands {
         #[arg(long)]
         start: Option<usize>,
     },
+    /// Resolve and print the identity config for a given type.
+    ///
+    /// Walks up from the current directory to find the first matching
+    /// `.remargin.yaml`, filtered by `--type` (e.g. `human` or `agent`).
+    /// Prints JSON to stdout. Useful for tooling that wants to detect the
+    /// human's personal config without passing through all CLI flags.
+    Identity {
+        /// Author type filter: `human`, `agent`, etc. If omitted, returns the first config found.
+        #[arg(long = "type")]
+        author_type: Option<String>,
+    },
     /// Generate a new Ed25519 signing key pair.
     Keygen {
         /// Output path for the private key (public key gets .pub suffix).
@@ -798,6 +809,9 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         Commands::Mcp { action } => {
             return cmd_mcp(system, cwd, &overrides, action.as_ref(), cli.global.json);
         }
+        Commands::Identity { author_type } => {
+            return cmd_identity(system, cwd, author_type.as_deref(), cli.global.json);
+        }
         Commands::Keygen { output } => return cmd_keygen(system, output),
         Commands::Skill { action } => return cmd_skill(system, action, cli.global.json),
         Commands::Ack { .. }
@@ -1011,6 +1025,7 @@ fn dispatch_with_config(
         ),
         // Already handled in `run()`.
         Commands::Version
+        | Commands::Identity { .. }
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
         | Commands::Skill { .. } => Ok(()),
@@ -1277,6 +1292,46 @@ fn cmd_get(
             out_raw(&content)
         }
     }
+}
+
+fn cmd_identity(
+    system: &dyn System,
+    cwd: &Path,
+    author_type: Option<&str>,
+    json_mode: bool,
+) -> Result<()> {
+    let found = config::load_config_filtered_with_path(system, cwd, author_type)?;
+    let value = match &found {
+        Some((path, cfg)) => json!({
+            "found": true,
+            "path": path.display().to_string(),
+            "identity": cfg.identity,
+            "author_type": cfg.author_type,
+            "key": cfg.key,
+            "mode": format!("{:?}", cfg.mode).to_lowercase(),
+        }),
+        None => json!({ "found": false }),
+    };
+    if json_mode {
+        print_output(true, &value)?;
+    } else {
+        match &found {
+            Some((path, cfg)) => {
+                eprintln!("Found config: {}", path.display());
+                if let Some(id) = &cfg.identity {
+                    eprintln!("Identity:     {id}");
+                }
+                if let Some(t) = &cfg.author_type {
+                    eprintln!("Type:         {t}");
+                }
+                if let Some(k) = &cfg.key {
+                    eprintln!("Key:          {k}");
+                }
+            }
+            None => eprintln!("No identity config found."),
+        }
+    }
+    Ok(())
 }
 
 fn cmd_keygen(system: &dyn System, output: &Path) -> Result<()> {

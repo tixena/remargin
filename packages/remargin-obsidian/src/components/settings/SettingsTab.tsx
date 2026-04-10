@@ -148,7 +148,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
         {/* Identity configuration */}
         <SettingsField
           label="Identity configuration"
-          description="Choose a .remargin.yaml config file or define identity manually."
+          description="Your personal identity lives in ~/.remargin.yaml. The vault-root .remargin.yaml is for the reply agent, not you — don't point this at that file. Use Manual to type author and key path directly."
         >
           <ToggleGroup
             type="single"

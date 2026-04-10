@@ -43,3 +43,12 @@ export interface BatchCommentOp {
   to?: string[];
   autoAck?: boolean;
 }
+
+export interface IdentityInfo {
+  found: boolean;
+  path?: string;
+  identity?: string;
+  author_type?: string;
+  key?: string;
+  mode?: string;
+}

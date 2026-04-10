@@ -302,6 +302,21 @@ pub fn load_config_filtered(
     start_dir: &Path,
     type_filter: Option<&str>,
 ) -> Result<Option<Config>> {
+    Ok(load_config_filtered_with_path(system, start_dir, type_filter)?.map(|(_, cfg)| cfg))
+}
+
+/// Like [`load_config_filtered`] but also returns the path to the matching
+/// config file. Useful for tooling that needs to report *where* the config
+/// was resolved from.
+///
+/// # Errors
+///
+/// Returns an error if a config file exists but cannot be read or parsed.
+pub fn load_config_filtered_with_path(
+    system: &dyn System,
+    start_dir: &Path,
+    type_filter: Option<&str>,
+) -> Result<Option<(PathBuf, Config)>> {
     let mut current = start_dir.to_path_buf();
     loop {
         let candidate = current.join(CONFIG_FILENAME);
@@ -316,10 +331,10 @@ pub fn load_config_filtered(
                 .with_context(|| format!("parsing {}", candidate.display()))?;
 
             match type_filter {
-                None => return Ok(Some(config)),
+                None => return Ok(Some((candidate, config))),
                 Some(filter) => {
                     if config.author_type.as_deref() == Some(filter) {
-                        return Ok(Some(config));
+                        return Ok(Some((candidate, config)));
                     }
                     // Type does not match; continue walking up.
                 }

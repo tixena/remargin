@@ -157,11 +157,28 @@ export default class RemarginPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign(
-      {},
-      DEFAULT_SETTINGS,
-      await this.loadData()
-    );
+    const saved = await this.loadData();
+    if (saved) {
+      this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+      return;
+    }
+    // First run: ask the CLI where a human identity config lives by
+    // walking up from the vault. If it finds one, use config mode with
+    // the resolved path. Otherwise fall back to manual mode.
+    this.settings = { ...DEFAULT_SETTINGS };
+    try {
+      const vaultPath =
+        (this.app.vault.adapter as unknown as { basePath?: string })
+          .basePath ?? "";
+      const probe = new RemarginBackend(this.settings, vaultPath);
+      const info = await probe.identity("human");
+      if (info.found && info.path) {
+        this.settings.identityMode = "config";
+        this.settings.configFilePath = info.path;
+      }
+    } catch {
+      // CLI not available or other error — keep manual defaults.
+    }
   }
 
   async saveSettings(settings: RemarginSettings) {
