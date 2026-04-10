@@ -3,6 +3,8 @@ import { createRoot, Root } from "react-dom/client";
 import { createElement } from "react";
 import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
+import { RemarginBackend } from "./backend";
+import { BackendContext } from "./hooks/useBackend";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
 
@@ -20,7 +22,13 @@ class RemarginView extends ItemView {
     container.empty();
     container.addClass("remargin-container");
     this.root = createRoot(container);
-    this.root.render(createElement(RemarginSidebar, { plugin: this.plugin }));
+    this.root.render(
+      createElement(
+        BackendContext.Provider,
+        { value: this.plugin.backend },
+        createElement(RemarginSidebar, { plugin: this.plugin })
+      )
+    );
   }
 
   async onClose() {
@@ -67,9 +75,13 @@ class RemarginSettingTab extends PluginSettingTab {
 
 export default class RemarginPlugin extends Plugin {
   settings: RemarginSettings = DEFAULT_SETTINGS;
+  backend!: RemarginBackend;
 
   async onload() {
     await this.loadSettings();
+
+    const vaultPath = (this.app.vault.adapter as any).basePath || "";
+    this.backend = new RemarginBackend(this.settings, vaultPath);
 
     this.addSettingTab(new RemarginSettingTab(this));
 
@@ -97,6 +109,7 @@ export default class RemarginPlugin extends Plugin {
 
   async saveSettings(settings: RemarginSettings) {
     this.settings = settings;
+    this.backend?.updateSettings(settings);
     await this.saveData(settings);
   }
 
