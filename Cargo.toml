@@ -56,7 +56,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 include_dir = "0.7"
 
 [features]
+default = ["zod", "jsonschema"]
 unrestricted = []
+# Feature flags mirrored from tixschema so its proc macro expands
+# cfg(feature = "...") checks successfully in this crate's scope.
+zod = []
+jsonschema = []
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -67,14 +72,6 @@ tempfile = "3"
 lto = true
 codegen-units = 1
 panic = "abort"
-
-[lints.rust]
-# tixschema's proc macro expands to code that checks `cfg(feature = "zod")`
-# and `cfg(feature = "jsonschema")` against the consuming crate. Register
-# them as known cfgs so the unexpected_cfgs lint doesn't fire.
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(feature, values("zod", "jsonschema"))',
-] }
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
