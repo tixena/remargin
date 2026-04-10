@@ -98,6 +98,55 @@ export default class RemarginPlugin extends Plugin {
       (leaf) => new RemarginView(leaf, this)
     );
 
+    // Commands
+    this.addCommand({
+      id: "open-sidebar",
+      name: "Open sidebar",
+      callback: () => this.activateView(),
+    });
+
+    this.addCommand({
+      id: "new-comment",
+      name: "New comment at cursor",
+      editorCallback: (editor) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) return;
+        const line = editor.getCursor().line + 1;
+        this.activateView();
+        // TODO: pass line context to sidebar prompt section
+        console.log(`New comment at line ${line} in ${file.path}`);
+      },
+    });
+
+    this.addCommand({
+      id: "refresh",
+      name: "Refresh comments",
+      callback: () => {
+        // Trigger a refresh by re-activating the view
+        this.activateView();
+      },
+    });
+
+    this.addCommand({
+      id: "ack-comment",
+      name: "Ack comment at cursor",
+      editorCallback: async (editor) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) return;
+        const line = editor.getCursor().line + 1;
+        // Find the comment block at this line
+        const { parseRemarginBlocks } = await import("./parser");
+        const text = editor.getValue();
+        const blocks = parseRemarginBlocks(text);
+        const block = blocks.find(
+          (b) => line >= b.startLine && line <= b.endLine
+        );
+        if (block?.comment.id) {
+          await this.backend.ack(file.path, [block.comment.id]);
+        }
+      },
+    });
+
     this.addRibbonIcon("message-square", "Open Remargin", () => {
       this.activateView();
     });
