@@ -1,0 +1,57 @@
+[package]
+name = "remargin-cli"
+description = "CLI and code-generation binaries for the remargin document access layer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "remargin"
+path = "src/main.rs"
+
+[[bin]]
+name = "generate_types"
+path = "src/bin/generate_types.rs"
+
+[features]
+default = ["zod", "jsonschema"]
+unrestricted = ["remargin/unrestricted"]
+zod = ["remargin/zod"]
+jsonschema = ["remargin/jsonschema"]
+
+[dependencies]
+remargin.workspace = true
+
+# CLI framework
+clap.workspace = true
+
+# Cryptography (key generation for `remargin identity`)
+ssh-key.workspace = true
+
+# YAML / JSON processing
+serde.workspace = true
+serde_yaml.workspace = true
+serde_json.workspace = true
+
+# System abstraction (filesystem, env, temp dirs)
+os-shim.workspace = true
+
+# Error handling
+anyhow.workspace = true
+
+# Date/time
+chrono.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true

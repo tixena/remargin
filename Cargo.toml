@@ -1,17 +1,17 @@
-[package]
-name = "remargin"
+[workspace]
+members = ["crates/remargin", "crates/remargin-cli"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 authors = ["Eduardo Burgos <eduardo@tixena.com>"]
-description = "Enhanced inline review protocol and document access layer for markdown"
 license = "MIT"
 repository = "https://github.com/tixena/remargin"
 
-[[bin]]
-name = "remargin"
-path = "src/main.rs"
+[workspace.dependencies]
+remargin = { path = "crates/remargin" }
 
-[dependencies]
 # CLI framework
 clap = { version = "4", features = ["derive", "env"] }
 
@@ -55,25 +55,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Skill embedding
 include_dir = "0.7"
 
-[features]
-default = ["zod", "jsonschema"]
-unrestricted = []
-# Feature flags mirrored from tixschema so its proc macro expands
-# cfg(feature = "...") checks successfully in this crate's scope.
-zod = []
-jsonschema = []
-
-[dev-dependencies]
+# Test-only crates
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
 
 [profile.release]
 lto = true
 codegen-units = 1
 panic = "abort"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 restriction = { level = "deny", priority = -1 }

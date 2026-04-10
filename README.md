@@ -530,7 +530,7 @@ Contributions are welcome. Here are some guidelines:
 2. **Keep changes focused** -- one feature or fix per PR
 3. **Follow existing patterns** -- the codebase uses strict clippy lints (all, pedantic, restriction, nursery levels). Run `cargo clippy` before submitting
 4. **Write tests** -- the project uses `assert_cmd` and `tempfile` for integration tests
-5. **Update the skill** -- if you add or change MCP tools, update `skill/SKILL.md` accordingly
+5. **Update the skill** -- if you add or change MCP tools, update `crates/remargin/skill/SKILL.md` accordingly
 6. **Commit messages** -- use conventional commits (`feat:`, `fix:`, `chore:`, etc.)
 
 ### Development Setup
