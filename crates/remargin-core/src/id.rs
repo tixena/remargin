@@ -7,7 +7,7 @@
 use core::iter::repeat_with;
 use std::collections::HashSet;
 
-use rand::Rng as _;
+use rand::RngExt as _;
 
 /// Character set for generated IDs: lowercase letters and digits.
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
