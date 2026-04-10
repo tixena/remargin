@@ -165,9 +165,19 @@ export default class RemarginPlugin extends Plugin {
   }
 
   async saveSettings(settings: RemarginSettings) {
+    const previousSide = this.settings.sidebarSide;
     this.settings = settings;
     this.backend?.updateSettings(settings);
     await this.saveData(settings);
+
+    if (previousSide !== settings.sidebarSide) {
+      for (const leaf of this.app.workspace.getLeavesOfType(
+        VIEW_TYPE_REMARGIN
+      )) {
+        leaf.detach();
+      }
+      await this.activateView();
+    }
   }
 
   async activateView() {
