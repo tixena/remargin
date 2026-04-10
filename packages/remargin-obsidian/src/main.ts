@@ -5,8 +5,10 @@ import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
 import { RemarginBackend } from "./backend";
 import { BackendContext } from "./hooks/useBackend";
-import { commentWidgetPlugin } from "./editor/commentWidget";
-import { remarginPostProcessor } from "./editor/readingModeProcessor";
+// Editor extensions disabled — see rem-359. Re-enable after fixing the
+// visual regression they cause in Live Preview and reading mode.
+// import { commentWidgetPlugin } from "./editor/commentWidget";
+// import { remarginPostProcessor } from "./editor/readingModeProcessor";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
 
@@ -87,11 +89,11 @@ export default class RemarginPlugin extends Plugin {
 
     this.addSettingTab(new RemarginSettingTab(this));
 
-    // Register CM6 editor extension for Live Preview mode
-    this.registerEditorExtension([commentWidgetPlugin]);
-
-    // Register reading mode post-processor
-    this.registerMarkdownPostProcessor(remarginPostProcessor);
+    // Editor extensions (CM6 widget + reading-mode processor) are
+    // disabled — see rem-359. They caused visual regressions in the
+    // markdown editor. Re-enable once rewritten.
+    // this.registerEditorExtension([commentWidgetPlugin]);
+    // this.registerMarkdownPostProcessor(remarginPostProcessor);
 
     this.registerView(
       VIEW_TYPE_REMARGIN,
