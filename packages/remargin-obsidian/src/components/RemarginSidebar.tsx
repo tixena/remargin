@@ -1,9 +1,10 @@
 import type { TFile } from "obsidian";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { PromptSection } from "@/components/sidebar/PromptSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
+import { openFileAtLine } from "@/lib/openFile";
 import type RemarginPlugin from "@/main";
 
 interface RemarginSidebarProps {
@@ -24,13 +25,27 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     };
   }, [plugin]);
 
+  const handleOpenAtLine = useCallback(
+    (filePath: string, line?: number) => {
+      void openFileAtLine(plugin, filePath, line);
+    },
+    [plugin]
+  );
+
   return (
     <SidebarShell
       plugin={plugin}
       activeFile={activeFile}
       promptContent={<PromptSection file={activeFile} />}
-      inboxContent={<InboxSection />}
-      threadContent={activeFile ? <ThreadedComments file={activeFile} /> : undefined}
+      inboxContent={<InboxSection onOpenAtLine={handleOpenAtLine} />}
+      threadContent={
+        activeFile ? (
+          <ThreadedComments
+            file={activeFile}
+            onGoToLine={(line) => handleOpenAtLine(activeFile, line)}
+          />
+        ) : undefined
+      }
     />
   );
 }

@@ -158,13 +158,20 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
   const { comment } = node;
   const isPending = (comment.ack?.length ?? 0) === 0;
 
+  const isClickable = comment.line > 0 && !!onGoToLine;
+
   return (
     <div>
       <div
         className={`flex flex-col gap-1 px-4 py-2 border-b border-bg-border hover:bg-bg-hover ${
           depth > 0 ? "border-l-2 border-l-accent" : ""
-        }`}
+        } ${isClickable ? "cursor-pointer" : ""}`}
         style={{ paddingLeft: `${16 + depth * 16}px` }}
+        onClick={() => {
+          if (isClickable) {
+            onGoToLine?.(comment.line);
+          }
+        }}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -225,7 +232,10 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
               variant="ghost"
               size="sm"
               className="h-5 px-1.5 text-[10px] text-green-500 hover:text-green-400"
-              onClick={() => comment.id && onAck(comment.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (comment.id) onAck(comment.id);
+              }}
             >
               <Check className="w-3 h-3 mr-0.5" />
               Ack
@@ -235,7 +245,10 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-text-faint hover:text-text-muted"
-            onClick={() => comment.id && onReply?.(comment.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (comment.id) onReply?.(comment.id);
+            }}
           >
             <Reply className="w-3 h-3 mr-0.5" />
             Reply
@@ -245,7 +258,10 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
               variant="ghost"
               size="sm"
               className="h-5 px-1.5 text-[10px] text-text-faint hover:text-text-muted"
-              onClick={() => onGoToLine?.(comment.line)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onGoToLine?.(comment.line);
+              }}
             >
               <MessageSquare className="w-3 h-3 mr-0.5" />L{comment.line}
             </Button>
@@ -256,6 +272,7 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
                 variant="ghost"
                 size="sm"
                 className="h-5 w-5 p-0 text-text-faint hover:text-text-muted"
+                onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal className="w-3 h-3" />
               </Button>
@@ -263,7 +280,10 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
             <DropdownMenuContent align="end">
               <DropdownMenuItem
                 className="text-red-400"
-                onClick={() => comment.id && onDelete(comment.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (comment.id) onDelete(comment.id);
+                }}
               >
                 <Trash2 className="w-3 h-3 mr-1.5" />
                 Delete

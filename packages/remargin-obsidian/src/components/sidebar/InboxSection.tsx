@@ -18,6 +18,10 @@ interface InboxItem {
   comment: ExpandedComment;
 }
 
+interface InboxSectionProps {
+  onOpenAtLine?: (filePath: string, line?: number) => void;
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
@@ -28,7 +32,7 @@ function errorMessage(err: unknown): string {
   }
 }
 
-export function InboxSection() {
+export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
   const backend = useBackend();
   const [filter, setFilter] = useState<"all" | "pending">("pending");
   const [items, setItems] = useState<InboxItem[]>([]);
@@ -111,6 +115,7 @@ export function InboxSection() {
               <div
                 key={`${item.file}:${item.comment.id}`}
                 className="flex flex-col gap-1 px-4 py-2 border-b border-bg-border hover:bg-bg-hover cursor-pointer"
+                onClick={() => onOpenAtLine?.(item.file, item.comment.line)}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 min-w-0">
