@@ -217,7 +217,7 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
           <div className="flex items-center gap-1 flex-wrap">
             {Object.entries(comment.reactions).map(([emoji, authors]) => (
               <Badge key={emoji} variant="outline" className="px-1.5 py-0 text-[10px] gap-0.5">
-                {emoji} {authors.length}
+                {emoji} {authors?.length ?? 0}
               </Badge>
             ))}
           </div>

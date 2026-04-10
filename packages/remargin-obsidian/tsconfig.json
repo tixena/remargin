@@ -4,10 +4,10 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "target": "ES2018",
+    "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["DOM", "ES2018"],
+    "lib": ["DOM", "DOM.Iterable", "ES2020"],
     "strict": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
