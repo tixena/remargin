@@ -573,3 +573,123 @@ fn test_line_number_round_trip() {
         "line number should be recomputed identically after round-trip"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Test: JSON shape matches the generated tixschema for Comment
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_comment_json_shape_matches_schema() {
+    // Build a block that exercises every optional field: `reply_to`,
+    // `thread`, `signature`, plus a non-empty `ack`, `reactions`,
+    // `attachments`, and `to` list.
+    let doc = "```remargin\n\
+         ---\n\
+         id: full\n\
+         author: alice\n\
+         type: human\n\
+         ts: 2026-04-06T14:32:00-04:00\n\
+         checksum: sha256:abc123\n\
+         to: [bob, carol]\n\
+         reply-to: abc\n\
+         thread: t1\n\
+         attachments: [file.png]\n\
+         reactions:\n\
+           \"+1\": [bob]\n\
+         ack:\n\
+           - bob@2026-04-06T15:00:00-04:00\n\
+         signature: ed25519:deadbeef\n\
+         ---\n\
+         Hello world.\n\
+         ```\n";
+    let parsed = parse(doc).unwrap();
+    let comment = parsed.comments()[0].clone();
+
+    // Serialize the comment through serde (which is what the CLI's
+    // `--json comments` output relies on) and inspect the resulting
+    // JSON object.
+    let value = serde_json::to_value(&comment).unwrap();
+    let obj = value.as_object().unwrap();
+
+    // Required keys must always be present.
+    for key in [
+        "ack",
+        "attachments",
+        "author",
+        "author_type",
+        "checksum",
+        "content",
+        "fence_depth",
+        "id",
+        "line",
+        "reactions",
+        "to",
+        "ts",
+    ] {
+        assert!(
+            obj.contains_key(key),
+            "required key `{key}` missing from serialized Comment"
+        );
+    }
+
+    // `author_type` must use the PascalCase enum value the schema
+    // declares (`Human`/`Agent`) — not the legacy lowercase `type` key
+    // the CLI used to hand-write.
+    assert_eq!(obj["author_type"], serde_json::json!("Human"));
+    assert!(
+        !obj.contains_key("type"),
+        "legacy `type` key must not appear in serialized Comment"
+    );
+
+    // Optional fields with values should be present.
+    assert_eq!(obj["reply_to"], serde_json::json!("abc"));
+    assert_eq!(obj["thread"], serde_json::json!("t1"));
+    assert_eq!(obj["signature"], serde_json::json!("ed25519:deadbeef"));
+
+    // Timestamp must be RFC3339 (the format the generated
+    // `z.iso.datetime()` schema expects).
+    assert_eq!(obj["ts"], serde_json::json!("2026-04-06T14:32:00-04:00"));
+}
+
+#[test]
+fn test_minimal_comment_json_skips_none_and_defaults_collections() {
+    // A block with only the required YAML fields should still
+    // serialize to all required schema keys, including empty
+    // collections for `ack`, `attachments`, `to`, and `reactions`.
+    let doc = minimal_block("abc");
+    let parsed = parse(&doc).unwrap();
+    let comment = parsed.comments()[0].clone();
+
+    let value = serde_json::to_value(&comment).unwrap();
+    let obj = value.as_object().unwrap();
+
+    assert_eq!(obj["ack"], serde_json::json!([]));
+    assert_eq!(obj["attachments"], serde_json::json!([]));
+    assert_eq!(obj["to"], serde_json::json!([]));
+    assert_eq!(obj["reactions"], serde_json::json!({}));
+
+    // Optional fields with no value should be omitted entirely so the
+    // Zod `strictObject` schema accepts them as `undefined` instead of
+    // rejecting an explicit `null`.
+    for key in ["reply_to", "thread", "signature"] {
+        assert!(
+            !obj.contains_key(key),
+            "optional key `{key}` should be skipped when None, \
+             but was present in {obj:?}"
+        );
+    }
+}
+
+#[test]
+fn test_author_type_serializes_pascalcase() {
+    let human = super::AuthorType::Human;
+    let agent = super::AuthorType::Agent;
+    assert_eq!(
+        serde_json::to_value(&human).unwrap(),
+        serde_json::json!("Human")
+    );
+    assert_eq!(
+        serde_json::to_value(&agent).unwrap(),
+        serde_json::json!("Agent")
+    );
+}

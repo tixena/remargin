@@ -19,7 +19,7 @@ const AuthorType$RawSchema = z.enum(["Agent", "Human"]).meta({
 export const AuthorType$Schema: ZodType<AuthorType> = AuthorType$RawSchema;
 const Acknowledgment$RawSchema = z.strictObject({
   author: z.string(),
-  ts: z.iso.datetime(),
+  ts: z.iso.datetime({ offset: true }),
 
 });
 
@@ -39,7 +39,7 @@ const Comment$RawSchema = z.strictObject({
   signature: z.union([z.string(), z.undefined()]),
   thread: z.union([z.string(), z.undefined()]),
   to: z.array(z.string()),
-  ts: z.iso.datetime(),
+  ts: z.iso.datetime({ offset: true }),
 
 });
 
@@ -69,7 +69,7 @@ const ExpandedComment$RawSchema = z.strictObject({
   signature: z.union([z.string(), z.undefined()]),
   thread: z.union([z.string(), z.undefined()]),
   to: z.array(z.string()),
-  ts: z.iso.datetime(),
+  ts: z.iso.datetime({ offset: true }),
 
 });
 
@@ -77,7 +77,7 @@ export const ExpandedComment$Schema: ZodType<ExpandedComment> = ExpandedComment$
 const QueryResult$RawSchema = z.strictObject({
   comment_count: z.number().int(),
   comments: z.array(ExpandedComment$Schema),
-  last_activity: z.union([z.iso.datetime(), z.undefined()]),
+  last_activity: z.union([z.iso.datetime({ offset: true }), z.undefined()]),
   path: z.string(),
   pending_count: z.number().int(),
   pending_for: z.array(z.string()),

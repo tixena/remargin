@@ -693,47 +693,6 @@ const fn author_type_str(at: &parser::AuthorType) -> &'static str {
     }
 }
 
-/// Convert a comment to a JSON value.
-fn comment_to_json(cm: &parser::Comment) -> Value {
-    let mut obj = json!({
-        "id": cm.id,
-        "author": cm.author,
-        "type": author_type_str(&cm.author_type),
-        "ts": cm.ts.to_rfc3339(),
-        "checksum": cm.checksum,
-        "content": cm.content,
-        "line": cm.line,
-    });
-    let map = obj.as_object_mut().unwrap();
-    if !cm.to.is_empty() {
-        map.insert("to".into(), json!(cm.to));
-    }
-    if let Some(reply_to) = &cm.reply_to {
-        map.insert("reply_to".into(), json!(reply_to));
-    }
-    if let Some(thread) = &cm.thread {
-        map.insert("thread".into(), json!(thread));
-    }
-    if !cm.ack.is_empty() {
-        let acks: Vec<Value> = cm
-            .ack
-            .iter()
-            .map(|a| json!({ "author": a.author, "ts": a.ts.to_rfc3339() }))
-            .collect();
-        map.insert("ack".into(), json!(acks));
-    }
-    if !cm.reactions.is_empty() {
-        map.insert("reactions".into(), json!(cm.reactions));
-    }
-    if !cm.attachments.is_empty() {
-        map.insert("attachments".into(), json!(cm.attachments));
-    }
-    if let Some(sig) = &cm.signature {
-        map.insert("signature".into(), json!(sig));
-    }
-    obj
-}
-
 /// Truncate content for display.
 fn truncate_content(content: &str, max_len: usize) -> String {
     let first_line = content.lines().next().unwrap_or("");
@@ -1251,8 +1210,10 @@ fn cmd_comments(
         let formatted = display::format_comments_pretty(file, &comments);
         out(&formatted)
     } else if json_mode {
-        let result: Vec<Value> = comments.iter().map(|cm| comment_to_json(cm)).collect();
-        out_json(&json!({ "comments": result }))
+        // Rely on the `Serialize` impl of `parser::Comment` so the output
+        // stays in lockstep with the tixschema-generated schemas. See
+        // `src/parser.rs` for the skip-if-none and PascalCase details.
+        out_json(&json!({ "comments": comments }))
     } else {
         for cm in &comments {
             let ack_status = if cm.ack.is_empty() {
@@ -1453,27 +1414,9 @@ fn cmd_ls(
     let entries = document::ls(system, cwd, target, config)?;
 
     if json_mode {
-        let results: Vec<Value> = entries
-            .iter()
-            .map(|entry| {
-                let mut obj = json!({
-                    "path": entry.path.display().to_string(),
-                    "is_dir": entry.is_dir,
-                });
-                let map = obj.as_object_mut().unwrap();
-                if let Some(size) = entry.size {
-                    map.insert("size".into(), json!(size));
-                }
-                if let Some(pending) = entry.remargin_pending {
-                    map.insert("remargin_pending".into(), json!(pending));
-                }
-                if let Some(last) = &entry.remargin_last_activity {
-                    map.insert("remargin_last_activity".into(), json!(last));
-                }
-                obj
-            })
-            .collect();
-        print_output(true, &json!({ "entries": results }))
+        // `document::ListEntry` derives `Serialize` so the JSON shape is
+        // kept in sync with the generated tixschema automatically.
+        print_output(true, &json!({ "entries": entries }))
     } else {
         for entry in &entries {
             let kind = if entry.is_dir { "d" } else { "-" };
@@ -1594,38 +1537,15 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     let results = query::query(system, &target, &filter)?;
 
     if params.json_mode {
-        let entries: Vec<Value> = results
-            .iter()
-            .map(|r| {
-                let mut obj = json!({
-                    "path": r.path.display().to_string(),
-                    "comment_count": r.comment_count,
-                    "pending_count": r.pending_count,
-                });
-                let map = obj.as_object_mut().unwrap();
-                if !r.pending_for.is_empty() {
-                    map.insert("pending_for".into(), json!(r.pending_for));
-                }
-                if let Some(ts) = &r.last_activity {
-                    map.insert("last_activity".into(), json!(ts.to_rfc3339()));
-                }
-                if !r.comments.is_empty() {
-                    map.insert(
-                        "comments".into(),
-                        json!(
-                            r.comments
-                                .iter()
-                                .map(serialize_expanded_comment)
-                                .collect::<Vec<_>>()
-                        ),
-                    );
-                }
-                obj
-            })
-            .collect();
+        // `query::QueryResult` and `query::ExpandedComment` derive
+        // `Serialize` so their JSON shape is guaranteed to match the
+        // generated tixschema. No hand-rolled field list here.
         print_output(
             true,
-            &json!({ "base_path": format!("{}/", params.path.trim_end_matches('/')), "results": entries }),
+            &json!({
+                "base_path": format!("{}/", params.path.trim_end_matches('/')),
+                "results": results,
+            }),
         )
     } else if params.pretty {
         let filter_name = params.pending_for;
@@ -1660,35 +1580,6 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     }
 }
 
-/// Serialize an [`ExpandedComment`](query::ExpandedComment) to a JSON value.
-fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
-    let author_type = match cm.author_type {
-        parser::AuthorType::Agent => "agent",
-        parser::AuthorType::Human => "human",
-        _ => "unknown",
-    };
-    json!({
-        "id": cm.id,
-        "author": cm.author,
-        "author_type": author_type,
-        "content": cm.content,
-        "file": cm.file.display().to_string(),
-        "ts": cm.ts.to_rfc3339(),
-        "line": cm.line,
-        "to": cm.to,
-        "ack": cm.ack.iter().map(|a| json!({
-            "author": a.author,
-            "ts": a.ts.to_rfc3339(),
-        })).collect::<Vec<_>>(),
-        "reply_to": cm.reply_to,
-        "thread": cm.thread,
-        "reactions": cm.reactions,
-        "attachments": cm.attachments,
-        "checksum": cm.checksum,
-        "signature": cm.signature,
-    })
-}
-
 fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Result<()> {
     let target = cwd.join(params.path);
 
@@ -1707,33 +1598,10 @@ fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Res
     let results = search::search(system, cwd, &target, &options)?;
 
     if params.json_mode {
-        let entries: Vec<Value> = results
-            .iter()
-            .map(|m| {
-                let mut obj = json!({
-                    "path": m.path.display().to_string(),
-                    "line": m.line,
-                    "text": m.text,
-                    "location": match m.location {
-                        search::MatchLocation::Body => "body",
-                        search::MatchLocation::Comment => "comment",
-                        _ => "unknown",
-                    },
-                });
-                let map = obj.as_object_mut().unwrap();
-                if let Some(id) = &m.comment_id {
-                    map.insert("comment_id".into(), json!(id));
-                }
-                if !m.before.is_empty() {
-                    map.insert("before".into(), json!(m.before));
-                }
-                if !m.after.is_empty() {
-                    map.insert("after".into(), json!(m.after));
-                }
-                obj
-            })
-            .collect();
-        print_output(true, &json!({ "matches": entries }))
+        // `search::SearchMatch` derives `Serialize`; the generated
+        // tixschema expects `location` as `"Body"`/`"Comment"`, which is
+        // what the default enum serialization emits.
+        print_output(true, &json!({ "matches": results }))
     } else {
         for m in &results {
             let loc = match m.location {

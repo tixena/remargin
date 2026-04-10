@@ -1176,3 +1176,131 @@ fn expanded_overrides_summary() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Test: JSON shape of QueryResult matches the generated tixschema
+// ---------------------------------------------------------------------------
+
+#[test]
+fn query_result_json_shape_matches_schema() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    let first = results.first().unwrap();
+
+    // Serialize the whole result via serde (this is what the CLI's
+    // `--json query` output relies on after rem-w0b).
+    let value = serde_json::to_value(first).unwrap();
+    let obj = value.as_object().unwrap();
+
+    // Required QueryResult keys.
+    for key in [
+        "comment_count",
+        "comments",
+        "path",
+        "pending_count",
+        "pending_for",
+    ] {
+        assert!(
+            obj.contains_key(key),
+            "required key `{key}` missing from serialized QueryResult"
+        );
+    }
+
+    // `path` must be a plain string (PathBuf), not some JSON object.
+    assert!(obj["path"].is_string());
+
+    // `pending_for` must always be present as an array, even when empty.
+    assert!(obj["pending_for"].is_array());
+
+    // Drill into the first embedded ExpandedComment.
+    let comments = obj["comments"].as_array().unwrap();
+    let comment = comments.first().unwrap().as_object().unwrap();
+
+    for key in [
+        "ack",
+        "attachments",
+        "author",
+        "author_type",
+        "checksum",
+        "content",
+        "file",
+        "id",
+        "line",
+        "reactions",
+        "to",
+        "ts",
+    ] {
+        assert!(
+            comment.contains_key(key),
+            "required key `{key}` missing from serialized ExpandedComment"
+        );
+    }
+
+    // Schema uses `author_type` with PascalCase enum values, not `type`.
+    assert!(
+        !comment.contains_key("type"),
+        "legacy `type` key must not appear in serialized ExpandedComment"
+    );
+    let author_type = comment["author_type"].as_str().unwrap();
+    assert!(
+        matches!(author_type, "Human" | "Agent"),
+        "author_type must be PascalCase, got {author_type:?}"
+    );
+
+    // `file` must render as a string path (what Zod `z.string()` expects),
+    // not as a `{ path: ... }` object or similar.
+    assert!(comment["file"].is_string());
+}
+
+#[test]
+fn expanded_comment_skips_none_options_in_json() {
+    // Feed a file with a minimal comment (no reply_to/thread/signature)
+    // and make sure those fields are omitted from the JSON so the Zod
+    // `strictObject` schema treats them as `undefined`.
+    let system = MockSystem::new()
+        .with_dir(Path::new("/mini"))
+        .unwrap()
+        .with_file(
+            Path::new("/mini/mini.md"),
+            b"\
+```remargin
+---
+id: mini
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:mini
+---
+Minimal.
+```
+",
+        )
+        .unwrap();
+
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/mini"), &filter).unwrap();
+    let first = results.first().unwrap();
+
+    let value = serde_json::to_value(first).unwrap();
+    let comment = value["comments"][0].as_object().unwrap();
+
+    for key in ["reply_to", "thread", "signature"] {
+        assert!(
+            !comment.contains_key(key),
+            "optional key `{key}` should be skipped when None"
+        );
+    }
+
+    // But required collections must still be present (as empty).
+    assert_eq!(comment["ack"], serde_json::json!([]));
+    assert_eq!(comment["attachments"], serde_json::json!([]));
+    assert_eq!(comment["to"], serde_json::json!([]));
+    assert_eq!(comment["reactions"], serde_json::json!({}));
+}

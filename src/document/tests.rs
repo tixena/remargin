@@ -1616,3 +1616,55 @@ fn rm_rejects_directory() {
         "expected directory error"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Test: JSON shape of ListEntry matches the generated tixschema
+// ---------------------------------------------------------------------------
+
+#[test]
+fn list_entry_json_shape_matches_schema() {
+    use std::path::PathBuf;
+
+    let entry = document::ListEntry {
+        is_dir: false,
+        path: PathBuf::from("foo/bar.md"),
+        remargin_last_activity: Some(String::from("2026-04-06T12:00:00-04:00")),
+        remargin_pending: Some(2_u32),
+        size: Some(1024_u64),
+    };
+
+    let value = serde_json::to_value(&entry).unwrap();
+    let obj = value.as_object().unwrap();
+
+    // Required keys always present.
+    assert!(obj.contains_key("is_dir"));
+    assert!(obj.contains_key("path"));
+    assert_eq!(obj["path"], serde_json::json!("foo/bar.md"));
+
+    // Populated optionals serialize their values.
+    assert_eq!(obj["size"], serde_json::json!(1024_u64));
+    assert_eq!(obj["remargin_pending"], serde_json::json!(2_u32));
+    assert_eq!(
+        obj["remargin_last_activity"],
+        serde_json::json!("2026-04-06T12:00:00-04:00")
+    );
+
+    // Empty optionals are omitted entirely so the generated Zod
+    // `strictObject` schema treats them as `undefined` rather than
+    // rejecting an explicit `null`.
+    let bare = document::ListEntry {
+        is_dir: true,
+        path: PathBuf::from("dir"),
+        remargin_last_activity: None,
+        remargin_pending: None,
+        size: None,
+    };
+    let bare_value = serde_json::to_value(&bare).unwrap();
+    let bare_obj = bare_value.as_object().unwrap();
+    for key in ["size", "remargin_pending", "remargin_last_activity"] {
+        assert!(
+            !bare_obj.contains_key(key),
+            "optional key `{key}` should be skipped when None"
+        );
+    }
+}

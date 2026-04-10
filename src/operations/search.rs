@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use regex::{Regex, RegexBuilder};
+use serde::Serialize;
 
 use tixschema::model_schema;
 
@@ -34,7 +35,7 @@ enum LineAttribution {
 }
 
 /// Where a match was found within the document.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 #[model_schema]
 pub enum MatchLocation {
@@ -50,7 +51,11 @@ struct Matcher {
 }
 
 /// A single search match.
-#[derive(Debug)]
+///
+/// Serializes to JSON that matches the `SearchMatch` tixschema:
+/// `path` as a string, `location` as `"Body"` or `"Comment"`, and
+/// `comment_id` skipped when `None`.
+#[derive(Debug, Serialize)]
 #[non_exhaustive]
 #[model_schema]
 pub struct SearchMatch {
@@ -59,6 +64,7 @@ pub struct SearchMatch {
     /// Context lines before the match.
     pub before: Vec<String>,
     /// If the match is inside a comment, the comment ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_id: Option<String>,
     /// 1-indexed line number of the match within the file.
     pub line: usize,

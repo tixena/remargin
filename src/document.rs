@@ -16,6 +16,7 @@ use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
+use serde::Serialize;
 
 use tixschema::model_schema;
 
@@ -28,7 +29,11 @@ use crate::parser;
 // ---------------------------------------------------------------------------
 
 /// A single entry from a directory listing.
-#[derive(Debug)]
+///
+/// Serializes to JSON that matches the `ListEntry` tixschema: `path` is
+/// rendered as a string and all `Option` fields are skipped when `None`
+/// so the generated Zod `strictObject` schema accepts them as `undefined`.
+#[derive(Debug, Serialize)]
 #[non_exhaustive]
 #[model_schema]
 pub struct ListEntry {
@@ -37,10 +42,13 @@ pub struct ListEntry {
     /// Relative path from the base directory.
     pub path: PathBuf,
     /// Only populated for markdown files with remargin comments.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remargin_last_activity: Option<String>,
     /// Only populated for markdown files with remargin comments.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remargin_pending: Option<u32>,
     /// File size in bytes (None for directories).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
 }
 

@@ -1,10 +1,14 @@
 import { exec } from "child_process";
-import type {
-  Comment,
-  QueryResult,
-  ExpandedComment,
-  ListEntry,
-  SearchMatch,
+import { z } from "zod/v4";
+import {
+  Comment$Schema,
+  ListEntry$Schema,
+  QueryResult$Schema,
+  SearchMatch$Schema,
+  type Comment,
+  type QueryResult,
+  type ListEntry,
+  type SearchMatch,
 } from "@/generated";
 import type { RemarginSettings } from "@/types";
 import type {
@@ -22,96 +26,47 @@ function shellescape(arg: string): string {
 }
 
 /**
- * Transform a raw comment object emitted by `remargin --json comments` into
- * the shape the UI and generated types expect.
- *
- * The CLI currently hand-writes JSON instead of serializing its typed structs,
- * so there's drift we have to patch up here:
- *
- *  - field name: `type` (lowercase) → `author_type` (what the schema uses)
- *  - enum case:  `"agent"`/`"human"` → `"Agent"`/`"Human"` (PascalCase)
- *  - optional collections are omitted when empty; fill them with defaults so
- *    the UI can iterate them unconditionally.
+ * The CLI wraps its payload in an object that also contains timing metadata
+ * (`elapsed_ms`), so the top-level envelopes are parsed with loose objects
+ * that only care about the specific payload fields.
  */
-function normalizeComment(raw: Record<string, unknown>): Comment {
-  const rawType =
-    (raw["author_type"] as string | undefined) ??
-    (raw["type"] as string | undefined);
-  const authorType = toPascalAuthorType(rawType);
+const CommentsEnvelope$Schema = z.looseObject({
+  comments: z.array(Comment$Schema),
+});
 
-  return {
-    id: (raw["id"] as string) ?? "",
-    author: (raw["author"] as string) ?? "",
-    author_type: authorType,
-    ts: (raw["ts"] as string) ?? "",
-    content: (raw["content"] as string) ?? "",
-    checksum: (raw["checksum"] as string) ?? "",
-    line: (raw["line"] as number) ?? 0,
-    fence_depth: (raw["fence_depth"] as number) ?? 3,
-    to: (raw["to"] as string[] | undefined) ?? [],
-    ack:
-      (raw["ack"] as Array<{ author: string; ts: string }> | undefined) ?? [],
-    reactions:
-      (raw["reactions"] as Record<string, string[]> | undefined) ?? {},
-    attachments: (raw["attachments"] as string[] | undefined) ?? [],
-    reply_to: raw["reply_to"] as string | undefined,
-    thread: raw["thread"] as string | undefined,
-    signature: raw["signature"] as string | undefined,
-  };
-}
+const QueryEnvelope$Schema = z.looseObject({
+  results: z.array(QueryResult$Schema),
+});
+
+const ListEnvelope$Schema = z.looseObject({
+  entries: z.array(ListEntry$Schema),
+});
+
+const SearchEnvelope$Schema = z.looseObject({
+  matches: z.array(SearchMatch$Schema),
+});
 
 /**
- * Same idea as `normalizeComment`, but for the `ExpandedComment` shape that
- * `query --expanded` embeds inside each result (includes a `file` field).
+ * Parse CLI stdout against a Zod schema and surface a readable error on
+ * validation failure so callers can tell the difference between a broken
+ * CLI version and a transient runtime problem.
  */
-function normalizeExpandedComment(
-  raw: Record<string, unknown>
-): ExpandedComment {
-  const rawType =
-    (raw["author_type"] as string | undefined) ??
-    (raw["type"] as string | undefined);
-  const authorType = toPascalAuthorType(rawType);
-
-  return {
-    id: (raw["id"] as string) ?? "",
-    author: (raw["author"] as string) ?? "",
-    author_type: authorType,
-    ts: (raw["ts"] as string) ?? "",
-    content: (raw["content"] as string) ?? "",
-    checksum: (raw["checksum"] as string) ?? "",
-    line: (raw["line"] as number) ?? 0,
-    file: (raw["file"] as string) ?? "",
-    to: (raw["to"] as string[] | undefined) ?? [],
-    ack:
-      (raw["ack"] as Array<{ author: string; ts: string }> | undefined) ?? [],
-    reactions:
-      (raw["reactions"] as Record<string, string[]> | undefined) ?? {},
-    attachments: (raw["attachments"] as string[] | undefined) ?? [],
-    reply_to: raw["reply_to"] as string | undefined,
-    thread: raw["thread"] as string | undefined,
-    signature: raw["signature"] as string | undefined,
-  };
-}
-
-function normalizeQueryResult(raw: Record<string, unknown>): QueryResult {
-  const rawComments =
-    (raw["comments"] as Array<Record<string, unknown>> | undefined) ?? [];
-  return {
-    path: (raw["path"] as string) ?? "",
-    comment_count: (raw["comment_count"] as number) ?? 0,
-    pending_count: (raw["pending_count"] as number) ?? 0,
-    pending_for: (raw["pending_for"] as string[] | undefined) ?? [],
-    last_activity: raw["last_activity"] as string | undefined,
-    comments: rawComments.map(normalizeExpandedComment),
-  };
-}
-
-function toPascalAuthorType(
-  value: string | undefined
-): "Agent" | "Human" {
-  const lower = (value ?? "").toLowerCase();
-  if (lower === "human") return "Human";
-  return "Agent";
+function parseEnvelope<T>(raw: string, schema: z.ZodType<T>, label: string): T {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `remargin ${label}: could not parse JSON (${(err as Error).message})`
+    );
+  }
+  const result = schema.safeParse(payload);
+  if (!result.success) {
+    throw new Error(
+      `remargin ${label}: output did not match schema: ${result.error.message}`
+    );
+  }
+  return result.data;
 }
 
 export class RemarginBackend {
@@ -141,8 +96,7 @@ export class RemarginBackend {
 
   async ls(path: string): Promise<ListEntry[]> {
     const raw = await this.exec(["ls", path]);
-    const parsed = JSON.parse(raw) as { entries?: ListEntry[] };
-    return parsed.entries ?? [];
+    return parseEnvelope(raw, ListEnvelope$Schema, "ls").entries;
   }
 
   async write(
@@ -165,11 +119,7 @@ export class RemarginBackend {
 
   async comments(file: string): Promise<Comment[]> {
     const raw = await this.exec(["comments", file]);
-    const parsed = JSON.parse(raw) as {
-      comments?: Array<Record<string, unknown>>;
-    };
-    const list = parsed.comments ?? [];
-    return list.map(normalizeComment);
+    return parseEnvelope(raw, CommentsEnvelope$Schema, "comments").comments;
   }
 
   async comment(
@@ -249,11 +199,7 @@ export class RemarginBackend {
     if (opts?.expanded) args.push("--expanded");
     if (opts?.commentId) args.push("--comment-id", opts.commentId);
     const raw = await this.exec(args);
-    const parsed = JSON.parse(raw) as {
-      results?: Array<Record<string, unknown>>;
-    };
-    const list = parsed.results ?? [];
-    return list.map(normalizeQueryResult);
+    return parseEnvelope(raw, QueryEnvelope$Schema, "query").results;
   }
 
   async search(
@@ -267,8 +213,7 @@ export class RemarginBackend {
     if (opts?.ignoreCase) args.push("--ignore-case");
     if (opts?.context != null) args.push("--context", String(opts.context));
     const raw = await this.exec(args);
-    const parsed = JSON.parse(raw) as { matches?: SearchMatch[] };
-    return parsed.matches ?? [];
+    return parseEnvelope(raw, SearchEnvelope$Schema, "search").matches;
   }
 
   // -- Utility ----------------------------------------------------------------

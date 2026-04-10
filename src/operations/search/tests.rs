@@ -257,3 +257,61 @@ fn multiple_files() {
     let results = search(&system, base, base, &literal_opts("hello")).unwrap();
     assert_eq!(results.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Test: JSON shape of SearchMatch matches the generated tixschema
+// ---------------------------------------------------------------------------
+
+#[test]
+fn search_match_json_shape_matches_schema() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/body.md"), b"hello world\n")
+        .unwrap()
+        .with_file(
+            Path::new("/docs/comment.md"),
+            remargin_block("abc", "hello reviewer").as_bytes(),
+        )
+        .unwrap();
+
+    let results = search(&system, base, base, &literal_opts("hello")).unwrap();
+    assert!(!results.is_empty());
+
+    // The body match has no comment_id; the comment match does.
+    let body_match = results
+        .iter()
+        .find(|m| matches!(m.location, MatchLocation::Body))
+        .unwrap();
+    let comment_match = results
+        .iter()
+        .find(|m| matches!(m.location, MatchLocation::Comment))
+        .unwrap();
+
+    let body_value = serde_json::to_value(body_match).unwrap();
+    let body_obj = body_value.as_object().unwrap();
+
+    for key in ["after", "before", "line", "location", "path", "text"] {
+        assert!(
+            body_obj.contains_key(key),
+            "required key `{key}` missing from serialized SearchMatch"
+        );
+    }
+
+    // `location` is a PascalCase enum string in the schema.
+    assert_eq!(body_obj["location"], serde_json::json!("Body"));
+    // `comment_id` is omitted when None.
+    assert!(
+        !body_obj.contains_key("comment_id"),
+        "comment_id must be skipped when None"
+    );
+    // `path` renders as a plain string.
+    assert!(body_obj["path"].is_string());
+
+    let comment_value = serde_json::to_value(comment_match).unwrap();
+    let comment_obj = comment_value.as_object().unwrap();
+    assert_eq!(comment_obj["location"], serde_json::json!("Comment"));
+    assert!(
+        comment_obj.contains_key("comment_id"),
+        "comment_id must be present for comment matches"
+    );
+}
