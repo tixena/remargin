@@ -52,6 +52,10 @@ regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
+# HTTP client (sync, minimal, pure-Rust TLS). Used by the `obsidian` feature
+# to fetch plugin assets from GitHub releases at install time.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
 # Skill embedding
 include_dir = "0.7"
 

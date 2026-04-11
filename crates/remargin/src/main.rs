@@ -1619,6 +1619,12 @@ fn cmd_obsidian(
 ) -> Result<()> {
     match action {
         ObsidianAction::Install { vault_path } => {
+            if !json_mode {
+                eprintln!(
+                    "Downloading remargin plugin v{} from GitHub Releases...",
+                    obsidian::plugin_version()
+                );
+            }
             let report = obsidian::install(system, cwd, vault_path.as_deref())?;
             if json_mode {
                 print_output(true, &report.to_json())

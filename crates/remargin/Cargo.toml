@@ -23,11 +23,11 @@ default = ["zod", "jsonschema"]
 unrestricted = ["remargin-core/unrestricted"]
 zod = ["remargin-core/zod"]
 jsonschema = ["remargin-core/jsonschema"]
-# Embed the Obsidian plugin (main.js + manifest.json) and expose the
-# `remargin obsidian install|uninstall` subcommand. Requires
-# `pnpm -C packages/remargin-obsidian build` to have run first so the
-# artifacts exist at compile time — see `just build-cli-obsidian`.
-obsidian = []
+# Expose the `remargin obsidian install|uninstall` subcommand. The install
+# path fetches `main.js` and `manifest.json` from the matching GitHub
+# release (`obsidian-v{CARGO_PKG_VERSION}`) at runtime, so no TypeScript
+# build is required to compile the CLI.
+obsidian = ["dep:ureq"]
 
 [dependencies]
 remargin-core.workspace = true
@@ -55,6 +55,9 @@ chrono.workspace = true
 # Logging
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# HTTP client (only compiled with the `obsidian` feature).
+ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_cmd.workspace = true

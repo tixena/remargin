@@ -27,10 +27,11 @@ build-rust:
 build-ts: generate-types
     pnpm -C packages/remargin-obsidian build
 
-# Build the CLI with the embedded Obsidian plugin feature. Runs the TS plugin
-# build first so the main.js / manifest.json artifacts embedded via
-# include_bytes! exist when cargo compiles.
-build-cli-obsidian: build-ts
+# Build the CLI with the Obsidian plugin feature. The CLI no longer embeds
+# the plugin at compile time -- it fetches main.js / manifest.json from the
+# matching GitHub release at install time -- so this recipe no longer
+# depends on the TypeScript build.
+build-cli-obsidian:
     cargo build -p remargin --features obsidian
 
 # Run the Rust test suite.
