@@ -4,6 +4,7 @@ pub mod batch;
 pub mod migrate;
 pub mod purge;
 pub mod query;
+pub mod sandbox;
 pub mod search;
 pub mod threading;
 
@@ -37,6 +38,11 @@ pub struct CreateCommentParams<'params> {
     pub content: &'params str,
     pub position: &'params InsertPosition,
     pub reply_to: Option<&'params str>,
+    /// Atomically stage the file in the caller's sandbox in the same
+    /// write cycle as the comment insert. If the caller already has a
+    /// sandbox entry on the document, the existing timestamp is kept
+    /// (idempotent with the standalone `sandbox add` command).
+    pub sandbox: bool,
     pub to: &'params [String],
 }
 
@@ -49,6 +55,7 @@ impl<'params> CreateCommentParams<'params> {
             content,
             position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         }
     }
@@ -156,6 +163,18 @@ pub fn create_comment(
     }
 
     frontmatter::ensure_frontmatter(&mut doc, config)?;
+
+    // Atomic comment+sandbox composite write: append the caller's sandbox
+    // entry (idempotent) in the same write cycle. This runs *after*
+    // `ensure_frontmatter` so recomputed `remargin_*` fields are preserved.
+    if params.sandbox {
+        let mut entries = frontmatter::read_sandbox_entries(&doc)?;
+        // The bool result is intentionally ignored: idempotent re-add
+        // preserves the existing timestamp, and the comment write still
+        // happens either way.
+        let _added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
+        frontmatter::write_sandbox_entries(&mut doc, &entries)?;
+    }
 
     let expected_added: HashSet<String> = HashSet::from([new_id.clone()]);
     let expected_removed: HashSet<String> = HashSet::new();

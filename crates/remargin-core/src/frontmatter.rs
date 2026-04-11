@@ -4,6 +4,12 @@
 //! auto-populated on first save but never overwritten. Tool-managed fields
 //! (`remargin_pending`, `remargin_pending_for`, `remargin_last_activity`)
 //! are recomputed on every write operation.
+//!
+//! The `sandbox` key is user-written volatile state: a list of
+//! `author@timestamp` strings identifying participants who have staged the
+//! file. It is preserved across writes but is not part of comment checksums
+//! or signatures (those are computed per comment and do not include any
+//! document-level frontmatter).
 
 #[cfg(test)]
 mod tests;
@@ -13,7 +19,15 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde_yaml::{Mapping, Value};
 
 use crate::config::ResolvedConfig;
-use crate::parser::{Comment, ParsedDocument, Segment};
+use crate::parser::{self, Comment, ParsedDocument, SandboxEntry, Segment};
+
+/// The frontmatter key under which sandbox entries are stored.
+///
+/// Note: intentionally *not* prefixed with `remargin_`. The `remargin_`
+/// prefix is reserved for derived/tool-managed fields (`remargin_pending`,
+/// `remargin_pending_for`, `remargin_last_activity`). `sandbox` is
+/// user-written state and follows the bare `ack` naming convention.
+pub const SANDBOX_KEY: &str = "sandbox";
 
 /// Frontmatter delimiter.
 const FRONTMATTER_DELIMITER: &str = "---";
@@ -37,6 +51,94 @@ pub fn ensure_frontmatter(doc: &mut ParsedDocument, config: &ResolvedConfig) -> 
     write_frontmatter_to_doc(doc, &yaml);
 
     Ok(())
+}
+
+/// Read the current `sandbox` frontmatter list as `SandboxEntry` values.
+///
+/// Returns an empty vector when the key is absent. Unparseable entries are
+/// surfaced as errors so callers can decide how to respond (the CLI reports
+/// the file as failed rather than silently dropping state).
+///
+/// # Errors
+///
+/// Returns an error if existing frontmatter YAML is invalid, or if a
+/// sandbox entry is not a well-formed `author@timestamp` string.
+pub fn read_sandbox_entries(doc: &ParsedDocument) -> Result<Vec<SandboxEntry>> {
+    let mapping = parse_existing_frontmatter(doc)?;
+    let key = Value::String(String::from(SANDBOX_KEY));
+    let Some(value) = mapping.get(&key) else {
+        return Ok(Vec::new());
+    };
+
+    let Value::Sequence(items) = value else {
+        anyhow::bail!("frontmatter `{SANDBOX_KEY}` is not a sequence");
+    };
+
+    let mut entries = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::String(raw) = item else {
+            anyhow::bail!("frontmatter `{SANDBOX_KEY}` entry is not a string");
+        };
+        entries.push(parser::parse_sandbox_entry(raw)?);
+    }
+    Ok(entries)
+}
+
+/// Write the given sandbox entries back into the document, preserving all
+/// other frontmatter. An empty slice removes the `sandbox` key entirely.
+///
+/// # Errors
+///
+/// Returns an error if existing frontmatter YAML cannot be parsed.
+pub fn write_sandbox_entries(doc: &mut ParsedDocument, entries: &[SandboxEntry]) -> Result<()> {
+    let mut mapping = parse_existing_frontmatter(doc)?;
+    set_sandbox_on_mapping(&mut mapping, entries);
+    let yaml = Value::Mapping(mapping);
+    write_frontmatter_to_doc(doc, &yaml);
+    Ok(())
+}
+
+/// Set the `sandbox` key on a frontmatter mapping in place.
+///
+/// Empty entry lists delete the key entirely so clean documents stay clean.
+pub fn set_sandbox_on_mapping(mapping: &mut Mapping, entries: &[SandboxEntry]) {
+    let key = Value::String(String::from(SANDBOX_KEY));
+    if entries.is_empty() {
+        mapping.remove(&key);
+        return;
+    }
+    let values: Vec<Value> = entries
+        .iter()
+        .map(|e| Value::String(parser::format_sandbox_entry(e)))
+        .collect();
+    mapping.insert(key, Value::Sequence(values));
+}
+
+/// Append a sandbox entry for `identity` if one does not already exist.
+///
+/// Returns `true` when a new entry was added, `false` when the identity was
+/// already present (idempotent: existing timestamp is preserved).
+pub fn add_sandbox_entry_for(
+    entries: &mut Vec<SandboxEntry>,
+    identity: &str,
+    now: DateTime<FixedOffset>,
+) -> bool {
+    if entries.iter().any(|e| e.author == identity) {
+        return false;
+    }
+    entries.push(SandboxEntry {
+        author: String::from(identity),
+        ts: now,
+    });
+    true
+}
+
+/// Remove any sandbox entry matching `identity`. Returns `true` when an
+/// entry was removed, `false` when none existed for the caller.
+pub fn remove_sandbox_entry_for(entries: &mut Vec<SandboxEntry>, identity: &str) -> bool {
+    let before = entries.len();
+    entries.retain(|e| e.author != identity);
+    entries.len() != before
 }
 
 /// Auto-populate user-owned fields. Only fills missing fields, never overwrites.

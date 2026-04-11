@@ -27,6 +27,7 @@ use remargin_core::operations::batch::BatchCommentOp;
 use remargin_core::operations::migrate;
 use remargin_core::operations::purge;
 use remargin_core::operations::query;
+use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
 use remargin_core::parser;
 use remargin_core::skill;
@@ -155,6 +156,9 @@ enum Commands {
         /// ID of the comment to reply to.
         #[arg(long)]
         reply_to: Option<String>,
+        /// Atomically stage the file in the caller's sandbox in the same write.
+        #[arg(long)]
+        sandbox: bool,
         /// Addressees of the comment.
         #[arg(long)]
         to: Vec<String>,
@@ -309,6 +313,12 @@ enum Commands {
         /// Path to the file.
         file: String,
     },
+    /// Manage per-identity sandbox staging for markdown files.
+    Sandbox {
+        /// Subcommand: add, list, or remove.
+        #[command(subcommand)]
+        action: SandboxAction,
+    },
     /// Search across documents for text matches.
     Search {
         /// Text or regex pattern to search for.
@@ -372,6 +382,32 @@ enum RegistryAction {
     Show,
 }
 
+/// Sandbox subcommands.
+#[derive(clap::Subcommand)]
+enum SandboxAction {
+    /// Stage one or more markdown files in the caller's sandbox.
+    Add {
+        /// Markdown files to stage.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+    /// List every markdown file staged for the caller.
+    List {
+        /// Emit absolute paths instead of paths relative to `--path`.
+        #[arg(long)]
+        absolute: bool,
+        /// Base directory to walk (defaults to current directory).
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Remove the caller's sandbox entry from one or more markdown files.
+    Remove {
+        /// Markdown files to unstage.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
+}
+
 /// Skill subcommands.
 #[derive(clap::Subcommand)]
 enum SkillAction {
@@ -430,6 +466,10 @@ enum ObsidianAction {
     },
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "CLI flags are naturally boolean"
+)]
 struct CommentParams<'cmd> {
     after_comment: Option<&'cmd str>,
     after_line: Option<usize>,
@@ -440,6 +480,7 @@ struct CommentParams<'cmd> {
     file: &'cmd str,
     json_mode: bool,
     reply_to: Option<&'cmd str>,
+    sandbox: bool,
     to: &'cmd [String],
 }
 
@@ -745,6 +786,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::React { .. }
         | Commands::Registry { .. }
         | Commands::Rm { .. }
+        | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Verify { .. }
         | Commands::Write { .. } => {}
@@ -808,6 +850,7 @@ fn dispatch_with_config(
             auto_ack,
             comment_file,
             reply_to,
+            sandbox,
             to,
         } => {
             let resolved_content =
@@ -822,6 +865,7 @@ fn dispatch_with_config(
                 file,
                 json_mode,
                 reply_to: reply_to.as_deref(),
+                sandbox: *sandbox,
                 to,
             };
             cmd_comment(system, cwd, config, &cp)
@@ -895,6 +939,7 @@ fn dispatch_with_config(
         }
         Commands::Registry { action } => cmd_registry(system, cwd, action, json_mode),
         Commands::Rm { file } => cmd_rm(system, cwd, config, file, json_mode),
+        Commands::Sandbox { action } => cmd_sandbox(system, cwd, config, action, json_mode),
         Commands::Search {
             pattern,
             path,
@@ -1085,6 +1130,7 @@ fn cmd_comment(
     params.attachments = cp.attachments;
     params.auto_ack = cp.auto_ack;
     params.reply_to = cp.reply_to;
+    params.sandbox = cp.sandbox;
     params.to = cp.to;
 
     let new_id = operations::create_comment(system, &path, config, &params)?;
@@ -1586,6 +1632,158 @@ fn cmd_registry(
             }
         }
     }
+}
+
+fn cmd_sandbox(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    action: &SandboxAction,
+    json_mode: bool,
+) -> Result<()> {
+    let identity = config
+        .identity
+        .as_deref()
+        .context("identity is required for sandbox operations")?;
+
+    match action {
+        SandboxAction::Add { files } => {
+            let absolute: Vec<PathBuf> = files
+                .iter()
+                .map(|f| {
+                    if f.is_absolute() {
+                        f.clone()
+                    } else {
+                        cwd.join(f)
+                    }
+                })
+                .collect();
+            let result = sandbox_ops::add_to_files(system, &absolute, identity)?;
+            emit_sandbox_bulk_result(&result, cwd, "added", json_mode)?;
+            if result.failed.is_empty() {
+                Ok(())
+            } else {
+                bail!("sandbox add: {} file(s) failed", result.failed.len())
+            }
+        }
+        SandboxAction::Remove { files } => {
+            let absolute: Vec<PathBuf> = files
+                .iter()
+                .map(|f| {
+                    if f.is_absolute() {
+                        f.clone()
+                    } else {
+                        cwd.join(f)
+                    }
+                })
+                .collect();
+            let result = sandbox_ops::remove_from_files(system, &absolute, identity)?;
+            emit_sandbox_bulk_result(&result, cwd, "removed", json_mode)?;
+            if result.failed.is_empty() {
+                Ok(())
+            } else {
+                bail!("sandbox remove: {} file(s) failed", result.failed.len())
+            }
+        }
+        SandboxAction::List { absolute, path } => {
+            let root = path
+                .as_ref()
+                .map_or_else(|| cwd.to_path_buf(), |p| cwd.join(p));
+            let listings = sandbox_ops::list_for_identity(system, &root, identity)?;
+
+            if json_mode {
+                let items: Vec<Value> = listings
+                    .iter()
+                    .map(|l| {
+                        let display_path = if *absolute {
+                            l.path.display().to_string()
+                        } else {
+                            l.path
+                                .strip_prefix(&root)
+                                .unwrap_or(&l.path)
+                                .display()
+                                .to_string()
+                        };
+                        json!({
+                            "path": display_path,
+                            "since": l.since.to_rfc3339(),
+                        })
+                    })
+                    .collect();
+                out_json(&json!({ "files": items }))
+            } else {
+                for l in &listings {
+                    let display_path = if *absolute {
+                        l.path.display().to_string()
+                    } else {
+                        l.path
+                            .strip_prefix(&root)
+                            .unwrap_or(&l.path)
+                            .display()
+                            .to_string()
+                    };
+                    out(&display_path)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn emit_sandbox_bulk_result(
+    result: &sandbox_ops::SandboxBulkResult,
+    cwd: &Path,
+    changed_key: &str,
+    json_mode: bool,
+) -> Result<()> {
+    if json_mode {
+        let changed: Vec<String> = result
+            .changed
+            .iter()
+            .map(|p| strip_prefix_display(p, cwd))
+            .collect();
+        let skipped: Vec<String> = result
+            .skipped
+            .iter()
+            .map(|p| strip_prefix_display(p, cwd))
+            .collect();
+        let failed: Vec<Value> = result
+            .failed
+            .iter()
+            .map(|f| {
+                json!({
+                    "path": strip_prefix_display(&f.path, cwd),
+                    "reason": f.reason,
+                })
+            })
+            .collect();
+        out_json(&json!({
+            changed_key: changed,
+            "skipped": skipped,
+            "failed": failed,
+        }))?;
+    } else {
+        for p in &result.changed {
+            out(&strip_prefix_display(p, cwd))?;
+        }
+        for failure in &result.failed {
+            let mut stderr = io::stderr().lock();
+            let _ = writeln!(
+                stderr,
+                "{}: {}",
+                strip_prefix_display(&failure.path, cwd),
+                failure.reason,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn strip_prefix_display(path: &Path, base: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 fn cmd_rm(

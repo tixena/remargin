@@ -145,6 +145,7 @@ fn create_simple_comment() {
             content: "This is a new comment.",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -158,6 +159,86 @@ fn create_simple_comment() {
     assert_eq!(comments[0].id, new_id);
     assert_eq!(comments[0].content, "This is a new comment.");
     assert!(comments[0].checksum.starts_with("sha256:"));
+}
+
+#[test]
+fn create_comment_with_sandbox_stages_and_writes_together() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let _new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Staged with sandbox.",
+            position: &position,
+            reply_to: None,
+            sandbox: true,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert!(
+        content.contains("sandbox:"),
+        "sandbox frontmatter key should be set after atomic comment+sandbox write: {content}",
+    );
+    assert!(
+        content.contains("eduardo@"),
+        "sandbox entry for caller should be appended: {content}",
+    );
+
+    let doc = parser::parse(&content).unwrap();
+    assert_eq!(doc.comments().len(), 1);
+    assert_eq!(doc.comments()[0].content, "Staged with sandbox.");
+}
+
+#[test]
+fn create_comment_with_sandbox_is_idempotent_against_existing_entry() {
+    // Seed the document with a pre-existing sandbox entry for eduardo.
+    let seeded = "\
+---
+title: Test
+author: eduardo
+sandbox:
+- eduardo@2026-04-11T10:00:00+00:00
+---
+
+# Test Document
+
+Body.
+";
+    let system = system_with_doc(seeded);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Second comment.",
+            position: &position,
+            reply_to: None,
+            sandbox: true,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    // Existing `10:00:00` timestamp is preserved (no refresh).
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert!(content.contains("eduardo@2026-04-11T10:00:00+00:00"));
+    // And the comment was still written.
+    let doc = parser::parse(&content).unwrap();
+    assert_eq!(doc.comments().len(), 1);
 }
 
 #[test]
@@ -183,6 +264,7 @@ fn create_with_attachment() {
             content: "See attached.",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -211,6 +293,7 @@ fn create_reply_auto_thread() {
             content: "Replying to abc.",
             position: &position,
             reply_to: Some("abc"),
+            sandbox: false,
             to: &[],
         },
     )
@@ -410,6 +493,7 @@ fn preservation_invariant() {
             content: "Second comment.",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -454,6 +538,7 @@ More text here.
             content: "test comment",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -503,6 +588,7 @@ Some body text.
             content: "appended comment",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -550,6 +636,7 @@ Some text.
             content: "after frontmatter",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -597,6 +684,7 @@ Some body text.
             content: "first",
             position: &InsertPosition::Append,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -612,6 +700,7 @@ Some body text.
             content: "second",
             position: &InsertPosition::Append,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -627,6 +716,7 @@ Some body text.
             content: "third",
             position: &InsertPosition::Append,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -674,6 +764,7 @@ Some body text.
             content: "first",
             position: &InsertPosition::Append,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -689,6 +780,7 @@ Some body text.
             content: "second",
             position: &InsertPosition::AfterComment(id1),
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -704,6 +796,7 @@ Some body text.
             content: "third",
             position: &InsertPosition::AfterComment(id2.clone()),
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -857,6 +950,7 @@ fn auto_ack_on_reply() {
             content: "Reply with auto-ack.",
             position: &position,
             reply_to: Some("abc"),
+            sandbox: false,
             to: &[],
         },
     )
@@ -885,6 +979,7 @@ fn auto_ack_preserves_reply_to() {
             content: "Reply with auto-ack.",
             position: &position,
             reply_to: Some("abc"),
+            sandbox: false,
             to: &[],
         },
     )
@@ -913,6 +1008,7 @@ fn auto_ack_false_does_not_ack() {
             content: "Reply without auto-ack.",
             position: &position,
             reply_to: Some("abc"),
+            sandbox: false,
             to: &[],
         },
     )
@@ -940,6 +1036,7 @@ fn auto_ack_without_reply_to_errors() {
             content: "Top-level with auto-ack.",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     );
@@ -969,6 +1066,7 @@ fn auto_ack_without_reply_to_no_file_modification() {
             content: "Top-level with auto-ack.",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     );
@@ -999,6 +1097,7 @@ fn reply_auto_populates_to() {
             content: "Reply with auto-to.",
             position: &position,
             reply_to: Some("abc"),
+            sandbox: false,
             to: &[],
         },
     )
@@ -1030,6 +1129,7 @@ fn reply_explicit_to_not_overridden() {
             content: "Reply with explicit to.",
             position: &position,
             reply_to: Some("abc"),
+            sandbox: false,
             to: &[String::from("bob")],
         },
     )
@@ -1061,6 +1161,7 @@ fn root_comment_no_auto_to() {
             content: "Root comment, no to.",
             position: &position,
             reply_to: None,
+            sandbox: false,
             to: &[],
         },
     )
@@ -1090,6 +1191,7 @@ fn reply_auto_populates_to_different_author() {
             content: "Reply to alice's comment.",
             position: &position,
             reply_to: Some("child1"),
+            sandbox: false,
             to: &[],
         },
     )

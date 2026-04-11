@@ -149,7 +149,7 @@ fn initialize_returns_capabilities() {
 }
 
 #[test]
-fn tools_list_returns_all_18_tools() {
+fn tools_list_returns_all_tools() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -167,7 +167,7 @@ fn tools_list_returns_all_18_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 18_usize);
+    assert_eq!(tools.len(), 21_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -189,6 +189,9 @@ fn tools_list_returns_all_18_tools() {
     assert!(names.contains(&"rm"));
     assert!(names.contains(&"search"));
     assert!(names.contains(&"purge"));
+    assert!(names.contains(&"sandbox_add"));
+    assert!(names.contains(&"sandbox_remove"));
+    assert!(names.contains(&"sandbox_list"));
 }
 
 #[test]

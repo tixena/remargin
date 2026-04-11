@@ -23,6 +23,20 @@ pub struct Acknowledgment {
     pub ts: DateTime<FixedOffset>,
 }
 
+/// A single sandbox entry attached to a document's frontmatter.
+///
+/// Wire format mirrors [`Acknowledgment`]: a single `author@timestamp`
+/// string. Sandbox entries represent "this participant has staged this
+/// file for attention" — they are volatile user state and excluded from
+/// comment-level checksums and signatures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+#[model_schema]
+pub struct SandboxEntry {
+    pub author: String,
+    pub ts: DateTime<FixedOffset>,
+}
+
 /// Whether the comment author is a human or an AI agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -412,6 +426,33 @@ fn parse_ack_entry(entry: &str) -> Result<Acknowledgment> {
     let ts = DateTime::parse_from_rfc3339(ts_str)
         .with_context(|| format!("invalid ack timestamp: {ts_str}"))?;
     Ok(Acknowledgment { author, ts })
+}
+
+/// Parses entries like `"eduardo@2026-04-11T12:34:56+00:00"`.
+///
+/// Shape-identical to [`parse_ack_entry`]: author, literal `@`, RFC3339
+/// timestamp. See [`SandboxEntry`].
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The entry is missing the `@` separator
+/// - The timestamp cannot be parsed as RFC 3339
+pub fn parse_sandbox_entry(entry: &str) -> Result<SandboxEntry> {
+    let at_pos = entry
+        .find('@')
+        .with_context(|| format!("sandbox entry missing '@': {entry}"))?;
+    let author = entry[..at_pos].to_owned();
+    let ts_str = &entry[at_pos + 1..];
+    let ts = DateTime::parse_from_rfc3339(ts_str)
+        .with_context(|| format!("invalid sandbox timestamp: {ts_str}"))?;
+    Ok(SandboxEntry { author, ts })
+}
+
+/// Serialize a [`SandboxEntry`] to its compact `author@timestamp` wire form.
+#[must_use]
+pub fn format_sandbox_entry(entry: &SandboxEntry) -> String {
+    format!("{}@{}", entry.author, entry.ts.to_rfc3339())
 }
 
 fn parse_remargin_block(inner: &str, fence_depth: usize, line: usize) -> Result<Comment> {

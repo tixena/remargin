@@ -24,6 +24,7 @@ use crate::operations::batch::BatchCommentOp;
 use crate::operations::migrate;
 use crate::operations::purge;
 use crate::operations::query::{self, QueryFilter};
+use crate::operations::sandbox as sandbox_ops;
 use crate::operations::search;
 use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
@@ -136,6 +137,7 @@ fn desc_comment() -> ToolDesc {
                 },
                 "after_line": { "type": "integer", "description": "Insert after this line number (1-indexed)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID" },
+                "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false },
                 "identity": { "type": "string", "description": "Override identity for this operation" },
                 "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
@@ -391,6 +393,64 @@ fn desc_verify() -> ToolDesc {
     }
 }
 
+/// Build the `sandbox_add` tool descriptor.
+fn desc_sandbox_add() -> ToolDesc {
+    ToolDesc {
+        name: "sandbox_add",
+        description: "Stage one or more markdown files in the caller's sandbox. Idempotent per identity.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Paths to markdown files to stage"
+                },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+            },
+            "required": ["files"]
+        }),
+    }
+}
+
+/// Build the `sandbox_remove` tool descriptor.
+fn desc_sandbox_remove() -> ToolDesc {
+    ToolDesc {
+        name: "sandbox_remove",
+        description: "Remove the caller's sandbox entry from one or more markdown files. Idempotent per identity.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Paths to markdown files to unstage"
+                },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+            },
+            "required": ["files"]
+        }),
+    }
+}
+
+/// Build the `sandbox_list` tool descriptor.
+fn desc_sandbox_list() -> ToolDesc {
+    ToolDesc {
+        name: "sandbox_list",
+        description: "Return all markdown files in the given path that are staged for the caller's identity.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Base directory to walk (default: .)", "default": "." },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+            }
+        }),
+    }
+}
+
 /// Build the write tool descriptor.
 fn desc_write() -> ToolDesc {
     ToolDesc {
@@ -428,6 +488,9 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_query(),
         desc_react(),
         desc_rm(),
+        desc_sandbox_add(),
+        desc_sandbox_list(),
+        desc_sandbox_remove(),
         desc_search(),
         desc_verify(),
         desc_write(),
@@ -617,6 +680,9 @@ fn dispatch_tool(
         "query" => handle_query(system, base_dir, params),
         "react" => handle_react(system, base_dir, config, params),
         "rm" => handle_rm(system, base_dir, config, params),
+        "sandbox_add" => handle_sandbox_add(system, base_dir, config, params),
+        "sandbox_list" => handle_sandbox_list(system, base_dir, config, params),
+        "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, params),
         "search" => handle_search(system, base_dir, params),
         "verify" => handle_verify(system, base_dir, params),
         "write" => handle_write(system, base_dir, config, params),
@@ -748,12 +814,14 @@ fn handle_comment(
 
     let auto_ack = optional_bool(params, "auto_ack");
 
+    let sandbox = optional_bool(params, "sandbox");
     let create_params = operations::CreateCommentParams {
         attachments: &attachments,
         auto_ack,
         content,
         position: &position,
         reply_to: reply_to.as_deref(),
+        sandbox,
         to: &to,
     };
 
@@ -1050,6 +1118,122 @@ fn handle_rm(
         "deleted": path_str,
         "existed": result.existed,
     }))
+}
+
+/// Handle the `sandbox_add` tool: stage files in the caller's sandbox.
+fn handle_sandbox_add(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let file_strs = string_array(params, "files");
+    let files: Vec<PathBuf> = file_strs.iter().map(|f| base_dir.join(f)).collect();
+
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+    let identity = cfg
+        .identity
+        .as_deref()
+        .context("identity is required for sandbox_add")?;
+
+    let result = sandbox_ops::add_to_files(system, &files, identity)?;
+    Ok(sandbox_result_to_json(&result, base_dir, "added"))
+}
+
+/// Handle the `sandbox_remove` tool: unstage files from the caller's sandbox.
+fn handle_sandbox_remove(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let file_strs = string_array(params, "files");
+    let files: Vec<PathBuf> = file_strs.iter().map(|f| base_dir.join(f)).collect();
+
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+    let identity = cfg
+        .identity
+        .as_deref()
+        .context("identity is required for sandbox_remove")?;
+
+    let result = sandbox_ops::remove_from_files(system, &files, identity)?;
+    Ok(sandbox_result_to_json(&result, base_dir, "removed"))
+}
+
+/// Handle the `sandbox_list` tool: list files staged for the caller.
+fn handle_sandbox_list(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let root = base_dir.join(optional_str(params, "path").unwrap_or("."));
+
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+    let identity = cfg
+        .identity
+        .as_deref()
+        .context("identity is required for sandbox_list")?;
+
+    let listings = sandbox_ops::list_for_identity(system, &root, identity)?;
+    let items: Vec<Value> = listings
+        .iter()
+        .map(|l| {
+            let display_path = l
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&l.path)
+                .display()
+                .to_string();
+            json!({
+                "path": display_path,
+                "since": l.since.to_rfc3339(),
+            })
+        })
+        .collect();
+    Ok(json!({ "files": items }))
+}
+
+fn sandbox_result_to_json(
+    result: &sandbox_ops::SandboxBulkResult,
+    base_dir: &Path,
+    changed_key: &str,
+) -> Value {
+    let changed: Vec<String> = result
+        .changed
+        .iter()
+        .map(|p| strip_prefix_display(p, base_dir))
+        .collect();
+    let skipped: Vec<String> = result
+        .skipped
+        .iter()
+        .map(|p| strip_prefix_display(p, base_dir))
+        .collect();
+    let failed: Vec<Value> = result
+        .failed
+        .iter()
+        .map(|f| {
+            json!({
+                "path": strip_prefix_display(&f.path, base_dir),
+                "reason": f.reason,
+            })
+        })
+        .collect();
+    json!({
+        changed_key: changed,
+        "skipped": skipped,
+        "failed": failed,
+    })
+}
+
+fn strip_prefix_display(path: &Path, base_dir: &Path) -> String {
+    path.strip_prefix(base_dir)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 /// Handle the `search` tool: search across documents for text matches.
