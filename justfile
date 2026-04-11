@@ -49,3 +49,34 @@ install-obsidian vault: build-ts
     cp packages/remargin-obsidian/main.js "{{vault}}/.obsidian/plugins/remargin/"
     cp packages/remargin-obsidian/manifest.json "{{vault}}/.obsidian/plugins/remargin/"
     @echo "Installed to {{vault}}/.obsidian/plugins/remargin"
+
+# Publish the Obsidian plugin as a GitHub release tagged obsidian-v<version>.
+publish-obsidian:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git diff --quiet HEAD -- packages/remargin-obsidian crates/remargin; then
+        echo "error: uncommitted changes in packages/remargin-obsidian or crates/remargin -- commit before publishing" >&2
+        exit 1
+    fi
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "error: gh is not authenticated -- run 'gh auth login' before publishing" >&2
+        exit 1
+    fi
+    VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name=="remargin") | .version')
+    if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
+        echo "error: failed to extract remargin version from cargo metadata" >&2
+        exit 1
+    fi
+    TAG="obsidian-v${VERSION}"
+    if gh release view "${TAG}" >/dev/null 2>&1; then
+        echo "error: release ${TAG} already exists -- bump Cargo.toml workspace version before publishing" >&2
+        exit 1
+    fi
+    echo "Publishing ${TAG}"
+    pnpm -C packages/remargin-obsidian install --frozen-lockfile
+    pnpm -C packages/remargin-obsidian build
+    gh release create "${TAG}" \
+        packages/remargin-obsidian/main.js \
+        packages/remargin-obsidian/manifest.json \
+        --title "Obsidian plugin v${VERSION}" \
+        --generate-notes
