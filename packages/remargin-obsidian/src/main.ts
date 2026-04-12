@@ -12,6 +12,7 @@ import { RemarginBackend } from "./backend";
 import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
 import { BackendContext } from "./hooks/useBackend";
+import { PortalContainerContext } from "./hooks/usePortalContainer";
 import { snapAfterCommentBlock } from "./lib/line-snap";
 // import { commentWidgetPlugin } from "./editor/commentWidget";
 // import { remarginPostProcessor } from "./editor/readingModeProcessor";
@@ -31,7 +32,7 @@ class RemarginView extends ItemView {
   }
 
   async onOpen() {
-    const container = this.containerEl.children[1];
+    const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass("remargin-container");
     this.root = createRoot(container);
@@ -39,7 +40,11 @@ class RemarginView extends ItemView {
       createElement(
         BackendContext.Provider,
         { value: this.plugin.backend },
-        createElement(RemarginSidebar, { plugin: this.plugin })
+        createElement(
+          PortalContainerContext.Provider,
+          { value: container },
+          createElement(RemarginSidebar, { plugin: this.plugin })
+        )
       )
     );
   }
