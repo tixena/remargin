@@ -1,5 +1,6 @@
 import { FileText, FolderTree, List, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { FileTree } from "@/components/sidebar/FileTree";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -202,25 +203,34 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
       )}
 
       <ScrollArea className="max-h-40">
-        <div className="flex flex-col">
-          {files.map((file) => (
-            <div key={file} className="flex items-center gap-2 px-4 py-1.5 hover:bg-bg-hover">
-              <Checkbox
-                checked={staged.has(file)}
-                onCheckedChange={() => toggleStaged(file)}
-                className="w-3.5 h-3.5"
-              />
-              <FileText className="w-3 h-3 text-text-faint shrink-0" />
-              <button
-                type="button"
-                className="text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
-                onClick={() => onOpenFile?.(file)}
-              >
-                {viewMode === "flat" ? file : file.split("/").pop()}
-              </button>
-            </div>
-          ))}
-        </div>
+        {viewMode === "flat" ? (
+          <div className="flex flex-col">
+            {files.map((file) => (
+              <div key={file} className="flex items-center gap-2 px-4 py-1.5 hover:bg-bg-hover">
+                <Checkbox
+                  checked={staged.has(file)}
+                  onCheckedChange={() => toggleStaged(file)}
+                  className="w-3.5 h-3.5"
+                />
+                <FileText className="w-3 h-3 text-text-faint shrink-0" />
+                <button
+                  type="button"
+                  className="text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
+                  onClick={() => onOpenFile?.(file)}
+                >
+                  {file}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <FileTree
+            files={files}
+            staged={staged}
+            onToggleStaged={toggleStaged}
+            onOpenFile={(f) => onOpenFile?.(f)}
+          />
+        )}
       </ScrollArea>
 
       <div className="flex items-center justify-end px-4 py-2 border-t border-bg-border">
