@@ -2,7 +2,6 @@ import { Check, Clock, FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -99,7 +98,7 @@ export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
         </Select>
       </div>
 
-      <ScrollArea className="max-h-64">
+      <div>
         {error ? (
           <div className="px-4 py-3 text-xs text-red-400 whitespace-pre-wrap break-words">
             <div className="font-semibold mb-1">Failed to load inbox</div>
@@ -170,7 +169,7 @@ export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
             ))}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }
