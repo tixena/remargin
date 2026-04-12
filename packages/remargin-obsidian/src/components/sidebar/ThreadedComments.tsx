@@ -191,10 +191,15 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
             >
               {comment.author_type === "agent" ? "AI" : "H"}
             </Badge>
-            <span className="text-xs font-medium text-text-normal truncate">{comment.author}</span>
+            {comment.id && (
+              <Badge className="px-1 py-0 text-[9px] font-mono font-semibold bg-slate-500 text-white">
+                {comment.id}
+              </Badge>
+            )}
             {comment.line > 0 && (
               <span className="text-[9px] text-text-faint font-mono">L{comment.line}</span>
             )}
+            <span className="text-xs font-medium text-text-normal truncate">{comment.author}</span>
             {isPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
           </div>
           <div className="flex items-center gap-1">
