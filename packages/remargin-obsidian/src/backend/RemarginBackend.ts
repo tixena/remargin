@@ -17,6 +17,7 @@ import type {
   GetOpts,
   IdentityInfo,
   QueryOpts,
+  SandboxListEntry,
   SearchOpts,
   WriteOpts,
 } from "./types";
@@ -44,6 +45,28 @@ const ListEnvelope$Schema = z.looseObject({
 
 const SearchEnvelope$Schema = z.looseObject({
   matches: z.array(SearchMatch$Schema),
+});
+
+const SandboxListEntry$Schema = z.looseObject({
+  path: z.string(),
+  since: z.string(),
+});
+
+const SandboxListEnvelope$Schema = z.looseObject({
+  files: z.array(SandboxListEntry$Schema),
+});
+
+const SandboxRemoveEnvelope$Schema = z.looseObject({
+  removed: z.array(z.string()).optional(),
+  skipped: z.array(z.string()).optional(),
+  failed: z
+    .array(
+      z.looseObject({
+        path: z.string(),
+        reason: z.string(),
+      })
+    )
+    .optional(),
 });
 
 /**
@@ -114,6 +137,7 @@ export class RemarginBackend {
     if (opts?.afterLine != null) args.push("--after-line", String(opts.afterLine));
     if (opts?.afterComment) args.push("--after-comment", opts.afterComment);
     if (opts?.autoAck) args.push("--auto-ack");
+    if (opts?.sandbox) args.push("--sandbox");
     if (opts?.to) {
       for (const recipient of opts.to) {
         args.push("--to", recipient);
@@ -127,6 +151,37 @@ export class RemarginBackend {
     const raw = await this.exec(args);
     const parsed = JSON.parse(raw);
     return parsed.id as string;
+  }
+
+  /**
+   * List every markdown file staged for the current identity's sandbox.
+   *
+   * Runs `remargin sandbox list --json` against the configured working
+   * directory (or the vault root when no explicit working directory is set).
+   * The CLI resolves the identity itself; callers do not override it.
+   *
+   * Paths in the returned entries are relative to the CLI's effective root,
+   * matching the convention used elsewhere in the plugin.
+   */
+  async sandboxList(): Promise<SandboxListEntry[]> {
+    const raw = await this.exec(["sandbox", "list"]);
+    return parseEnvelope(raw, SandboxListEnvelope$Schema, "sandbox list").files;
+  }
+
+  /**
+   * Remove the current identity's sandbox entry from one or more markdown
+   * files. Used after a successful Submit-to-Claude so the plugin's sidepanel
+   * refetches an empty list for the files that were just processed.
+   *
+   * The CLI emits a best-effort JSON envelope with `removed`, `skipped`, and
+   * `failed` arrays; callers typically just check that the promise resolves
+   * and refetch the sandbox list.
+   */
+  async sandboxRemove(files: string[]): Promise<void> {
+    if (files.length === 0) return;
+    const raw = await this.exec(["sandbox", "remove", ...files]);
+    // Validate the shape but discard the result — we refetch after this.
+    parseEnvelope(raw, SandboxRemoveEnvelope$Schema, "sandbox remove");
   }
 
   async ack(file: string, ids: string[]): Promise<void> {

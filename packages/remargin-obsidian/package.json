@@ -11,6 +11,7 @@
     "prebuild": "pnpm run generate-types",
     "build": "node esbuild.config.mjs production",
     "lint": "pnpm exec biome check --write --diagnostic-level=error",
+    "test": "node --experimental-strip-types --no-warnings --test 'src/**/*.test.ts'",
     "typecheck": "pnpm exec tsc --noEmit"
   },
   "dependencies": {

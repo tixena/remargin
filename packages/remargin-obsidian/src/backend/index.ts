@@ -6,6 +6,7 @@ export type {
   GetOpts,
   IdentityInfo,
   QueryOpts,
+  SandboxListEntry,
   SearchOpts,
   WriteOpts,
 } from "./types";

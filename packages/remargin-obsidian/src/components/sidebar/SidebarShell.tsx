@@ -12,11 +12,32 @@ interface SidebarShellProps {
   sandboxCount?: number;
   inboxCount?: number;
   threadPending?: number;
+  /**
+   * Disables the header `+` button. The parent flips this reactively based
+   * on whether there is an active `MarkdownView` in the workspace.
+   */
+  plusDisabled?: boolean;
+  /**
+   * Handler for the header `+` button. Only invoked when the button is
+   * enabled; the shell does not guess at the semantics.
+   */
+  onPlusClick?: () => void;
+  /**
+   * Handler for the header refresh button. Firing it should cause every
+   * sidebar section to refetch its data.
+   */
+  onRefreshClick?: () => void;
   promptContent?: React.ReactNode;
   sandboxContent?: React.ReactNode;
   sandboxActions?: React.ReactNode;
   inboxContent?: React.ReactNode;
   threadContent?: React.ReactNode;
+  /**
+   * Optional content rendered inside the file-named section, above the
+   * thread list. Used by the `+` flow to show an inline comment editor
+   * next to the file it targets (no modal).
+   */
+  threadInlineEditor?: React.ReactNode;
   footerContent?: React.ReactNode;
 }
 
@@ -25,11 +46,15 @@ export function SidebarShell({
   sandboxCount = 0,
   inboxCount = 0,
   threadPending = 0,
+  plusDisabled,
+  onPlusClick,
+  onRefreshClick,
   promptContent,
   sandboxContent,
   sandboxActions,
   inboxContent,
   threadContent,
+  threadInlineEditor,
   footerContent,
 }: SidebarShellProps) {
   const [promptOpen, setPromptOpen] = useState(false);
@@ -45,10 +70,25 @@ export function SidebarShell({
           <span className="text-base font-semibold text-text-normal font-sans">Remargin</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="w-7 h-7">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-7 h-7"
+            disabled={plusDisabled}
+            onClick={onPlusClick}
+            aria-label="New comment at cursor"
+            title="New comment at cursor"
+          >
             <Plus className="w-3.5 h-3.5 text-text-muted" />
           </Button>
-          <Button variant="ghost" size="icon" className="w-7 h-7">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-7 h-7"
+            onClick={onRefreshClick}
+            aria-label="Refresh"
+            title="Refresh"
+          >
             <RefreshCw className="w-3.5 h-3.5 text-text-muted" />
           </Button>
         </div>
@@ -108,6 +148,7 @@ export function SidebarShell({
               )}
             </div>
             <CollapsibleContent>
+              {threadInlineEditor}
               {threadContent ?? (
                 <div className="px-4 py-3 text-xs text-text-faint">
                   Open a markdown file to see comments.
