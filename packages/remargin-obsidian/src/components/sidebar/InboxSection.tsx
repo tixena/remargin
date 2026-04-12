@@ -1,5 +1,6 @@
-import { Check, Clock, FileText } from "lucide-react";
+import { Check, Clock, FileText, FolderTree, List } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { InboxTree } from "@/components/sidebar/InboxTree";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 
@@ -37,6 +39,7 @@ function errorMessage(err: unknown): string {
 export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSectionProps = {}) {
   const backend = useBackend();
   const [filter, setFilter] = useState<"all" | "pending">("pending");
+  const [viewMode, setViewMode] = useState<"flat" | "tree">("tree");
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +101,7 @@ export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSect
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-bg-border">
+      <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-bg-border">
         <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "pending")}>
           <SelectTrigger className="h-7 text-xs w-28">
             <SelectValue />
@@ -108,6 +111,19 @@ export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSect
             <SelectItem value="all">All</SelectItem>
           </SelectContent>
         </Select>
+        <ToggleGroup
+          type="single"
+          value={viewMode}
+          onValueChange={(v) => v && setViewMode(v as "flat" | "tree")}
+          className="gap-0"
+        >
+          <ToggleGroupItem value="flat" className="h-6 w-6 p-0">
+            <List className="w-3 h-3" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="tree" className="h-6 w-6 p-0">
+            <FolderTree className="w-3 h-3" />
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
 
       <div>
@@ -120,6 +136,8 @@ export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSect
           <div className="px-4 py-3 text-xs text-text-faint">
             {filter === "pending" ? "No pending comments." : "No comments found."}
           </div>
+        ) : viewMode === "tree" ? (
+          <InboxTree items={items} onOpenAtLine={onOpenAtLine} onAck={handleAck} />
         ) : (
           <div className="flex flex-col">
             {items.map((item) => (
