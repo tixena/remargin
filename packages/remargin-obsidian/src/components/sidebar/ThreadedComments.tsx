@@ -1,5 +1,6 @@
 import { Check, MoreHorizontal, Reply, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -140,6 +141,7 @@ export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedComments
           <CommentThread
             key={node.comment.id}
             node={node}
+            file={file}
             depth={0}
             onAck={handleAck}
             onDelete={handleDelete}
@@ -154,6 +156,7 @@ export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedComments
 
 interface CommentThreadProps {
   node: ThreadNode;
+  file: string;
   depth: number;
   onAck: (id: string) => void;
   onDelete: (id: string) => void;
@@ -161,7 +164,15 @@ interface CommentThreadProps {
   onGoToLine?: (line: number) => void;
 }
 
-function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: CommentThreadProps) {
+function CommentThread({
+  node,
+  file,
+  depth,
+  onAck,
+  onDelete,
+  onReply,
+  onGoToLine,
+}: CommentThreadProps) {
   const { comment } = node;
   const isPending = (comment.ack?.length ?? 0) === 0;
 
@@ -229,7 +240,7 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
           </div>
         )}
 
-        <p className="text-xs text-text-muted whitespace-pre-wrap break-words">{comment.content}</p>
+        <MarkdownContent content={comment.content} sourcePath={file} />
 
         {comment.reactions && Object.keys(comment.reactions).length > 0 && (
           <div className="flex items-center gap-1 flex-wrap">
@@ -302,6 +313,7 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
         <CommentThread
           key={reply.comment.id}
           node={reply}
+          file={file}
           depth={depth + 1}
           onAck={onAck}
           onDelete={onDelete}

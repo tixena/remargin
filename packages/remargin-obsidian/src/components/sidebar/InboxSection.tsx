@@ -1,5 +1,6 @@
 import { Check, Clock, FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -148,9 +149,9 @@ export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
                     </span>
                   </div>
                 </div>
-                <p className="text-xs text-text-muted line-clamp-2">
-                  {item.comment.content?.split("\n")[0] ?? ""}
-                </p>
+                <div className="line-clamp-2 overflow-hidden">
+                  <MarkdownContent content={item.comment.content ?? ""} sourcePath={item.file} />
+                </div>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1">
                     <FileText className="w-3 h-3 text-text-faint" />

@@ -1,3 +1,67 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Scoped styles for markdown rendered inside sidebar comment content. */
+.remargin-markdown-content {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.remargin-markdown-content h1,
+.remargin-markdown-content h2,
+.remargin-markdown-content h3,
+.remargin-markdown-content h4,
+.remargin-markdown-content h5,
+.remargin-markdown-content h6 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 4px 0;
+}
+
+.remargin-markdown-content p {
+  margin: 2px 0;
+}
+
+.remargin-markdown-content pre {
+  font-size: 11px;
+  padding: 4px 8px;
+  margin: 4px 0;
+  border-radius: 4px;
+}
+
+.remargin-markdown-content code {
+  font-size: 11px;
+}
+
+.remargin-markdown-content ul,
+.remargin-markdown-content ol {
+  margin: 2px 0;
+  padding-left: 16px;
+}
+
+.remargin-markdown-content li {
+  margin: 1px 0;
+}
+
+.remargin-markdown-content blockquote {
+  margin: 4px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--text-faint);
+}
+
+.remargin-markdown-content a {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.remargin-markdown-content img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.remargin-markdown-content hr {
+  margin: 4px 0;
+}
