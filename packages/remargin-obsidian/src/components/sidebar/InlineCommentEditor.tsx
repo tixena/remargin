@@ -69,7 +69,9 @@ export function InlineCommentEditor({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        handleSubmit();
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation();
+        void handleSubmit();
       }
       if (e.key === "Escape") {
         onClose();
@@ -103,26 +105,15 @@ export function InlineCommentEditor({
       )}
       <div className="flex items-center justify-between">
         <span className="text-[9px] text-text-faint">Ctrl+Enter to comment</span>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-[10px] text-text-muted"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            className="h-6 px-2 text-[10px] bg-accent text-white hover:bg-accent-hover"
-            disabled={!content.trim() || submitting}
-            onClick={handleSubmit}
-          >
-            <Send className="w-3 h-3 mr-1" />
-            {submitting ? "Sending..." : "Comment"}
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          className="h-6 px-2 text-[10px] bg-accent text-white hover:bg-accent-hover"
+          disabled={!content.trim() || submitting}
+          onClick={handleSubmit}
+        >
+          <Send className="w-3 h-3 mr-1" />
+          {submitting ? "Sending..." : "Comment"}
+        </Button>
       </div>
     </div>
   );
