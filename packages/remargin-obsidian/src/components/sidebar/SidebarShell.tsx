@@ -1,9 +1,10 @@
-import { FileText, Inbox, Mail, MessageSquare, Plus, RefreshCw, Terminal } from "lucide-react";
+import { Inbox, Mail, MessageSquare, Plus, RefreshCw, Terminal } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type RemarginPlugin from "@/main";
+import { FilePathHeader } from "./FilePathHeader";
 import { SectionHeader } from "./SectionHeader";
 
 interface SidebarShellProps {
@@ -42,6 +43,7 @@ interface SidebarShellProps {
 }
 
 export function SidebarShell({
+  plugin,
   activeFile,
   sandboxCount = 0,
   inboxCount = 0,
@@ -136,17 +138,7 @@ export function SidebarShell({
           </Collapsible>
 
           <Collapsible open={threadOpen} onOpenChange={setThreadOpen}>
-            <div className="flex items-center gap-2 px-4 py-2 bg-bg-border border-t border-bg-border">
-              <FileText className="w-3.5 h-3.5 text-text-faint" />
-              <span className="font-mono text-xs text-text-muted truncate">
-                {activeFile ?? "No file open"}
-              </span>
-              {threadPending > 0 && (
-                <span className="px-1.5 py-0 text-[9px] font-semibold leading-4 rounded-full bg-amber-400 text-bg-primary whitespace-nowrap">
-                  {threadPending} pending
-                </span>
-              )}
-            </div>
+            <FilePathHeader plugin={plugin} filePath={activeFile} pendingCount={threadPending} />
             <CollapsibleContent>
               {threadInlineEditor}
               {threadContent ?? (
