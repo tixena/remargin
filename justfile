@@ -68,15 +68,19 @@ publish-obsidian:
         exit 1
     fi
     TAG="obsidian-v${VERSION}"
-    if gh release view "${TAG}" >/dev/null 2>&1; then
-        echo "error: release ${TAG} already exists -- bump Cargo.toml workspace version before publishing" >&2
-        exit 1
-    fi
     echo "Publishing ${TAG}"
     pnpm -C packages/remargin-obsidian install --frozen-lockfile
     pnpm -C packages/remargin-obsidian build
-    gh release create "${TAG}" \
-        packages/remargin-obsidian/main.js \
-        packages/remargin-obsidian/manifest.json \
-        --title "Obsidian plugin v${VERSION}" \
-        --generate-notes
+    if gh release view "${TAG}" >/dev/null 2>&1; then
+        echo "Release ${TAG} already exists -- overwriting assets with --clobber"
+        gh release upload "${TAG}" \
+            packages/remargin-obsidian/main.js \
+            packages/remargin-obsidian/manifest.json \
+            --clobber
+    else
+        gh release create "${TAG}" \
+            packages/remargin-obsidian/main.js \
+            packages/remargin-obsidian/manifest.json \
+            --title "Obsidian plugin v${VERSION}" \
+            --generate-notes
+    fi
