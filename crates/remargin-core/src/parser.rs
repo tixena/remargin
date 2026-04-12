@@ -58,8 +58,6 @@ pub struct Comment {
     pub author_type: AuthorType,
     pub checksum: String,
     pub content: String,
-    /// Number of backticks in the wrapping fence (3, 4, 5, ...).
-    pub fence_depth: usize,
     pub id: String,
     /// 1-indexed line number of the opening fence in the source document.
     /// Zero means "not yet placed" (e.g. newly created, before write).
@@ -221,7 +219,7 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
         let line = byte_offset_to_line(content, block.start);
 
         if block.tag == "remargin" {
-            let comment = parse_remargin_block(&block.inner, block.depth, line)
+            let comment = parse_remargin_block(&block.inner, line)
                 .with_context(|| format!("in remargin block starting at byte {}", block.start))?;
             segments.push(Segment::Comment(Box::new(comment)));
         } else if let Some(legacy) = try_parse_legacy(block, line) {
@@ -251,8 +249,32 @@ pub fn parse_file(system: &dyn System, path: &Path) -> Result<ParsedDocument> {
     parse(&content)
 }
 
+/// Determine the minimum fence depth needed to wrap content that may
+/// contain backtick sequences.  Returns at least 3.
+pub(crate) fn required_fence_depth(content: &str) -> usize {
+    let mut max_backticks: usize = 0;
+
+    for line in content.split('\n') {
+        let mut current: usize = 0;
+        for ch in line.chars() {
+            if ch == '`' {
+                current += 1;
+                if current > max_backticks {
+                    max_backticks = current;
+                }
+            } else {
+                current = 0;
+            }
+        }
+    }
+
+    let min_depth = max_backticks + 1;
+    if min_depth < 3 { 3 } else { min_depth }
+}
+
 fn serialize_comment(cm: &Comment, out: &mut String) {
-    let fence: String = repeat_n('`', cm.fence_depth).collect();
+    let fence_depth = required_fence_depth(&cm.content);
+    let fence: String = repeat_n('`', fence_depth).collect();
 
     let _ = writeln!(out, "{fence}remargin");
     out.push_str("---\n");
@@ -455,7 +477,7 @@ pub fn format_sandbox_entry(entry: &SandboxEntry) -> String {
     format!("{}@{}", entry.author, entry.ts.to_rfc3339())
 }
 
-fn parse_remargin_block(inner: &str, fence_depth: usize, line: usize) -> Result<Comment> {
+fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
     let mut parts = inner.splitn(3, "---\n");
 
     // Skip any text before the first `---` (should be empty or whitespace).
@@ -498,7 +520,6 @@ fn parse_remargin_block(inner: &str, fence_depth: usize, line: usize) -> Result<
         author_type,
         checksum: header.checksum,
         content,
-        fence_depth,
         id: header.id,
         line,
         reactions: header.reactions,

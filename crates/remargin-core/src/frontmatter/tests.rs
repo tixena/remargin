@@ -36,7 +36,6 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
         author_type: AuthorType::Human,
         checksum: String::from("sha256:test"),
         content: String::from("Test content."),
-        fence_depth: 3,
         id: String::from(id),
         line: 0,
         reactions: BTreeMap::new(),

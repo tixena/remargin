@@ -15,7 +15,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
-use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment, required_fence_depth};
 
 /// Where to insert a new comment in a document.
 #[derive(Debug)]
@@ -27,29 +27,6 @@ pub enum InsertPosition {
     AfterLine(usize),
     /// Place at the end of the document.
     Append,
-}
-
-/// Determine the minimum fence depth needed to wrap content that may
-/// contain backtick sequences.  Returns at least 3.
-fn required_fence_depth(content: &str) -> usize {
-    let mut max_backticks: usize = 0;
-
-    for line in content.split('\n') {
-        let mut current: usize = 0;
-        for ch in line.chars() {
-            if ch == '`' {
-                current += 1;
-                if current > max_backticks {
-                    max_backticks = current;
-                }
-            } else {
-                current = 0;
-            }
-        }
-    }
-
-    let min_depth = max_backticks + 1;
-    if min_depth < 3 { 3 } else { min_depth }
 }
 
 /// Serialize a `Comment` into a remargin fenced code block string.

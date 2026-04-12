@@ -34,7 +34,6 @@ fn make_comment(content: &str) -> Comment {
         author_type: AuthorType::Human,
         checksum: compute_checksum(content),
         content: String::from(content),
-        fence_depth: 3,
         id: String::from("abc"),
         line: 0,
         reactions: BTreeMap::new(),

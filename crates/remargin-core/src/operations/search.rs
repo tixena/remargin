@@ -19,7 +19,7 @@ use serde::Serialize;
 use tixschema::model_schema;
 
 use crate::document::allowlist;
-use crate::parser::{self, Segment};
+use crate::parser::{self, Segment, required_fence_depth};
 
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]
@@ -342,7 +342,8 @@ fn search_file(
 
 /// Reconstruct a comment block's text representation for line counting.
 fn serialize_comment_block(cm: &parser::Comment, out: &mut String) {
-    let fence: String = repeat_n('`', cm.fence_depth).collect();
+    let fence_depth = required_fence_depth(&cm.content);
+    let fence: String = repeat_n('`', fence_depth).collect();
     let _ = writeln!(out, "{fence}remargin");
     out.push_str("---\n");
     let _ = writeln!(out, "id: {}", cm.id);

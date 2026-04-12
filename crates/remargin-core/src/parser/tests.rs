@@ -47,7 +47,7 @@ fn test_simple_comment() {
     assert_eq!(comments[0].author, "testuser");
     assert_eq!(comments[0].author_type, AuthorType::Human);
     assert_eq!(comments[0].checksum, "sha256:abc123");
-    assert_eq!(comments[0].fence_depth, 3);
+    // fence_depth is no longer stored on Comment; it is computed at serialization time.
 }
 
 #[test]
@@ -130,7 +130,7 @@ This is the comment body.
     assert_eq!(c.ack[0].author, "jorge");
     assert_eq!(c.ack[1].author, "claude");
     assert_eq!(c.signature.as_deref(), Some("ed25519:base64signature=="));
-    assert_eq!(c.fence_depth, 4);
+    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert_eq!(c.content, "This is the comment body.");
 }
 
@@ -251,7 +251,7 @@ End of comment.
     let parsed = parse(doc).unwrap();
     let c = parsed.comments()[0];
     assert_eq!(c.id, "deep");
-    assert_eq!(c.fence_depth, 4);
+    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert!(c.content.contains("```python"));
     assert!(c.content.contains("print(\"hello\")"));
 }
@@ -280,7 +280,7 @@ Done quoting.
     let comments = parsed.comments();
     assert_eq!(comments.len(), 1);
     assert_eq!(comments[0].id, "v6wrap");
-    assert_eq!(comments[0].fence_depth, 6);
+    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert!(comments[0].content.contains("`````remargin"));
 }
 
@@ -288,7 +288,8 @@ Done quoting.
 fn test_three_backtick_minimal() {
     let doc = minimal_block("min3");
     let parsed = parse(&doc).unwrap();
-    assert_eq!(parsed.comments()[0].fence_depth, 3);
+    // fence_depth is no longer stored on Comment; verify the comment parsed successfully.
+    assert_eq!(parsed.comments()[0].id, "min3");
 }
 
 #[test]
@@ -315,7 +316,7 @@ More text.
     let parsed = parse(doc).unwrap();
     let c = parsed.comments()[0];
     assert_eq!(c.id, "sd4");
-    assert_eq!(c.fence_depth, 4);
+    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert!(c.content.contains("```"));
     assert!(c.content.contains("some code"));
 }
@@ -503,7 +504,6 @@ fn test_comment_json_shape_matches_schema() {
         "author_type",
         "checksum",
         "content",
-        "fence_depth",
         "id",
         "line",
         "reactions",

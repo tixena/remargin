@@ -25,7 +25,6 @@ fn make_comment(id: &str, content: &str) -> Comment {
         author_type: AuthorType::Human,
         checksum: String::from("sha256:abc123"),
         content: String::from(content),
-        fence_depth: 3,
         id: String::from(id),
         line: 0,
         reactions: BTreeMap::new(),
@@ -66,7 +65,6 @@ fn full_serialize() {
         author_type: AuthorType::Agent,
         checksum: String::from("sha256:deadbeef"),
         content: String::from("Full comment body."),
-        fence_depth: 3,
         id: String::from("full"),
         line: 0,
         reactions,
@@ -370,4 +368,148 @@ fn insert_after_line_beyond_length_clamps() {
     let line2_pos = markdown.find("Line 2").unwrap();
     let comment_pos = markdown.find("id: far").unwrap();
     assert!(line2_pos < comment_pos);
+}
+
+#[test]
+fn after_comment_with_code_block_content() {
+    // Regression: AfterComment with triple-backtick content previously
+    // corrupted the document because the parser's serialize_comment used a
+    // stored fence_depth of 3 instead of computing from content.
+    let doc_str = "\
+```remargin
+---
+id: abc
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+checksum: sha256:abc123
+---
+First comment.
+```
+Some text after.
+";
+    let mut doc = parser::parse(doc_str).unwrap();
+
+    let content_with_backticks = "Here is some code:\n\n```python\nprint(\"hello\")\n```\n\nEnd.";
+    let new_comment = make_comment("reply1", content_with_backticks);
+    insert_comment(
+        &mut doc,
+        new_comment,
+        &InsertPosition::AfterComment(String::from("abc")),
+    )
+    .unwrap();
+
+    let markdown = doc.to_markdown();
+
+    // The outer fence must use 4+ backticks since content has triple backticks.
+    assert!(
+        markdown.contains("````remargin"),
+        "expected 4-backtick fence for comment with code blocks:\n{markdown}"
+    );
+
+    // Re-parse must succeed with both comments intact.
+    let reparsed = parser::parse(&markdown).unwrap();
+    let ids: Vec<&str> = reparsed
+        .comments()
+        .iter()
+        .map(|cm| cm.id.as_str())
+        .collect();
+    assert_eq!(ids, vec!["abc", "reply1"]);
+    assert_eq!(
+        reparsed.find_comment("reply1").unwrap().content,
+        content_with_backticks
+    );
+}
+
+#[test]
+fn append_with_code_block_content() {
+    // Same regression test as above, but for the Append insert path.
+    let doc_str = "# Title\n\nSome text.\n";
+    let mut doc = parser::parse(doc_str).unwrap();
+
+    let content_with_backticks = "```rust\nfn main() {}\n```";
+    let new_comment = make_comment("app1", content_with_backticks);
+    insert_comment(&mut doc, new_comment, &InsertPosition::Append).unwrap();
+
+    let markdown = doc.to_markdown();
+
+    // The outer fence must use 4+ backticks.
+    assert!(
+        markdown.contains("````remargin"),
+        "expected 4-backtick fence for appended comment with code blocks:\n{markdown}"
+    );
+
+    // Re-parse must succeed.
+    let reparsed = parser::parse(&markdown).unwrap();
+    assert_eq!(reparsed.comments().len(), 1);
+    assert_eq!(reparsed.comments()[0].id, "app1");
+    assert_eq!(reparsed.comments()[0].content, content_with_backticks);
+}
+
+#[test]
+fn round_trip_after_comment_code_block_all_comments_preserved() {
+    // Full round-trip: parse -> insert (AfterComment, code block content)
+    // -> to_markdown -> re-parse. All comments preserved, content identical.
+    let initial_doc = "\
+```remargin
+---
+id: root
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+checksum: sha256:abc123
+---
+Root comment.
+```
+";
+    let mut doc = parser::parse(initial_doc).unwrap();
+
+    let code_content = "Check this out:\n\n```\nsome code\n```\n\nDone.";
+    let reply = make_comment("child", code_content);
+    insert_comment(
+        &mut doc,
+        reply,
+        &InsertPosition::AfterComment(String::from("root")),
+    )
+    .unwrap();
+
+    let markdown = doc.to_markdown();
+    let reparsed = parser::parse(&markdown).unwrap();
+
+    assert_eq!(reparsed.comments().len(), 2);
+    assert_eq!(
+        reparsed.find_comment("root").unwrap().content,
+        "Root comment."
+    );
+    assert_eq!(
+        reparsed.find_comment("child").unwrap().content,
+        code_content
+    );
+}
+
+#[test]
+fn round_trip_append_code_block_all_comments_preserved() {
+    // Full round-trip: parse -> insert (Append, code block content)
+    // -> to_markdown -> re-parse.
+    let initial_doc = "# Document\n\nBody text.\n";
+    let mut doc = parser::parse(initial_doc).unwrap();
+
+    let code_content = "`````nested\ndeep content\n`````";
+    let comment = make_comment("deep1", code_content);
+    insert_comment(&mut doc, comment, &InsertPosition::Append).unwrap();
+
+    let markdown = doc.to_markdown();
+
+    // Needs 6+ backtick fence for 5-backtick content.
+    assert!(
+        markdown.contains("``````remargin"),
+        "expected 6-backtick fence for deeply nested content:\n{markdown}"
+    );
+
+    let reparsed = parser::parse(&markdown).unwrap();
+    assert_eq!(reparsed.comments().len(), 1);
+    assert_eq!(
+        reparsed.find_comment("deep1").unwrap().content,
+        code_content
+    );
 }

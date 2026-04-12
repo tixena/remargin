@@ -161,7 +161,6 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
               checksum: yaml.checksum,
               signature: yaml.signature,
               line: blockStartLine,
-              fence_depth: fenceDepth,
             },
             valid: true,
           };

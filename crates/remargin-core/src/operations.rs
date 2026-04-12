@@ -128,7 +128,6 @@ pub fn create_comment(
         author_type,
         checksum,
         content: String::from(params.content),
-        fence_depth: 3, // Will be recalculated by the writer serializer.
         id: new_id.clone(),
         line: 0, // Placeholder; updated after document write and re-parse.
         reactions: BTreeMap::default(),

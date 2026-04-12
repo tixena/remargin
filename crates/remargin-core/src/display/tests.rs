@@ -52,7 +52,6 @@ fn build_comment(params: TestComment<'_>) -> Comment {
         author_type: params.author_type,
         checksum: String::from("sha256:test"),
         content: String::from(params.content),
-        fence_depth: 3,
         id: String::from(params.id),
         line: params.line,
         reactions: params.reactions,
