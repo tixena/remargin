@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { spawn } from "child_process";
 import { z } from "zod/v4";
 import {
   type Comment,
@@ -21,10 +21,6 @@ import type {
   SearchOpts,
   WriteOpts,
 } from "./types";
-
-function shellescape(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`;
-}
 
 /**
  * The CLI wraps its payload in an object that also contains timing metadata
@@ -284,23 +280,52 @@ export class RemarginBackend {
     // flags must come first.
     const fullArgs = [...identityArgs, ...(useJson ? ["--json"] : []), ...args];
 
-    const cmd = [shellescape(binary), ...fullArgs.map(shellescape)].join(" ");
+    return new Promise<string>((resolve, reject) => {
+      const child = spawn(binary, fullArgs, { cwd });
 
-    return new Promise((resolve, reject) => {
-      exec(cmd, { cwd, timeout }, (error, stdout, stderr) => {
-        if (error) {
-          if (error.killed) {
-            reject(new Error(`remargin timed out after ${timeout}ms`));
-          } else if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      let settled = false;
+
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
+
+      child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+      // Manual timeout — spawn doesn't have a built-in timeout option.
+      const timer = setTimeout(() => {
+        child.kill();
+        settle(() => reject(new Error(`remargin timed out after ${timeout}ms`)));
+      }, timeout);
+
+      child.on("error", (err: NodeJS.ErrnoException) => {
+        settle(() => {
+          if (err.code === "ENOENT") {
             reject(new Error(`remargin binary not found at "${binary}". Check plugin settings.`));
           } else {
-            const detail = stderr.trim() || error.message;
-            // Surface the command that failed so users can reproduce it.
-            reject(new Error(`${detail}\n  command: ${cmd}`));
+            reject(new Error(`failed to spawn remargin: ${err.message}`));
           }
-          return;
-        }
-        resolve(stdout);
+        });
+      });
+
+      child.on("close", (code) => {
+        settle(() => {
+          const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+          const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+
+          if (code !== 0) {
+            const detail = stderr.trim() || `exit code ${code ?? "unknown"}`;
+            const cmdPreview = [binary, ...fullArgs].join(" ");
+            reject(new Error(`${detail}\n  command: ${cmdPreview}`));
+            return;
+          }
+          resolve(stdout);
+        });
       });
     });
   }
