@@ -297,12 +297,13 @@ export class RemarginBackend {
 
   private buildIdentityArgs(): string[] {
     if (this.settings.identityMode === "config" && this.settings.configFilePath) {
-      return ["--config", this.settings.configFilePath];
+      return ["--config", this.settings.configFilePath, "--type", "human"];
     }
     const args: string[] = [];
     if (this.settings.authorName) {
       args.push("--identity", this.settings.authorName);
     }
+    args.push("--type", "human");
     return args;
   }
 }

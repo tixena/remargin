@@ -41,7 +41,9 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        handleSubmit();
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation();
+        void handleSubmit();
       }
       if (e.key === "Escape") {
         onClose();

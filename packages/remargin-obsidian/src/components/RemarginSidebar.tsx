@@ -2,6 +2,7 @@ import type { TFile } from "obsidian";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
+import { InlineReplyEditor } from "@/components/sidebar/InlineReplyEditor";
 import { PromptSection } from "@/components/sidebar/PromptSection";
 import { SandboxSection } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
@@ -37,6 +38,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     return plugin.getLastMarkdownView() !== null;
   });
   const [compose, setCompose] = useState<ComposeState | null>(null);
+  const [replyTarget, setReplyTarget] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const bumpRefresh = useCallback(() => {
@@ -121,7 +123,26 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     return Promise.resolve();
   }, []);
 
+  const handleReplyClose = useCallback(() => {
+    setReplyTarget(null);
+  }, []);
+
+  const handleReplySubmitted = useCallback(() => {
+    setReplyTarget(null);
+    bumpRefresh();
+  }, [bumpRefresh]);
+
   const inlineEditor = useMemo(() => {
+    if (replyTarget && activeFile) {
+      return (
+        <InlineReplyEditor
+          file={activeFile}
+          replyTo={replyTarget}
+          onClose={handleReplyClose}
+          onSubmitted={handleReplySubmitted}
+        />
+      );
+    }
     if (!compose) return null;
     if (activeFile !== compose.file) return null;
     return (
@@ -132,7 +153,15 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
         onSubmitted={handleComposeSubmitted}
       />
     );
-  }, [compose, activeFile, handleComposeClose, handleComposeSubmitted]);
+  }, [
+    compose,
+    replyTarget,
+    activeFile,
+    handleComposeClose,
+    handleComposeSubmitted,
+    handleReplyClose,
+    handleReplySubmitted,
+  ]);
 
   return (
     <SidebarShell
@@ -157,6 +186,10 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
             key={`${activeFile}:${refreshKey}`}
             file={activeFile}
             onGoToLine={(line) => handleOpenAtLine(activeFile, line)}
+            onReply={(commentId) => {
+              setCompose(null);
+              setReplyTarget(commentId);
+            }}
           />
         ) : undefined
       }

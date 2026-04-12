@@ -1,4 +1,4 @@
-import { Check, MessageSquare, MoreHorizontal, Reply, Trash2 } from "lucide-react";
+import { Check, MoreHorizontal, Reply, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -185,6 +185,9 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
               {comment.author_type === "agent" ? "AI" : "H"}
             </Badge>
             <span className="text-xs font-medium text-text-normal truncate">{comment.author}</span>
+            {comment.line > 0 && (
+              <span className="text-[9px] text-text-faint font-mono">L{comment.line}</span>
+            )}
             {isPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
           </div>
           <div className="flex items-center gap-1">
@@ -196,7 +199,7 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p className="text-xs">{comment.ts}</p>
+                  <p className="text-xs">{formatFullTime(comment.ts)}</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -234,7 +237,10 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
               className="h-5 px-1.5 text-[10px] text-green-500 hover:text-green-400"
               onClick={(e) => {
                 e.stopPropagation();
-                if (comment.id) onAck(comment.id);
+                if (comment.id) {
+                  onGoToLine?.(comment.line);
+                  onAck(comment.id);
+                }
               }}
             >
               <Check className="w-3 h-3 mr-0.5" />
@@ -253,19 +259,6 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
             <Reply className="w-3 h-3 mr-0.5" />
             Reply
           </Button>
-          {comment.line > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 px-1.5 text-[10px] text-text-faint hover:text-text-muted"
-              onClick={(e) => {
-                e.stopPropagation();
-                onGoToLine?.(comment.line);
-              }}
-            >
-              <MessageSquare className="w-3 h-3 mr-0.5" />L{comment.line}
-            </Button>
-          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -306,6 +299,21 @@ function CommentThread({ node, depth, onAck, onDelete, onReply, onGoToLine }: Co
       ))}
     </div>
   );
+}
+
+function formatFullTime(ts?: string): string {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return ts;
+  }
 }
 
 function formatRelativeTime(ts?: string): string {

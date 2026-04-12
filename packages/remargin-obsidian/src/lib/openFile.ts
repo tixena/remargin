@@ -44,7 +44,18 @@ export async function openFileAtLine(
       requestAnimationFrame(() => setTimeout(resolve, 50));
     });
 
-    // 3. Scroll after the buffer has settled.
+    // 3. If the view is in reading mode, switch to source (live preview) so
+    //    the editor API is available for cursor placement and scrolling.
+    if (leaf.view instanceof MarkdownView) {
+      const state = leaf.view.getState();
+      if (state.mode === "preview") {
+        await leaf.view.setState({ ...state, mode: "source" }, { history: false });
+        // Give Obsidian a tick to finish the mode switch.
+        await new Promise<void>((r) => setTimeout(r, 50));
+      }
+    }
+
+    // 4. Scroll after the buffer has settled.
     if (leaf.view instanceof MarkdownView && leaf.view.editor) {
       const pos = { line: line - 1, ch: 0 };
       leaf.view.editor.setCursor(pos);
