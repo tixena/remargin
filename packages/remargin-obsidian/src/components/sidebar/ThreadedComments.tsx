@@ -18,6 +18,7 @@ interface ThreadedCommentsProps {
   file: string;
   onReply?: (commentId: string) => void;
   onGoToLine?: (line: number) => void;
+  onMutation?: () => void;
 }
 
 interface ThreadNode {
@@ -57,7 +58,7 @@ function errorMessage(err: unknown): string {
   }
 }
 
-export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedCommentsProps) {
+export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: ThreadedCommentsProps) {
   const backend = useBackend();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,12 +97,13 @@ export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedComments
           // Best-effort: ack succeeded, don't fail the whole operation.
         }
         await refresh();
+        onMutation?.();
       } catch (err) {
         console.error("ThreadedComments.ack failed:", err);
         setError(errorMessage(err));
       }
     },
-    [backend, file, refresh]
+    [backend, file, refresh, onMutation]
   );
 
   const handleDelete = useCallback(
@@ -109,12 +111,13 @@ export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedComments
       try {
         await backend.deleteComments(file, [id]);
         await refresh();
+        onMutation?.();
       } catch (err) {
         console.error("ThreadedComments.delete failed:", err);
         setError(errorMessage(err));
       }
     },
-    [backend, file, refresh]
+    [backend, file, refresh, onMutation]
   );
 
   if (loading) {

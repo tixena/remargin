@@ -20,6 +20,8 @@ interface InboxItem {
 
 interface InboxSectionProps {
   onOpenAtLine?: (filePath: string, line?: number) => void;
+  onMutation?: () => void;
+  refreshKey?: number;
 }
 
 function errorMessage(err: unknown): string {
@@ -32,13 +34,14 @@ function errorMessage(err: unknown): string {
   }
 }
 
-export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
+export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSectionProps = {}) {
   const backend = useBackend();
   const [filter, setFilter] = useState<"all" | "pending">("pending");
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a monotonic counter prop; including it recreates the callback when sibling sections mutate, triggering a re-fetch.
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -62,7 +65,7 @@ export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
     } finally {
       setLoading(false);
     }
-  }, [backend, filter]);
+  }, [backend, filter, refreshKey]);
 
   useEffect(() => {
     refresh();
@@ -72,13 +75,21 @@ export function InboxSection({ onOpenAtLine }: InboxSectionProps = {}) {
     async (file: string, id: string) => {
       try {
         await backend.ack(file, [id]);
+        // Stage the file in the user's sandbox so the interaction is
+        // visible in the next Submit-to-Claude cycle.
+        try {
+          await backend.sandboxAdd([file]);
+        } catch {
+          // Best-effort: ack succeeded, don't fail the whole operation.
+        }
         await refresh();
+        onMutation?.();
       } catch (err) {
         console.error("InboxSection.ack failed:", err);
         setError(errorMessage(err));
       }
     },
-    [backend, refresh]
+    [backend, refresh, onMutation]
   );
 
   if (loading) {

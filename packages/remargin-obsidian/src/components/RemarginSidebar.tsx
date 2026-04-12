@@ -178,7 +178,13 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
           onSubmit={handleSandboxSubmit}
         />
       }
-      inboxContent={<InboxSection onOpenAtLine={handleOpenAtLine} />}
+      inboxContent={
+        <InboxSection
+          onOpenAtLine={handleOpenAtLine}
+          onMutation={bumpRefresh}
+          refreshKey={refreshKey}
+        />
+      }
       threadInlineEditor={inlineEditor}
       threadContent={
         activeFile ? (
@@ -186,6 +192,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
             key={`${activeFile}:${refreshKey}`}
             file={activeFile}
             onGoToLine={(line) => handleOpenAtLine(activeFile, line)}
+            onMutation={bumpRefresh}
             onReply={(commentId) => {
               setCompose(null);
               setReplyTarget(commentId);
