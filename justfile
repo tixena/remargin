@@ -50,11 +50,42 @@ install-obsidian vault: build-ts
     cp packages/remargin-obsidian/manifest.json "{{vault}}/.obsidian/plugins/remargin/"
     @echo "Installed to {{vault}}/.obsidian/plugins/remargin"
 
-# Publish the Obsidian plugin as a GitHub release tagged obsidian-v<version>.
-publish-obsidian:
+# Propagate Cargo's workspace version into the Obsidian plugin's
+# manifest.json and package.json using jq. Cargo.toml is the single source
+# of truth for the plugin version; these JSON files are derived. Idempotent:
+# when the files already match Cargo, this recipe is a no-op.
+sync-versions:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! git diff --quiet HEAD -- packages/remargin-obsidian crates/remargin; then
+    VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name=="remargin") | .version')
+    if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
+        echo "error: failed to extract remargin version from cargo metadata" >&2
+        exit 1
+    fi
+    for file in packages/remargin-obsidian/manifest.json packages/remargin-obsidian/package.json; do
+        current=$(jq -r '.version' "${file}")
+        if [ "${current}" = "${VERSION}" ]; then
+            echo "${file}: ${VERSION} (already in sync)"
+        else
+            tmp=$(mktemp)
+            jq --indent 2 --arg v "${VERSION}" '.version = $v' "${file}" > "${tmp}"
+            mv "${tmp}" "${file}"
+            echo "${file}: ${current} -> ${VERSION}"
+        fi
+    done
+
+# Publish the Obsidian plugin as a GitHub release tagged obsidian-v<version>.
+# Runs sync-versions first so manifest.json and package.json always reflect
+# the current Cargo workspace version. The dirty-tree guard excludes those
+# two files since they are derived from Cargo and may legitimately change
+# as part of the publish run.
+publish-obsidian: sync-versions
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git diff --quiet HEAD -- \
+        packages/remargin-obsidian crates/remargin \
+        ':(exclude)packages/remargin-obsidian/manifest.json' \
+        ':(exclude)packages/remargin-obsidian/package.json'; then
         echo "error: uncommitted changes in packages/remargin-obsidian or crates/remargin -- commit before publishing" >&2
         exit 1
     fi

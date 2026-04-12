@@ -1,4 +1,4 @@
-import { MarkdownView, type TFile } from "obsidian";
+import type { TFile } from "obsidian";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
@@ -6,7 +6,6 @@ import { PromptSection } from "@/components/sidebar/PromptSection";
 import { SandboxSection } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
-import { snapAfterCommentBlock } from "@/lib/line-snap.ts";
 import { openFileAtLine } from "@/lib/openFile";
 import type RemarginPlugin from "@/main";
 
@@ -22,18 +21,20 @@ interface ComposeState {
 /**
  * Top-level React tree mounted inside the plugin's sidebar leaf.
  *
- * Owns the cross-section state: the currently-active file, whether there is
- * an active markdown view (for the `+` button), an inline-compose target for
- * the `+` flow, and a monotonic `refreshKey` that child sections observe to
- * know when to refetch. The refresh button in the header and every
- * successful mutation both bump the key.
+ * Owns the cross-section state: the currently-active file, whether the
+ * header `+` button should be enabled (driven by the plugin's stable
+ * last-markdown-view cache — NOT by the focused leaf, which flips to null
+ * when the user clicks the sidebar), an inline-compose target for the `+`
+ * flow, and a monotonic `refreshKey` that child sections observe to know
+ * when to refetch. The refresh button in the header and every successful
+ * mutation both bump the key.
  */
 export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [activeFile, setActiveFile] = useState<string | undefined>(() => {
     return plugin.app.workspace.getActiveFile()?.path;
   });
-  const [hasMarkdownView, setHasMarkdownView] = useState<boolean>(() => {
-    return !!plugin.app.workspace.getActiveViewOfType(MarkdownView);
+  const [plusEnabled, setPlusEnabled] = useState<boolean>(() => {
+    return plugin.getLastMarkdownView() !== null;
   });
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -44,25 +45,42 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
 
   // Track file-open and active-leaf changes so the header `+` button's
   // enabled state and the file-named section stay in sync with the workspace.
+  // Note: `plusEnabled` reads from `plugin.getLastMarkdownView()`, which is
+  // only cleared when the cached view's file is closed — it does NOT flip to
+  // false just because focus moved to the sidebar.
   useEffect(() => {
     const { workspace } = plugin.app;
 
+    const syncPlus = () => {
+      setPlusEnabled(plugin.getLastMarkdownView() !== null);
+    };
+
     const fileOpenRef = workspace.on("file-open", (file: TFile | null) => {
       setActiveFile(file?.path);
-      setHasMarkdownView(!!workspace.getActiveViewOfType(MarkdownView));
+      syncPlus();
       // Switching files closes any in-progress compose — the cursor target
       // would be meaningless on a different file.
       setCompose(null);
     });
 
-    const leafChangeRef = workspace.on("active-leaf-change", () => {
-      setHasMarkdownView(!!workspace.getActiveViewOfType(MarkdownView));
-    });
+    const leafChangeRef = workspace.on("active-leaf-change", syncPlus);
+    const layoutChangeRef = workspace.on("layout-change", syncPlus);
 
     return () => {
       workspace.offref(fileOpenRef);
       workspace.offref(leafChangeRef);
+      workspace.offref(layoutChangeRef);
     };
+  }, [plugin]);
+
+  // Register our compose handler with the plugin so its `Add comment`
+  // command and `+` button can both request the composer to open. The
+  // plugin drains any compose request that arrived before we registered.
+  useEffect(() => {
+    plugin.setComposeHandler((request) => {
+      setCompose({ file: request.file, afterLine: request.afterLine });
+    });
+    return () => plugin.setComposeHandler(null);
   }, [plugin]);
 
   const handleOpenAtLine = useCallback(
@@ -73,14 +91,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   );
 
   const handlePlusClick = useCallback(() => {
-    const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view || !view.file) return;
-    const editor = view.editor;
-    // Obsidian's editor API is 0-indexed; remargin's CLI is 1-indexed.
-    const cursorLine1 = editor.getCursor().line + 1;
-    const lines = editor.getValue().split("\n");
-    const snapped = snapAfterCommentBlock(lines, cursorLine1);
-    setCompose({ file: view.file.path, afterLine: snapped });
+    void plugin.addComment();
   }, [plugin]);
 
   const handleComposeClose = useCallback(() => {
@@ -127,7 +138,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     <SidebarShell
       plugin={plugin}
       activeFile={activeFile}
-      plusDisabled={!hasMarkdownView}
+      plusDisabled={!plusEnabled}
       onPlusClick={handlePlusClick}
       onRefreshClick={bumpRefresh}
       promptContent={<PromptSection file={activeFile} />}
