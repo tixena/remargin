@@ -1,4 +1,4 @@
-import { FileText, FolderTree, List, Send } from "lucide-react";
+import { FileText, FolderTree, List, Send, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { FileTree } from "@/components/sidebar/FileTree";
 import { Button } from "@/components/ui/button";
@@ -118,6 +118,19 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
     });
   }, [files]);
 
+  const handleRemove = useCallback(
+    async (path: string) => {
+      try {
+        await backend.sandboxRemove([path]);
+        await refresh();
+      } catch (err) {
+        console.error("SandboxSection.handleRemove failed:", err);
+        setError(errorMessage(err));
+      }
+    },
+    [backend, refresh]
+  );
+
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
     const selected = files.filter((f) => staged.has(f));
@@ -206,7 +219,10 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
         {viewMode === "flat" ? (
           <div className="flex flex-col">
             {files.map((file) => (
-              <div key={file} className="flex items-center gap-2 px-4 py-1.5 hover:bg-bg-hover">
+              <div
+                key={file}
+                className="group flex items-center gap-2 px-4 py-1.5 hover:bg-bg-hover"
+              >
                 <Checkbox
                   checked={staged.has(file)}
                   onCheckedChange={() => toggleStaged(file)}
@@ -215,10 +231,18 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
                 <FileText className="w-3 h-3 text-text-faint shrink-0" />
                 <button
                   type="button"
-                  className="text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
+                  className="flex-1 text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
                   onClick={() => onOpenFile?.(file)}
                 >
                   {file}
+                </button>
+                <button
+                  type="button"
+                  className="hidden group-hover:flex items-center justify-center w-4 h-4 shrink-0 text-text-faint hover:text-red-400"
+                  onClick={() => handleRemove(file)}
+                  title="Remove from sandbox"
+                >
+                  <X className="w-3 h-3" />
                 </button>
               </div>
             ))}
@@ -229,6 +253,7 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
             staged={staged}
             onToggleStaged={toggleStaged}
             onOpenFile={(f) => onOpenFile?.(f)}
+            onRemoveFile={handleRemove}
           />
         )}
       </ScrollArea>

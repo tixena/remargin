@@ -27,6 +27,7 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
       await backend.comment(file, content.trim(), {
         replyTo,
         autoAck: true,
+        sandbox: true,
       });
       setContent("");
       onSubmitted();

@@ -184,6 +184,16 @@ export class RemarginBackend {
     parseEnvelope(raw, SandboxRemoveEnvelope$Schema, "sandbox remove");
   }
 
+  /**
+   * Stage one or more markdown files in the current identity's sandbox.
+   * Calls `remargin sandbox add <files...>`. The operation is idempotent:
+   * re-adding a file that is already staged preserves its existing timestamp.
+   */
+  async sandboxAdd(files: string[]): Promise<void> {
+    if (files.length === 0) return;
+    await this.exec(["sandbox", "add", ...files]);
+  }
+
   async ack(file: string, ids: string[]): Promise<void> {
     const args: string[] = ["ack", "--file", file, ...ids];
     await this.exec(args);

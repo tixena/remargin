@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileText, Folder } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Folder, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
@@ -8,6 +8,7 @@ export interface FileTreeProps {
   staged: Set<string>;
   onToggleStaged: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
 }
 
 /**
@@ -39,12 +40,14 @@ function DirectoryNode({
   staged,
   onToggleStaged,
   onOpenFile,
+  onRemoveFile,
 }: {
   node: FileTreeNode;
   depth: number;
   staged: Set<string>;
   onToggleStaged: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const checked = dirCheckedState(node, staged);
@@ -92,6 +95,7 @@ function DirectoryNode({
             staged={staged}
             onToggleStaged={onToggleStaged}
             onOpenFile={onOpenFile}
+            onRemoveFile={onRemoveFile}
           />
         ))}
     </>
@@ -104,16 +108,18 @@ function FileNode({
   staged,
   onToggleStaged,
   onOpenFile,
+  onRemoveFile,
 }: {
   node: FileTreeNode;
   depth: number;
   staged: Set<string>;
   onToggleStaged: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
 }) {
   return (
     <div
-      className="flex items-center gap-2 py-1 hover:bg-bg-hover"
+      className="group flex items-center gap-2 py-1 hover:bg-bg-hover"
       style={{ paddingLeft: `${16 + depth * 16}px`, paddingRight: "16px" }}
     >
       {/* Spacer to align with directory chevrons */}
@@ -126,11 +132,21 @@ function FileNode({
       <FileText className="w-3 h-3 text-text-faint shrink-0" />
       <button
         type="button"
-        className="text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
+        className="flex-1 text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
         onClick={() => onOpenFile(node.fullPath)}
       >
         {node.name}
       </button>
+      {onRemoveFile && (
+        <button
+          type="button"
+          className="hidden group-hover:flex items-center justify-center w-4 h-4 shrink-0 text-text-faint hover:text-red-400"
+          onClick={() => onRemoveFile(node.fullPath)}
+          title="Remove from sandbox"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
     </div>
   );
 }
@@ -141,12 +157,14 @@ function TreeNode({
   staged,
   onToggleStaged,
   onOpenFile,
+  onRemoveFile,
 }: {
   node: FileTreeNode;
   depth: number;
   staged: Set<string>;
   onToggleStaged: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
 }) {
   if (node.isDir) {
     return (
@@ -156,6 +174,7 @@ function TreeNode({
         staged={staged}
         onToggleStaged={onToggleStaged}
         onOpenFile={onOpenFile}
+        onRemoveFile={onRemoveFile}
       />
     );
   }
@@ -166,6 +185,7 @@ function TreeNode({
       staged={staged}
       onToggleStaged={onToggleStaged}
       onOpenFile={onOpenFile}
+      onRemoveFile={onRemoveFile}
     />
   );
 }
@@ -174,7 +194,13 @@ function TreeNode({
  * Hierarchical file tree view for the Sandbox section. Renders collapsible
  * directories with tri-state checkboxes and indented file leaves.
  */
-export function FileTree({ files, staged, onToggleStaged, onOpenFile }: FileTreeProps) {
+export function FileTree({
+  files,
+  staged,
+  onToggleStaged,
+  onOpenFile,
+  onRemoveFile,
+}: FileTreeProps) {
   const tree = buildFileTree(files);
 
   return (
@@ -187,6 +213,7 @@ export function FileTree({ files, staged, onToggleStaged, onOpenFile }: FileTree
           staged={staged}
           onToggleStaged={onToggleStaged}
           onOpenFile={onOpenFile}
+          onRemoveFile={onRemoveFile}
         />
       ))}
     </div>

@@ -87,6 +87,13 @@ export function ThreadedComments({ file, onReply, onGoToLine }: ThreadedComments
     async (id: string) => {
       try {
         await backend.ack(file, [id]);
+        // Stage the file in the user's sandbox so the interaction is
+        // visible in the next Submit-to-Claude cycle.
+        try {
+          await backend.sandboxAdd([file]);
+        } catch {
+          // Best-effort: ack succeeded, don't fail the whole operation.
+        }
         await refresh();
       } catch (err) {
         console.error("ThreadedComments.ack failed:", err);
