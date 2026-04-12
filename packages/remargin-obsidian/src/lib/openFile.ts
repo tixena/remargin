@@ -4,11 +4,14 @@ import type RemarginPlugin from "@/main";
 /**
  * Open a file in the current leaf and optionally scroll to a specific line.
  *
- * - Reuses the currently-active leaf (`getLeaf(false)`) so repeated clicks
- *   do not keep spawning new panes.
+ * - Targets the last-known markdown leaf (via `getLastMarkdownView()`) so
+ *   clicking a sidebar comment navigates the editor, not the sidebar pane.
+ *   Falls back to any open markdown leaf, then to `getLeaf(false)`.
  * - `line` is expected to be **1-indexed** (as stored by the remargin parser).
  *   Obsidian's editor API is 0-indexed, so we subtract one before calling
  *   `setCursor`/`scrollIntoView`.
+ * - Waits one animation frame + 50 ms after opening the file so Obsidian's
+ *   vault watcher and editor buffer refresh complete before scrolling.
  * - If the path does not resolve to a `TFile` (e.g. the file was deleted or
  *   renamed), logs an error and returns without throwing.
  * - If the opened view is not a `MarkdownView` (e.g. PDF, image), the file is
@@ -25,13 +28,27 @@ export async function openFileAtLine(
     return;
   }
 
-  const leaf = plugin.app.workspace.getLeaf(false);
+  // 1. Target the last-known markdown leaf, not the active (sidebar) leaf.
+  const lastView = plugin.getLastMarkdownView();
+  let leaf = lastView?.leaf ?? null;
+  if (!leaf || !(leaf.view instanceof MarkdownView)) {
+    const leaves = plugin.app.workspace.getLeavesOfType("markdown");
+    leaf = leaves[0] ?? plugin.app.workspace.getLeaf(false);
+  }
+
   await leaf.openFile(file);
 
-  if (line && line > 0 && leaf.view instanceof MarkdownView && leaf.view.editor) {
-    // remargin line numbers are 1-indexed; Obsidian's editor is 0-indexed.
-    const pos = { line: line - 1, ch: 0 };
-    leaf.view.editor.setCursor(pos);
-    leaf.view.editor.scrollIntoView({ from: pos, to: pos }, true);
+  if (line && line > 0) {
+    // 2. Wait for Obsidian's vault watcher + editor buffer refresh.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => setTimeout(resolve, 50));
+    });
+
+    // 3. Scroll after the buffer has settled.
+    if (leaf.view instanceof MarkdownView && leaf.view.editor) {
+      const pos = { line: line - 1, ch: 0 };
+      leaf.view.editor.setCursor(pos);
+      leaf.view.editor.scrollIntoView({ from: pos, to: pos }, true);
+    }
   }
 }
