@@ -1,19 +1,33 @@
-import { Check, Clock, FileText, FolderTree, List } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Check, ChevronDown, Clock, FileText, FolderTree, List } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxTree } from "@/components/sidebar/InboxTree";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
+
+type InboxFilter = "pending" | "all";
+
+interface InboxFilterOption {
+  value: InboxFilter;
+  label: string;
+}
+
+// Extensible list of filter options. Add entries here (e.g. "to-you",
+// "mentions", "acked") and extend the `InboxFilter` union to light up
+// additional dropdown choices without touching the trigger markup.
+const INBOX_FILTER_OPTIONS: readonly InboxFilterOption[] = [
+  { value: "pending", label: "Pending" },
+  { value: "all", label: "All" },
+];
 
 interface InboxItem {
   file: string;
@@ -38,7 +52,7 @@ function errorMessage(err: unknown): string {
 
 export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSectionProps = {}) {
   const backend = useBackend();
-  const [filter, setFilter] = useState<"all" | "pending">("pending");
+  const [filter, setFilter] = useState<InboxFilter>("pending");
   const [viewMode, setViewMode] = useState<"flat" | "tree">("tree");
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -95,6 +109,11 @@ export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSect
     [backend, refresh, onMutation]
   );
 
+  const filterLabel = useMemo(
+    () => INBOX_FILTER_OPTIONS.find((o) => o.value === filter)?.label ?? filter,
+    [filter]
+  );
+
   if (loading) {
     return <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>;
   }
@@ -102,15 +121,29 @@ export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSect
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-bg-border">
-        <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "pending")}>
-          <SelectTrigger className="h-7 text-xs w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="all">All</SelectItem>
-          </SelectContent>
-        </Select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs font-medium text-text-normal gap-1.5"
+            >
+              {filterLabel}
+              <ChevronDown className="w-3 h-3 text-text-muted" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-28">
+            {INBOX_FILTER_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={option.value}
+                onClick={() => setFilter(option.value)}
+                className="text-xs"
+              >
+                {option.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <ToggleGroup
           type="single"
           value={viewMode}
