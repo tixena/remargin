@@ -167,11 +167,22 @@ pub fn insert_comment(
             let after = &markdown[byte_offset..];
             let serialized = serialize_comment_from_segment(&segment);
 
+            // Invariant: whatever precedes the opening fence must be empty or
+            // end with a newline — otherwise ``` glues onto the last body
+            // line and no longer parses as a code fence. The `Append` branch
+            // has an analogous guard; files with a trailing newline land in
+            // the else arm and output is byte-identical to before this fix.
+            let sep = if !before.is_empty() && !before.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+
             // `serialize_comment()` already ends with `\n` (the closing
-            // fence uses `writeln!`), so adding another `\n` here would
+            // fence uses `writeln!`), so adding another `\n` after would
             // produce a surplus blank line that becomes an artifact when
             // the comment is later deleted.
-            let new_markdown = format!("{before}{serialized}{after}");
+            let new_markdown = format!("{before}{sep}{serialized}{after}");
             let reparsed = parser::parse(&new_markdown)
                 .context("re-parsing after AfterLine insertion failed")?;
             doc.segments = reparsed.segments;

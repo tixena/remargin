@@ -10,6 +10,7 @@ use chrono::DateTime;
 use os_shim::System as _;
 use os_shim::mock::MockSystem;
 
+use crate::linter;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment};
 
 use super::{
@@ -352,6 +353,49 @@ fn insert_after_last_line() {
     let line3_pos = markdown.find("Line 3").unwrap();
     let comment_pos = markdown.find("id: last").unwrap();
     assert!(line3_pos < comment_pos);
+}
+
+/// Regression: when the target file has no trailing newline, inserting a
+/// comment via `AfterLine` at (or beyond) the last line concatenated the
+/// opening fence onto the end of the last body line instead of starting it
+/// on its own line. The lint then reported "unclosed fenced code block"
+/// because the triple backticks were no longer at start-of-line. Reproduced
+/// originally against ~/.../remargin-issues.md (847 bytes, no trailing \n).
+#[test]
+fn insert_after_line_preserves_fence_when_no_trailing_newline() {
+    // Three lines, NO trailing newline — mirrors the real-world failure case.
+    let doc_str = "Line 1\nLine 2\nLine 3";
+    assert!(!doc_str.ends_with('\n'));
+
+    let line_count = doc_str.split('\n').count();
+    let mut doc = parser::parse(doc_str).unwrap();
+    let new_comment = make_comment("nln", "After last line, no trailing newline.");
+    insert_comment(
+        &mut doc,
+        new_comment,
+        &InsertPosition::AfterLine(line_count),
+    )
+    .unwrap();
+
+    let markdown = doc.to_markdown();
+
+    // The rendered output must lint cleanly. Before the fix, this failed
+    // with "unclosed fenced code block" because the opening ```remargin was
+    // glued onto the end of `Line 3`.
+    let lint_result = linter::lint_or_fail(&markdown);
+    assert!(
+        lint_result.is_ok(),
+        "AfterLine insert into file with no trailing newline produced bad markdown:\n---\n{markdown}\n---\nlint error: {}",
+        lint_result
+            .err()
+            .map_or_else(String::new, |e| e.to_string()),
+    );
+
+    // Belt and suspenders: the opening fence must be at start-of-line.
+    assert!(
+        markdown.contains("\n```remargin\n"),
+        "opening fence should be on its own line; got:\n{markdown}"
+    );
 }
 
 #[test]
