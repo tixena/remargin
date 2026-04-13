@@ -1,7 +1,6 @@
 import { Inbox, Mail, Terminal } from "lucide-react";
 import { useState } from "react";
 import { ReMarginLogo } from "@/components/icons/ReMarginLogo";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -96,16 +95,31 @@ export function SidebarShell({
             <ObsidianIcon icon="refresh-cw" size={12} />
           </button>
         </div>
-        <Button
-          size="sm"
-          className="h-7 px-3 text-xs gap-1 font-semibold shrink-0"
+        <button
+          type="button"
           onClick={onPlusClick}
           aria-label="New comment at cursor"
           title="New comment at cursor"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            height: 28,
+            padding: "0 12px",
+            borderRadius: 6,
+            border: "none",
+            cursor: "pointer",
+            backgroundColor: "var(--interactive-accent)",
+            color: "var(--text-on-accent)",
+            fontSize: 12,
+            fontWeight: 600,
+            gap: 4,
+            flexShrink: 0,
+          }}
         >
           <ObsidianIcon icon="plus" size={14} />
           New
-        </Button>
+        </button>
       </div>
 
       <ScrollArea className="flex-1">

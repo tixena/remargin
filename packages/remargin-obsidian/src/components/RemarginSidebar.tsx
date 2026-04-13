@@ -1,4 +1,4 @@
-import type { TFile } from "obsidian";
+import { Notice, type TFile } from "obsidian";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
@@ -110,7 +110,13 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   );
 
   const handlePlusClick = useCallback(() => {
-    void plugin.addComment();
+    // Surface any failure instead of letting the promise reject silently —
+    // the user clicked a button, they deserve to know if it failed.
+    plugin.addComment().catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[remargin] addComment failed:", err);
+      new Notice(`Add comment failed: ${msg}`);
+    });
   }, [plugin]);
 
   const handleComposeClose = useCallback(() => {

@@ -46,6 +46,7 @@ export function InlineCommentEditor({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const submitRef = useRef<() => void>(noop);
@@ -83,6 +84,12 @@ export function InlineCommentEditor({
         onCancel: () => closeRef.current(),
         onDocLength: (len) => setHasContent(len > 0),
       });
+      // Bring the composer into view and focus the editor so the user can
+      // start typing immediately. Without this the user often doesn't
+      // notice anything happened, because the composer renders at the
+      // bottom of a long sidebar below the fold.
+      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      viewRef.current.focus();
     }
     return () => {
       viewRef.current?.destroy();
@@ -91,7 +98,10 @@ export function InlineCommentEditor({
   }, []);
 
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-2 bg-bg-secondary border-y border-bg-border">
+    <div
+      ref={containerRef}
+      className="flex flex-col gap-1.5 px-4 py-2 bg-bg-secondary border-y border-bg-border"
+    >
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-text-faint">
           New comment after line {afterLine} in {file.split("/").pop()}
