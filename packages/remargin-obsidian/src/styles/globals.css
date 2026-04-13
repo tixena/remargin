@@ -7,6 +7,25 @@
   line-height: 1.5;
   color: var(--text-muted);
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Prevent inline code / long URLs from forcing the card wider than its
+   container at narrow panel widths. Without these rules, non-breaking
+   tokens push the flex ancestor past its intended width and clip. */
+.remargin-markdown-content code,
+.remargin-markdown-content a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.remargin-markdown-content pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 
 .remargin-markdown-content h1,
