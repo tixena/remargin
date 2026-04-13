@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useBackend } from "@/hooks/useBackend";
 import { expandPath } from "@/lib/expandPath";
 import type { RemarginSettings } from "@/types";
 import { SettingsField } from "./SettingsField";
@@ -21,10 +22,63 @@ interface SettingsTabProps {
 
 type TestState = "idle" | "loading" | "success" | "error";
 
+type ModeValue = "open" | "registered" | "strict";
+const MODE_OPTIONS: readonly ModeValue[] = ["open", "registered", "strict"];
+const isModeValue = (value: string): value is ModeValue =>
+  (MODE_OPTIONS as readonly string[]).includes(value);
+
 export function SettingsTab({ settings, onSave }: SettingsTabProps) {
+  const backend = useBackend();
   const [current, setCurrent] = useState(settings);
   const [testState, setTestState] = useState<TestState>("idle");
   const [testMessage, setTestMessage] = useState("");
+  // Vault mode is sourced from the CLI's identity probe, not from
+  // plugin-level settings. `undefined` means "not yet probed"; a real value
+  // (`open`/`registered`/`strict`) drives the Select.
+  const [vaultMode, setVaultMode] = useState<ModeValue | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const info = await backend.identity("human");
+        if (cancelled) return;
+        const raw = info.mode;
+        if (raw && isModeValue(raw)) {
+          setVaultMode(raw);
+        } else {
+          // CLI walk-up found no mode anywhere — default the dropdown to
+          // `open` so the user sees a concrete option without us claiming
+          // that's what's on disk.
+          setVaultMode("open");
+        }
+      } catch {
+        // CLI unavailable — leave the Select in its loading state. The user
+        // can still save other fields; picking a mode requires the CLI.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backend]);
+
+  const handleModeChange = useCallback(
+    (value: string) => {
+      if (!isModeValue(value)) return;
+      setVaultMode(value);
+      try {
+        backend.setVaultMode(value);
+      } catch (err) {
+        // Surface the error through the existing Test CLI status slot so we
+        // do not silently swallow a failed filesystem write.
+        setTestState("error");
+        setTestMessage(
+          err instanceof Error ? `setVaultMode: ${err.message}` : "setVaultMode: failed"
+        );
+      }
+    },
+    [backend]
+  );
 
   const update = useCallback(
     <K extends keyof RemarginSettings>(field: K, value: RemarginSettings[K]) => {
@@ -188,18 +242,19 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <SettingsField
           label="Remargin mode"
-          description="Controls comment integrity enforcement level."
+          description="Controls comment integrity enforcement level. Reads and writes the `mode:` field in the vault-root .remargin.yaml — the CLI's single source of truth."
         >
           <Select
-            value={current.remarginMode}
-            onValueChange={(value) => update("remarginMode", value)}
+            value={vaultMode ?? ""}
+            onValueChange={handleModeChange}
+            disabled={vaultMode === undefined}
           >
             <SelectTrigger className="font-mono text-sm bg-bg-primary border-bg-border">
-              <SelectValue />
+              <SelectValue placeholder="Loading..." />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="open">open</SelectItem>
-              <SelectItem value="signed">signed</SelectItem>
+              <SelectItem value="registered">registered</SelectItem>
               <SelectItem value="strict">strict</SelectItem>
             </SelectContent>
           </Select>

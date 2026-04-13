@@ -84,12 +84,16 @@ class RemarginSettingTab extends PluginSettingTab {
     this.root = createRoot(mount);
     this.root.render(
       createElement(
-        PortalContainerContext.Provider,
-        { value: mount },
-        createElement(SettingsTab, {
-          settings: this.plugin.settings,
-          onSave: (s: RemarginSettings) => this.plugin.saveSettings(s),
-        })
+        BackendContext.Provider,
+        { value: this.plugin.backend },
+        createElement(
+          PortalContainerContext.Provider,
+          { value: mount },
+          createElement(SettingsTab, {
+            settings: this.plugin.settings,
+            onSave: (s: RemarginSettings) => this.plugin.saveSettings(s),
+          })
+        )
       )
     );
   }
@@ -225,6 +229,13 @@ export default class RemarginPlugin extends Plugin {
   async loadSettings() {
     const saved = await this.loadData();
     if (saved) {
+      // Migration: older plugin versions persisted a `remarginMode` field in
+      // data.json that was never actually wired to the CLI. The vault-root
+      // .remargin.yaml is now the single source of truth for mode, so drop
+      // the ghost field on load (saveSettings will persist without it).
+      if (saved && typeof saved === "object" && "remarginMode" in saved) {
+        delete (saved as { remarginMode?: unknown }).remarginMode;
+      }
       this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
       return;
     }

@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import { spawn } from "child_process";
 import { z } from "zod/v4";
 import {
@@ -12,6 +13,7 @@ import {
   SearchMatch$Schema,
 } from "@/generated";
 import { expandPath } from "@/lib/expandPath";
+import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
 import type {
   BatchCommentOp,
@@ -264,6 +266,30 @@ export class RemarginBackend {
    * Does not pass any identity flags (so it can run before settings are
    * populated).
    */
+  /**
+   * Write or patch the `mode:` field in the vault-root `.remargin.yaml`.
+   *
+   * The vault root is the working directory resolved the same way `exec`
+   * resolves it (expanded `workingDirectory` setting, falling back to the
+   * plugin's known vault path). If the file does not exist, it is created
+   * with just `mode: <value>` so we do not guess at identity or key on the
+   * user's behalf.
+   *
+   * The write preserves every other field, comment, and blank line in the
+   * file — see `patchModeInYaml`. This is a plugin-side edit (no CLI call)
+   * because the target is a single well-known file and the patch is local.
+   */
+  setVaultMode(mode: string): void {
+    const root = expandPath(this.settings.workingDirectory) || this.vaultPath;
+    if (!root) {
+      throw new Error("vault root is not configured; cannot write .remargin.yaml");
+    }
+    const target = joinPath(root, ".remargin.yaml");
+    const existing = existsSync(target) ? readFileSync(target, "utf-8") : "";
+    const patched = patchModeInYaml(existing, mode);
+    writeFileSync(target, patched, "utf-8");
+  }
+
   async identity(type?: "human" | "agent"): Promise<IdentityInfo> {
     const args: string[] = ["identity"];
     if (type) args.push("--type", type);

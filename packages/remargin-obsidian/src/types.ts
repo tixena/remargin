@@ -9,7 +9,6 @@ export interface RemarginSettings {
   configFilePath: string;
   authorName: string;
   keyFilePath: string;
-  remarginMode: string;
   sidebarSide: "left" | "right";
   /** Per-section view mode, persisted across sessions (UI task 26). */
   sandboxView: ViewMode;
@@ -24,7 +23,6 @@ export const DEFAULT_SETTINGS: RemarginSettings = {
   configFilePath: "",
   authorName: "user",
   keyFilePath: "",
-  remarginMode: "open",
   sidebarSide: "left",
   sandboxView: "tree",
   inboxView: "tree",
