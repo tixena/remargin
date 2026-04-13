@@ -1,4 +1,5 @@
-import { FolderTree, List } from "lucide-react";
+import { setIcon } from "obsidian";
+import { useEffect, useRef } from "react";
 import type { ViewMode } from "@/types";
 
 export interface ViewToggleProps {
@@ -6,12 +7,65 @@ export interface ViewToggleProps {
   onChange: (next: ViewMode) => void;
 }
 
+function IconButton({
+  icon,
+  active,
+  label,
+  onClick,
+}: {
+  icon: string;
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const iconRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (iconRef.current) {
+      setIcon(iconRef.current, icon);
+    }
+  }, [icon]);
+
+  return (
+    <button
+      type="button"
+      style={{
+        width: 22,
+        height: 22,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 4,
+        transition: "background-color 120ms",
+        border: "none",
+        cursor: "pointer",
+        backgroundColor: active ? "var(--background-modifier-hover)" : "transparent",
+        color: active ? "var(--text-normal)" : "var(--text-muted)",
+      }}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <span
+        ref={iconRef}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 14,
+          height: 14,
+        }}
+      />
+    </button>
+  );
+}
+
 /**
  * Paired list/tree toggle used in the right-slot of the Sandbox and Inbox
- * section headers. The active option renders with a filled `bg-hover`
- * background and a muted icon; the other stays transparent with a faint
- * icon. Clicks stop propagation so toggling does not also collapse the
- * enclosing Collapsible section.
+ * section headers. Icons are rendered via Obsidian's native `setIcon` API
+ * rather than inline SVGs — the host theme scopes custom SVGs out of
+ * buttons, so we use the icon system the app expects.
  */
 export function ViewToggle({ value, onChange }: ViewToggleProps) {
   return (
@@ -20,34 +74,18 @@ export function ViewToggle({ value, onChange }: ViewToggleProps) {
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <button
-        type="button"
-        className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded-sm transition-colors ${
-          value === "flat"
-            ? "bg-bg-hover text-text-normal"
-            : "bg-transparent text-text-muted hover:text-text-normal"
-        }`}
-        aria-pressed={value === "flat"}
-        aria-label="Flat view"
-        title="Flat view"
+      <IconButton
+        icon="list"
+        active={value === "flat"}
+        label="Flat view"
         onClick={() => onChange("flat")}
-      >
-        <List className="w-3 h-3" />
-      </button>
-      <button
-        type="button"
-        className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded-sm transition-colors ${
-          value === "tree"
-            ? "bg-bg-hover text-text-normal"
-            : "bg-transparent text-text-muted hover:text-text-normal"
-        }`}
-        aria-pressed={value === "tree"}
-        aria-label="Tree view"
-        title="Tree view"
+      />
+      <IconButton
+        icon="folder-tree"
+        active={value === "tree"}
+        label="Tree view"
         onClick={() => onChange("tree")}
-      >
-        <FolderTree className="w-3 h-3" />
-      </button>
+      />
     </div>
   );
 }

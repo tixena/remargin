@@ -89,13 +89,14 @@ export function SidebarShell({
         </div>
         <Button
           size="sm"
-          className="h-7 px-3 text-xs gap-1 bg-purple-500 text-white hover:bg-purple-600 font-semibold shrink-0"
+          className="h-7 px-3 text-xs gap-1 font-semibold shrink-0"
+          style={{ backgroundColor: "#a855f7", color: "#ffffff" }}
           disabled={plusDisabled}
           onClick={onPlusClick}
           aria-label="New comment at cursor"
           title="New comment at cursor"
         >
-          <Plus className="w-3.5 h-3.5" />
+          <Plus className="w-3.5 h-3.5" style={{ color: "#ffffff" }} />
           New
         </Button>
       </div>
