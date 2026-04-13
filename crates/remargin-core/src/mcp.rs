@@ -58,7 +58,7 @@ struct ToolDesc {
 fn desc_ack() -> ToolDesc {
     ToolDesc {
         name: "ack",
-        description: "Acknowledge one or more comments. Omit file to resolve by ID across the folder tree.",
+        description: "Acknowledge one or more comments (or remove this identity's ack with remove=true). Omit file to resolve by ID across the folder tree.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -69,6 +69,7 @@ fn desc_ack() -> ToolDesc {
                     "description": "Comment IDs to acknowledge"
                 },
                 "path": { "type": "string", "description": "Base directory to search when resolving by ID (default: .)", "default": "." },
+                "remove": { "type": "boolean", "description": "Remove this identity's ack instead of adding one", "default": false },
                 "identity": { "type": "string", "description": "Override identity for this operation" },
                 "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
@@ -711,6 +712,7 @@ fn handle_ack(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let ids = string_array(params, "ids");
+    let remove = optional_bool(params, "remove");
     let overridden = apply_identity_overrides(config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
@@ -718,7 +720,7 @@ fn handle_ack(
         // Direct file path provided.
         let path = base_dir.join(file);
         let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-        operations::ack_comments(system, &path, cfg, &id_refs)?;
+        operations::ack_comments(system, &path, cfg, &id_refs, remove)?;
     } else {
         // Folder-wide ack: resolve each ID across the folder tree.
         let search_path = optional_str(params, "path").unwrap_or(".");
@@ -731,7 +733,7 @@ fn handle_ack(
                 }
                 1 => {
                     let id_refs: Vec<&str> = vec![comment_id.as_str()];
-                    operations::ack_comments(system, &matches[0], cfg, &id_refs)?;
+                    operations::ack_comments(system, &matches[0], cfg, &id_refs, remove)?;
                 }
                 n => {
                     let file_list: Vec<String> =
@@ -745,7 +747,12 @@ fn handle_ack(
         }
     }
 
-    Ok(json!({ "acknowledged": ids }))
+    let key = if remove {
+        "unacknowledged"
+    } else {
+        "acknowledged"
+    };
+    Ok(json!({ key: ids }))
 }
 
 /// Handle the `batch` tool: create multiple comments atomically.

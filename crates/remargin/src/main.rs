@@ -123,6 +123,9 @@ enum Commands {
         /// Base directory to search when resolving by ID (default: .).
         #[arg(long, default_value = ".")]
         path: String,
+        /// Remove this identity's ack instead of adding one.
+        #[arg(long)]
+        remove: bool,
     },
     /// Create multiple comments atomically (JSON ops via --ops).
     Batch {
@@ -519,6 +522,14 @@ struct SearchParams<'cmd> {
     scope: &'cmd str,
 }
 
+struct AckParams<'cmd> {
+    file: Option<&'cmd str>,
+    ids: &'cmd [String],
+    json_mode: bool,
+    remove: bool,
+    search_path: &'cmd str,
+}
+
 struct ReactParams<'cmd> {
     emoji: &'cmd str,
     file: &'cmd str,
@@ -837,8 +848,20 @@ fn dispatch_with_config(
     let dry_run = cli.global.dry_run;
 
     match &cli.command {
-        Commands::Ack { file, ids, path } => {
-            cmd_ack(system, cwd, config, file.as_deref(), ids, path, json_mode)
+        Commands::Ack {
+            file,
+            ids,
+            path,
+            remove,
+        } => {
+            let ap = AckParams {
+                file: file.as_deref(),
+                ids,
+                json_mode,
+                remove: *remove,
+                search_path: path,
+            };
+            cmd_ack(system, cwd, config, &ap)
         }
         Commands::Batch { file, ops } => cmd_batch(system, cwd, config, file, ops, json_mode),
         Commands::Comment {
@@ -996,15 +1019,19 @@ fn cmd_ack(
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
-    file: Option<&str>,
-    ids: &[String],
-    search_path: &str,
-    json_mode: bool,
+    params: &AckParams<'_>,
 ) -> Result<()> {
+    let AckParams {
+        file,
+        ids,
+        json_mode,
+        remove,
+        search_path,
+    } = *params;
     if let Some(doc_file) = file {
         let path = resolve_doc_path(system, cwd, doc_file)?;
         let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-        operations::ack_comments(system, &path, config, &id_refs)?;
+        operations::ack_comments(system, &path, config, &id_refs, remove)?;
     } else {
         let base_dir = cwd.join(search_path);
         for comment_id in ids {
@@ -1015,7 +1042,7 @@ fn cmd_ack(
                 }
                 1 => {
                     let id_refs: Vec<&str> = vec![comment_id.as_str()];
-                    operations::ack_comments(system, &matches[0], config, &id_refs)?;
+                    operations::ack_comments(system, &matches[0], config, &id_refs, remove)?;
                 }
                 n => {
                     let file_list: Vec<String> =
@@ -1028,7 +1055,12 @@ fn cmd_ack(
             }
         }
     }
-    print_output(json_mode, &json!({ "acknowledged": ids }))
+    let key = if remove {
+        "unacknowledged"
+    } else {
+        "acknowledged"
+    };
+    print_output(json_mode, &json!({ key: ids }))
 }
 
 fn cmd_batch(

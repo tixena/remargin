@@ -190,8 +190,10 @@ export class RemarginBackend {
     await this.exec(["sandbox", "add", ...files]);
   }
 
-  async ack(file: string, ids: string[]): Promise<void> {
-    const args: string[] = ["ack", "--file", file, ...ids];
+  async ack(file: string, ids: string[], remove = false): Promise<void> {
+    const args: string[] = ["ack", "--file", file];
+    if (remove) args.push("--remove");
+    args.push(...ids);
     await this.exec(args);
   }
 

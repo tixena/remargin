@@ -311,7 +311,14 @@ fn ack_single_comment() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
-    ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]).unwrap();
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
@@ -901,8 +908,93 @@ fn ack_nonexistent_comment() {
         Path::new("/docs/test.md"),
         &config,
         &["nonexistent"],
+        false,
     );
     assert!(result.is_err());
+}
+
+#[test]
+fn ack_remove_clears_identity_ack() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    // First, ack so there is something to remove.
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+    // Then remove the identity's ack.
+    ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    assert!(
+        cm.ack.iter().all(|a| a.author != "eduardo"),
+        "expected eduardo's ack to be removed, got {:?}",
+        cm.ack
+    );
+}
+
+#[test]
+fn ack_remove_preserves_other_acks() {
+    let system = system_with_doc(&doc_with_comment());
+    let mut eduardo_config = open_config();
+    let mut agent_config = open_config();
+    agent_config.identity = Some(String::from("some_agent"));
+
+    // Both identities ack the same comment.
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &eduardo_config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &agent_config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    // Eduardo removes only his ack.
+    eduardo_config.identity = Some(String::from("eduardo"));
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &eduardo_config,
+        &["abc"],
+        true,
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    let authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
+    assert_eq!(authors, vec!["some_agent"]);
+}
+
+#[test]
+fn ack_remove_is_idempotent_when_not_acked() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    // Removing a non-existent ack should be a no-op (not an error).
+    ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    assert!(cm.ack.is_empty());
 }
 
 #[test]

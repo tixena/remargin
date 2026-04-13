@@ -186,7 +186,12 @@ pub fn create_comment(
     Ok(new_id)
 }
 
-/// Acknowledge one or more comments.
+/// Acknowledge (or un-acknowledge) one or more comments.
+///
+/// When `remove` is true, every acknowledgment authored by the current
+/// identity is stripped from each matching comment. Comments with no
+/// matching ack entry are left alone (no error); the only failure mode
+/// for removals is a missing comment ID.
 ///
 /// # Errors
 ///
@@ -199,6 +204,7 @@ pub fn ack_comments(
     path: &Path,
     config: &ResolvedConfig,
     comment_ids: &[&str],
+    remove: bool,
 ) -> Result<()> {
     let identity = config
         .identity
@@ -215,10 +221,14 @@ pub fn ack_comments(
         let Some(cm) = found else {
             bail!("comment {comment_id:?} not found");
         };
-        cm.ack.push(Acknowledgment {
-            author: String::from(identity),
-            ts: now,
-        });
+        if remove {
+            cm.ack.retain(|a| a.author != identity);
+        } else {
+            cm.ack.push(Acknowledgment {
+                author: String::from(identity),
+                ts: now,
+            });
+        }
     }
 
     frontmatter::ensure_frontmatter(&mut doc, config)?;
