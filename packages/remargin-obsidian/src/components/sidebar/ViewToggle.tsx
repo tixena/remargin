@@ -24,8 +24,8 @@ export function ViewToggle({ value, onChange }: ViewToggleProps) {
         type="button"
         className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded-sm transition-colors ${
           value === "flat"
-            ? "bg-bg-hover text-text-muted"
-            : "bg-transparent text-text-faint hover:text-text-muted"
+            ? "bg-bg-hover text-text-normal"
+            : "bg-transparent text-text-muted hover:text-text-normal"
         }`}
         aria-pressed={value === "flat"}
         aria-label="Flat view"
@@ -38,8 +38,8 @@ export function ViewToggle({ value, onChange }: ViewToggleProps) {
         type="button"
         className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded-sm transition-colors ${
           value === "tree"
-            ? "bg-bg-hover text-text-muted"
-            : "bg-transparent text-text-faint hover:text-text-muted"
+            ? "bg-bg-hover text-text-normal"
+            : "bg-transparent text-text-muted hover:text-text-normal"
         }`}
         aria-pressed={value === "tree"}
         aria-label="Tree view"

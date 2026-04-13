@@ -89,7 +89,7 @@ export function SidebarShell({
         </div>
         <Button
           size="sm"
-          className="h-7 px-3 text-xs gap-1 bg-accent text-white hover:bg-accent-hover font-semibold shrink-0"
+          className="h-7 px-3 text-xs gap-1 bg-purple-500 text-white hover:bg-purple-600 font-semibold shrink-0"
           disabled={plusDisabled}
           onClick={onPlusClick}
           aria-label="New comment at cursor"
