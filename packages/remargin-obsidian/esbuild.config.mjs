@@ -1,9 +1,9 @@
+import tailwindcss from "@tailwindcss/postcss";
 import autoprefixer from "autoprefixer";
 import esbuild from "esbuild";
 import { readFile } from "fs/promises";
 import { dirname, resolve } from "path";
 import postcss from "postcss";
-import tailwindcss from "tailwindcss";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

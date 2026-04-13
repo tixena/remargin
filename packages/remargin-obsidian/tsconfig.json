@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },
@@ -8,6 +7,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2020"],
+    "types": ["node"],
     "strict": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
@@ -19,6 +19,6 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
   "exclude": ["node_modules"]
 }
