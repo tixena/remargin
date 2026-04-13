@@ -1,4 +1,5 @@
-import { ChevronDown, Clock, FileText } from "lucide-react";
+import { toRegex } from "diacritic-regex";
+import { ChevronDown, Clock, FileText, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxTree } from "@/components/sidebar/InboxTree";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
@@ -10,9 +11,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 import type { ViewMode } from "@/types";
+
+/**
+ * Build the diacritic- and case-insensitive pattern shipped to
+ * `remargin search --regex`. `diacritic-regex` produces character classes
+ * like `[CcÇç][AaÀàÁáÂâ...]...` which are compatible with the Rust `regex`
+ * crate; because case-insensitivity is baked into every character class,
+ * the CLI's `--ignore-case` flag is redundant and is intentionally omitted.
+ */
+const buildSearchPattern = toRegex({ flags: "i" });
+
+/** Debounce window (ms) before a keystroke triggers a search CLI call. */
+const SEARCH_DEBOUNCE_MS = 250;
 
 type InboxFilter = "pending" | "all";
 
@@ -63,24 +77,76 @@ export function InboxSection({
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Debounce keystrokes in the search textbox so we don't spawn a CLI
+  // process on every character.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  const isSearching = debouncedSearch.trim().length > 0;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a monotonic counter prop; including it recreates the callback when sibling sections mutate, triggering a re-fetch.
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const results = await backend.query(".", {
-        pending: filter === "pending",
-        expanded: true,
-      });
-      const flat: InboxItem[] = [];
-      for (const result of results) {
-        for (const comment of result.comments) {
-          flat.push({ file: result.path, comment });
+      if (isSearching) {
+        // Global search mode: match across every document regardless of the
+        // Pending/All filter. Build a diacritic- and case-insensitive regex
+        // that remains literal for non-alpha characters (spaces, punctuation,
+        // etc.), then hydrate matched comment IDs via `query` so the rest of
+        // the inbox UI can render them uniformly.
+        const pattern = buildSearchPattern(debouncedSearch.trim()).source;
+        const matches = await backend.search(pattern, {
+          regex: true,
+          scope: "comments",
+        });
+        // Group matched comment IDs by file so we make one query call per
+        // file rather than per match.
+        const idsByFile = new Map<string, Set<string>>();
+        for (const m of matches) {
+          if (!m.comment_id) continue;
+          let set = idsByFile.get(m.path);
+          if (!set) {
+            set = new Set<string>();
+            idsByFile.set(m.path, set);
+          }
+          set.add(m.comment_id);
         }
+        const flat: InboxItem[] = [];
+        for (const [file, ids] of idsByFile) {
+          const results = await backend.query(file, { expanded: true });
+          for (const result of results) {
+            for (const comment of result.comments) {
+              if (comment.id && ids.has(comment.id)) {
+                flat.push({ file: result.path, comment });
+              }
+            }
+          }
+        }
+        flat.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
+        setItems(flat);
+        setError(null);
+      } else {
+        const results = await backend.query(".", {
+          pending: filter === "pending",
+          expanded: true,
+        });
+        const flat: InboxItem[] = [];
+        for (const result of results) {
+          for (const comment of result.comments) {
+            flat.push({ file: result.path, comment });
+          }
+        }
+        flat.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
+        setItems(flat);
+        setError(null);
       }
-      flat.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
-      setItems(flat);
-      setError(null);
     } catch (err) {
       console.error("InboxSection.refresh failed:", err);
       setItems([]);
@@ -88,7 +154,7 @@ export function InboxSection({
     } finally {
       setLoading(false);
     }
-  }, [backend, filter, refreshKey]);
+  }, [backend, filter, refreshKey, isSearching, debouncedSearch]);
 
   useEffect(() => {
     refresh();
@@ -126,30 +192,58 @@ export function InboxSection({
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-bg-border">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs font-medium text-text-normal gap-1.5"
+      <div className="flex flex-col gap-2 px-4 py-2 border-b border-bg-border">
+        <div className="relative">
+          <Input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search comments..."
+            aria-label="Search comments"
+            className="h-7 text-xs pr-7"
+          />
+          {searchInput.length > 0 && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearchInput("")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-text-faint hover:text-text-normal"
             >
-              {filterLabel}
-              <ChevronDown className="w-3 h-3 text-text-muted" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-28">
-            {INBOX_FILTER_OPTIONS.map((option) => (
-              <DropdownMenuItem
-                key={option.value}
-                onClick={() => setFilter(option.value)}
-                className="text-xs"
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={isSearching}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isSearching}
+                title={
+                  isSearching ? "Pending/All is disabled while a search is active." : undefined
+                }
+                className={`h-7 px-2 text-xs font-medium text-text-normal gap-1.5 ${
+                  isSearching ? "opacity-50" : ""
+                }`}
               >
-                {option.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                {isSearching ? "Search results" : filterLabel}
+                <ChevronDown className="w-3 h-3 text-text-muted" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-28">
+              {INBOX_FILTER_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  onClick={() => setFilter(option.value)}
+                  className="text-xs"
+                >
+                  {option.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       <div>
@@ -160,7 +254,11 @@ export function InboxSection({
           </div>
         ) : items.length === 0 ? (
           <div className="px-4 py-3 text-xs text-text-faint">
-            {filter === "pending" ? "No pending comments." : "No comments found."}
+            {isSearching
+              ? "No comments match your search."
+              : filter === "pending"
+                ? "No pending comments."
+                : "No comments found."}
           </div>
         ) : viewMode === "tree" ? (
           <InboxTree items={items} onOpenAtLine={onOpenAtLine} onAck={handleAck} />
