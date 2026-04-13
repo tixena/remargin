@@ -155,17 +155,25 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     bumpRefresh();
   }, [bumpRefresh]);
 
-  const inlineEditor = useMemo(() => {
-    if (replyTarget && activeFile) {
-      return (
-        <InlineReplyEditor
-          file={activeFile}
-          replyTo={replyTarget}
-          onClose={handleReplyClose}
-          onSubmitted={handleReplySubmitted}
-        />
-      );
-    }
+  // Reply composer — rendered inline below the targeted comment by
+  // ThreadedComments (see `threadContent` below), NOT at the top of the
+  // thread. Keeping it here centralizes the identity/file/callback
+  // plumbing so ThreadedComments only needs to know where to drop it.
+  const replyEditor = useMemo(() => {
+    if (!replyTarget || !activeFile) return null;
+    return (
+      <InlineReplyEditor
+        file={activeFile}
+        replyTo={replyTarget}
+        onClose={handleReplyClose}
+        onSubmitted={handleReplySubmitted}
+      />
+    );
+  }, [replyTarget, activeFile, handleReplyClose, handleReplySubmitted]);
+
+  // Compose-new-comment — the `+` / "Add comment" flow. This is not tied
+  // to a specific comment row, so it stays in the top-of-thread slot.
+  const composeEditor = useMemo(() => {
     if (!compose) return null;
     if (activeFile !== compose.file) return null;
     return (
@@ -176,15 +184,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
         onSubmitted={handleComposeSubmitted}
       />
     );
-  }, [
-    compose,
-    replyTarget,
-    activeFile,
-    handleComposeClose,
-    handleComposeSubmitted,
-    handleReplyClose,
-    handleReplySubmitted,
-  ]);
+  }, [compose, activeFile, handleComposeClose, handleComposeSubmitted]);
 
   return (
     <SidebarShell
@@ -211,7 +211,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
           viewMode={inboxView}
         />
       }
-      threadInlineEditor={inlineEditor}
+      threadInlineEditor={composeEditor}
       threadContent={
         activeFile ? (
           <ThreadedComments
@@ -223,6 +223,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
               setCompose(null);
               setReplyTarget(commentId);
             }}
+            replyTarget={replyTarget}
+            replyEditor={replyEditor}
           />
         ) : undefined
       }

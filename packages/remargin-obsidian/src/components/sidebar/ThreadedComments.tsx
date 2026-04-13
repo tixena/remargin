@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommentCard } from "@/components/sidebar/CommentCard";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Comment } from "@/generated";
@@ -9,6 +9,20 @@ interface ThreadedCommentsProps {
   onReply?: (commentId: string) => void;
   onGoToLine?: (line: number) => void;
   onMutation?: () => void;
+  /**
+   * ID of the comment the user is replying to, if any. When set, the
+   * `replyEditor` node is rendered as a peer row immediately after the
+   * matching comment's card (same visual depth as a reply) instead of at
+   * the top of the thread, so the composer stays next to the comment the
+   * user is actually replying to.
+   */
+  replyTarget?: string | null;
+  /**
+   * The inline reply composer to render below the targeted comment. Owned
+   * by the sidebar (which also owns `replyTarget`), passed down so the
+   * thread can slot it in at the right place.
+   */
+  replyEditor?: React.ReactNode;
 }
 
 interface ThreadNode {
@@ -48,7 +62,14 @@ function errorMessage(err: unknown): string {
   }
 }
 
-export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: ThreadedCommentsProps) {
+export function ThreadedComments({
+  file,
+  onReply,
+  onGoToLine,
+  onMutation,
+  replyTarget,
+  replyEditor,
+}: ThreadedCommentsProps) {
   const backend = useBackend();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -175,6 +196,8 @@ export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: Thre
             onReply={onReply}
             onReact={handleReact}
             onGoToLine={onGoToLine}
+            replyTarget={replyTarget ?? null}
+            replyEditor={replyEditor}
           />
         ))}
       </div>
@@ -194,6 +217,14 @@ interface CommentThreadProps {
   onReply?: (id: string) => void;
   onReact: (id: string, emoji: string, remove: boolean) => void;
   onGoToLine?: (line: number) => void;
+  /**
+   * ID of the comment whose card should have the inline reply editor
+   * rendered directly beneath it (nested one level deeper, matching the
+   * depth a real reply would render at). Compared against this node's id
+   * during traversal — only one match fires.
+   */
+  replyTarget: string | null;
+  replyEditor?: React.ReactNode;
 }
 
 function CommentThread({
@@ -207,7 +238,10 @@ function CommentThread({
   onReply,
   onReact,
   onGoToLine,
+  replyTarget,
+  replyEditor,
 }: CommentThreadProps) {
+  const isReplyHere = replyTarget === node.comment.id && !!replyEditor;
   return (
     <div>
       <CommentCard
@@ -223,6 +257,7 @@ function CommentThread({
         onReact={onReact}
         onGoToLine={onGoToLine}
       />
+      {isReplyHere && <InlineReplySlot depth={depth + 1}>{replyEditor}</InlineReplySlot>}
       {node.replies.map((reply) => (
         <CommentThread
           key={reply.comment.id}
@@ -236,8 +271,30 @@ function CommentThread({
           onReply={onReply}
           onReact={onReact}
           onGoToLine={onGoToLine}
+          replyTarget={replyTarget}
+          replyEditor={replyEditor}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * Wrapper that scrolls the inline reply editor into view on mount so the
+ * user does not lose it on a long thread. Depth controls the left inset
+ * so the composer visually nests under the comment being replied to.
+ */
+function InlineReplySlot({ depth, children }: { depth: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, []);
+  // Match CommentCard's depth-based left padding (10px base + 16px per
+  // level) so the composer aligns with comment cards at the same depth.
+  const style = { paddingLeft: `${10 + depth * 16}px` };
+  return (
+    <div ref={ref} style={style}>
+      {children}
     </div>
   );
 }
