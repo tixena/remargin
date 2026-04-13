@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clock, FileText, FolderTree, List } from "lucide-react";
+import { Check, ChevronDown, Clock, FileText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxTree } from "@/components/sidebar/InboxTree";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
@@ -10,9 +10,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
+import type { ViewMode } from "@/types";
 
 type InboxFilter = "pending" | "all";
 
@@ -38,6 +38,8 @@ interface InboxSectionProps {
   onOpenAtLine?: (filePath: string, line?: number) => void;
   onMutation?: () => void;
   refreshKey?: number;
+  /** View mode owned by RemarginSidebar (persisted in plugin settings). */
+  viewMode?: ViewMode;
 }
 
 function errorMessage(err: unknown): string {
@@ -50,10 +52,14 @@ function errorMessage(err: unknown): string {
   }
 }
 
-export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSectionProps = {}) {
+export function InboxSection({
+  onOpenAtLine,
+  onMutation,
+  refreshKey,
+  viewMode = "tree",
+}: InboxSectionProps = {}) {
   const backend = useBackend();
   const [filter, setFilter] = useState<InboxFilter>("pending");
-  const [viewMode, setViewMode] = useState<"flat" | "tree">("tree");
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,19 +150,6 @@ export function InboxSection({ onOpenAtLine, onMutation, refreshKey }: InboxSect
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <ToggleGroup
-          type="single"
-          value={viewMode}
-          onValueChange={(v) => v && setViewMode(v as "flat" | "tree")}
-          className="gap-0"
-        >
-          <ToggleGroupItem value="flat" className="h-6 w-6 p-0">
-            <List className="w-3 h-3" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="tree" className="h-6 w-6 p-0">
-            <FolderTree className="w-3 h-3" />
-          </ToggleGroupItem>
-        </ToggleGroup>
       </div>
 
       <div>

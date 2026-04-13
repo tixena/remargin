@@ -1,3 +1,6 @@
+/** "flat" renders a single-level list; "tree" groups files by directory. */
+export type ViewMode = "flat" | "tree";
+
 export interface RemarginSettings {
   remarginPath: string;
   claudePath: string;
@@ -8,6 +11,9 @@ export interface RemarginSettings {
   keyFilePath: string;
   remarginMode: string;
   sidebarSide: "left" | "right";
+  /** Per-section view mode, persisted across sessions (UI task 26). */
+  sandboxView: ViewMode;
+  inboxView: ViewMode;
 }
 
 export const DEFAULT_SETTINGS: RemarginSettings = {
@@ -20,4 +26,6 @@ export const DEFAULT_SETTINGS: RemarginSettings = {
   keyFilePath: "",
   remarginMode: "open",
   sidebarSide: "left",
+  sandboxView: "tree",
+  inboxView: "tree",
 };

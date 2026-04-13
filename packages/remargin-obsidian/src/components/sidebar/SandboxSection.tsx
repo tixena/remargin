@@ -1,10 +1,12 @@
-import { Send } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SandboxGroupHeader } from "@/components/sidebar/SandboxGroupHeader";
 import { SandboxRow } from "@/components/sidebar/SandboxRow";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useBackend } from "@/hooks/useBackend";
+import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
+import type { ViewMode } from "@/types";
 
 interface SandboxSectionProps {
   /**
@@ -14,6 +16,8 @@ interface SandboxSectionProps {
    * refetch.
    */
   refreshKey?: number;
+  /** View mode owned by RemarginSidebar (persisted in plugin settings). */
+  viewMode?: ViewMode;
   /**
    * Called to open a staged file in the editor when the user clicks on it.
    * Receives the path exactly as the CLI reported it.
@@ -51,7 +55,12 @@ function errorMessage(err: unknown): string {
  * rows (via `remargin sandbox remove`), and the per-row trash on unstaged
  * rows does an explicit `sandbox remove` to forget the file entirely.
  */
-export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSectionProps) {
+export function SandboxSection({
+  refreshKey,
+  viewMode = "flat",
+  onOpenFile,
+  onSubmit,
+}: SandboxSectionProps) {
   const backend = useBackend();
   const [files, setFiles] = useState<string[]>([]);
   const [staged, setStaged] = useState<Set<string>>(new Set());
@@ -280,17 +289,26 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
           onRightBulk={unstageBulk}
           disabled={stagedFiles.length === 0}
         />
-        {stagedOpen &&
-          stagedFiles.map((file) => (
-            <SandboxRow
-              key={`s:${file}`}
-              path={file}
-              variant="staged"
-              selected={selected.has(file)}
-              onToggleSelected={toggleSelected}
-              onOpenFile={(p) => onOpenFile?.(p)}
-            />
-          ))}
+        {stagedOpen && viewMode === "flat"
+          ? stagedFiles.map((file) => (
+              <SandboxRow
+                key={`s:${file}`}
+                path={file}
+                variant="staged"
+                selected={selected.has(file)}
+                onToggleSelected={toggleSelected}
+                onOpenFile={(p) => onOpenFile?.(p)}
+              />
+            ))
+          : stagedOpen && (
+              <SandboxTreeGroup
+                files={stagedFiles}
+                variant="staged"
+                selected={selected}
+                onToggleSelected={toggleSelected}
+                onOpenFile={(p) => onOpenFile?.(p)}
+              />
+            )}
         {stagedOpen && (
           <div className="flex items-center justify-end px-4 py-2">
             <Button
@@ -318,19 +336,117 @@ export function SandboxSection({ refreshKey, onOpenFile, onSubmit }: SandboxSect
           onRightBulk={stageAllUnstaged}
           disabled={unstagedFiles.length === 0}
         />
-        {unstagedOpen &&
-          unstagedFiles.map((file) => (
-            <SandboxRow
-              key={`u:${file}`}
-              path={file}
-              variant="unstaged"
-              selected={selected.has(file)}
-              onToggleSelected={toggleSelected}
-              onOpenFile={(p) => onOpenFile?.(p)}
-              onRemoveFile={handleRemove}
-            />
-          ))}
+        {unstagedOpen && viewMode === "flat"
+          ? unstagedFiles.map((file) => (
+              <SandboxRow
+                key={`u:${file}`}
+                path={file}
+                variant="unstaged"
+                selected={selected.has(file)}
+                onToggleSelected={toggleSelected}
+                onOpenFile={(p) => onOpenFile?.(p)}
+                onRemoveFile={handleRemove}
+              />
+            ))
+          : unstagedOpen && (
+              <SandboxTreeGroup
+                files={unstagedFiles}
+                variant="unstaged"
+                selected={selected}
+                onToggleSelected={toggleSelected}
+                onOpenFile={(p) => onOpenFile?.(p)}
+                onRemoveFile={handleRemove}
+              />
+            )}
       </ScrollArea>
     </div>
+  );
+}
+
+interface SandboxTreeGroupProps {
+  files: string[];
+  variant: "staged" | "unstaged";
+  selected: Set<string>;
+  onToggleSelected: (path: string) => void;
+  onOpenFile: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
+}
+
+/**
+ * Tree-view renderer for a Sandbox sub-group. Groups files by directory
+ * with collapsible folder nodes; file leaves reuse the same row
+ * affordances as the flat view (checkbox + trash for unstaged, path-only
+ * for staged), indented per depth.
+ */
+function SandboxTreeGroup(props: SandboxTreeGroupProps) {
+  const tree = useMemo(() => buildFileTree(props.files), [props.files]);
+  return (
+    <>
+      {tree.map((node) => (
+        <SandboxTreeNode key={node.fullPath} node={node} depth={0} {...props} />
+      ))}
+    </>
+  );
+}
+
+interface SandboxTreeNodeProps {
+  node: FileTreeNode;
+  depth: number;
+  variant: "staged" | "unstaged";
+  selected: Set<string>;
+  onToggleSelected: (path: string) => void;
+  onOpenFile: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
+}
+
+function SandboxTreeNode({
+  node,
+  depth,
+  variant,
+  selected,
+  onToggleSelected,
+  onOpenFile,
+  onRemoveFile,
+}: SandboxTreeNodeProps) {
+  const [expanded, setExpanded] = useState(true);
+  if (!node.isDir) {
+    return (
+      <SandboxRow
+        path={node.fullPath}
+        depth={depth}
+        variant={variant}
+        selected={selected.has(node.fullPath)}
+        onToggleSelected={onToggleSelected}
+        onOpenFile={onOpenFile}
+        onRemoveFile={onRemoveFile}
+      />
+    );
+  }
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+  return (
+    <>
+      <div
+        className="group flex items-center gap-1.5 py-1 pr-4 hover:bg-bg-hover cursor-pointer"
+        style={{ paddingLeft: `${24 + depth * 16}px` }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <Chevron className="w-3 h-3 text-text-faint shrink-0" />
+        <Folder className="w-3 h-3 text-text-faint shrink-0" />
+        <span className="flex-1 text-xs font-mono text-text-muted truncate">{node.name}</span>
+      </div>
+      {expanded &&
+        node.children.map((child) => (
+          <SandboxTreeNode
+            key={child.fullPath}
+            node={child}
+            depth={depth + 1}
+            variant={variant}
+            selected={selected}
+            onToggleSelected={onToggleSelected}
+            onOpenFile={onOpenFile}
+            onRemoveFile={onRemoveFile}
+          />
+        ))}
+    </>
   );
 }

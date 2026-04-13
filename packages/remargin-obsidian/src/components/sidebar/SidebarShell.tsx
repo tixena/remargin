@@ -33,6 +33,8 @@ interface SidebarShellProps {
   sandboxContent?: React.ReactNode;
   sandboxActions?: React.ReactNode;
   inboxContent?: React.ReactNode;
+  /** Right-aligned actions slot for the Inbox section header. */
+  inboxActions?: React.ReactNode;
   threadContent?: React.ReactNode;
   /**
    * Optional content rendered inside the file-named section, above the
@@ -56,6 +58,7 @@ export function SidebarShell({
   sandboxContent,
   sandboxActions,
   inboxContent,
+  inboxActions,
   threadContent,
   threadInlineEditor,
   footerContent,
@@ -130,6 +133,7 @@ export function SidebarShell({
               badge={inboxCount || undefined}
               badgeVariant="warning"
               open={inboxOpen}
+              actions={inboxActions}
             />
             <CollapsibleContent>
               {inboxContent ?? (

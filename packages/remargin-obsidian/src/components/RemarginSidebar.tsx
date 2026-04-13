@@ -7,8 +7,10 @@ import { PromptSection } from "@/components/sidebar/PromptSection";
 import { SandboxSection } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
+import { ViewToggle } from "@/components/sidebar/ViewToggle";
 import { openFileAtLine } from "@/lib/openFile";
 import type RemarginPlugin from "@/main";
+import type { ViewMode } from "@/types";
 
 interface RemarginSidebarProps {
   plugin: RemarginPlugin;
@@ -40,10 +42,28 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [replyTarget, setReplyTarget] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sandboxView, setSandboxViewState] = useState<ViewMode>(plugin.settings.sandboxView);
+  const [inboxView, setInboxViewState] = useState<ViewMode>(plugin.settings.inboxView);
 
   const bumpRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
+
+  const handleSandboxView = useCallback(
+    (next: ViewMode) => {
+      setSandboxViewState(next);
+      void plugin.saveSettings({ ...plugin.settings, sandboxView: next });
+    },
+    [plugin]
+  );
+
+  const handleInboxView = useCallback(
+    (next: ViewMode) => {
+      setInboxViewState(next);
+      void plugin.saveSettings({ ...plugin.settings, inboxView: next });
+    },
+    [plugin]
+  );
 
   // Track file-open and active-leaf changes so the header `+` button's
   // enabled state and the file-named section stay in sync with the workspace.
@@ -171,18 +191,22 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       onPlusClick={handlePlusClick}
       onRefreshClick={bumpRefresh}
       promptContent={<PromptSection file={activeFile} />}
+      sandboxActions={<ViewToggle value={sandboxView} onChange={handleSandboxView} />}
       sandboxContent={
         <SandboxSection
           refreshKey={refreshKey}
+          viewMode={sandboxView}
           onOpenFile={(path) => handleOpenAtLine(path)}
           onSubmit={handleSandboxSubmit}
         />
       }
+      inboxActions={<ViewToggle value={inboxView} onChange={handleInboxView} />}
       inboxContent={
         <InboxSection
           onOpenAtLine={handleOpenAtLine}
           onMutation={bumpRefresh}
           refreshKey={refreshKey}
+          viewMode={inboxView}
         />
       }
       threadInlineEditor={inlineEditor}
