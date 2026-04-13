@@ -3,7 +3,6 @@ import { CommentHeader } from "@/components/sidebar/CommentHeader";
 import { EmojiPicker } from "@/components/sidebar/EmojiPicker";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { ReactionPills } from "@/components/sidebar/ReactionPills";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,6 +19,12 @@ interface CommentCardProps {
   isOnline?: boolean;
   /** Current identity name; used by ReactionPills to mark "mine" pills. */
   me?: string | null;
+  /**
+   * Author of the comment this one replies to. Used as a fallback target
+   * for the "to:" chip when `comment.to` is empty — a reply without an
+   * explicit `to` field is implicitly addressed to the parent's author.
+   */
+  parentAuthor?: string;
   onAck: (id: string) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
@@ -46,6 +51,7 @@ export function CommentCard({
   depth,
   isOnline,
   me,
+  parentAuthor,
   onAck,
   onDelete,
   onReply,
@@ -54,6 +60,15 @@ export function CommentCard({
 }: CommentCardProps) {
   const isPending = (comment.ack?.length ?? 0) === 0;
   const isClickable = comment.line > 0 && !!onGoToLine;
+  // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
+  // back to the parent comment's author for replies that did not set `to`.
+  // Root comments with neither stay bare (no chip).
+  const toTargets: string[] =
+    comment.to && comment.to.length > 0
+      ? comment.to
+      : comment.reply_to && parentAuthor
+        ? [parentAuthor]
+        : [];
 
   return (
     <div
@@ -67,18 +82,21 @@ export function CommentCard({
         }
       }}
     >
-      <CommentHeader comment={comment} isOnline={isOnline} />
-
-      {comment.to && comment.to.length > 0 && (
-        <div className="flex items-center gap-1 text-[10px] text-text-faint">
-          <span>to:</span>
-          {comment.to.map((r) => (
-            <Badge key={r} variant="outline" className="px-1 py-0 text-[9px]">
-              {r}
-            </Badge>
+      {toTargets.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {toTargets.map((identity) => (
+            <span
+              key={identity}
+              className="inline-flex items-center gap-1 rounded-[3px] bg-bg-hover px-1.5 py-0.5 font-mono text-[9px] leading-none"
+            >
+              <span className="text-text-faint">to:</span>
+              <span className="text-accent font-semibold">{identity}</span>
+            </span>
           ))}
         </div>
       )}
+
+      <CommentHeader comment={comment} isOnline={isOnline} />
 
       <div className="text-sm text-text-normal leading-[1.4]">
         <MarkdownContent content={comment.content} sourcePath={file} />
