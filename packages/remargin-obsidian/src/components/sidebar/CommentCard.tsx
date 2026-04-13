@@ -1,4 +1,3 @@
-import { MoreHorizontal, Reply, Trash2 } from "lucide-react";
 import { AckToggle } from "@/components/sidebar/AckToggle";
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
 import { EmojiPicker } from "@/components/sidebar/EmojiPicker";
@@ -11,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import type { Comment } from "@/generated";
 
 interface CommentCardProps {
@@ -150,7 +150,7 @@ export function CommentCard({
               if (comment.id) onReply?.(comment.id);
             }}
           >
-            <Reply className="w-3 h-3" />
+            <ObsidianIcon icon="reply" size={12} />
             Reply
           </Button>
           <DropdownMenu>
@@ -161,7 +161,7 @@ export function CommentCard({
                 className="h-5 w-5 p-0 text-text-faint hover:text-text-muted"
                 onClick={(e) => e.stopPropagation()}
               >
-                <MoreHorizontal className="w-3 h-3" />
+                <ObsidianIcon icon="more-horizontal" size={12} />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -172,7 +172,7 @@ export function CommentCard({
                   if (comment.id) onDelete(comment.id);
                 }}
               >
-                <Trash2 className="w-3 h-3 mr-1.5" />
+                <ObsidianIcon icon="trash-2" size={12} className="mr-1.5" />
                 Delete
               </DropdownMenuItem>
             </DropdownMenuContent>

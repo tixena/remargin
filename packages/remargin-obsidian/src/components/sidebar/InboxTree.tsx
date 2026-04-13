@@ -1,8 +1,7 @@
-import { Check, ChevronDown, ChevronRight, Clock, FileText, Folder } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, FileText, Folder } from "lucide-react";
 import { useState } from "react";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { ExpandedComment } from "@/generated";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
 
@@ -80,24 +79,6 @@ function CommentLeaf({ item, depth, onOpenAtLine, onAck }: CommentLeafProps) {
       <div className="line-clamp-2 overflow-hidden">
         <MarkdownContent content={item.comment.content ?? ""} sourcePath={item.file} />
       </div>
-      {item.comment.ack?.length === 0 && (
-        <div className="flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[10px] text-green-500 hover:text-green-400"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (item.comment.id) {
-                onAck?.(item.file, item.comment.id);
-              }
-            }}
-          >
-            <Check className="w-3 h-3 mr-0.5" />
-            Ack
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -123,12 +104,7 @@ function InboxFileNode({
   const pendingCount = comments.filter((i) => i.comment.ack?.length === 0).length;
 
   const handleClick = () => {
-    if (isActive) {
-      setExpanded((prev) => !prev);
-    } else {
-      onOpenAtLine?.(filePath, undefined);
-      setExpanded(true);
-    }
+    setExpanded((prev) => !prev);
   };
 
   const fileName = filePath.split("/").pop() ?? filePath;

@@ -83,10 +83,14 @@ class RemarginSettingTab extends PluginSettingTab {
     const mount = this.containerEl.createDiv({ cls: "remargin-container" });
     this.root = createRoot(mount);
     this.root.render(
-      createElement(SettingsTab, {
-        settings: this.plugin.settings,
-        onSave: (s: RemarginSettings) => this.plugin.saveSettings(s),
-      })
+      createElement(
+        PortalContainerContext.Provider,
+        { value: mount },
+        createElement(SettingsTab, {
+          settings: this.plugin.settings,
+          onSave: (s: RemarginSettings) => this.plugin.saveSettings(s),
+        })
+      )
     );
   }
 

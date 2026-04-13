@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clock, FileText } from "lucide-react";
+import { ChevronDown, Clock, FileText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxTree } from "@/components/sidebar/InboxTree";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
@@ -214,22 +214,6 @@ export function InboxSection({
                       {item.file}
                     </span>
                   </div>
-                  {item.comment.ack?.length === 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 px-1.5 text-[10px] text-green-500 hover:text-green-400"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (item.comment.id) {
-                          handleAck(item.file, item.comment.id);
-                        }
-                      }}
-                    >
-                      <Check className="w-3 h-3 mr-0.5" />
-                      Ack
-                    </Button>
-                  )}
                 </div>
               </div>
             ))}

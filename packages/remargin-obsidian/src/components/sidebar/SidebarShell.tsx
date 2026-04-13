@@ -1,8 +1,9 @@
-import { Inbox, Mail, Plus, RefreshCw, Terminal } from "lucide-react";
+import { Inbox, Mail, Terminal } from "lucide-react";
 import { useState } from "react";
 import { ReMarginLogo } from "@/components/icons/ReMarginLogo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type RemarginPlugin from "@/main";
 import { FilePathHeader } from "./FilePathHeader";
@@ -14,15 +15,7 @@ interface SidebarShellProps {
   sandboxCount?: number;
   inboxCount?: number;
   threadPending?: number;
-  /**
-   * Disables the header `+` button. The parent flips this reactively based
-   * on whether there is an active `MarkdownView` in the workspace.
-   */
-  plusDisabled?: boolean;
-  /**
-   * Handler for the header `+` button. Only invoked when the button is
-   * enabled; the shell does not guess at the semantics.
-   */
+  /** Handler for the header `+` button. */
   onPlusClick?: () => void;
   /**
    * Handler for the header refresh button. Firing it should cause every
@@ -51,7 +44,6 @@ export function SidebarShell({
   sandboxCount = 0,
   inboxCount = 0,
   threadPending = 0,
-  plusDisabled,
   onPlusClick,
   onRefreshClick,
   promptContent,
@@ -72,31 +64,46 @@ export function SidebarShell({
     <div className="flex flex-col h-full bg-bg-primary">
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border">
         <div className="flex items-center gap-2 min-w-0">
-          <ReMarginLogo size={18} className="text-accent shrink-0" />
+          <ReMarginLogo size={22} className="text-accent shrink-0" />
           <span className="text-base font-semibold text-text-normal font-sans truncate">
             Remargin
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-[22px] h-[22px] rounded-sm shrink-0"
+          <button
+            type="button"
             onClick={onRefreshClick}
             aria-label="Refresh"
             title="Refresh"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              borderRadius: 4,
+              border: "none",
+              cursor: "pointer",
+              backgroundColor: "transparent",
+              padding: 0,
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "var(--background-modifier-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "transparent";
+            }}
           >
-            <RefreshCw className="w-3 h-3 text-text-faint" />
-          </Button>
+            <ObsidianIcon icon="refresh-cw" size={12} />
+          </button>
         </div>
         <Button
           size="sm"
           className="h-7 px-3 text-xs gap-1 font-semibold shrink-0"
-          style={{ backgroundColor: "#a855f7", color: "#ffffff" }}
-          disabled={plusDisabled}
           onClick={onPlusClick}
           aria-label="New comment at cursor"
           title="New comment at cursor"
         >
-          <Plus className="w-3.5 h-3.5" style={{ color: "#ffffff" }} />
+          <ObsidianIcon icon="plus" size={14} />
           New
         </Button>
       </div>

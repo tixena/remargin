@@ -34,10 +34,9 @@ interface ComposeState {
  */
 export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [activeFile, setActiveFile] = useState<string | undefined>(() => {
-    return plugin.app.workspace.getActiveFile()?.path;
-  });
-  const [plusEnabled, setPlusEnabled] = useState<boolean>(() => {
-    return plugin.getLastMarkdownView() !== null;
+    // getActiveFile() returns null when the sidebar is the active leaf, so fall
+    // back to the plugin's cached last markdown view.
+    return plugin.app.workspace.getActiveFile()?.path ?? plugin.getLastMarkdownView()?.file?.path;
   });
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [replyTarget, setReplyTarget] = useState<string | null>(null);
@@ -65,28 +64,26 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     [plugin]
   );
 
-  // Track file-open and active-leaf changes so the header `+` button's
-  // enabled state and the file-named section stay in sync with the workspace.
-  // Note: `plusEnabled` reads from `plugin.getLastMarkdownView()`, which is
-  // only cleared when the cached view's file is closed — it does NOT flip to
-  // false just because focus moved to the sidebar.
+  // Keep `activeFile` in sync with the workspace so the file-named section and
+  // the inline composer always target whichever markdown file the user last
+  // interacted with.
   useEffect(() => {
     const { workspace } = plugin.app;
 
-    const syncPlus = () => {
-      setPlusEnabled(plugin.getLastMarkdownView() !== null);
+    const syncActiveFile = () => {
+      const path = workspace.getActiveFile()?.path ?? plugin.getLastMarkdownView()?.file?.path;
+      if (path) setActiveFile(path);
     };
 
     const fileOpenRef = workspace.on("file-open", (file: TFile | null) => {
       setActiveFile(file?.path);
-      syncPlus();
       // Switching files closes any in-progress compose — the cursor target
       // would be meaningless on a different file.
       setCompose(null);
     });
 
-    const leafChangeRef = workspace.on("active-leaf-change", syncPlus);
-    const layoutChangeRef = workspace.on("layout-change", syncPlus);
+    const leafChangeRef = workspace.on("active-leaf-change", syncActiveFile);
+    const layoutChangeRef = workspace.on("layout-change", syncActiveFile);
 
     return () => {
       workspace.offref(fileOpenRef);
@@ -187,7 +184,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     <SidebarShell
       plugin={plugin}
       activeFile={activeFile}
-      plusDisabled={!plusEnabled}
       onPlusClick={handlePlusClick}
       onRefreshClick={bumpRefresh}
       promptContent={<PromptSection file={activeFile} />}

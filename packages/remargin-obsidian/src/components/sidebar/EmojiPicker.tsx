@@ -1,9 +1,9 @@
-import { SmilePlus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 
 export interface EmojiPickerProps {
   /** Invoked with the chosen emoji (unicode character). */
@@ -30,6 +30,10 @@ const QUICK_EMOJIS: readonly string[] = [
   "✅",
   "❌",
   "🙏",
+  "💩",
+  "🏆",
+  "😒",
+  "🏳️‍🌈",
 ];
 
 /**
@@ -49,7 +53,7 @@ export function EmojiPicker({ onPick, disabled }: EmojiPickerProps) {
           aria-label="Add reaction"
           title="Add reaction"
         >
-          <SmilePlus className="w-3 h-3" />
+          <ObsidianIcon icon="smile-plus" size={12} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="p-1 w-auto">
