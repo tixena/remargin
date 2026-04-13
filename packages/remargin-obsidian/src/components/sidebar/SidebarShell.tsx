@@ -1,5 +1,6 @@
-import { Inbox, Mail, MessageSquare, Plus, RefreshCw, Terminal } from "lucide-react";
+import { Inbox, Mail, Plus, RefreshCw, Terminal } from "lucide-react";
 import { useState } from "react";
+import { ReMarginLogo } from "@/components/icons/ReMarginLogo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -68,7 +69,7 @@ export function SidebarShell({
     <div className="flex flex-col h-full bg-bg-primary">
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border">
         <div className="flex items-center gap-2 min-w-0">
-          <MessageSquare className="w-4 h-4 text-accent shrink-0" />
+          <ReMarginLogo size={18} className="text-accent shrink-0" />
           <span className="text-base font-semibold text-text-normal font-sans truncate">
             Remargin
           </span>
