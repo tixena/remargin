@@ -54,6 +54,19 @@ pub enum Mode {
     Strict,
 }
 
+impl Mode {
+    /// Canonical lowercase name for the mode, matching the YAML
+    /// representation and the CLI's JSON output.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Registered => "registered",
+            Self::Strict => "strict",
+        }
+    }
+}
+
 /// The final resolved configuration after merging the config file, registry,
 /// and CLI overrides.
 #[derive(Debug, Clone)]
@@ -183,6 +196,23 @@ impl ResolvedConfig {
     }
 }
 
+/// Resolved mode with provenance, produced by [`resolve_mode`].
+///
+/// Unlike the identity walk-up, this resolution ignores the `type:` field:
+/// it returns whichever `.remargin.yaml` appears first on the walk (closest
+/// to `start_dir`). `mode` is a directory-tree property, not an identity
+/// property, so it must not be filtered by author type.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ResolvedMode {
+    /// Effective mode for `start_dir`. Defaults to [`Mode::Open`] when no
+    /// config with a `mode:` field is found on the walk.
+    pub mode: Mode,
+    /// Path to the `.remargin.yaml` that declared the mode, or `None` when
+    /// the resolution fell back to the default.
+    pub source: Option<PathBuf>,
+}
+
 fn default_assets_dir() -> String {
     String::from("assets")
 }
@@ -214,6 +244,34 @@ fn find_file_upward(
         if !current.pop() {
             return Ok(None);
         }
+    }
+}
+
+/// Resolve the effective mode for a directory by walking up from `start_dir`
+/// looking for the first `.remargin.yaml` — without any `type:` filtering.
+///
+/// Mode is a directory-tree property, independent of whose identity lives in
+/// the config. This function is the clean way to ask "what mode applies
+/// here?" without going through the identity machinery (which filters by
+/// author type and can fall through to a different config).
+///
+/// Falls back silently to [`Mode::Open`] when no config is found, matching
+/// the CLI's existing open-by-default posture.
+///
+/// # Errors
+///
+/// Returns an error if a `.remargin.yaml` exists on the walk but cannot be
+/// read or parsed.
+pub fn resolve_mode(system: &dyn System, start_dir: &Path) -> Result<ResolvedMode> {
+    match load_config_filtered_with_path(system, start_dir, None)? {
+        Some((path, cfg)) => Ok(ResolvedMode {
+            mode: cfg.mode,
+            source: Some(path),
+        }),
+        None => Ok(ResolvedMode {
+            mode: Mode::Open,
+            source: None,
+        }),
     }
 }
 

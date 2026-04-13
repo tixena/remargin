@@ -41,7 +41,13 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const info = await backend.identity("human");
+        // `resolveMode` is the purpose-built probe for vault-mode display:
+        // it walks up from the working directory without any `type:` filter,
+        // because mode is a directory-tree property, not an identity
+        // property. Previously we inferred mode off the identity envelope,
+        // which could return the wrong config when the walk-up passed
+        // through a different-typed `.remargin.yaml`.
+        const info = await backend.resolveMode();
         if (cancelled) return;
         const raw = info.mode;
         if (raw && isModeValue(raw)) {

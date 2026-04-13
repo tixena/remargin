@@ -21,6 +21,7 @@ import type {
   GetOpts,
   IdentityInfo,
   QueryOpts,
+  ResolvedMode,
   SandboxListEntry,
   SearchOpts,
   WriteOpts,
@@ -288,6 +289,24 @@ export class RemarginBackend {
     const existing = existsSync(target) ? readFileSync(target, "utf-8") : "";
     const patched = patchModeInYaml(existing, mode);
     writeFileSync(target, patched, "utf-8");
+  }
+
+  /**
+   * Resolve the effective enforcement mode for the vault (or an explicit
+   * directory) by walking up from `cwd` and reading the nearest
+   * `.remargin.yaml`. Decoupled from identity resolution: never filters by
+   * `type:` field, because mode is a directory-tree property.
+   *
+   * Returns `{ mode: "open", source: null }` when no config is found, matching
+   * the CLI's open-by-default posture. No identity flags are forwarded so
+   * this is safe to call before settings are populated.
+   */
+  async resolveMode(cwd?: string): Promise<ResolvedMode> {
+    const args: string[] = ["resolve-mode"];
+    if (cwd) args.push("--cwd", cwd);
+    const raw = await this.exec(args, { skipIdentity: true });
+    const parsed = JSON.parse(raw) as ResolvedMode;
+    return parsed;
   }
 
   async identity(type?: "human" | "agent"): Promise<IdentityInfo> {

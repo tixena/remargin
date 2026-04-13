@@ -73,3 +73,22 @@ export interface IdentityInfo {
   key?: string;
   mode?: string;
 }
+
+/**
+ * Response from `remargin --json resolve-mode`. Mode is a directory-tree
+ * property (not an identity property), so this probe exists independently of
+ * the identity resolution: it walks up from the given `cwd` looking for the
+ * nearest `.remargin.yaml` regardless of its `type:` field.
+ *
+ * When no config is found, `mode` defaults to `"open"` and `source` is
+ * `null` — matching the CLI's open-by-default posture.
+ */
+export interface ResolvedMode {
+  /** Effective mode: `"open"`, `"registered"`, or `"strict"`. */
+  mode: string;
+  /**
+   * Absolute path of the `.remargin.yaml` that declared the mode, or
+   * `null` when the resolution fell back to the default.
+   */
+  source: string | null;
+}

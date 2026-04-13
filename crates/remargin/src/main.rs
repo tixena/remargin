@@ -311,6 +311,21 @@ enum Commands {
         #[command(subcommand)]
         action: RegistryAction,
     },
+    /// Resolve the effective enforcement mode for a directory.
+    ///
+    /// Walks up from `--cwd` (or the current directory) looking for the
+    /// nearest `.remargin.yaml` and returns its `mode:` field. Unlike
+    /// `identity`, this does NOT filter by author type — mode is a
+    /// directory-tree property. Falls back to `open` when no config is found.
+    ///
+    /// Prints a JSON object like `{"mode":"strict","source":"/path/to/.remargin.yaml"}`
+    /// under `--json`; prints a short human-readable summary otherwise.
+    ResolveMode {
+        /// Starting directory for the walk-up. Defaults to the process's
+        /// current directory.
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+    },
     /// Remove a file from the managed document tree.
     Rm {
         /// Path to the file.
@@ -775,6 +790,10 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         Commands::Identity { author_type } => {
             return cmd_identity(system, cwd, author_type.as_deref(), cli.global.json);
         }
+        Commands::ResolveMode { cwd: override_cwd } => {
+            let start_dir = override_cwd.as_deref().unwrap_or(cwd);
+            return cmd_resolve_mode(system, start_dir, cli.global.json);
+        }
         Commands::Keygen { output } => return cmd_keygen(system, output),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { action } => {
@@ -1009,6 +1028,7 @@ fn dispatch_with_config(
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
+        | Commands::ResolveMode { .. }
         | Commands::Skill { .. } => Ok(()),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => Ok(()),
@@ -1313,6 +1333,25 @@ fn cmd_identity(
                 }
             }
             None => eprintln!("No identity config found."),
+        }
+    }
+    Ok(())
+}
+
+fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<()> {
+    let resolved = config::resolve_mode(system, cwd)?;
+    let source = resolved.source.as_ref().map(|p| p.display().to_string());
+    let value = json!({
+        "mode": resolved.mode.as_str(),
+        "source": source,
+    });
+    if json_mode {
+        print_output(true, &value)?;
+    } else {
+        eprintln!("Mode:   {}", resolved.mode.as_str());
+        match &source {
+            Some(path) => eprintln!("Source: {path}"),
+            None => eprintln!("Source: <default>"),
         }
     }
     Ok(())

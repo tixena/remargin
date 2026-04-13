@@ -9,7 +9,7 @@ use crate::parser::AuthorType;
 use super::registry::RegistryParticipantStatus;
 use super::{
     CliOverrides, Mode, ResolvedConfig, load_config, load_config_filtered, load_registry,
-    resolve_key_path,
+    resolve_key_path, resolve_mode,
 };
 
 fn minimal_config_yaml(identity: &str) -> String {
@@ -484,6 +484,103 @@ fn load_config_wrapper_still_works() {
         .unwrap()
         .unwrap();
     assert_eq!(config.identity.as_deref(), Some("agent_bot"));
+}
+
+#[test]
+fn resolve_mode_finds_vault_root_mode() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            b"mode: strict\ntype: human\nidentity: eduardo\n",
+        )
+        .unwrap();
+
+    let resolved = resolve_mode(&system, Path::new("/project")).unwrap();
+    assert_eq!(resolved.mode, Mode::Strict);
+    assert_eq!(
+        resolved.source.as_deref(),
+        Some(Path::new("/project/.remargin.yaml"))
+    );
+}
+
+#[test]
+fn resolve_mode_walks_up() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project/src/deep"))
+        .unwrap()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: registered\n")
+        .unwrap();
+
+    let resolved = resolve_mode(&system, Path::new("/project/src/deep")).unwrap();
+    assert_eq!(resolved.mode, Mode::Registered);
+    assert_eq!(
+        resolved.source.as_deref(),
+        Some(Path::new("/project/.remargin.yaml"))
+    );
+}
+
+#[test]
+fn resolve_mode_defaults_to_open_when_no_config() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/empty/path"))
+        .unwrap();
+
+    let resolved = resolve_mode(&system, Path::new("/empty/path")).unwrap();
+    assert_eq!(resolved.mode, Mode::Open);
+    assert!(resolved.source.is_none());
+}
+
+#[test]
+fn resolve_mode_ignores_type_filter() {
+    // The whole point: even when the nearest config is `type: agent`, the
+    // mode resolution does not skip it looking for a human config — it
+    // returns the agent config's mode, because mode is a directory-tree
+    // property.
+    let system = MockSystem::new()
+        .with_dir(Path::new("/home/vault/sub"))
+        .unwrap()
+        .with_file(
+            Path::new("/home/vault/.remargin.yaml"),
+            b"type: agent\nmode: strict\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/home/.remargin.yaml"),
+            b"type: human\nidentity: eduardo\nmode: open\n",
+        )
+        .unwrap();
+
+    let resolved = resolve_mode(&system, Path::new("/home/vault/sub")).unwrap();
+    assert_eq!(resolved.mode, Mode::Strict);
+    assert_eq!(
+        resolved.source.as_deref(),
+        Some(Path::new("/home/vault/.remargin.yaml"))
+    );
+}
+
+#[test]
+fn resolve_mode_uses_default_when_config_omits_mode() {
+    // A config without a `mode:` field parses as Mode::Open (default).
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            minimal_config_yaml("bob").as_bytes(),
+        )
+        .unwrap();
+
+    let resolved = resolve_mode(&system, Path::new("/project")).unwrap();
+    assert_eq!(resolved.mode, Mode::Open);
+    assert_eq!(
+        resolved.source.as_deref(),
+        Some(Path::new("/project/.remargin.yaml"))
+    );
+}
+
+#[test]
+fn mode_as_str_roundtrip() {
+    assert_eq!(Mode::Open.as_str(), "open");
+    assert_eq!(Mode::Registered.as_str(), "registered");
+    assert_eq!(Mode::Strict.as_str(), "strict");
 }
 
 #[test]
