@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { expandPath } from "@/lib/expandPath";
 import type { RemarginSettings } from "@/types";
 import { SettingsField } from "./SettingsField";
 
@@ -41,9 +42,12 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
     setTestMessage("Testing...");
     try {
       const { exec } = require("child_process") as typeof import("child_process");
+      // Expand ~ / $HOME so the Test CLI button honours portable paths.
+      // Fall back to a bare 'remargin' when the field is empty.
+      const binary = expandPath(current.remarginPath) || "remargin";
       const result = await new Promise<string>((resolve, reject) => {
         exec(
-          `${current.remarginPath} --version`,
+          `${binary} --version`,
           { timeout: 5000 },
           (error: Error | null, stdout: string, stderr: string) => {
             if (error) reject(new Error(stderr || error.message));
@@ -71,7 +75,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
       <div className="flex flex-col gap-5 p-5 px-6 overflow-y-auto">
         <SettingsField
           label="Remargin binary path"
-          description="Path to the remargin CLI binary. Use an absolute path or ensure it's in your PATH."
+          description="Path to the remargin CLI binary. Supports ~ and $HOME (e.g. ~/.cargo/bin/remargin) for portability across machines. Leave blank to use whatever is on your PATH."
         >
           <Input
             value={current.remarginPath}
@@ -82,7 +86,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <SettingsField
           label="Claude binary path"
-          description="Path to the claude CLI binary for AI-assisted commenting."
+          description="Path to the claude CLI binary for AI-assisted commenting. Supports ~ and $HOME."
         >
           <Input
             value={current.claudePath}
@@ -93,7 +97,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <SettingsField
           label="Working directory"
-          description="Base directory for remargin operations. Leave empty to use vault root."
+          description="Base directory for remargin operations. Supports ~ and $HOME. Leave empty to use vault root."
         >
           <Input
             value={current.workingDirectory}
@@ -134,7 +138,7 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <SettingsField
           label="Identity configuration"
-          description="Your personal identity lives in ~/.remargin.yaml. The vault-root .remargin.yaml is for the reply agent, not you — don't point this at that file. Use Manual to type author and key path directly."
+          description="Your personal identity lives in ~/.remargin.yaml. The vault-root .remargin.yaml is for the reply agent, not you — don't point this at that file. Use Manual to type author and key path directly. Path fields below support ~ and $HOME for cross-machine portability."
         >
           <ToggleGroup
             type="single"

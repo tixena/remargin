@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { spawn } from "child_process";
 import { z } from "zod/v4";
 import {
@@ -10,6 +11,7 @@ import {
   type SearchMatch,
   SearchMatch$Schema,
 } from "@/generated";
+import { expandPath } from "@/lib/expandPath";
 import type { RemarginSettings } from "@/types";
 import type {
   BatchCommentOp,
@@ -274,8 +276,8 @@ export class RemarginBackend {
     args: string[],
     opts?: { timeout?: number; useJson?: boolean; skipIdentity?: boolean }
   ): Promise<string> {
-    const binary = this.settings.remarginPath || "remargin";
-    const cwd = this.settings.workingDirectory || this.vaultPath;
+    const binary = this.resolveBinary();
+    const cwd = expandPath(this.settings.workingDirectory) || this.vaultPath;
     const timeout = opts?.timeout ?? 30000;
     const useJson = opts?.useJson ?? true;
     const skipIdentity = opts?.skipIdentity ?? false;
@@ -336,13 +338,35 @@ export class RemarginBackend {
 
   private buildIdentityArgs(): string[] {
     if (this.settings.identityMode === "config" && this.settings.configFilePath) {
-      return ["--config", this.settings.configFilePath, "--type", "human"];
+      return ["--config", expandPath(this.settings.configFilePath), "--type", "human"];
     }
     const args: string[] = [];
     if (this.settings.authorName) {
       args.push("--identity", this.settings.authorName);
     }
+    // NOTE: keyFilePath is not currently forwarded to the CLI here, but when
+    // it is, it should go through expandPath as well.
     args.push("--type", "human");
     return args;
+  }
+
+  /**
+   * Resolve the remargin binary to invoke. Applies `expandPath` to the
+   * configured path so `~/...` and `$HOME/...` work, then falls back to a
+   * bare PATH lookup (`remargin`) if the configured path does not exist on
+   * disk. This lets users leave the setting blank when remargin is on their
+   * PATH, and lets them use a portable `~/.cargo/bin/remargin` style entry
+   * across machines.
+   */
+  private resolveBinary(): string {
+    const configured = expandPath(this.settings.remarginPath);
+    if (!configured) return "remargin";
+    // If the user typed a bare command name (no path separator), trust
+    // PATH lookup — don't stat it.
+    const looksLikePath = configured.includes("/") || configured.includes("\\");
+    if (!looksLikePath) return configured;
+    if (existsSync(configured)) return configured;
+    // Fallback: try the bare name on PATH.
+    return "remargin";
   }
 }
