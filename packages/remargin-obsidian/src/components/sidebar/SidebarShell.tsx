@@ -67,33 +67,33 @@ export function SidebarShell({
   return (
     <div className="flex flex-col h-full bg-bg-primary">
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-accent" />
-          <span className="text-base font-semibold text-text-normal font-sans">Remargin</span>
-        </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <MessageSquare className="w-4 h-4 text-accent shrink-0" />
+          <span className="text-base font-semibold text-text-normal font-sans truncate">
+            Remargin
+          </span>
           <Button
             variant="ghost"
             size="icon"
-            className="w-7 h-7"
-            disabled={plusDisabled}
-            onClick={onPlusClick}
-            aria-label="New comment at cursor"
-            title="New comment at cursor"
-          >
-            <Plus className="w-3.5 h-3.5 text-text-muted" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-7 h-7"
+            className="w-[22px] h-[22px] rounded-sm shrink-0"
             onClick={onRefreshClick}
             aria-label="Refresh"
             title="Refresh"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-text-muted" />
+            <RefreshCw className="w-3 h-3 text-text-faint" />
           </Button>
         </div>
+        <Button
+          size="sm"
+          className="h-7 px-3 text-xs gap-1 bg-accent text-white hover:bg-accent-hover font-semibold shrink-0"
+          disabled={plusDisabled}
+          onClick={onPlusClick}
+          aria-label="New comment at cursor"
+          title="New comment at cursor"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          New
+        </Button>
       </div>
 
       <ScrollArea className="flex-1">
