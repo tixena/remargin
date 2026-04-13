@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import {
   Select,
   SelectContent,
@@ -12,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useBackend } from "@/hooks/useBackend";
 import { expandPath } from "@/lib/expandPath";
+import { type FilePickerFilter, isFilePickerAvailable, pickFile } from "@/lib/pickFile";
 import type { RemarginSettings } from "@/types";
 import { SettingsField } from "./SettingsField";
 
@@ -21,6 +23,93 @@ interface SettingsTabProps {
 }
 
 type TestState = "idle" | "loading" | "success" | "error";
+
+interface PathInputProps {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+  /** File-type filters passed to the native open dialog. */
+  filters?: FilePickerFilter[];
+  /** Window title for the native dialog. */
+  dialogTitle?: string;
+  className?: string;
+}
+
+/**
+ * Text input paired with a "Browse" button that opens the OS native
+ * file-open dialog via Electron. The button is hidden on hosts that do not
+ * expose Electron's dialog API (future mobile builds, unit tests) so the
+ * bare input still works as a manual entry field.
+ *
+ * Selecting a file in the dialog fires `onChange` with the absolute path —
+ * exactly the same code path as typing, so the caller does not need special
+ * handling.
+ */
+function PathInput({
+  value,
+  onChange,
+  placeholder,
+  filters,
+  dialogTitle,
+  className,
+}: PathInputProps) {
+  const pickerAvailable = useMemo(() => isFilePickerAvailable(), []);
+
+  const handleBrowse = useCallback(async () => {
+    try {
+      const picked = await pickFile({
+        // Feed the existing value so the dialog opens next to the current
+        // path; the helper falls back to the OS default when empty.
+        defaultPath: expandPath(value) || undefined,
+        filters,
+        title: dialogTitle,
+      });
+      if (picked) onChange(picked);
+    } catch {
+      // Swallow dialog-level errors: the user can always type the path by
+      // hand, and surfacing a stack trace in the settings UI would be more
+      // alarming than useful.
+    }
+  }, [dialogTitle, filters, onChange, value]);
+
+  return (
+    <div className="flex gap-2 items-center">
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={className ?? "font-mono text-sm bg-bg-primary border-bg-border flex-1"}
+      />
+      {pickerAvailable ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void handleBrowse();
+          }}
+          className="shrink-0 gap-1.5"
+          aria-label="Browse for file"
+        >
+          <ObsidianIcon icon="folder-open" size={14} />
+          Browse
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+const YAML_CONFIG_FILTERS: FilePickerFilter[] = [
+  { name: "YAML", extensions: ["yaml", "yml"] },
+  { name: "All Files", extensions: ["*"] },
+];
+
+const KEY_FILE_FILTERS: FilePickerFilter[] = [
+  // Signing keys often have no extension, so "All Files" is the primary
+  // filter — we still offer common SSH-style extensions for convenience.
+  { name: "All Files", extensions: ["*"] },
+  { name: "Key", extensions: ["pem", "key", "pub"] },
+];
 
 type ModeValue = "open" | "registered" | "strict";
 const MODE_OPTIONS: readonly ModeValue[] = ["open", "registered", "strict"];
@@ -223,11 +312,14 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
           </ToggleGroup>
 
           {current.identityMode === "config" ? (
-            <Input
-              value={current.configFilePath}
-              onChange={(e) => update("configFilePath", e.target.value)}
-              className="font-mono text-sm bg-bg-primary border-bg-border mt-2"
-            />
+            <div className="mt-2">
+              <PathInput
+                value={current.configFilePath}
+                onChange={(next) => update("configFilePath", next)}
+                filters={YAML_CONFIG_FILTERS}
+                dialogTitle="Select .remargin.yaml"
+              />
+            </div>
           ) : (
             <div className="flex flex-col gap-2 mt-2">
               <Input
@@ -236,11 +328,12 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
                 placeholder="Author name"
                 className="font-mono text-sm bg-bg-primary border-bg-border"
               />
-              <Input
+              <PathInput
                 value={current.keyFilePath}
-                onChange={(e) => update("keyFilePath", e.target.value)}
+                onChange={(next) => update("keyFilePath", next)}
                 placeholder="Path to signing key"
-                className="font-mono text-sm bg-bg-primary border-bg-border"
+                filters={KEY_FILE_FILTERS}
+                dialogTitle="Select signing key"
               />
             </div>
           )}
