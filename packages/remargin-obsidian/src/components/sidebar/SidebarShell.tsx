@@ -61,10 +61,10 @@ export function SidebarShell({
 
   return (
     <div className="flex flex-col h-full bg-bg-primary">
-      <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border">
+      <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
           <ReMarginLogo size={22} className="text-accent shrink-0" />
-          <span className="text-base font-semibold text-text-normal font-sans truncate">
+          <span className="text-base font-semibold text-text-normal font-sans truncate min-w-0">
             Remargin
           </span>
           <button
