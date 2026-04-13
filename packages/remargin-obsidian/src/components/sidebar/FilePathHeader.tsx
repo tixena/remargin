@@ -1,9 +1,10 @@
 import { Check, Copy, FileText } from "lucide-react";
 import { TFile } from "obsidian";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useContainerWidth } from "@/hooks/useContainerWidth";
 import { abbreviatePath } from "@/lib/abbreviatePath";
+import { extractTitle } from "@/lib/file-title";
 import type RemarginPlugin from "@/main";
 
 interface FilePathHeaderProps {
@@ -37,21 +38,35 @@ export function FilePathHeader({ plugin, filePath, pendingCount }: FilePathHeade
     return lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
   }, [filePath]);
 
+  const [fileContents, setFileContents] = useState<string>("");
+
+  // Re-read the file contents whenever the active path changes so the
+  // title can follow H1 edits. Uses cachedRead (non-blocking, metadata-
+  // cache-backed) to avoid hammering the vault on every render.
+  useEffect(() => {
+    let cancelled = false;
+    setFileContents("");
+    if (!filePath) return;
+    const file = plugin.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) return;
+    plugin.app.vault
+      .cachedRead(file)
+      .then((contents) => {
+        if (!cancelled) setFileContents(contents);
+      })
+      .catch(() => {
+        // Best-effort: title falls back to the filename stem if the read
+        // fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plugin, filePath]);
+
   const title = useMemo(() => {
     if (!filePath) return "No file open";
-    const file = plugin.app.vault.getAbstractFileByPath(filePath);
-    if (file instanceof TFile) {
-      const cache = plugin.app.metadataCache.getFileCache(file);
-      const fmTitle = cache?.frontmatter?.title;
-      if (typeof fmTitle === "string" && fmTitle.trim()) {
-        return fmTitle.trim();
-      }
-    }
-    // Fallback to filename without extension.
-    const basename = filePath.split("/").pop() ?? filePath;
-    const dotIdx = basename.lastIndexOf(".");
-    return dotIdx > 0 ? basename.slice(0, dotIdx) : basename;
-  }, [plugin, filePath]);
+    return extractTitle(fileContents, filePath);
+  }, [filePath, fileContents]);
 
   // Abbreviate the directory path based on available width.
   const maxChars = Math.max(8, Math.floor((containerWidth - RESERVED_PX) / CHAR_WIDTH_PX));
@@ -77,11 +92,11 @@ export function FilePathHeader({ plugin, filePath, pendingCount }: FilePathHeade
       <FileText className="w-3.5 h-3.5 text-text-faint mt-0.5 shrink-0" />
       <div className="flex flex-col min-w-0 flex-1">
         {displayDir && (
-          <span className="font-mono text-[10px] text-text-faint truncate leading-tight">
+          <span className="font-mono text-[10px] text-accent truncate leading-tight">
             {displayDir}
           </span>
         )}
-        <span className="font-sans text-xs text-text-muted truncate leading-tight font-medium">
+        <span className="font-sans text-xs text-text-normal truncate leading-tight font-medium">
           {title}
         </span>
       </div>
