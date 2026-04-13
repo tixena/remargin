@@ -53,6 +53,7 @@ export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: Thre
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [me, setMe] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -73,6 +74,23 @@ export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: Thre
     refresh();
   }, [refresh]);
 
+  // Resolve the current identity once per mount so reaction pills can
+  // distinguish "mine" from others' without threading it in from the shell.
+  useEffect(() => {
+    let cancelled = false;
+    backend
+      .identity()
+      .then((info) => {
+        if (!cancelled) setMe(info.identity ?? null);
+      })
+      .catch((err) => {
+        console.error("ThreadedComments.identity failed:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend]);
+
   const threads = useMemo(() => buildThreadTree(comments), [comments]);
 
   const handleAck = useCallback(
@@ -90,6 +108,20 @@ export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: Thre
         onMutation?.();
       } catch (err) {
         console.error("ThreadedComments.ack failed:", err);
+        setError(errorMessage(err));
+      }
+    },
+    [backend, file, refresh, onMutation]
+  );
+
+  const handleReact = useCallback(
+    async (id: string, emoji: string, remove: boolean) => {
+      try {
+        await backend.react(file, id, emoji, remove);
+        await refresh();
+        onMutation?.();
+      } catch (err) {
+        console.error("ThreadedComments.react failed:", err);
         setError(errorMessage(err));
       }
     },
@@ -136,9 +168,11 @@ export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: Thre
             node={node}
             file={file}
             depth={0}
+            me={me}
             onAck={handleAck}
             onDelete={handleDelete}
             onReply={onReply}
+            onReact={handleReact}
             onGoToLine={onGoToLine}
           />
         ))}
@@ -151,9 +185,11 @@ interface CommentThreadProps {
   node: ThreadNode;
   file: string;
   depth: number;
+  me: string | null;
   onAck: (id: string) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
+  onReact: (id: string, emoji: string, remove: boolean) => void;
   onGoToLine?: (line: number) => void;
 }
 
@@ -161,9 +197,11 @@ function CommentThread({
   node,
   file,
   depth,
+  me,
   onAck,
   onDelete,
   onReply,
+  onReact,
   onGoToLine,
 }: CommentThreadProps) {
   return (
@@ -173,9 +211,11 @@ function CommentThread({
         file={file}
         depth={depth}
         isOnline={false}
+        me={me}
         onAck={onAck}
         onDelete={onDelete}
         onReply={onReply}
+        onReact={onReact}
         onGoToLine={onGoToLine}
       />
       {node.replies.map((reply) => (
@@ -184,9 +224,11 @@ function CommentThread({
           node={reply}
           file={file}
           depth={depth + 1}
+          me={me}
           onAck={onAck}
           onDelete={onDelete}
           onReply={onReply}
+          onReact={onReact}
           onGoToLine={onGoToLine}
         />
       ))}

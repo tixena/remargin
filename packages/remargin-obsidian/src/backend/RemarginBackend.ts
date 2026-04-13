@@ -203,8 +203,10 @@ export class RemarginBackend {
     await this.exec(["edit", file, id, content]);
   }
 
-  async react(file: string, id: string, emoji: string): Promise<void> {
-    await this.exec(["react", file, id, emoji]);
+  async react(file: string, id: string, emoji: string, remove = false): Promise<void> {
+    const args = ["react", file, id, emoji];
+    if (remove) args.push("--remove");
+    await this.exec(args);
   }
 
   async batch(file: string, operations: BatchCommentOp[]): Promise<string[]> {

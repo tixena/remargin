@@ -1,6 +1,8 @@
 import { Check, MoreHorizontal, Reply, Trash2 } from "lucide-react";
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
+import { EmojiPicker } from "@/components/sidebar/EmojiPicker";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
+import { ReactionPills } from "@/components/sidebar/ReactionPills";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +18,17 @@ interface CommentCardProps {
   file: string;
   depth: number;
   isOnline?: boolean;
+  /** Current identity name; used by ReactionPills to mark "mine" pills. */
+  me?: string | null;
   onAck: (id: string) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
+  /**
+   * Called when the user wants to add or remove a reaction. `remove` is
+   * true when the click was on a pill the current identity already reacted
+   * to.
+   */
+  onReact?: (id: string, emoji: string, remove: boolean) => void;
   onGoToLine?: (line: number) => void;
 }
 
@@ -35,9 +45,11 @@ export function CommentCard({
   file,
   depth,
   isOnline,
+  me,
   onAck,
   onDelete,
   onReply,
+  onReact,
   onGoToLine,
 }: CommentCardProps) {
   const isPending = (comment.ack?.length ?? 0) === 0;
@@ -72,18 +84,8 @@ export function CommentCard({
         <MarkdownContent content={comment.content} sourcePath={file} />
       </div>
 
-      {comment.reactions && Object.keys(comment.reactions).length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap">
-          {Object.entries(comment.reactions).map(([emoji, authors]) => (
-            <Badge key={emoji} variant="outline" className="px-1.5 py-0 text-[10px] gap-0.5">
-              {emoji} {authors?.length ?? 0}
-            </Badge>
-          ))}
-        </div>
-      )}
-
       <div className="flex items-center justify-between gap-2 w-full">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           {isPending && (
             <Button
               variant="ghost"
@@ -100,6 +102,25 @@ export function CommentCard({
               <Check className="w-3 h-3 mr-0.5" />
               Ack
             </Button>
+          )}
+          {comment.reactions && (
+            <ReactionPills
+              reactions={comment.reactions}
+              me={me}
+              onToggle={(emoji, mine) => {
+                if (comment.id) onReact?.(comment.id, emoji, mine);
+              }}
+            />
+          )}
+          {onReact && comment.id && (
+            <EmojiPicker
+              onPick={(emoji) => {
+                if (comment.id) {
+                  const already = !!me && (comment.reactions?.[emoji]?.includes(me) ?? false);
+                  onReact(comment.id, emoji, already);
+                }
+              }}
+            />
           )}
         </div>
         <div className="flex items-center gap-1">
