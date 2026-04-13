@@ -1,4 +1,5 @@
-import { Check, MoreHorizontal, Reply, Trash2 } from "lucide-react";
+import { MoreHorizontal, Reply, Trash2 } from "lucide-react";
+import { AckToggle } from "@/components/sidebar/AckToggle";
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
 import { EmojiPicker } from "@/components/sidebar/EmojiPicker";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
@@ -25,7 +26,12 @@ interface CommentCardProps {
    * explicit `to` field is implicitly addressed to the parent's author.
    */
   parentAuthor?: string;
-  onAck: (id: string) => void;
+  /**
+   * Toggle the current identity's ack on this comment. `remove` is true
+   * when the click should strip the identity's existing ack; false adds
+   * a new one.
+   */
+  onAck: (id: string, remove: boolean) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
   /**
@@ -58,8 +64,8 @@ export function CommentCard({
   onReact,
   onGoToLine,
 }: CommentCardProps) {
-  const isPending = (comment.ack?.length ?? 0) === 0;
   const isClickable = comment.line > 0 && !!onGoToLine;
+  const ackAuthors: string[] = (comment.ack ?? []).map((a) => a.author);
   // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
   // back to the parent comment's author for replies that did not set `to`.
   // Root comments with neither stay bare (no chip).
@@ -104,22 +110,15 @@ export function CommentCard({
 
       <div className="flex items-center justify-between gap-2 w-full">
         <div className="flex items-center gap-1.5 flex-wrap">
-          {isPending && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 px-1.5 text-[10px] text-green-500 hover:text-green-400"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (comment.id) {
-                  onGoToLine?.(comment.line);
-                  onAck(comment.id);
-                }
+          {comment.id && (
+            <AckToggle
+              ack={ackAuthors}
+              me={me}
+              onToggle={(remove) => {
+                if (!remove) onGoToLine?.(comment.line);
+                if (comment.id) onAck(comment.id, remove);
               }}
-            >
-              <Check className="w-3 h-3 mr-0.5" />
-              Ack
-            </Button>
+            />
           )}
           {comment.reactions && (
             <ReactionPills

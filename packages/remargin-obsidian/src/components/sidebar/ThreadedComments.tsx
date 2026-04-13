@@ -94,9 +94,9 @@ export function ThreadedComments({ file, onReply, onGoToLine, onMutation }: Thre
   const threads = useMemo(() => buildThreadTree(comments), [comments]);
 
   const handleAck = useCallback(
-    async (id: string) => {
+    async (id: string, remove: boolean) => {
       try {
-        await backend.ack(file, [id]);
+        await backend.ack(file, [id], remove);
         // Stage the file in the user's sandbox so the interaction is
         // visible in the next Submit-to-Claude cycle.
         try {
@@ -189,7 +189,7 @@ interface CommentThreadProps {
   me: string | null;
   /** Author of this node's parent comment, for the implicit "to:" chip. */
   parentAuthor?: string;
-  onAck: (id: string) => void;
+  onAck: (id: string, remove: boolean) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
   onReact: (id: string, emoji: string, remove: boolean) => void;
