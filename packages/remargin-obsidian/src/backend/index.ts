@@ -5,6 +5,7 @@ export type {
   CommentOpts,
   GetOpts,
   IdentityInfo,
+  Participant,
   QueryOpts,
   SandboxListEntry,
   SearchOpts,

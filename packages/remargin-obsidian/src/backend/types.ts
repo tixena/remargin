@@ -1,3 +1,20 @@
+/**
+ * A single entry from `remargin registry show --json`. Mirrors the CLI JSON
+ * shape: `display_name` is always present (the CLI substitutes the id when
+ * the registry leaves it blank), so consumers never need to handle null.
+ *
+ * Revoked participants are included so historical comments from them can
+ * still render their human-friendly name; downstream UI (e.g. the to: picker)
+ * is expected to filter by `status === "active"`.
+ */
+export interface Participant {
+  name: string;
+  display_name: string;
+  type: "human" | "agent";
+  status: "active" | "revoked";
+  pubkeys: number;
+}
+
 export interface CommentOpts {
   replyTo?: string;
   afterLine?: number;

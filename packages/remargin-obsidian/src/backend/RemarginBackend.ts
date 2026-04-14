@@ -20,6 +20,7 @@ import type {
   CommentOpts,
   GetOpts,
   IdentityInfo,
+  Participant,
   QueryOpts,
   ResolvedMode,
   SandboxListEntry,
@@ -55,6 +56,18 @@ const SandboxListEntry$Schema = z.looseObject({
 
 const SandboxListEnvelope$Schema = z.looseObject({
   files: z.array(SandboxListEntry$Schema),
+});
+
+const Participant$Schema = z.looseObject({
+  name: z.string(),
+  display_name: z.string(),
+  type: z.enum(["human", "agent"]),
+  status: z.enum(["active", "revoked"]),
+  pubkeys: z.number(),
+});
+
+const RegistryEnvelope$Schema = z.looseObject({
+  participants: z.array(Participant$Schema),
 });
 
 const SandboxRemoveEnvelope$Schema = z.looseObject({
@@ -317,6 +330,28 @@ export class RemarginBackend {
     const raw = await this.exec(args, { skipIdentity: true });
     const parsed = JSON.parse(raw) as IdentityInfo;
     return parsed;
+  }
+
+  /**
+   * Fetch the current vault's registered participants via
+   * `remargin --json registry show`.
+   *
+   * Gracefully degrades to an empty list when the CLI errors with
+   * `"no registry found"` so the plugin works on vaults that haven't
+   * set up a registry yet. Any other error (binary missing, parse
+   * failure, permission) is rethrown so real bugs surface.
+   */
+  async registryShow(): Promise<Participant[]> {
+    try {
+      const raw = await this.exec(["registry", "show"]);
+      return parseEnvelope(raw, RegistryEnvelope$Schema, "registry show")
+        .participants as Participant[];
+    } catch (err) {
+      if (err instanceof Error && /no registry found/i.test(err.message)) {
+        return [];
+      }
+      throw err;
+    }
   }
 
   private async exec(
