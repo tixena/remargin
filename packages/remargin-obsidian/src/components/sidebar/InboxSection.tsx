@@ -1,7 +1,8 @@
 import { toRegex } from "diacritic-regex";
-import { ChevronDown, Clock, FileText, Search, X } from "lucide-react";
+import { Check, ChevronDown, Clock, FileText, MoreHorizontal, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxTree } from "@/components/sidebar/InboxTree";
+import { deriveLeafState } from "@/components/sidebar/inboxLeafState";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,11 @@ export function InboxSection({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
+  // Resolve the current identity once per mount. Used by the inbox leaf
+  // to decide whether a row is "directed at me" and to detect "acked by
+  // me" without a second round-trip. Null while the probe is in flight —
+  // leaves render as neutral in that window (see `deriveLeafState`).
+  const [me, setMe] = useState<string | null>(null);
   // The submitted query only advances on explicit user action (Enter key or
   // search-button click). Typing alone does nothing — the old debounce
   // version felt jittery because every keystroke eventually spawned a CLI
@@ -134,16 +140,38 @@ export function InboxSection({
     refresh();
   }, [refresh]);
 
+  // Resolve identity once per mount. No retry loop: if the CLI errors,
+  // we keep `me` as `null` and leaves render as neutral — an acceptable
+  // fallback that does not block the inbox from loading.
+  useEffect(() => {
+    let cancelled = false;
+    backend
+      .identity()
+      .then((info) => {
+        if (!cancelled) setMe(info.identity ?? null);
+      })
+      .catch((err: unknown) => {
+        console.error("InboxSection.identity failed:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend]);
+
   const handleAck = useCallback(
-    async (file: string, id: string) => {
+    async (file: string, id: string, remove: boolean) => {
       try {
-        await backend.ack(file, [id]);
-        // Stage the file in the user's sandbox so the interaction is
-        // visible in the next Submit-to-Claude cycle.
-        try {
-          await backend.sandboxAdd([file]);
-        } catch {
-          // Best-effort: ack succeeded, don't fail the whole operation.
+        await backend.ack(file, [id], remove);
+        // Acking stages the file in the user's sandbox so the
+        // interaction is visible in the next Submit-to-Claude cycle.
+        // Unacking does NOT stage — that would contradict the "I've
+        // reviewed this" signal the sandbox entry represents.
+        if (!remove) {
+          try {
+            await backend.sandboxAdd([file]);
+          } catch {
+            // Best-effort: ack succeeded, don't fail the whole operation.
+          }
         }
         await refresh();
         onMutation?.();
@@ -248,14 +276,16 @@ export function InboxSection({
                 : "No comments found."}
           </div>
         ) : viewMode === "tree" ? (
-          <InboxTree items={items} onOpenAtLine={onOpenAtLine} onAck={handleAck} />
+          <InboxTree items={items} me={me} onOpenAtLine={onOpenAtLine} onAck={handleAck} />
         ) : (
           <div className="flex flex-col">
             {items.map((item) => (
               <InboxFlatRow
                 key={`${item.file}:${item.comment.id}`}
                 item={item}
+                me={me}
                 onOpenAtLine={onOpenAtLine}
+                onAck={handleAck}
               />
             ))}
           </div>
@@ -267,23 +297,36 @@ export function InboxSection({
 
 interface InboxFlatRowProps {
   item: InboxItem;
+  me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
+  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
 /**
  * Single row in the inbox's flat (non-tree) view. Extracted as its own
  * component so it can call `useParticipants` at the row level — hooks
  * cannot run inside a `.map` callback.
+ *
+ * Renders one of three visuals derived from `deriveLeafState`:
+ * `me-directed-unacked` (purple accent + Ack button), `acked-by-me`
+ * (dimmed + ellipsis-menu Unack), or `neutral` (default styling).
  */
-function InboxFlatRow({ item, onOpenAtLine }: InboxFlatRowProps) {
+function InboxFlatRow({ item, me, onOpenAtLine, onAck }: InboxFlatRowProps) {
   const { resolveDisplayName } = useParticipants();
   const { label: authorDisplay, title: authorTitle } = authorLabel(
     item.comment.author,
     resolveDisplayName
   );
+  const { visual, ackedByMe } = deriveLeafState(item.comment, me);
+  const visualCls =
+    visual === "me-directed-unacked"
+      ? "border-l-2 border-l-purple-500 bg-purple-500/5 hover:bg-purple-500/10"
+      : visual === "acked-by-me"
+        ? "opacity-60"
+        : "hover:bg-bg-hover";
   return (
     <div
-      className="flex flex-col gap-1 px-4 py-2 border-b border-bg-border hover:bg-bg-hover cursor-pointer min-w-0 overflow-hidden"
+      className={`flex flex-col gap-1 px-4 py-2 border-b border-bg-border cursor-pointer min-w-0 overflow-hidden ${visualCls}`}
       onClick={() => onOpenAtLine?.(item.file, item.comment.line)}
     >
       <div className="flex items-center justify-between gap-2 min-w-0">
@@ -315,6 +358,47 @@ function InboxFlatRow({ item, onOpenAtLine }: InboxFlatRowProps) {
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {visual === "me-directed-unacked" && item.comment.id && onAck && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-5 px-2 text-[10px] gap-1"
+              aria-label="Ack this comment"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAck(item.file, item.comment.id, false);
+              }}
+            >
+              <Check className="w-2.5 h-2.5" />
+              Ack
+            </Button>
+          )}
+          {ackedByMe && item.comment.id && onAck && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 w-5 p-0 text-text-faint"
+                  aria-label="Inbox row actions"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal className="w-2.5 h-2.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAck(item.file, item.comment.id, true);
+                  }}
+                >
+                  Unack
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Clock className="w-3 h-3 text-text-faint" />
           <span className="text-[10px] text-text-faint whitespace-nowrap">
             {formatRelativeTime(item.comment.ts)}
