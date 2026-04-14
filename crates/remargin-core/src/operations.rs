@@ -221,8 +221,18 @@ pub fn ack_comments(
         let Some(cm) = found else {
             bail!("comment {comment_id:?} not found");
         };
+
+        // Self-heal: keep only the first Acknowledgment per author so
+        // repeated acks or pre-dirty input converge to a single entry
+        // (preserving the original timestamp).
+        let mut seen: HashSet<String> = HashSet::new();
+        cm.ack.retain(|a| seen.insert(a.author.clone()));
+
         if remove {
             cm.ack.retain(|a| a.author != identity);
+        } else if cm.ack.iter().any(|a| a.author == identity) {
+            // Idempotent: identity already acked (possibly from a
+            // pre-dedup duplicate above) — nothing to push.
         } else {
             cm.ack.push(Acknowledgment {
                 author: String::from(identity),

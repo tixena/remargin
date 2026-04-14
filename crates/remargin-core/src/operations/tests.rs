@@ -998,6 +998,195 @@ fn ack_remove_is_idempotent_when_not_acked() {
 }
 
 #[test]
+fn ack_twice_is_idempotent() {
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    // First ack — records a timestamp.
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    let content_after_first = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let first_doc = parser::parse(&content_after_first).unwrap();
+    let first_cm = first_doc.find_comment("abc").unwrap();
+    assert_eq!(first_cm.ack.len(), 1);
+    let first_ts = first_cm.ack[0].ts;
+
+    // Second ack by the same identity — should be a no-op (no new entry).
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    let content_after_second = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let second_doc = parser::parse(&content_after_second).unwrap();
+    let second_cm = second_doc.find_comment("abc").unwrap();
+    assert_eq!(
+        second_cm.ack.len(),
+        1,
+        "second ack by same identity should not add a new entry",
+    );
+    assert_eq!(second_cm.ack[0].author, "eduardo");
+    assert_eq!(
+        second_cm.ack[0].ts, first_ts,
+        "original timestamp should be preserved across re-acks",
+    );
+}
+
+#[test]
+fn ack_self_heals_duplicate_entries() {
+    // Pre-dirty input: two acks from `alice` at different timestamps
+    // (legacy buggy run). A subsequent ack should collapse them to
+    // exactly one entry keyed on the first timestamp.
+    let doc_content = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+ack:
+  - alice@2026-04-06T13:00:00-04:00
+  - alice@2026-04-06T14:00:00-04:00
+---
+First comment.
+```
+";
+    let system = system_with_doc(doc_content);
+    let mut config = open_config();
+    config.identity = Some(String::from("alice"));
+
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    let alice_acks: Vec<_> = cm.ack.iter().filter(|a| a.author == "alice").collect();
+    assert_eq!(
+        alice_acks.len(),
+        1,
+        "duplicate acks for alice should be collapsed, got {:?}",
+        cm.ack
+    );
+    assert_eq!(
+        alice_acks[0].ts.to_rfc3339(),
+        "2026-04-06T13:00:00-04:00",
+        "first (earliest) ack timestamp should be preserved",
+    );
+}
+
+#[test]
+fn ack_noop_rewrites_file() {
+    // The file should be rewritten every time `ack` runs, even when
+    // the acting identity is already in the list. This keeps
+    // `remargin_last_activity` and the frontmatter checksum fresh so
+    // downstream inbox queries stay consistent.
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+
+    // First ack — populates alice... er, eduardo — into the list.
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    // No-op ack (eduardo already present) — the ensure_frontmatter +
+    // write_document tail must still run so remargin_last_activity
+    // and the frontmatter checksum stay fresh.
+    ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    let second_content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    // The frontmatter-level `remargin_last_activity` is recomputed on
+    // every `ensure_frontmatter` call.
+    assert!(second_content.contains("remargin_last_activity"));
+    // And the ack block must remain a single entry for eduardo
+    // (no duplicate push on no-op).
+    let doc = parser::parse(&second_content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    assert_eq!(cm.ack.len(), 1);
+    assert_eq!(cm.ack[0].author, "eduardo");
+}
+
+#[test]
+fn ack_remove_after_dedup_clears_all_duplicates() {
+    // Pre-dirty: alice has two ack entries. `ack --remove` as alice
+    // should produce zero alice entries (dedup first, then strip).
+    let doc_content = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+ack:
+  - alice@2026-04-06T13:00:00-04:00
+  - alice@2026-04-06T14:00:00-04:00
+---
+First comment.
+```
+";
+    let system = system_with_doc(doc_content);
+    let mut config = open_config();
+    config.identity = Some(String::from("alice"));
+
+    ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    assert!(
+        cm.ack.iter().all(|a| a.author != "alice"),
+        "all duplicate alice acks should be gone after --remove, got {:?}",
+        cm.ack
+    );
+}
+
+#[test]
 fn delete_nonexistent_comment() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
