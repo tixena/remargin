@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, FixedOffset};
 use os_shim::System;
+use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 use tixschema::model_schema;
 
@@ -29,6 +30,10 @@ pub struct QueryFilter {
     pub author: Option<String>,
     /// Only include documents containing a comment with this structural ID.
     pub comment_id: Option<String>,
+    /// Regex applied to comment content. Applied after all metadata filters;
+    /// see [`QueryFilter::with_content_regex`] for a pre-compiled constructor
+    /// helper.
+    pub content_regex: Option<Regex>,
     /// Include individual matching comments in each result.
     pub expanded: bool,
     /// Only include documents with pending (unacked) comments.
@@ -39,6 +44,24 @@ pub struct QueryFilter {
     pub since: Option<DateTime<FixedOffset>>,
     /// Return only counts/summary, suppress comment data.
     pub summary: bool,
+}
+
+impl QueryFilter {
+    /// Compile `pattern` with optional case-insensitivity and attach it as the
+    /// content regex. Returns a structured error (with the caller-provided
+    /// pattern) when compilation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `pattern` cannot be compiled as a regex.
+    pub fn with_content_regex(mut self, pattern: &str, ignore_case: bool) -> Result<Self> {
+        let compiled = RegexBuilder::new(pattern)
+            .case_insensitive(ignore_case)
+            .build()
+            .with_context(|| format!("invalid content regex: {pattern}"))?;
+        self.content_regex = Some(compiled);
+        Ok(self)
+    }
 }
 
 /// Owned comment data for inclusion in expanded query results.
@@ -236,6 +259,10 @@ pub fn query(
 }
 
 /// Test whether a single comment matches all active filters.
+///
+/// Metadata filters (pending, author, since, comment-id) are evaluated first;
+/// the `content_regex` check runs last so the regex only executes against the
+/// already-filtered subset.
 fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     if filter.pending && !is_pending(cm) {
         return false;
@@ -257,6 +284,11 @@ fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     }
     if let Some(target_id) = &filter.comment_id
         && cm.id != *target_id
+    {
+        return false;
+    }
+    if let Some(re) = &filter.content_regex
+        && !re.is_match(&cm.content)
     {
         return false;
     }

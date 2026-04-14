@@ -239,6 +239,8 @@ export class RemarginBackend {
     if (opts?.since) args.push("--since", opts.since);
     if (opts?.expanded) args.push("--expanded");
     if (opts?.commentId) args.push("--comment-id", opts.commentId);
+    if (opts?.contentRegex) args.push("--content-regex", opts.contentRegex);
+    if (opts?.ignoreCase) args.push("--ignore-case");
     const raw = await this.exec(args);
     return parseEnvelope(raw, QueryEnvelope$Schema, "query").results;
   }

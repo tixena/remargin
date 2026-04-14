@@ -274,9 +274,15 @@ enum Commands {
         /// Only documents containing a comment with this structural ID.
         #[arg(long)]
         comment_id: Option<String>,
+        /// Regex applied to comment content; composes with metadata filters.
+        #[arg(long)]
+        content_regex: Option<String>,
         /// Include individual matching comments in each result (default behavior).
         #[arg(long)]
         expanded: bool,
+        /// Case-insensitive match for `--content-regex`.
+        #[arg(long, short = 'i')]
+        ignore_case: bool,
         /// Only documents with pending (unacked) comments.
         #[arg(long)]
         pending: bool,
@@ -517,7 +523,9 @@ struct GetParams<'cmd> {
 struct QueryParams<'cmd> {
     author: Option<&'cmd str>,
     comment_id: Option<&'cmd str>,
+    content_regex: Option<&'cmd str>,
     expanded: bool,
+    ignore_case: bool,
     json_mode: bool,
     path: &'cmd str,
     pending: bool,
@@ -943,7 +951,9 @@ fn dispatch_with_config(
             path,
             author,
             comment_id,
+            content_regex,
             expanded,
+            ignore_case,
             pending,
             pending_for,
             pretty,
@@ -953,7 +963,9 @@ fn dispatch_with_config(
             let q = QueryParams {
                 author: author.as_deref(),
                 comment_id: comment_id.as_deref(),
+                content_regex: content_regex.as_deref(),
                 expanded: *expanded,
+                ignore_case: *ignore_case,
                 json_mode,
                 path: path.as_str(),
                 pending: *pending,
@@ -1547,6 +1559,9 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     filter.pending_for = params.pending_for.map(String::from);
     filter.since = since_dt;
     filter.summary = params.summary;
+    if let Some(pattern) = params.content_regex {
+        filter = filter.with_content_regex(pattern, params.ignore_case)?;
+    }
 
     let results = query::query(system, &target, &filter)?;
 

@@ -35,6 +35,17 @@ export interface QueryOpts {
   since?: string;
   expanded?: boolean;
   commentId?: string;
+  /**
+   * Regex applied to comment content. Composes with metadata filters (pending,
+   * author, since, comment-id) and runs after them so the regex only executes
+   * against the already-filtered comment set.
+   */
+  contentRegex?: string;
+  /**
+   * Case-insensitive match for `contentRegex`. Has no effect without
+   * `contentRegex` set.
+   */
+  ignoreCase?: boolean;
 }
 
 export interface GetOpts {

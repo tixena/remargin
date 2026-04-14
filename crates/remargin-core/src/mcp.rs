@@ -310,7 +310,9 @@ fn desc_query() -> ToolDesc {
             "properties": {
                 "path": { "type": "string", "description": "Base directory to search", "default": "." },
                 "comment_id": { "type": "string", "description": "Only documents containing a comment with this structural ID" },
+                "content_regex": { "type": "string", "description": "Regex applied to comment content; composes with metadata filters" },
                 "expanded": { "type": "boolean", "description": "Include individual matching comments in each result (default: true via non-summary mode)", "default": false },
+                "ignore_case": { "type": "boolean", "description": "Case-insensitive match for content_regex", "default": false },
                 "pending": { "type": "boolean", "description": "Only documents with pending comments", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "pretty": { "type": "boolean", "description": "Pretty-print results grouped by file with structured display", "default": false },
@@ -1066,7 +1068,7 @@ fn handle_query(
 
     let pending_for_str = optional_str(params, "pending_for").map(String::from);
 
-    let filter = QueryFilter {
+    let mut filter = QueryFilter {
         author: optional_str(params, "author").map(String::from),
         comment_id: optional_str(params, "comment_id").map(String::from),
         expanded: optional_bool(params, "expanded"),
@@ -1074,7 +1076,11 @@ fn handle_query(
         pending_for: pending_for_str.clone(),
         since,
         summary: optional_bool(params, "summary"),
+        ..QueryFilter::default()
     };
+    if let Some(pattern) = optional_str(params, "content_regex") {
+        filter = filter.with_content_regex(pattern, optional_bool(params, "ignore_case"))?;
+    }
 
     let results = query::query(system, &target, &filter)?;
 

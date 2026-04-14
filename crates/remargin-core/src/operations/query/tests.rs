@@ -1128,3 +1128,130 @@ Minimal.
     assert_eq!(comment["to"], serde_json::json!([]));
     assert_eq!(comment["reactions"], serde_json::json!({}));
 }
+
+// ===========================================================================
+// content_regex tests (rem-0vh)
+// ===========================================================================
+
+#[test]
+fn content_regex_filters_comments() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter::default()
+        .with_content_regex("alice", false)
+        .unwrap();
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    // Only comments whose body contains "alice": c1 and c3 in review.md
+    // ("First comment from alice." and "Third comment, already acked." - the
+    // latter does not contain alice). Actually only c1 mentions alice by name;
+    // d1 says "Comment from carol." — no alice. c2 says "Second comment from
+    // bob." — no alice.
+    let all_comments: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    assert_eq!(all_comments, vec!["c1"]);
+}
+
+#[test]
+fn content_regex_composes_with_pending() {
+    let system = setup_expanded_system();
+    // Match the word "comment" (case-sensitive) across every doc, but only
+    // include pending comments. c3 contains "comment" (via "Third comment")
+    // but is acked, so it must be excluded.
+    let filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+            .with_content_regex("comment", false)
+            .unwrap()
+    };
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    let ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    // c1, c2 (pending + contain "comment"), d1 (pending + contains "Comment"
+    // capitalised — case-sensitive so excluded). Only c1, c2.
+    assert!(ids.contains(&"c1"));
+    assert!(ids.contains(&"c2"));
+    assert!(!ids.contains(&"c3"), "acked comment must be excluded");
+    assert!(!ids.contains(&"d1"), "capital C must not match lowercase");
+}
+
+#[test]
+fn content_regex_ignore_case_matches_diacritic_class() {
+    // Simulate the plugin's diacritic-regex output: a character class pattern
+    // that leaves consonants as lowercase literals. Paired with ignore_case
+    // we should match "Cafe" and "cafe-with-accent" and "CAFE-with-accent".
+    // Body text uses `\u{c9}` (capital E-acute) so we avoid non-ASCII literals
+    // per the repo's strict clippy config.
+    let doc = "\
+---
+title: Cafe Doc
+---
+
+```remargin
+---
+id: m1
+author: alice
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [bob]
+checksum: sha256:m1
+---
+Visited CAF\u{c9} today.
+```
+
+```remargin
+---
+id: m2
+author: alice
+type: human
+ts: 2026-04-06T11:00:00-04:00
+to: [bob]
+checksum: sha256:m2
+---
+Nothing match-worthy here.
+```
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/d"))
+        .unwrap()
+        .with_file(Path::new("/d/x.md"), doc.as_bytes())
+        .unwrap();
+
+    // Diacritic-class style pattern: consonants are lowercase literals,
+    // vowels are character classes covering common accents. `ignore_case`
+    // flips the lowercase consonants to match 'C' and 'F' too.
+    let pattern = "c[aA\u{e0}\u{c0}\u{e1}\u{c1}\u{e2}\u{c2}\u{e3}\u{c3}\u{e4}\u{c4}]f[eE\u{e8}\u{c8}\u{e9}\u{c9}\u{ea}\u{ca}\u{eb}\u{cb}]";
+    let filter = QueryFilter::default()
+        .with_content_regex(pattern, true)
+        .unwrap();
+
+    let results = query(&system, Path::new("/d"), &filter).unwrap();
+    let ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    assert_eq!(ids, vec!["m1"]);
+}
+
+#[test]
+fn content_regex_invalid_pattern_errors() {
+    // Unclosed character class — regex::RegexBuilder::build() should reject.
+    let result = QueryFilter::default().with_content_regex("[unclosed", false);
+    assert!(result.is_err(), "invalid regex must return Err, not panic");
+}
+
+#[test]
+fn content_regex_no_match_yields_empty_results() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter::default()
+        .with_content_regex("xyzzy-no-such-token", false)
+        .unwrap();
+
+    let results = query(&system, Path::new("/exp"), &filter).unwrap();
+    // When no comments match, the whole file is skipped.
+    assert!(results.is_empty());
+}
