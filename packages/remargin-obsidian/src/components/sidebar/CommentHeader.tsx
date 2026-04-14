@@ -3,7 +3,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { Comment } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
 import { authorLabel } from "@/lib/authorLabel";
-import { identityShort } from "@/lib/identity-hash";
 import { formatRelative } from "@/lib/relative-time";
 
 interface CommentHeaderProps {
@@ -16,7 +15,7 @@ interface CommentHeaderProps {
 }
 
 /**
- * Rich header for a comment card: avatar circle, identity shortcode, line
+ * Rich header for a comment card: avatar circle, comment-id badge, line
  * badge, username, optional online dot, right-aligned relative timestamp.
  */
 export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps) {
@@ -24,7 +23,6 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
   const initials = isAgent ? "AI" : "H";
   const avatarClass = isAgent ? "bg-purple-400 text-white" : "bg-blue-400 text-white";
 
-  const shortcode = identityShort(comment.author);
   const tsFull = formatFullTime(comment.ts);
   const { resolveDisplayName } = useParticipants();
   const { label: authorDisplay, title: authorTitle } = authorLabel(
@@ -41,9 +39,9 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
         >
           {initials}
         </div>
-        {shortcode && (
-          <Badge className="px-1 py-0 rounded-sm bg-bg-hover text-text-muted border-transparent font-mono text-[9px] font-semibold leading-none">
-            {shortcode}
+        {comment.id && (
+          <Badge className="px-1 py-0 rounded-sm bg-slate-500 text-white font-mono text-[9px] font-semibold leading-none">
+            {comment.id}
           </Badge>
         )}
         {comment.line > 0 && (
