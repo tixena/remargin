@@ -106,7 +106,12 @@ fn allowlist_is_visible_md() {
 
 #[test]
 fn allowlist_is_visible_rs() {
-    assert!(!allowlist::is_visible(Path::new("main.rs"), false));
+    assert!(allowlist::is_visible(Path::new("main.rs"), false));
+}
+
+#[test]
+fn allowlist_is_text_rs() {
+    assert!(allowlist::is_text(Path::new("main.rs")));
 }
 
 #[test]
@@ -122,6 +127,73 @@ fn allowlist_is_text_pen_uppercase() {
 #[test]
 fn allowlist_is_text_png_still_false() {
     assert!(!allowlist::is_text(Path::new("image.png")));
+}
+
+#[test]
+fn allowlist_source_code_extensions_visible_and_text() {
+    // One representative extension per added language family.
+    let cases = &[
+        "main.rs",
+        "main.ts",
+        "main.tsx",
+        "main.mts",
+        "main.cts",
+        "main.js",
+        "main.mjs",
+        "main.cjs",
+        "main.jsx",
+        "app.py",
+        "App.java",
+        "Main.kt",
+        "Program.cs",
+        "node.cpp",
+        "vec.cc",
+        "node.hpp",
+        "header.h",
+        "main.go",
+        "app.rb",
+        "index.php",
+        "App.swift",
+        "Main.scala",
+        "deploy.sh",
+        "activate.ps1",
+        "schema.sql",
+        "config.yaml",
+        "Cargo.toml",
+        "index.html",
+        "style.css",
+    ];
+    for path in cases {
+        assert!(
+            allowlist::is_visible(Path::new(path), false),
+            "expected {path} to be visible"
+        );
+        assert!(
+            allowlist::is_text(Path::new(path)),
+            "expected {path} to be text"
+        );
+    }
+}
+
+#[test]
+fn allowlist_source_code_case_insensitive() {
+    assert!(allowlist::is_visible(Path::new("Main.RS"), false));
+    assert!(allowlist::is_text(Path::new("Main.RS")));
+    assert!(allowlist::is_visible(Path::new("APP.PY"), false));
+    assert!(allowlist::is_text(Path::new("APP.PY")));
+}
+
+#[test]
+fn allowlist_unsupported_extension_not_visible() {
+    assert!(!allowlist::is_visible(Path::new("foo.exe"), false));
+}
+
+#[test]
+fn allowlist_dotfile_still_hidden_even_for_env() {
+    // Named env/conf files are visible, but dotfiles are still hidden.
+    assert!(!allowlist::is_visible(Path::new(".env"), false));
+    assert!(allowlist::is_visible(Path::new("app.env"), false));
+    assert!(allowlist::is_visible(Path::new("server.conf"), false));
 }
 
 #[test]
@@ -240,13 +312,13 @@ fn get_disallowed_extension() {
     let system = MockSystem::new()
         .with_current_dir("/project")
         .unwrap()
-        .with_file(Path::new("/project/main.rs"), b"fn main() {}")
+        .with_file(Path::new("/project/app.exe"), b"binary")
         .unwrap();
 
     let result = document::get(
         &system,
         Path::new("/project"),
-        Path::new("main.rs"),
+        Path::new("app.exe"),
         None,
         false,
         false,
@@ -584,8 +656,8 @@ fn write_create_rejects_disallowed_extension() {
     let result = document::write(
         &system,
         Path::new("/project"),
-        Path::new("script.rs"),
-        "fn main() {}",
+        Path::new("app.exe"),
+        "binary",
         &config,
         WriteOptions {
             create: true,

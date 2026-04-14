@@ -10,9 +10,25 @@ use os_shim::System;
 
 /// File extensions visible through remargin.
 const ALLOWED_EXTENSIONS: &[&str] = &[
-    // Markdown/text/data
-    "md", "txt", "csv", "xml", "json", // Design
-    "pen",  // Images
+    // Prose / data
+    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf",
+    // Design
+    "pen", // Web markup / styles
+    "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
+    // JavaScript / TypeScript
+    "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", // Python
+    "py", "pyi", "pyw", // Rust
+    "rs",  // Go
+    "go",  // .NET
+    "cs", "csx", "fs", "fsx", "vb", // JVM
+    "java", "kt", "kts", "scala", "sc", "groovy", // C / C++
+    "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", // Ruby / PHP
+    "rb", "php", "phtml", // Swift / Objective-C
+    "swift", "m", "mm", // Other mainstream languages
+    "dart", "lua", "r", "pl", "pm", "jl", "hs", "ex", "exs", "clj", "cljs", "cljc", "edn", "ml",
+    "mli", "erl", "hrl", "zig", "nim", // Shell / scripting
+    "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1", // SQL
+    "sql",  // Images
     "png", "jpg", "jpeg", "gif", "svg", "webp", // Documents
     "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", // Audio
     "mp3", "wav", "ogg", "flac", "m4a", // Video
@@ -20,7 +36,28 @@ const ALLOWED_EXTENSIONS: &[&str] = &[
 ];
 
 /// Extensions that are text-based (support `--lines`).
-const TEXT_EXTENSIONS: &[&str] = &["md", "txt", "csv", "xml", "json", "pen"];
+/// Every non-binary entry in `ALLOWED_EXTENSIONS` also appears here.
+const TEXT_EXTENSIONS: &[&str] = &[
+    // Prose / data
+    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf",
+    // Design
+    "pen", // Web markup / styles
+    "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
+    // JavaScript / TypeScript
+    "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", // Python
+    "py", "pyi", "pyw", // Rust
+    "rs",  // Go
+    "go",  // .NET
+    "cs", "csx", "fs", "fsx", "vb", // JVM
+    "java", "kt", "kts", "scala", "sc", "groovy", // C / C++
+    "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", // Ruby / PHP
+    "rb", "php", "phtml", // Swift / Objective-C
+    "swift", "m", "mm", // Other mainstream languages
+    "dart", "lua", "r", "pl", "pm", "jl", "hs", "ex", "exs", "clj", "cljs", "cljc", "edn", "ml",
+    "mli", "erl", "hrl", "zig", "nim", // Shell / scripting
+    "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1", // SQL
+    "sql",
+];
 
 /// Check if a path is visible (allowed extension, not a dotfile).
 /// Directories are always visible (for navigation).
