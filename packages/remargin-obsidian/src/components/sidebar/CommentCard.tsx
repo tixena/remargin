@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import type { Comment } from "@/generated";
+import { useParticipants } from "@/hooks/useParticipants";
+import { authorLabel } from "@/lib/authorLabel";
 
 interface CommentCardProps {
   comment: Comment;
@@ -66,6 +68,7 @@ export function CommentCard({
 }: CommentCardProps) {
   const isClickable = comment.line > 0 && !!onGoToLine;
   const ackAuthors: string[] = (comment.ack ?? []).map((a) => a.author);
+  const { resolveDisplayName } = useParticipants();
   // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
   // back to the parent comment's author for replies that did not set `to`.
   // Root comments with neither stay bare (no chip).
@@ -90,15 +93,19 @@ export function CommentCard({
     >
       {toTargets.length > 0 && (
         <div className="flex items-center gap-1 flex-wrap">
-          {toTargets.map((identity) => (
-            <span
-              key={identity}
-              className="inline-flex items-center gap-1 rounded-[3px] bg-bg-hover px-1.5 py-0.5 font-mono text-[9px] leading-none"
-            >
-              <span className="text-text-faint">to:</span>
-              <span className="text-accent font-semibold">{identity}</span>
-            </span>
-          ))}
+          {toTargets.map((identity) => {
+            const { label, title } = authorLabel(identity, resolveDisplayName);
+            return (
+              <span
+                key={identity}
+                className="inline-flex items-center gap-1 rounded-[3px] bg-bg-hover px-1.5 py-0.5 font-mono text-[9px] leading-none"
+                title={title}
+              >
+                <span className="text-text-faint">to:</span>
+                <span className="text-accent font-semibold">{label}</span>
+              </span>
+            );
+          })}
         </div>
       )}
 

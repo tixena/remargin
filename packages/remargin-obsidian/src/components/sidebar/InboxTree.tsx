@@ -3,6 +3,8 @@ import { useState } from "react";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
 import type { ExpandedComment } from "@/generated";
+import { useParticipants } from "@/hooks/useParticipants";
+import { authorLabel } from "@/lib/authorLabel";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
 
 interface InboxItem {
@@ -40,6 +42,11 @@ function formatRelativeTime(ts?: string): string {
 }
 
 function CommentLeaf({ item, depth, onOpenAtLine, onAck }: CommentLeafProps) {
+  const { resolveDisplayName } = useParticipants();
+  const { label: authorDisplay, title: authorTitle } = authorLabel(
+    item.comment.author,
+    resolveDisplayName
+  );
   return (
     <div
       className="flex flex-col gap-1 py-2 border-b border-bg-border hover:bg-bg-hover cursor-pointer"
@@ -65,8 +72,8 @@ function CommentLeaf({ item, depth, onOpenAtLine, onAck }: CommentLeafProps) {
           {item.comment.line > 0 && (
             <span className="text-[9px] text-text-faint font-mono">L{item.comment.line}</span>
           )}
-          <span className="text-xs font-medium text-text-normal truncate">
-            {item.comment.author}
+          <span className="text-xs font-medium text-text-normal truncate" title={authorTitle}>
+            {authorDisplay}
           </span>
         </div>
         <div className="flex items-center gap-1">

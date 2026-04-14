@@ -1,4 +1,5 @@
 import { Check, CheckCheck } from "lucide-react";
+import { useParticipants } from "@/hooks/useParticipants";
 import { ackStateFor } from "@/lib/ack-state";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,14 @@ export function AckToggle({ ack, me, onToggle, disabled }: AckToggleProps) {
   const Icon = state === "me-acked" ? CheckCheck : Check;
   const label = state === "unacked" ? "unacked" : "acked";
   const count = ack.length;
+  const { resolveDisplayName } = useParticipants();
+
+  // Base action-describing label ("click to …") plus the roster of
+  // people who have already acked, using display names where available.
+  const action = state === "me-acked" ? "Remove my ack" : "Ack this comment";
+  const rosterLabel =
+    count === 0 ? "" : ` — acked by ${ack.map((a) => resolveDisplayName(a)).join(", ")}`;
+  const tooltip = `${action}${rosterLabel}`;
 
   return (
     <button
@@ -45,8 +54,8 @@ export function AckToggle({ ack, me, onToggle, disabled }: AckToggleProps) {
         e.stopPropagation();
         onToggle(state === "me-acked");
       }}
-      aria-label={state === "me-acked" ? "Remove my ack" : "Ack this comment"}
-      title={state === "me-acked" ? "Remove my ack" : "Ack this comment"}
+      aria-label={tooltip}
+      title={tooltip}
       disabled={disabled}
     >
       <Icon className="w-2.5 h-2.5" />

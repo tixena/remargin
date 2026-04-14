@@ -1,3 +1,4 @@
+import { useParticipants } from "@/hooks/useParticipants";
 import { cn } from "@/lib/utils";
 
 export interface ReactionPillsProps {
@@ -22,6 +23,7 @@ export interface ReactionPillsProps {
  * an accent-colored background so "mine vs theirs" is visible at a glance.
  */
 export function ReactionPills({ reactions, me, onToggle }: ReactionPillsProps) {
+  const { resolveDisplayName } = useParticipants();
   const entries: Array<[string, string[]]> = [];
   for (const [emoji, authors] of Object.entries(reactions)) {
     if (authors && authors.length > 0) entries.push([emoji, authors]);
@@ -32,6 +34,7 @@ export function ReactionPills({ reactions, me, onToggle }: ReactionPillsProps) {
     <>
       {entries.map(([emoji, authors]) => {
         const mine = !!me && authors.includes(me);
+        const tooltip = authors.map((a) => resolveDisplayName(a)).join(", ");
         return (
           <button
             type="button"
@@ -46,7 +49,7 @@ export function ReactionPills({ reactions, me, onToggle }: ReactionPillsProps) {
               e.stopPropagation();
               onToggle(emoji, mine);
             }}
-            title={authors.join(", ")}
+            title={tooltip}
             aria-label={`${emoji} ${authors.length}${mine ? " (click to remove)" : ""}`}
           >
             <span className="text-[11px]">{emoji}</span>

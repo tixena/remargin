@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Comment } from "@/generated";
+import { useParticipants } from "@/hooks/useParticipants";
+import { authorLabel } from "@/lib/authorLabel";
 import { identityShort } from "@/lib/identity-hash";
 import { formatRelative } from "@/lib/relative-time";
 
@@ -24,6 +26,11 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
 
   const shortcode = identityShort(comment.author);
   const tsFull = formatFullTime(comment.ts);
+  const { resolveDisplayName } = useParticipants();
+  const { label: authorDisplay, title: authorTitle } = authorLabel(
+    comment.author,
+    resolveDisplayName
+  );
 
   return (
     <div className="flex items-center justify-between gap-2 w-full">
@@ -47,7 +54,9 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
             L{comment.line}
           </Badge>
         )}
-        <span className="text-xs font-semibold text-text-normal truncate">{comment.author}</span>
+        <span className="text-xs font-semibold text-text-normal truncate" title={authorTitle}>
+          {authorDisplay}
+        </span>
         {!isAgent && isOnline && (
           <span
             className="inline-block h-1.5 w-1.5 rounded-full bg-[#22C55E] shrink-0"

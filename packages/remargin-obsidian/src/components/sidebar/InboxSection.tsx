@@ -14,6 +14,8 @@ import {
 import { Input } from "@/components/ui/input";
 import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
+import { useParticipants } from "@/hooks/useParticipants";
+import { authorLabel } from "@/lib/authorLabel";
 import type { ViewMode } from "@/types";
 
 /**
@@ -250,62 +252,89 @@ export function InboxSection({
         ) : (
           <div className="flex flex-col">
             {items.map((item) => (
-              <div
+              <InboxFlatRow
                 key={`${item.file}:${item.comment.id}`}
-                className="flex flex-col gap-1 px-4 py-2 border-b border-bg-border hover:bg-bg-hover cursor-pointer min-w-0 overflow-hidden"
-                onClick={() => onOpenAtLine?.(item.file, item.comment.line)}
-              >
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <Badge
-                      className={`px-1 py-0 text-[9px] font-semibold shrink-0 ${
-                        item.comment.author_type === "agent"
-                          ? "bg-purple-400 text-white"
-                          : "bg-blue-400 text-white"
-                      }`}
-                    >
-                      {item.comment.author_type === "agent" ? "AI" : "H"}
-                    </Badge>
-                    {item.comment.id && (
-                      <Badge className="px-1 py-0 text-[9px] font-mono font-semibold bg-slate-500 text-white shrink-0">
-                        {item.comment.id}
-                      </Badge>
-                    )}
-                    {item.comment.line > 0 && (
-                      <span className="text-[9px] text-text-faint font-mono shrink-0">
-                        L{item.comment.line}
-                      </span>
-                    )}
-                    <span className="text-xs font-medium text-text-normal truncate min-w-0">
-                      {item.comment.author}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Clock className="w-3 h-3 text-text-faint" />
-                    <span className="text-[10px] text-text-faint whitespace-nowrap">
-                      {formatRelativeTime(item.comment.ts)}
-                    </span>
-                  </div>
-                </div>
-                <div className="line-clamp-2 overflow-hidden min-w-0">
-                  <MarkdownContent
-                    content={item.comment.content ?? ""}
-                    sourcePath={item.file}
-                    className="min-w-0"
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                  <div className="flex items-center gap-1 min-w-0 flex-1">
-                    <FileText className="w-3 h-3 text-text-faint shrink-0" />
-                    <span className="font-mono text-[10px] text-text-faint truncate min-w-0">
-                      {item.file}
-                    </span>
-                  </div>
-                </div>
-              </div>
+                item={item}
+                onOpenAtLine={onOpenAtLine}
+              />
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface InboxFlatRowProps {
+  item: InboxItem;
+  onOpenAtLine?: (filePath: string, line?: number) => void;
+}
+
+/**
+ * Single row in the inbox's flat (non-tree) view. Extracted as its own
+ * component so it can call `useParticipants` at the row level — hooks
+ * cannot run inside a `.map` callback.
+ */
+function InboxFlatRow({ item, onOpenAtLine }: InboxFlatRowProps) {
+  const { resolveDisplayName } = useParticipants();
+  const { label: authorDisplay, title: authorTitle } = authorLabel(
+    item.comment.author,
+    resolveDisplayName
+  );
+  return (
+    <div
+      className="flex flex-col gap-1 px-4 py-2 border-b border-bg-border hover:bg-bg-hover cursor-pointer min-w-0 overflow-hidden"
+      onClick={() => onOpenAtLine?.(item.file, item.comment.line)}
+    >
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <Badge
+            className={`px-1 py-0 text-[9px] font-semibold shrink-0 ${
+              item.comment.author_type === "agent"
+                ? "bg-purple-400 text-white"
+                : "bg-blue-400 text-white"
+            }`}
+          >
+            {item.comment.author_type === "agent" ? "AI" : "H"}
+          </Badge>
+          {item.comment.id && (
+            <Badge className="px-1 py-0 text-[9px] font-mono font-semibold bg-slate-500 text-white shrink-0">
+              {item.comment.id}
+            </Badge>
+          )}
+          {item.comment.line > 0 && (
+            <span className="text-[9px] text-text-faint font-mono shrink-0">
+              L{item.comment.line}
+            </span>
+          )}
+          <span
+            className="text-xs font-medium text-text-normal truncate min-w-0"
+            title={authorTitle}
+          >
+            {authorDisplay}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Clock className="w-3 h-3 text-text-faint" />
+          <span className="text-[10px] text-text-faint whitespace-nowrap">
+            {formatRelativeTime(item.comment.ts)}
+          </span>
+        </div>
+      </div>
+      <div className="line-clamp-2 overflow-hidden min-w-0">
+        <MarkdownContent
+          content={item.comment.content ?? ""}
+          sourcePath={item.file}
+          className="min-w-0"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="flex items-center gap-1 min-w-0 flex-1">
+          <FileText className="w-3 h-3 text-text-faint shrink-0" />
+          <span className="font-mono text-[10px] text-text-faint truncate min-w-0">
+            {item.file}
+          </span>
+        </div>
       </div>
     </div>
   );
