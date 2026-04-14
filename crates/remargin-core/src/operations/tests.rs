@@ -1395,7 +1395,9 @@ fn reply_auto_populates_to() {
 }
 
 #[test]
-fn reply_explicit_to_not_overridden() {
+fn reply_explicit_to_prepends_parent_author() {
+    // Updated invariant (rem-kja): the parent author is always first
+    // in `to:`; explicit `--to` entries are appended after it.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
     let position = InsertPosition::Append;
@@ -1421,9 +1423,112 @@ fn reply_explicit_to_not_overridden() {
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(
         reply.to,
-        vec![String::from("bob")],
-        "explicit to should not be overridden"
+        vec![String::from("eduardo"), String::from("bob")],
+        "parent author (eduardo) should be first, explicit bob appended",
     );
+}
+
+#[test]
+fn reply_dedupes_parent_when_caller_includes_it() {
+    // If the caller explicitly includes the parent author in `--to`,
+    // it should be deduped (not doubled), with the parent still first
+    // and other recipients preserved in input order.
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Reply with parent re-listed in to.",
+            position: &position,
+            reply_to: Some("abc"),
+            sandbox: false,
+            to: &[String::from("eduardo"), String::from("bob")],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&new_id).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("eduardo"), String::from("bob")],
+        "parent appears once, bob preserved in input order",
+    );
+}
+
+#[test]
+fn reply_with_multiple_extras_prepends_parent() {
+    // Parent first, then all caller-supplied recipients in input order.
+    let system = system_with_doc(&doc_with_thread());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    // Reply to "child1" (authored by "alice") with extras [bob, carol].
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Reply with multiple extras.",
+            position: &position,
+            reply_to: Some("child1"),
+            sandbox: false,
+            to: &[String::from("bob"), String::from("carol")],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let reply = doc.find_comment(&new_id).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![
+            String::from("alice"),
+            String::from("bob"),
+            String::from("carol"),
+        ],
+        "parent alice first, then bob then carol in input order",
+    );
+}
+
+#[test]
+fn root_comment_preserves_explicit_to() {
+    // When there's no `reply_to`, `effective_to` is just `params.to`
+    // (no parent to prepend).
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "Root with to.",
+            position: &position,
+            reply_to: None,
+            sandbox: false,
+            to: &[String::from("bob")],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment(&new_id).unwrap();
+    assert_eq!(cm.to, vec![String::from("bob")]);
 }
 
 #[test]

@@ -1636,3 +1636,45 @@ fn mcp_write_binary_rejected_for_md() {
 
     assert!(is_tool_error(&response));
 }
+
+#[test]
+fn mcp_reply_prepends_parent_author_to_list() {
+    // Parity test for rem-kja: the MCP `comment` tool inherits the
+    // "parent author always first in `to:`" invariant from operations.
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // Reply to `aaa` (authored by `eduardo`) with explicit to=[bob].
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "MCP reply with extra recipient.",
+                    "reply_to": "aaa",
+                    "to": ["bob"]
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let new_id = result["id"].as_str().unwrap();
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let reply = doc.find_comment(new_id).unwrap();
+    assert_eq!(
+        reply.to,
+        vec![String::from("eduardo"), String::from("bob")],
+        "MCP comment handler should prepend parent author to explicit to",
+    );
+}

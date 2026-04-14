@@ -109,15 +109,26 @@ pub fn create_comment(
     let resolved_attachments = copy_attachments(system, path, config, params.attachments)
         .context("copying attachments")?;
 
-    // Auto-populate `to` from the parent comment's author when replying
-    // without an explicit recipient list.
-    let effective_to: Vec<String> = if params.to.is_empty() {
-        params
+    // Reply invariant: the parent's author is always first in `to:`.
+    // Additional recipients passed by the caller are appended in input
+    // order, with duplicates (including duplicates of the parent author)
+    // removed. Root comments (no `reply_to`) use `params.to` verbatim.
+    let effective_to: Vec<String> = {
+        let parent_author = params
             .reply_to
             .and_then(|pid| doc.find_comment(pid))
-            .map_or_else(Vec::new, |parent| vec![parent.author.clone()])
-    } else {
-        params.to.to_vec()
+            .map(|parent| parent.author.clone());
+
+        let mut result: Vec<String> = Vec::new();
+        if let Some(author) = parent_author {
+            result.push(author);
+        }
+        for recipient in params.to {
+            if !result.contains(recipient) {
+                result.push(recipient.clone());
+            }
+        }
+        result
     };
 
     let now = Utc::now().fixed_offset();
