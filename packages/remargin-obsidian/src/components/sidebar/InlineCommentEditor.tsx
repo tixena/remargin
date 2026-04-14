@@ -1,6 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import { Send, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RecipientPicker } from "@/components/sidebar/RecipientPicker";
 import { Button } from "@/components/ui/button";
 import { createCommentEditor } from "@/editor/commentEditor";
 import { useBackend } from "@/hooks/useBackend";
@@ -46,6 +47,7 @@ export function InlineCommentEditor({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
+  const [to, setTo] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -61,6 +63,7 @@ export function InlineCommentEditor({
       await backend.comment(file, content, {
         afterLine,
         sandbox: true,
+        to,
       });
       onSubmitted(afterLine);
     } catch (err) {
@@ -68,7 +71,7 @@ export function InlineCommentEditor({
     } finally {
       setSubmitting(false);
     }
-  }, [backend, file, afterLine, submitting, onSubmitted]);
+  }, [backend, file, afterLine, submitting, onSubmitted, to]);
 
   // Keep refs in sync so the CM6 keymap closures always call the
   // latest versions of handleSubmit/onClose.
@@ -110,6 +113,7 @@ export function InlineCommentEditor({
           <X className="w-3 h-3" />
         </Button>
       </div>
+      <RecipientPicker selected={to} onChange={setTo} />
       <div ref={editorRef} />
       {error && (
         <div className="text-[10px] text-red-400 font-mono whitespace-pre-wrap break-words">
