@@ -1672,6 +1672,55 @@ fn cmd_react(
     )
 }
 
+/// Render a single registry participant as a JSON object for
+/// `remargin registry show --json`. `display_name` always appears;
+/// when absent in the registry it falls back to the participant id
+/// so clients never have to handle a null value.
+fn registry_participant_json(
+    name: &str,
+    participant: &config::registry::RegistryParticipant,
+) -> Value {
+    let status = match participant.status {
+        config::registry::RegistryParticipantStatus::Active => "active",
+        config::registry::RegistryParticipantStatus::Revoked => "revoked",
+        _ => "unknown",
+    };
+    let display_name = participant
+        .display_name
+        .clone()
+        .unwrap_or_else(|| String::from(name));
+    json!({
+        "name": name,
+        "display_name": display_name,
+        "type": participant.author_type,
+        "status": status,
+        "pubkeys": participant.pubkeys.len(),
+    })
+}
+
+/// Render a single registry participant as a one-line string for
+/// `remargin registry show`. When a display name is set, the prefix
+/// is `"Display Name" (id)`; otherwise it's the bare id.
+fn registry_participant_pretty(
+    name: &str,
+    participant: &config::registry::RegistryParticipant,
+) -> String {
+    let status = match participant.status {
+        config::registry::RegistryParticipantStatus::Active => "active",
+        config::registry::RegistryParticipantStatus::Revoked => "revoked",
+        _ => "unknown",
+    };
+    let prefix = participant.display_name.as_ref().map_or_else(
+        || String::from(name),
+        |display| format!("\"{display}\" ({name})"),
+    );
+    format!(
+        "{prefix} ({}) [{status}] {} key(s)",
+        participant.author_type,
+        participant.pubkeys.len(),
+    )
+}
+
 fn cmd_registry(
     system: &dyn System,
     cwd: &Path,
@@ -1686,33 +1735,12 @@ fn cmd_registry(
                 let participants: Vec<Value> = registry
                     .participants
                     .iter()
-                    .map(|(name, participant)| {
-                        let status = match participant.status {
-                            config::registry::RegistryParticipantStatus::Active => "active",
-                            config::registry::RegistryParticipantStatus::Revoked => "revoked",
-                            _ => "unknown",
-                        };
-                        json!({
-                            "name": name,
-                            "type": participant.author_type,
-                            "status": status,
-                            "pubkeys": participant.pubkeys.len(),
-                        })
-                    })
+                    .map(|(name, participant)| registry_participant_json(name, participant))
                     .collect();
                 print_output(true, &json!({ "participants": participants }))
             } else {
                 for (name, participant) in &registry.participants {
-                    let status = match participant.status {
-                        config::registry::RegistryParticipantStatus::Active => "active",
-                        config::registry::RegistryParticipantStatus::Revoked => "revoked",
-                        _ => "unknown",
-                    };
-                    out(&format!(
-                        "{name} ({}) [{status}] {} key(s)",
-                        participant.author_type,
-                        participant.pubkeys.len(),
-                    ))?;
+                    out(&registry_participant_pretty(name, participant))?;
                 }
                 Ok(())
             }
@@ -2174,8 +2202,11 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use os_shim::mock::MockSystem;
+    use remargin_core::config;
+    use remargin_core::config::registry::Registry;
+    use serde_json::json;
 
-    use super::resolve_comment_content;
+    use super::{registry_participant_json, registry_participant_pretty, resolve_comment_content};
 
     #[test]
     fn content_from_positional_arg() {
@@ -2235,6 +2266,109 @@ mod tests {
         assert!(
             msg.contains("reading comment body from"),
             "unexpected error: {msg}",
+        );
+    }
+
+    fn registry_with_yaml(yaml: &str) -> Registry {
+        let system = MockSystem::new()
+            .with_file(
+                Path::new("/project/.remargin-registry.yaml"),
+                yaml.as_bytes(),
+            )
+            .unwrap();
+        config::load_registry(&system, Path::new("/project"))
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn registry_json_includes_display_name_when_set() {
+        let registry = registry_with_yaml(
+            "\
+participants:
+  alice:
+    display_name: \"Alice Doe\"
+    type: human
+    status: active
+    pubkeys:
+      - \"ssh-ed25519 AAAA...\"
+",
+        );
+        let alice = &registry.participants["alice"];
+        let value = registry_participant_json("alice", alice);
+        assert_eq!(
+            value,
+            json!({
+                "name": "alice",
+                "display_name": "Alice Doe",
+                "type": "human",
+                "status": "active",
+                "pubkeys": 1_u64,
+            })
+        );
+    }
+
+    #[test]
+    fn registry_json_falls_back_to_name_when_display_name_absent() {
+        let registry = registry_with_yaml(
+            "\
+participants:
+  ci-bot:
+    type: agent
+    status: active
+    pubkeys: []
+",
+        );
+        let bot = &registry.participants["ci-bot"];
+        let value = registry_participant_json("ci-bot", bot);
+        assert_eq!(
+            value,
+            json!({
+                "name": "ci-bot",
+                "display_name": "ci-bot",
+                "type": "agent",
+                "status": "active",
+                "pubkeys": 0_u64,
+            })
+        );
+    }
+
+    #[test]
+    fn registry_pretty_with_display_name() {
+        let registry = registry_with_yaml(
+            "\
+participants:
+  alice:
+    display_name: \"Alice Doe\"
+    type: human
+    status: active
+    pubkeys:
+      - \"ssh-ed25519 AAAA...\"
+",
+        );
+        let alice = &registry.participants["alice"];
+        assert_eq!(
+            registry_participant_pretty("alice", alice),
+            "\"Alice Doe\" (alice) (human) [active] 1 key(s)",
+        );
+    }
+
+    #[test]
+    fn registry_pretty_without_display_name() {
+        let registry = registry_with_yaml(
+            "\
+participants:
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - \"ssh-ed25519 AAAA...\"
+",
+        );
+        let alice = &registry.participants["alice"];
+        assert_eq!(
+            registry_participant_pretty("alice", alice),
+            "alice (human) [active] 1 key(s)",
         );
     }
 }

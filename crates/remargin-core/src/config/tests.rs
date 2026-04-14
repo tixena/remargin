@@ -621,3 +621,44 @@ fn agent_override_rejects_inherited_human_identity() {
         result.as_ref().ok().map(|r| r.author_type.clone()),
     );
 }
+
+#[test]
+fn registry_participant_display_name_mixed() {
+    // Mixed registry: some participants set `display_name`, some don't.
+    // Both shapes must parse, and the struct must carry `Some` / `None`
+    // respectively. Downstream JSON output (in the CLI) substitutes
+    // the participant id when `None`.
+    let yaml = "\
+participants:
+  alice:
+    display_name: \"Alice Doe\"
+    type: human
+    status: active
+    pubkeys: []
+  bob:
+    type: agent
+    status: active
+    pubkeys: []
+";
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin-registry.yaml"),
+            yaml.as_bytes(),
+        )
+        .unwrap();
+
+    let registry = load_registry(&system, Path::new("/project"))
+        .unwrap()
+        .unwrap();
+
+    let alice = &registry.participants["alice"];
+    assert_eq!(alice.display_name.as_deref(), Some("Alice Doe"));
+    assert_eq!(alice.status, RegistryParticipantStatus::Active);
+
+    let bob = &registry.participants["bob"];
+    assert!(
+        bob.display_name.is_none(),
+        "bob has no display_name, expected None; got {:?}",
+        bob.display_name,
+    );
+}
