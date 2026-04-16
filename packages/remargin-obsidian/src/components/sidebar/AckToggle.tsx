@@ -11,56 +11,43 @@ export interface AckToggleProps {
   ack: readonly string[];
   /** Current identity name; used to pick between me-acked and others-acked. */
   me?: string | null;
-  /**
-   * Called when the user clicks the pill. `remove` is true when the click
-   * removes the current identity's ack (state was `me-acked`).
-   */
-  onToggle: (remove: boolean) => void;
-  /** Disable the button while a request is in flight. */
-  disabled?: boolean;
 }
 
 /**
- * Always-visible Ack pill with three visual states (see ackStateFor). The
- * control is a single toggle: clicking it adds the current identity's ack
- * when in `unacked`/`others-acked` and removes it when in `me-acked`.
+ * Non-interactive Ack label with three visual states (see ackStateFor).
+ *
+ * Originally a click-to-toggle button, this was downgraded to a passive
+ * label after repeated mis-clicks accidentally removed acks. The Unack
+ * action now lives in the comment card's ellipsis menu (see CommentCard),
+ * where intent is explicit.
  */
-export function AckToggle({ ack, me, onToggle, disabled }: AckToggleProps) {
+export function AckToggle({ ack, me }: AckToggleProps) {
   const state = ackStateFor(ack, me);
   const Icon = state === "me-acked" ? CheckCheck : Check;
   const label = state === "unacked" ? "unacked" : "acked";
   const count = ack.length;
   const { resolveDisplayName } = useParticipants();
 
-  // Base action-describing label ("click to …") plus the roster of
-  // people who have already acked, using display names where available.
-  const action = state === "me-acked" ? "Remove my ack" : "Ack this comment";
+  // The roster of people who have acked, used as a tooltip so hovering the
+  // label still surfaces the same information the old button exposed.
   const rosterLabel =
-    count === 0 ? "" : ` — acked by ${ack.map((a) => resolveDisplayName(a)).join(", ")}`;
-  const tooltip = `${action}${rosterLabel}`;
+    count === 0 ? "" : `acked by ${ack.map((a) => resolveDisplayName(a)).join(", ")}`;
+  const tooltip = rosterLabel || "No acknowledgments yet";
 
   return (
-    <button
-      type="button"
+    <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[10px] leading-none font-semibold transition-colors",
+        "inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[10px] leading-none font-semibold",
         state === "me-acked" && "bg-green-500/20 text-green-500 border border-green-500/40",
         state === "others-acked" && "bg-bg-hover text-text-muted border border-bg-border",
-        state === "unacked" &&
-          "bg-transparent text-text-muted border border-bg-border hover:bg-bg-hover",
-        disabled && "opacity-50 pointer-events-none"
+        state === "unacked" && "bg-transparent text-text-muted border border-bg-border"
       )}
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle(state === "me-acked");
-      }}
       aria-label={tooltip}
       title={tooltip}
-      disabled={disabled}
     >
       <Icon className="w-2.5 h-2.5" />
       <span>{label}</span>
       {count > 0 && <span className="font-mono text-[9px] font-semibold">{count}</span>}
-    </button>
+    </span>
   );
 }

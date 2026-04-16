@@ -8,11 +8,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import type { Comment } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
+import { ackStateFor } from "@/lib/ack-state";
 import { authorLabel } from "@/lib/authorLabel";
 
 interface CommentCardProps {
@@ -29,9 +31,11 @@ interface CommentCardProps {
    */
   parentAuthor?: string;
   /**
-   * Toggle the current identity's ack on this comment. `remove` is true
-   * when the click should strip the identity's existing ack; false adds
-   * a new one.
+   * Toggle the current identity's ack on this comment. The threaded view
+   * only exposes the removal path (via the ellipsis-menu `Unack` item), so
+   * this callback is always invoked with `remove: true` from here. The
+   * parent still accepts a full toggle so other callers (e.g. the inbox)
+   * can share the same handler.
    */
   onAck: (id: string, remove: boolean) => void;
   onDelete: (id: string) => void;
@@ -69,6 +73,9 @@ export function CommentCard({
   const isClickable = comment.line > 0 && !!onGoToLine;
   const ackAuthors: string[] = (comment.ack ?? []).map((a) => a.author);
   const { resolveDisplayName } = useParticipants();
+  // Only offer Unack in the ellipsis menu when the viewer is actually in
+  // the ack roster — otherwise there is nothing for them to remove.
+  const viewerAcked = ackStateFor(ackAuthors, me) === "me-acked";
   // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
   // back to the parent comment's author for replies that did not set `to`.
   // Root comments with neither stay bare (no chip).
@@ -117,16 +124,7 @@ export function CommentCard({
 
       <div className="flex items-center justify-between gap-2 w-full">
         <div className="flex items-center gap-1.5 flex-wrap">
-          {comment.id && (
-            <AckToggle
-              ack={ackAuthors}
-              me={me}
-              onToggle={(remove) => {
-                if (!remove) onGoToLine?.(comment.line);
-                if (comment.id) onAck(comment.id, remove);
-              }}
-            />
-          )}
+          {comment.id && <AckToggle ack={ackAuthors} me={me} />}
           {comment.reactions && (
             <ReactionPills
               reactions={comment.reactions}
@@ -172,6 +170,20 @@ export function CommentCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {viewerAcked && (
+                <>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (comment.id) onAck(comment.id, true);
+                    }}
+                  >
+                    <ObsidianIcon icon="check" size={12} className="mr-1.5" />
+                    Unack
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem
                 className="text-red-400"
                 onClick={(e) => {
