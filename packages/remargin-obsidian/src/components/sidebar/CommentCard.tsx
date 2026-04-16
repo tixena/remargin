@@ -1,3 +1,4 @@
+import { AckButton } from "@/components/sidebar/AckButton";
 import { AckToggle } from "@/components/sidebar/AckToggle";
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
 import { EmojiPicker } from "@/components/sidebar/EmojiPicker";
@@ -31,11 +32,10 @@ interface CommentCardProps {
    */
   parentAuthor?: string;
   /**
-   * Toggle the current identity's ack on this comment. The threaded view
-   * only exposes the removal path (via the ellipsis-menu `Unack` item), so
-   * this callback is always invoked with `remove: true` from here. The
-   * parent still accepts a full toggle so other callers (e.g. the inbox)
-   * can share the same handler.
+   * Toggle the current identity's ack on this comment. Invoked from two
+   * places on the card: the inline AckButton (when the viewer hasn't
+   * acked yet, `remove: false`) and the ellipsis-menu `Unack` item (when
+   * the viewer is already in the ack roster, `remove: true`).
    */
   onAck: (id: string, remove: boolean) => void;
   onDelete: (id: string) => void;
@@ -73,8 +73,10 @@ export function CommentCard({
   const isClickable = comment.line > 0 && !!onGoToLine;
   const ackAuthors: string[] = (comment.ack ?? []).map((a) => a.author);
   const { resolveDisplayName } = useParticipants();
-  // Only offer Unack in the ellipsis menu when the viewer is actually in
-  // the ack roster — otherwise there is nothing for them to remove.
+  // Drives two conditional branches: show the non-interactive AckToggle
+  // label (me-acked) vs the interactive AckButton (unacked/others-acked),
+  // and gate the ellipsis-menu `Unack` item on whether the viewer has an
+  // ack to remove in the first place.
   const viewerAcked = ackStateFor(ackAuthors, me) === "me-acked";
   // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
   // back to the parent comment's author for replies that did not set `to`.
@@ -124,7 +126,18 @@ export function CommentCard({
 
       <div className="flex items-center justify-between gap-2 w-full">
         <div className="flex items-center gap-1.5 flex-wrap">
-          {comment.id && <AckToggle ack={ackAuthors} me={me} />}
+          {comment.id &&
+            (viewerAcked ? (
+              <AckToggle ack={ackAuthors} me={me} />
+            ) : (
+              <AckButton
+                ack={ackAuthors}
+                me={me}
+                onAck={() => {
+                  if (comment.id) onAck(comment.id, false);
+                }}
+              />
+            ))}
           {comment.reactions && (
             <ReactionPills
               reactions={comment.reactions}
