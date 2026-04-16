@@ -104,6 +104,8 @@ The write tools (`comment`, `batch`, `edit`, `delete`, `ack`, `react`) accept op
 - `identity` (string) — override the author name
 - `author_type` (string) — override the author type: `"human"` or `"agent"`
 
+**Always identify yourself:** on every write operation, pass your own agent name as `identity` and `"agent"` as `author_type`. For example, if you are Gemini, pass `identity="gemini" author_type="agent"`. If you are Claude, pass `identity="claude" author_type="agent"`. This ensures comments are attributed to the correct agent.
+
 #### Folder-wide ack
 
 When `ack` is called without a `file` parameter, it searches the directory tree (scoped by `path`, default `"."`) to find which document contains the comment ID. If the ID is found in exactly one file, it acks it there. If found in multiple files, it returns an error (ambiguous). If not found, it returns an error.

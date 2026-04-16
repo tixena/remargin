@@ -1,8 +1,8 @@
 //! Skill install, uninstall, and test operations.
 //!
-//! Manages the Claude Code skill file that teaches agents how to invoke
-//! remargin commands. The skill is embedded in the binary at compile time
-//! and extracted on install.
+//! Manages agent skill files that teach AI agents how to invoke remargin
+//! commands. The skill is embedded in the binary at compile time and extracted
+//! to the target agent's skill directory on install.
 
 #[cfg(test)]
 mod tests;
@@ -16,6 +16,26 @@ use os_shim::System;
 
 /// Skill files embedded at compile time from the `skill/` directory.
 static SKILL_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/skill");
+
+/// The AI agent to install the skill for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Agent {
+    /// Claude Code — installs to `.claude/skills/remargin/`.
+    Claude,
+    /// Gemini CLI — installs to `.gemini/skills/remargin/`.
+    Gemini,
+}
+
+impl Agent {
+    /// The skill subdirectory relative to the project root or home directory.
+    pub fn skill_subdir(self) -> &'static str {
+        match self {
+            Agent::Claude => ".claude/skills/remargin",
+            Agent::Gemini => ".gemini/skills/remargin",
+        }
+    }
+}
 
 /// Installation status of the skill.
 #[derive(Debug, PartialEq, Eq)]
@@ -31,16 +51,16 @@ pub enum SkillStatus {
 
 /// Install the skill by extracting embedded files.
 ///
-/// If `global` is true, installs to `~/.claude/skills/remargin/`.
-/// Otherwise installs to `./.claude/skills/remargin/`.
+/// If `global` is true, installs to `~/<agent-dir>/skills/remargin/`.
+/// Otherwise installs to `./<agent-dir>/skills/remargin/`.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The `HOME` env var is not set (for global install)
 /// - Directory creation or file writing fails
-pub fn install(system: &dyn System, global: bool) -> Result<PathBuf> {
-    let skill_path = resolve_skill_path(system, global)?;
+pub fn install(system: &dyn System, agent: Agent, global: bool) -> Result<PathBuf> {
+    let skill_path = resolve_skill_path(system, agent, global)?;
 
     system
         .create_dir_all(&skill_path)
@@ -62,8 +82,8 @@ pub fn install(system: &dyn System, global: bool) -> Result<PathBuf> {
 ///
 /// Returns an error if:
 /// - The `HOME` env var is not set (for global check)
-pub fn test_status(system: &dyn System, global: bool) -> Result<SkillStatus> {
-    let skill_path = resolve_skill_path(system, global)?;
+pub fn test_status(system: &dyn System, agent: Agent, global: bool) -> Result<SkillStatus> {
+    let skill_path = resolve_skill_path(system, agent, global)?;
 
     if !system.exists(&skill_path).unwrap_or(false) {
         return Ok(SkillStatus::NotInstalled);
@@ -94,8 +114,8 @@ pub fn test_status(system: &dyn System, global: bool) -> Result<SkillStatus> {
 /// Returns an error if:
 /// - The `HOME` env var is not set (for global uninstall)
 /// - The directory cannot be removed
-pub fn uninstall(system: &dyn System, global: bool) -> Result<()> {
-    let skill_path = resolve_skill_path(system, global)?;
+pub fn uninstall(system: &dyn System, agent: Agent, global: bool) -> Result<()> {
+    let skill_path = resolve_skill_path(system, agent, global)?;
 
     if !system.exists(&skill_path).unwrap_or(false) {
         bail!("skill is not installed at {}", skill_path.display());
@@ -109,14 +129,15 @@ pub fn uninstall(system: &dyn System, global: bool) -> Result<()> {
 }
 
 /// Resolve the skill installation path.
-fn resolve_skill_path(system: &dyn System, global: bool) -> Result<PathBuf> {
+fn resolve_skill_path(system: &dyn System, agent: Agent, global: bool) -> Result<PathBuf> {
+    let subdir = agent.skill_subdir();
     if global {
         let home = system
             .env_var("HOME")
             .map_err(|_err| anyhow::anyhow!("HOME environment variable not set"))?;
-        Ok(PathBuf::from(home).join(".claude/skills/remargin"))
+        Ok(PathBuf::from(home).join(subdir))
     } else {
         let cwd = system.current_dir().context("getting current directory")?;
-        Ok(cwd.join(".claude/skills/remargin"))
+        Ok(cwd.join(subdir))
     }
 }

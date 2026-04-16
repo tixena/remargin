@@ -363,7 +363,7 @@ enum Commands {
         #[arg(long, short = 'i')]
         ignore_case: bool,
     },
-    /// Manage the Claude Code skill.
+    /// Manage the agent skill.
     Skill {
         /// Subcommand: install, uninstall, test.
         #[command(subcommand)]
@@ -435,24 +435,51 @@ enum SandboxAction {
 /// Skill subcommands.
 #[derive(clap::Subcommand)]
 enum SkillAction {
-    /// Install the Claude Code skill.
+    /// Install the skill for an agent.
     Install {
-        /// Install globally to ~/.claude/skills/remargin/.
+        /// Agent to install for (claude, gemini).
+        #[arg(long)]
+        agent: AgentArg,
+        /// Install globally to ~/<agent-dir>/skills/remargin/.
         #[arg(long)]
         global: bool,
     },
     /// Check skill installation status.
     Test {
+        /// Agent to check (claude, gemini).
+        #[arg(long)]
+        agent: AgentArg,
         /// Check global installation.
         #[arg(long)]
         global: bool,
     },
     /// Uninstall the skill.
     Uninstall {
+        /// Agent to uninstall for (claude, gemini).
+        #[arg(long)]
+        agent: AgentArg,
         /// Uninstall from global location.
         #[arg(long)]
         global: bool,
     },
+}
+
+/// Agent target for skill installation.
+#[derive(Clone, clap::ValueEnum)]
+enum AgentArg {
+    /// Claude Code.
+    Claude,
+    /// Gemini CLI.
+    Gemini,
+}
+
+impl From<AgentArg> for skill::Agent {
+    fn from(a: AgentArg) -> Self {
+        match a {
+            AgentArg::Claude => skill::Agent::Claude,
+            AgentArg::Gemini => skill::Agent::Gemini,
+        }
+    }
 }
 
 /// MCP subcommands.
@@ -1981,8 +2008,8 @@ fn cmd_obsidian(
 
 fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Result<()> {
     match action {
-        SkillAction::Install { global } => {
-            let path = skill::install(system, *global)?;
+        SkillAction::Install { agent, global } => {
+            let path = skill::install(system, skill::Agent::from(agent.clone()), *global)?;
             if json_mode {
                 print_output(true, &json!({ "installed": path.display().to_string() }))
             } else {
@@ -1990,8 +2017,8 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
                 Ok(())
             }
         }
-        SkillAction::Test { global } => {
-            let status = skill::test_status(system, *global)?;
+        SkillAction::Test { agent, global } => {
+            let status = skill::test_status(system, skill::Agent::from(agent.clone()), *global)?;
             let status_str = match status {
                 skill::SkillStatus::NotInstalled => "not_installed",
                 skill::SkillStatus::Outdated => "outdated",
@@ -2005,8 +2032,8 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
                 Ok(())
             }
         }
-        SkillAction::Uninstall { global } => {
-            skill::uninstall(system, *global)?;
+        SkillAction::Uninstall { agent, global } => {
+            skill::uninstall(system, skill::Agent::from(agent.clone()), *global)?;
             if json_mode {
                 print_output(true, &json!({ "uninstalled": true }))
             } else {
