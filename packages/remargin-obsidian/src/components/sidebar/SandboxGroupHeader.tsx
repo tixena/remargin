@@ -1,5 +1,6 @@
-import { CheckCheck, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback } from "react";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 
 export type SandboxGroupBulkIcon = "check-check" | "minus" | "plus";
 
@@ -37,9 +38,7 @@ export interface SandboxGroupHeaderProps {
 }
 
 function BulkIcon({ name }: { name: SandboxGroupBulkIcon }) {
-  if (name === "check-check") return <CheckCheck className="w-3 h-3" />;
-  if (name === "minus") return <Minus className="w-3 h-3" />;
-  return <Plus className="w-3 h-3" />;
+  return <ObsidianIcon icon={name} size={12} />;
 }
 
 /**
