@@ -55,33 +55,65 @@ pub fn ensure_frontmatter(doc: &mut ParsedDocument, config: &ResolvedConfig) -> 
 
 /// Read the current `sandbox` frontmatter list as `SandboxEntry` values.
 ///
-/// Returns an empty vector when the key is absent. Unparseable entries are
-/// surfaced as errors so callers can decide how to respond (the CLI reports
-/// the file as failed rather than silently dropping state).
+/// Returns an empty vector when the key is absent, null, or an empty
+/// sequence — self-healing for the common case where a user wrote bare
+/// `sandbox:` in the frontmatter. Unparseable entries are surfaced as
+/// errors so callers can decide how to respond (the CLI reports the file
+/// as failed rather than silently dropping state).
 ///
 /// # Errors
 ///
-/// Returns an error if existing frontmatter YAML is invalid, or if a
+/// Returns an error if existing frontmatter YAML is invalid, if the
+/// sandbox value is present but neither null nor a sequence, or if a
 /// sandbox entry is not a well-formed `author@timestamp` string.
 pub fn read_sandbox_entries(doc: &ParsedDocument) -> Result<Vec<SandboxEntry>> {
     let mapping = parse_existing_frontmatter(doc)?;
-    let key = Value::String(String::from(SANDBOX_KEY));
-    let Some(value) = mapping.get(&key) else {
-        return Ok(Vec::new());
-    };
-
-    let Value::Sequence(items) = value else {
-        anyhow::bail!("frontmatter `{SANDBOX_KEY}` is not a sequence");
-    };
+    let items = read_sequence_or_empty(&mapping, SANDBOX_KEY)?;
 
     let mut entries = Vec::with_capacity(items.len());
     for item in items {
         let Value::String(raw) = item else {
             anyhow::bail!("frontmatter `{SANDBOX_KEY}` entry is not a string");
         };
-        entries.push(parser::parse_sandbox_entry(raw)?);
+        entries.push(parser::parse_sandbox_entry(&raw)?);
     }
     Ok(entries)
+}
+
+/// Read a sequence-typed frontmatter value, coercing missing keys and null
+/// values to an empty sequence.
+///
+/// This is the defensive parser shared by any caller that treats a
+/// frontmatter key as a list. It accepts:
+///
+/// - key absent → empty sequence
+/// - key present with null value (e.g. bare `sandbox:`) → empty sequence
+/// - key present as a sequence → the sequence
+///
+/// Any other type (scalar, mapping, tagged) is rejected so a misuse is
+/// surfaced rather than silently dropped.
+///
+/// # Errors
+///
+/// Returns an error when the key is present but its value is neither null
+/// nor a YAML sequence.
+fn read_sequence_or_empty(mapping: &Mapping, key: &str) -> Result<Vec<Value>> {
+    let key_value = Value::String(String::from(key));
+    let Some(value) = mapping.get(&key_value) else {
+        return Ok(Vec::new());
+    };
+
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::Sequence(items) => Ok(items.clone()),
+        Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::Mapping(_)
+        | Value::Tagged(_) => {
+            anyhow::bail!("frontmatter `{key}` is not a sequence");
+        }
+    }
 }
 
 /// Write the given sandbox entries back into the document, preserving all

@@ -9,9 +9,10 @@ use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::frontmatter::{
-    ensure_frontmatter, extract_title_from_heading, populate_user_fields, update_remargin_fields,
+    add_sandbox_entry_for, ensure_frontmatter, extract_title_from_heading, populate_user_fields,
+    read_sandbox_entries, update_remargin_fields, write_sandbox_entries,
 };
-use crate::parser::{Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 
 /// Create a default `ResolvedConfig` for testing.
 fn test_config() -> ResolvedConfig {
@@ -237,4 +238,75 @@ fn no_identity_no_author() {
         !mapping.contains_key(Value::String(String::from("author"))),
         "author should not be set without identity"
     );
+}
+
+#[test]
+fn sandbox_null_value_reads_as_empty() {
+    // Bare `sandbox:` in YAML parses as a null value. Reading it must not
+    // error; callers should treat it as an empty list so they can add the
+    // first entry cleanly.
+    let body = "---\ntitle: Doc\nsandbox:\n---\n\nBody.\n";
+    let doc = make_doc(body, Vec::new());
+
+    let entries = read_sandbox_entries(&doc).unwrap();
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn sandbox_missing_key_reads_as_empty() {
+    let body = "---\ntitle: Doc\n---\n\nBody.\n";
+    let doc = make_doc(body, Vec::new());
+
+    let entries = read_sandbox_entries(&doc).unwrap();
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn sandbox_existing_sequence_reads_entries() {
+    let body = "---\ntitle: Doc\nsandbox:\n  - alice@2026-04-16T10:00:00-04:00\n---\n\nBody.\n";
+    let doc = make_doc(body, Vec::new());
+
+    let entries = read_sandbox_entries(&doc).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].author, "alice");
+}
+
+#[test]
+fn sandbox_null_value_self_heals_on_write() {
+    // Starting from bare `sandbox:` (null), add an entry and confirm the
+    // serialized frontmatter is a proper YAML sequence the next read can
+    // parse.
+    let body = "---\ntitle: Doc\nsandbox:\n---\n\nBody.\n";
+    let mut doc = make_doc(body, Vec::new());
+
+    let mut entries = read_sandbox_entries(&doc).unwrap();
+    let added = add_sandbox_entry_for(
+        &mut entries,
+        "eduardo",
+        DateTime::parse_from_rfc3339("2026-04-16T10:33:21-04:00").unwrap(),
+    );
+    assert!(added);
+    write_sandbox_entries(&mut doc, &entries).unwrap();
+
+    let markdown = doc.to_markdown();
+    assert!(markdown.contains("sandbox:"));
+    assert!(markdown.contains("- eduardo@2026-04-16T10:33:21"));
+
+    // Round-trip: the rewritten document parses cleanly.
+    let reparsed = parser::parse(&markdown).unwrap();
+    let reread = read_sandbox_entries(&reparsed).unwrap();
+    assert_eq!(reread.len(), 1);
+    assert_eq!(reread[0].author, "eduardo");
+}
+
+#[test]
+fn sandbox_non_sequence_errors() {
+    // A non-null, non-sequence value is still a user error. We want the
+    // bug report pointed at the file, not silently dropped state.
+    let body = "---\ntitle: Doc\nsandbox: alice\n---\n\nBody.\n";
+    let doc = make_doc(body, Vec::new());
+
+    let err = read_sandbox_entries(&doc).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("not a sequence"), "got: {msg}");
 }
