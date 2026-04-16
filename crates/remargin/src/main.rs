@@ -67,6 +67,10 @@ struct Cli {
     )
 )]
 struct GlobalFlags {
+    /// Agent identity for config selection and skill operations.
+    #[arg(long, default_value = "claude")]
+    agent: AgentArg,
+
     /// Path to assets directory.
     #[arg(long)]
     assets_dir: Option<String>,
@@ -437,27 +441,18 @@ enum SandboxAction {
 enum SkillAction {
     /// Install the skill for an agent.
     Install {
-        /// Agent to install for (claude, gemini).
-        #[arg(long)]
-        agent: AgentArg,
         /// Install globally to ~/<agent-dir>/skills/remargin/.
         #[arg(long)]
         global: bool,
     },
     /// Check skill installation status.
     Test {
-        /// Agent to check (claude, gemini).
-        #[arg(long)]
-        agent: AgentArg,
         /// Check global installation.
         #[arg(long)]
         global: bool,
     },
     /// Uninstall the skill.
     Uninstall {
-        /// Agent to uninstall for (claude, gemini).
-        #[arg(long)]
-        agent: AgentArg,
         /// Uninstall from global location.
         #[arg(long)]
         global: bool,
@@ -465,7 +460,7 @@ enum SkillAction {
 }
 
 /// Agent target for skill installation.
-#[derive(Clone, clap::ValueEnum)]
+#[derive(Clone, Copy, clap::ValueEnum)]
 enum AgentArg {
     /// Claude Code.
     Claude,
@@ -476,8 +471,8 @@ enum AgentArg {
 impl From<AgentArg> for skill::Agent {
     fn from(a: AgentArg) -> Self {
         match a {
-            AgentArg::Claude => skill::Agent::Claude,
-            AgentArg::Gemini => skill::Agent::Gemini,
+            AgentArg::Claude => Self::Claude,
+            AgentArg::Gemini => Self::Gemini,
         }
     }
 }
@@ -834,7 +829,14 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         Commands::Obsidian { action } => {
             return cmd_obsidian(system, cwd, action, cli.global.json);
         }
-        Commands::Skill { action } => return cmd_skill(system, action, cli.global.json),
+        Commands::Skill { action } => {
+            return cmd_skill(
+                system,
+                action,
+                skill::Agent::from(cli.global.agent),
+                cli.global.json,
+            );
+        }
         Commands::Ack { .. }
         | Commands::Batch { .. }
         | Commands::Comment { .. }
@@ -865,15 +867,20 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     } else {
         None
     };
-    let cfg = config::load_config_filtered(system, cwd, type_filter)?;
-    if let Some(filter) = type_filter
-        && cfg.is_none()
-    {
-        anyhow::bail!(
-            "no .remargin.yaml with type {filter:?} found (searched from {} to /)",
-            cwd.display()
-        );
-    }
+    let cfg = if type_filter.is_some() {
+        let cfg = config::load_config_filtered(system, cwd, type_filter)?;
+        if cfg.is_none() {
+            anyhow::bail!(
+                "no .remargin.yaml with type {:?} found (searched from {} to /)",
+                type_filter.unwrap_or_default(),
+                cwd.display()
+            );
+        }
+        cfg
+    } else {
+        let agent_name = skill::Agent::from(cli.global.agent).name();
+        config::load_config_for_agent(system, cwd, Some(agent_name))?
+    };
     let registry = config::load_registry(system, cwd)?;
     #[cfg(not(feature = "unrestricted"))]
     let final_config = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
@@ -2006,10 +2013,15 @@ fn cmd_obsidian(
     }
 }
 
-fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Result<()> {
+fn cmd_skill(
+    system: &dyn System,
+    action: &SkillAction,
+    agent: skill::Agent,
+    json_mode: bool,
+) -> Result<()> {
     match action {
-        SkillAction::Install { agent, global } => {
-            let path = skill::install(system, skill::Agent::from(agent.clone()), *global)?;
+        SkillAction::Install { global } => {
+            let path = skill::install(system, agent, *global)?;
             if json_mode {
                 print_output(true, &json!({ "installed": path.display().to_string() }))
             } else {
@@ -2017,8 +2029,8 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
                 Ok(())
             }
         }
-        SkillAction::Test { agent, global } => {
-            let status = skill::test_status(system, skill::Agent::from(agent.clone()), *global)?;
+        SkillAction::Test { global } => {
+            let status = skill::test_status(system, agent, *global)?;
             let status_str = match status {
                 skill::SkillStatus::NotInstalled => "not_installed",
                 skill::SkillStatus::Outdated => "outdated",
@@ -2032,8 +2044,8 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
                 Ok(())
             }
         }
-        SkillAction::Uninstall { agent, global } => {
-            skill::uninstall(system, skill::Agent::from(agent.clone()), *global)?;
+        SkillAction::Uninstall { global } => {
+            skill::uninstall(system, agent, *global)?;
             if json_mode {
                 print_output(true, &json!({ "uninstalled": true }))
             } else {

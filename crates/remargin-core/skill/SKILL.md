@@ -55,6 +55,18 @@ If remargin MCP tools require approval on every call, ask the user to add this w
 
 This approves all remargin tools at once — no per-tool confirmation needed.
 
+## Identity Setup
+
+Your identity is configured in `.remargin.<agent>.yaml` in the project root (created by `remargin skill install`). **Always pass `--agent <identity>` on every remargin command**, where `<identity>` is the value of `identity` in your config file.
+
+For example, if your config contains `identity: claude`:
+
+```
+remargin --agent claude comment docs/design.md "note"
+remargin --agent claude get docs/design.md
+remargin --agent claude ack abc
+```
+
 ## MCP Tools Reference
 
 ### Document Access
@@ -103,8 +115,6 @@ The write tools (`comment`, `batch`, `edit`, `delete`, `ack`, `react`) accept op
 
 - `identity` (string) — override the author name
 - `author_type` (string) — override the author type: `"human"` or `"agent"`
-
-**Always identify yourself:** on every write operation, pass your own agent name as `identity` and `"agent"` as `author_type`. For example, if you are Gemini, pass `identity="gemini" author_type="agent"`. If you are Claude, pass `identity="claude" author_type="agent"`. This ensures comments are attributed to the correct agent.
 
 #### Folder-wide ack
 

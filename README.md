@@ -326,9 +326,9 @@ remargin [OPTIONS] <COMMAND>
 | `mcp uninstall` | Remove MCP server registration |
 | `mcp test` | Check MCP registration status |
 | `mcp run` | Start the MCP server (stdio transport) |
-| `skill install [--global]` | Install the Claude Code skill |
-| `skill uninstall` | Remove the skill |
-| `skill test` | Check skill installation status |
+| `skill install [--agent <agent>] [--global]` | Install the skill (default agent: claude) |
+| `skill uninstall [--agent <agent>]` | Remove the skill |
+| `skill test [--agent <agent>]` | Check skill installation status |
 | `registry show` | Display the participant registry |
 
 ### Global Options
@@ -368,17 +368,22 @@ Once installed, Claude Code will have access to these tools: `ls`, `get`, `write
 
 ### Skill
 
-The skill teaches Claude Code *when* and *how* to use the MCP tools -- trigger phrases, display format for comments, critical rules (like never using `Read`/`Edit`/`Write` for remargin-managed documents), and common workflows.
+The skill teaches agents *when* and *how* to use the MCP tools -- trigger phrases, display format for comments, critical rules (like never using `Read`/`Edit`/`Write` for remargin-managed documents), and common workflows.
 
 ```bash
-# Install at project scope
+# Install at project scope (defaults to --agent claude)
 remargin skill install
+
+# Install for a specific agent
+remargin skill install --agent claude
+remargin skill install --agent gemini
 
 # Or install globally
 remargin skill install --global
 
 # Verify installation
 remargin skill test
+remargin skill test --agent gemini
 ```
 
 ### Permissions
@@ -402,7 +407,7 @@ For a project using remargin with Claude Code:
 ```bash
 # Install both MCP server and skill
 remargin mcp install
-remargin skill install
+remargin skill install  # installs for Claude Code by default
 
 # Add permissions (optional, avoids confirmation prompts)
 # Edit .claude/settings.local.json and add mcp__remargin__* to allow list

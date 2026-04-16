@@ -28,11 +28,21 @@ pub enum Agent {
 }
 
 impl Agent {
-    /// The skill subdirectory relative to the project root or home directory.
-    pub fn skill_subdir(self) -> &'static str {
+    /// The canonical lowercase name used in config filenames and YAML content.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
-            Agent::Claude => ".claude/skills/remargin",
-            Agent::Gemini => ".gemini/skills/remargin",
+            Self::Claude => "claude",
+            Self::Gemini => "gemini",
+        }
+    }
+
+    /// The skill subdirectory relative to the project root or home directory.
+    #[must_use]
+    pub const fn skill_subdir(self) -> &'static str {
+        match self {
+            Self::Claude => ".claude/skills/remargin",
+            Self::Gemini => ".gemini/skills/remargin",
         }
     }
 }
@@ -60,7 +70,8 @@ pub enum SkillStatus {
 /// - The `HOME` env var is not set (for global install)
 /// - Directory creation or file writing fails
 pub fn install(system: &dyn System, agent: Agent, global: bool) -> Result<PathBuf> {
-    let skill_path = resolve_skill_path(system, agent, global)?;
+    let root = resolve_root(system, global)?;
+    let skill_path = root.join(agent.skill_subdir());
 
     system
         .create_dir_all(&skill_path)
@@ -71,6 +82,15 @@ pub fn install(system: &dyn System, agent: Agent, global: bool) -> Result<PathBu
         system
             .write(&dest, file.contents())
             .with_context(|| format!("writing {}", dest.display()))?;
+    }
+
+    let name = agent.name();
+    let config_path = root.join(format!(".remargin.{name}.yaml"));
+    if !system.exists(&config_path).unwrap_or(false) {
+        let content = format!("identity: {name}\ntype: agent\n");
+        system
+            .write(&config_path, content.as_bytes())
+            .with_context(|| format!("writing {}", config_path.display()))?;
     }
 
     Ok(skill_path)
@@ -128,16 +148,19 @@ pub fn uninstall(system: &dyn System, agent: Agent, global: bool) -> Result<()> 
     Ok(())
 }
 
-/// Resolve the skill installation path.
-fn resolve_skill_path(system: &dyn System, agent: Agent, global: bool) -> Result<PathBuf> {
-    let subdir = agent.skill_subdir();
+/// Resolve the install root: home directory for global, cwd for project.
+fn resolve_root(system: &dyn System, global: bool) -> Result<PathBuf> {
     if global {
         let home = system
             .env_var("HOME")
             .map_err(|_err| anyhow::anyhow!("HOME environment variable not set"))?;
-        Ok(PathBuf::from(home).join(subdir))
+        Ok(PathBuf::from(home))
     } else {
-        let cwd = system.current_dir().context("getting current directory")?;
-        Ok(cwd.join(subdir))
+        system.current_dir().context("getting current directory")
     }
+}
+
+/// Resolve the skill installation path.
+fn resolve_skill_path(system: &dyn System, agent: Agent, global: bool) -> Result<PathBuf> {
+    Ok(resolve_root(system, global)?.join(agent.skill_subdir()))
 }

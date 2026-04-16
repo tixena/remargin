@@ -172,12 +172,16 @@ fn uninstall_claude_removes_only_claude_dir() {
 
     skill::uninstall(&system, Agent::Claude, false).unwrap();
 
-    assert!(!system
-        .exists(Path::new("/project/.claude/skills/remargin"))
-        .unwrap());
-    assert!(system
-        .exists(Path::new("/project/.gemini/skills/remargin"))
-        .unwrap());
+    assert!(
+        !system
+            .exists(Path::new("/project/.claude/skills/remargin"))
+            .unwrap()
+    );
+    assert!(
+        system
+            .exists(Path::new("/project/.gemini/skills/remargin"))
+            .unwrap()
+    );
 }
 
 #[test]
@@ -188,12 +192,16 @@ fn uninstall_gemini_removes_only_gemini_dir() {
 
     skill::uninstall(&system, Agent::Gemini, false).unwrap();
 
-    assert!(system
-        .exists(Path::new("/project/.claude/skills/remargin"))
-        .unwrap());
-    assert!(!system
-        .exists(Path::new("/project/.gemini/skills/remargin"))
-        .unwrap());
+    assert!(
+        system
+            .exists(Path::new("/project/.claude/skills/remargin"))
+            .unwrap()
+    );
+    assert!(
+        !system
+            .exists(Path::new("/project/.gemini/skills/remargin"))
+            .unwrap()
+    );
 }
 
 #[test]

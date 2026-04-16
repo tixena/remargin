@@ -348,6 +348,34 @@ pub fn load_config_filtered_with_path(
     }
 }
 
+/// Load config for a specific agent.
+///
+/// Tries `.remargin.<agent>.yaml` first (walking up from `start_dir`), then
+/// falls back to the standard `.remargin.yaml` walk-up. When `agent` is
+/// `None`, behaves identically to [`load_config`].
+///
+/// # Errors
+///
+/// Returns an error if a config file exists but cannot be read or parsed.
+pub fn load_config_for_agent(
+    system: &dyn System,
+    start_dir: &Path,
+    agent: Option<&str>,
+) -> Result<Option<Config>> {
+    if let Some(name) = agent {
+        let filename = format!(".remargin.{name}.yaml");
+        if let Some(path) = find_file_upward(system, start_dir, &filename)? {
+            let content = system
+                .read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let config: Config = serde_yaml::from_str(&content)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            return Ok(Some(config));
+        }
+    }
+    load_config(system, start_dir)
+}
+
 /// Load registry by walking up from `start_dir` (independent from config).
 ///
 /// Returns `None` if no `.remargin-registry.yaml` was found.
