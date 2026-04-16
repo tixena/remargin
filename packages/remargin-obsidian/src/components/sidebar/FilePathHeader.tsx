@@ -86,7 +86,7 @@ export function FilePathHeader({ plugin, filePath, pendingCount }: FilePathHeade
   return (
     <div
       ref={containerRef}
-      className="flex items-start gap-2 px-4 py-2 bg-bg-border border-t border-bg-border"
+      className="flex items-start gap-2 px-4 py-2 min-w-0 bg-bg-border border-t border-bg-border overflow-hidden"
       title={filePath ?? "No file open"}
     >
       <FileText className="w-3.5 h-3.5 text-text-faint mt-0.5 shrink-0" />

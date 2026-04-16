@@ -268,7 +268,7 @@ export function SandboxSection({
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col min-w-0">
       {error && (
         <div className="px-4 py-2 text-[10px] text-red-400 font-mono whitespace-pre-wrap break-words">
           {error}

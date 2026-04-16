@@ -60,7 +60,7 @@ export function SidebarShell({
   const [threadOpen, setThreadOpen] = useState(true);
 
   return (
-    <div className="flex flex-col h-full bg-bg-primary">
+    <div className="flex flex-col h-full min-w-0 bg-bg-primary">
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
           <ReMarginLogo size={22} className="text-accent shrink-0" />
@@ -122,8 +122,8 @@ export function SidebarShell({
         </button>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="flex flex-col">
+      <ScrollArea className="flex-1 min-w-0">
+        <div className="flex flex-col min-w-0">
           <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
             <SectionHeader icon={Terminal} title="Prompt" open={promptOpen} />
             <CollapsibleContent>

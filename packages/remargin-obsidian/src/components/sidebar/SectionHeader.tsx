@@ -22,7 +22,7 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <CollapsibleTrigger className="flex items-center w-full px-4 py-2 gap-2 bg-bg-border hover:bg-bg-hover overflow-hidden">
+    <CollapsibleTrigger className="flex items-center justify-start w-full min-w-0 px-4 py-2 gap-2 bg-bg-border hover:bg-bg-hover overflow-hidden text-left">
       <div className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
         <Chevron className="w-3 h-3 text-text-faint shrink-0" />
         <Icon className="w-3.5 h-3.5 text-text-muted shrink-0" />

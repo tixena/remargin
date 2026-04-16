@@ -193,8 +193,8 @@ export function InboxSection({
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex flex-col gap-2 px-4 py-2 border-b border-bg-border">
+    <div className="flex flex-col min-w-0">
+      <div className="flex flex-col gap-2 px-4 py-2 border-b border-bg-border min-w-0">
         <div className="flex items-center gap-1">
           <div className="relative flex-1">
             <Input
@@ -261,7 +261,7 @@ export function InboxSection({
         </div>
       </div>
 
-      <div>
+      <div className="min-w-0">
         {error ? (
           <div className="px-4 py-3 text-xs text-red-400 whitespace-pre-wrap break-words">
             <div className="font-semibold mb-1">Failed to load inbox</div>
@@ -278,7 +278,7 @@ export function InboxSection({
         ) : viewMode === "tree" ? (
           <InboxTree items={items} me={me} onOpenAtLine={onOpenAtLine} onAck={handleAck} />
         ) : (
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             {items.map((item) => (
               <InboxFlatRow
                 key={`${item.file}:${item.comment.id}`}

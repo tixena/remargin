@@ -153,13 +153,13 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
       <Button
         variant="ghost"
         size="sm"
-        className="h-5 px-1.5 text-[10px] gap-0.5 text-text-faint hover:text-text-normal"
+        className="h-5 w-5 p-0 text-text-faint hover:text-text-normal"
         onClick={() => setOpen((prev) => !prev)}
         aria-label="Add recipient"
+        title="Add recipient"
         aria-expanded={open}
       >
         <Plus className="w-2.5 h-2.5" />
-        Add
       </Button>
       {open && (
         <div className="absolute top-full left-0 z-30 mt-1 w-60 max-w-full rounded border border-bg-border bg-bg-primary shadow-lg p-1">
