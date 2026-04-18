@@ -1368,9 +1368,14 @@ fn handle_write(
         .lines(lines)
         .raw(raw);
     let target = Path::new(path_str);
-    document::write(system, base_dir, target, content, config, opts)?;
+    let outcome = document::write(system, base_dir, target, content, config, opts)?;
 
-    Ok(json!({ "written": path_str, "binary": binary, "raw": raw || binary }))
+    Ok(json!({
+        "written": path_str,
+        "binary": binary,
+        "raw": raw || binary,
+        "noop": outcome.noop,
+    }))
 }
 
 /// Serialize a comment to a JSON value for the `comments` tool response.

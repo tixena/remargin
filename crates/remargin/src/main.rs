@@ -2194,13 +2194,23 @@ fn cmd_write(
         None => read_stdin()?,
     };
 
-    document::write(system, cwd, target, &body, config, wp.opts)?;
+    let outcome = document::write(system, cwd, target, &body, config, wp.opts)?;
+
+    // A no-op prints a one-line human message in text mode instead of
+    // the usual "written: ... / binary: ... / raw: ..." block; JSON mode
+    // still returns a single payload, now with `noop: true` alongside
+    // the existing fields so callers can branch on it (rem-1f2).
+    if outcome.noop && !wp.json_mode {
+        return out(&format!("{}: no changes (already up to date)", wp.path));
+    }
+
     print_output(
         wp.json_mode,
         &json!({
             "written": wp.path,
             "binary": wp.opts.binary,
             "raw": wp.opts.raw || wp.opts.binary,
+            "noop": outcome.noop,
         }),
     )
 }

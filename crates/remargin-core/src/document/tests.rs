@@ -1940,6 +1940,194 @@ fn write_whole_file_unchanged_when_lines_omitted() {
     assert!(result.contains("id: def"));
 }
 
+// ---------- no-op detection (rem-1f2) ----------
+
+#[test]
+fn write_noop_when_identical_bytes_back_to_back() {
+    // First write: canonical content gets written. Second write: same
+    // input content, so the serialized output is byte-identical — must
+    // return noop=true without touching the file. We verify the file
+    // bytes are preserved exactly across the no-op.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+    let config = open_config();
+
+    let first = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        DOC_WITH_COMMENTS,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+    // The first write may or may not be a true no-op depending on
+    // whether the input is already canonical; either way, capture what
+    // ended up on disk so we can assert the next call doesn't change it.
+    let after_first = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+
+    let second = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &after_first,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+
+    // Second call with the on-disk canonical bytes must be a no-op.
+    assert!(
+        second.noop,
+        "expected second write of canonical content to be a no-op"
+    );
+    let after_second = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    assert_eq!(
+        after_first, after_second,
+        "no-op write must not touch the file bytes"
+    );
+    // And the first write itself: its outcome tells the caller whether
+    // the input already matched disk. No other assertion here — the
+    // round-trip equality above is the behavioural contract.
+    let _: bool = first.noop;
+}
+
+#[test]
+fn write_noop_reports_false_when_content_differs() {
+    // Baseline: two distinct writes must each report noop=false so
+    // callers can reliably branch on the flag.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+    let config = open_config();
+
+    let modified = DOC_WITH_COMMENTS.replace("# Test", "# Changed Test");
+    let outcome = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &modified,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+    assert!(!outcome.noop, "content change must report noop=false");
+    let after = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    assert!(after.contains("# Changed Test"));
+}
+
+#[test]
+fn write_noop_raw_when_bytes_match() {
+    // Raw writes bypass the markdown pipeline but still honor the
+    // byte-identical no-op guard so `remargin write --raw` is retry-safe
+    // for plain text / source files too.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+    let config = open_config();
+    let initial = "hello world\n";
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("notes.txt"),
+        initial,
+        &config,
+        WriteOptions::new().create(true).raw(true),
+    )
+    .unwrap();
+
+    let outcome = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("notes.txt"),
+        initial,
+        &config,
+        WriteOptions::new().raw(true),
+    )
+    .unwrap();
+    assert!(outcome.noop, "raw write of identical bytes must be no-op");
+
+    let changed = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("notes.txt"),
+        "hello world\nand more\n",
+        &config,
+        WriteOptions::new().raw(true),
+    )
+    .unwrap();
+    assert!(!changed.noop, "raw write of new bytes must not be no-op");
+}
+
+#[test]
+fn write_noop_binary_when_bytes_match() {
+    // Mirror of the raw case for binary mode. MockSystem exposes
+    // `read_to_string` only, so the no-op short-circuit for binary
+    // files only trips when the existing bytes are valid UTF-8 — good
+    // enough for this test since the payload decodes to ASCII.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+    let config = open_config();
+    // "hello" base64-encoded
+    let payload = BASE64_STANDARD.encode(b"hello");
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("data.png"),
+        &payload,
+        &config,
+        WriteOptions::new().create(true).binary(true),
+    )
+    .unwrap();
+
+    let outcome = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("data.png"),
+        &payload,
+        &config,
+        WriteOptions::new().binary(true),
+    )
+    .unwrap();
+    assert!(
+        outcome.noop,
+        "binary write of identical bytes must be no-op"
+    );
+}
+
+#[test]
+fn write_create_never_reports_noop() {
+    // `create` writes a brand-new file — the noop short-circuit
+    // must not fire (file doesn't exist yet to compare against).
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+    let config = open_config();
+
+    let outcome = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("new.md"),
+        "# New\n\nBody\n",
+        &config,
+        WriteOptions::new().create(true),
+    )
+    .unwrap();
+    assert!(!outcome.noop, "create write must always report noop=false");
+}
+
 #[test]
 fn list_entry_json_shape_matches_schema() {
     use std::path::PathBuf;

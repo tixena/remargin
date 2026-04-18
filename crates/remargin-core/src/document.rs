@@ -50,6 +50,18 @@ pub struct RmResult {
     pub path: PathBuf,
 }
 
+/// Result of a `write` call.
+///
+/// `noop == true` means the prospective content was byte-identical to the
+/// on-disk file and no disk write was performed. Retries and idempotent
+/// re-submits of the same content settle here, keeping file mtime stable
+/// and avoiding downstream watcher/reload noise (rem-1f2).
+#[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
+pub struct WriteOutcome {
+    pub noop: bool,
+}
+
 /// Metadata for a single document.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -328,7 +340,7 @@ pub fn write(
     content: &str,
     config: &ResolvedConfig,
     opts: WriteOptions,
-) -> Result<()> {
+) -> Result<WriteOutcome> {
     validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {
@@ -353,17 +365,23 @@ pub fn write(
         let bytes = BASE64_STANDARD
             .decode(content)
             .context("invalid base64 content")?;
+        if is_byte_identical(system, &resolved, &bytes) {
+            return Ok(WriteOutcome { noop: true });
+        }
         system
             .write(&resolved, &bytes)
             .with_context(|| format!("writing {}", resolved.display()))?;
-        return Ok(());
+        return Ok(WriteOutcome { noop: false });
     }
 
     if opts.raw {
+        if is_byte_identical(system, &resolved, content.as_bytes()) {
+            return Ok(WriteOutcome { noop: true });
+        }
         system
             .write(&resolved, content.as_bytes())
             .with_context(|| format!("writing {}", resolved.display()))?;
-        return Ok(());
+        return Ok(WriteOutcome { noop: false });
     }
 
     // Partial write: splice the replacement content into `[start..=end]`,
@@ -395,14 +413,39 @@ pub fn write(
     let mut final_doc = new_doc;
     frontmatter::ensure_frontmatter(&mut final_doc, config)?;
 
+    // No-op detection (rem-1f2): if the canonical output would be
+    // byte-identical to what is already on disk, skip both the disk
+    // write AND the post-write verify gate. The verify gate is
+    // semantically satisfied: the file is already in the verified state
+    // this payload would produce. `create` never no-ops (the path is
+    // guaranteed not to exist, ruled out above).
+    let final_content = final_doc.to_markdown();
+    if !opts.create && is_byte_identical(system, &resolved, final_content.as_bytes()) {
+        return Ok(WriteOutcome { noop: true });
+    }
+
     commit_with_verify(&final_doc, config, |verified_doc| {
-        let final_content = verified_doc.to_markdown();
+        let serialized = verified_doc.to_markdown();
         system
-            .write(&resolved, final_content.as_bytes())
+            .write(&resolved, serialized.as_bytes())
             .with_context(|| format!("writing {}", resolved.display()))
     })?;
 
-    Ok(())
+    Ok(WriteOutcome { noop: false })
+}
+
+/// Return true when the on-disk bytes at `path` exactly match `new_bytes`.
+///
+/// A missing file or a read error returns false, so the caller falls
+/// through to a real write (safer default — the write will surface any
+/// underlying I/O error with a proper diagnostic). Uses `read_to_string`
+/// because that is the only read primitive `System` exposes; binary
+/// files that aren't valid UTF-8 won't trip the no-op fast path, but the
+/// correctness guarantee (never skip a real change) still holds.
+fn is_byte_identical(system: &dyn System, path: &Path, new_bytes: &[u8]) -> bool {
+    system
+        .read_to_string(path)
+        .is_ok_and(|existing| existing.as_bytes() == new_bytes)
 }
 
 /// Validate mutually-exclusive `WriteOptions` combinations up front so

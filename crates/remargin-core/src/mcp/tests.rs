@@ -1729,6 +1729,74 @@ fn mcp_write_partial_rejects_missing_end_line() {
 }
 
 #[test]
+fn mcp_write_reports_noop_true_on_identical_content() {
+    // rem-1f2: the `write` tool response must carry `noop: true` when
+    // the proposed content is byte-identical to what's on disk so
+    // agents can branch on it (e.g. skip follow-up verification).
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/notes.txt"), b"hello\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "notes.txt",
+                    "content": "hello\n",
+                    "raw": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["noop"].as_bool(), Some(true));
+    assert_eq!(result["written"].as_str(), Some("notes.txt"));
+}
+
+#[test]
+fn mcp_write_reports_noop_false_on_real_change() {
+    // Mirror test: a real byte change produces `noop: false` so the
+    // flag is reliable as a branch condition.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/notes.txt"), b"hello\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "notes.txt",
+                    "content": "hello world\n",
+                    "raw": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["noop"].as_bool(), Some(false));
+}
+
+#[test]
 fn mcp_reply_prepends_parent_author_to_list() {
     // Parity test for rem-kja: the MCP `comment` tool inherits the
     // "parent author always first in `to:`" invariant from operations.
