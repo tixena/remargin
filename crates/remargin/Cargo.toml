@@ -65,4 +65,9 @@ ureq = { workspace = true, optional = true }
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
+# Used by tests/adapter_loc_cap.rs to walk main.rs and mcp.rs AST.
+# `span-locations` exposes `Span::start()` / `Span::end()` so we can
+# measure each function's physical line span.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "2", features = ["full", "parsing"] }
 tempfile.workspace = true
