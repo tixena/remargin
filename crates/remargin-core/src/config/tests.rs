@@ -662,3 +662,115 @@ participants:
         bob.display_name,
     );
 }
+
+// ---------- resolve_signing_key: rem-dyz fail-fast contract ----------
+
+#[test]
+fn resolve_signing_key_returns_none_in_open_mode() {
+    // Open mode: even registered authors with a key resolved on the
+    // config do not "require" a signature from the op's perspective. The
+    // helper must return Ok(None) so create_comment skips signing.
+    let system = MockSystem::new();
+    let cli = CliOverrides {
+        mode: Some("open"),
+        ..CliOverrides::default()
+    };
+    let resolved = ResolvedConfig::resolve(&system, None, None, &cli).unwrap();
+
+    assert!(resolved.resolve_signing_key("eduardo").unwrap().is_none());
+}
+
+#[test]
+fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
+    // Strict + unregistered author: requires_signature is false (because
+    // the author is not registered active). can_post will have already
+    // rejected this before create_comment calls resolve_signing_key; the
+    // helper itself must not bail so the more-specific can_post message
+    // reaches the user.
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin-registry.yaml"),
+            registry_yaml().as_bytes(),
+        )
+        .unwrap();
+
+    let registry = load_registry(&system, Path::new("/project")).unwrap();
+    let cli = CliOverrides {
+        mode: Some("strict"),
+        ..CliOverrides::default()
+    };
+    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+
+    assert!(resolved.resolve_signing_key("stranger").unwrap().is_none());
+}
+
+#[test]
+fn resolve_signing_key_returns_key_when_present() {
+    // Strict + registered active + key_path set: the helper hands back a
+    // reference to the resolved key path so the caller signs with it.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/eduardo")
+        .unwrap()
+        .with_file(
+            Path::new("/project/.remargin-registry.yaml"),
+            registry_yaml().as_bytes(),
+        )
+        .unwrap();
+
+    let registry = load_registry(&system, Path::new("/project")).unwrap();
+    let cli = CliOverrides {
+        key: Some("id_ed25519"),
+        mode: Some("strict"),
+        ..CliOverrides::default()
+    };
+    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+
+    let key = resolved.resolve_signing_key("eduardo").unwrap().unwrap();
+    assert!(
+        key.ends_with("id_ed25519"),
+        "key must resolve through ~/.ssh; got {}",
+        key.display(),
+    );
+}
+
+#[test]
+fn resolve_signing_key_bails_when_registered_active_has_no_key() {
+    // Strict + registered active + NO key_path: this is the fail-fast
+    // case. The helper must bail with a message naming the identity and
+    // the config surfaces to check (--key flag, config file `key:`
+    // field). Previously create_comment silently wrote an unsigned
+    // artifact here and the post-write gate tripped on the NEXT mutation
+    // (rem-dyz).
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/project/.remargin-registry.yaml"),
+            registry_yaml().as_bytes(),
+        )
+        .unwrap();
+
+    let registry = load_registry(&system, Path::new("/project")).unwrap();
+    let cli = CliOverrides {
+        mode: Some("strict"),
+        ..CliOverrides::default()
+    };
+    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+
+    let err = resolved.resolve_signing_key("eduardo").unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("eduardo"),
+        "error must name the identity, got: {msg}"
+    );
+    assert!(
+        msg.contains("no signing key"),
+        "error must say a signing key is missing, got: {msg}"
+    );
+    assert!(
+        msg.contains("--key"),
+        "error must point at --key flag, got: {msg}"
+    );
+    assert!(
+        msg.contains(".remargin.yaml"),
+        "error must point at config file key field, got: {msg}"
+    );
+}

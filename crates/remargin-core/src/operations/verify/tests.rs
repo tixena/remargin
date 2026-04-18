@@ -16,8 +16,11 @@ use os_shim::mock::MockSystem;
 use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
+use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::operations::verify::{RowStatus, SignatureStatus, commit_with_verify, verify_document};
-use crate::operations::{CreateCommentParams, ack_comments, create_comment, delete_comments};
+use crate::operations::{
+    CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment,
+};
 use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
 use crate::writer::InsertPosition;
 
@@ -537,6 +540,210 @@ alice's note
     assert_eq!(
         after, corrupted,
         "file must be byte-identical after gate trip"
+    );
+}
+
+// ---------- rem-dyz: strict mode fails fast at creation time ----------
+//
+// Creation-time fail-fast is paired with the post-write verify gate. The
+// verify gate catches unsigned artifacts on the NEXT mutation (too late,
+// because nine orphans have already been written). These tests exercise
+// the pre-write fail-fast path: strict + registered active + no key →
+// the op bails before touching disk.
+
+/// Strict-mode config with `alice` registered active, no key path set.
+/// The identity field is blank by default; each test sets it to the
+/// relevant author.
+fn strict_cfg_with_alice_no_key() -> ResolvedConfig {
+    let mut cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    cfg.identity = Some(String::from("alice"));
+    cfg.key_path = None;
+    cfg
+}
+
+#[test]
+fn create_comment_strict_registered_active_no_key_fails_fast() {
+    // The headline rem-dyz scenario: strict + registered active + no key
+    // configured must bail BEFORE any byte hits disk. Previously the
+    // comment was written unsigned and the next op's verify gate blew up.
+    let before = alice_doc_content();
+    let system = mock_with_doc(&before);
+    let cfg = strict_cfg_with_alice_no_key();
+
+    let pos = InsertPosition::Append;
+    let result = create_comment(
+        &system,
+        Path::new("/d/a.md"),
+        &cfg,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "unsigned attempt",
+            position: &pos,
+            reply_to: None,
+            sandbox: false,
+            to: &[],
+        },
+    );
+
+    let err = result.unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("alice"),
+        "error must name the identity, got: {msg}"
+    );
+    assert!(
+        msg.contains("no signing key"),
+        "error must say a signing key is missing, got: {msg}"
+    );
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert_eq!(
+        after, before,
+        "file must be byte-identical after fail-fast rejection"
+    );
+    assert!(
+        !after.contains("unsigned attempt"),
+        "rejected content must never reach disk"
+    );
+}
+
+#[test]
+fn create_comment_strict_unregistered_author_rejected_before_signing_check() {
+    // Strict + unregistered author: can_post bails first with the
+    // "not registered" message. resolve_signing_key is not reached.
+    let before = alice_doc_content();
+    let system = mock_with_doc(&before);
+    let mut cfg = strict_cfg_with_alice_no_key();
+    cfg.identity = Some(String::from("charlie"));
+
+    let pos = InsertPosition::Append;
+    let result = create_comment(
+        &system,
+        Path::new("/d/a.md"),
+        &cfg,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "uninvited",
+            position: &pos,
+            reply_to: None,
+            sandbox: false,
+            to: &[],
+        },
+    );
+
+    let err = result.unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("not registered"),
+        "unregistered identity must trip can_post, got: {msg}"
+    );
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert_eq!(after, before, "file must be byte-identical");
+}
+
+#[test]
+fn create_comment_open_mode_no_key_still_writes_unsigned() {
+    // Open mode is the explicit non-strict regression guard. No key
+    // configured, registered or not — the op must land, unsigned.
+    let system = mock_with_doc(&alice_doc_content());
+    let cfg = open_cfg_as("alice");
+
+    let pos = InsertPosition::Append;
+    let new_id = create_comment(
+        &system,
+        Path::new("/d/a.md"),
+        &cfg,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: false,
+            content: "open mode reply",
+            position: &pos,
+            reply_to: None,
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert!(content.contains(&new_id));
+    assert!(
+        content.contains("open mode reply"),
+        "open-mode unsigned write must land"
+    );
+}
+
+#[test]
+fn edit_comment_strict_registered_active_no_key_fails_fast() {
+    // edit_comment is a signed-artifact-producing op: it re-signs on edit
+    // when the identity requires signing. Same fail-fast rule applies.
+    let before = alice_doc_content();
+    let system = mock_with_doc(&before);
+    let cfg = strict_cfg_with_alice_no_key();
+
+    let result = edit_comment(
+        &system,
+        Path::new("/d/a.md"),
+        &cfg,
+        "alc",
+        "new content that must not land",
+    );
+
+    let err = result.unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("alice"),
+        "error must name the identity, got: {msg}"
+    );
+    assert!(
+        msg.contains("no signing key"),
+        "error must say a signing key is missing, got: {msg}"
+    );
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert_eq!(
+        after, before,
+        "file must be byte-identical after fail-fast edit rejection"
+    );
+    assert!(
+        !after.contains("new content that must not land"),
+        "rejected content must never reach disk"
+    );
+}
+
+#[test]
+fn batch_comment_strict_registered_active_no_key_fails_fast() {
+    // batch_comment composes multiple creates atomically. The fail-fast
+    // check runs once before the loop so the whole batch is rejected
+    // before any op modifies the in-memory doc.
+    let before = alice_doc_content();
+    let system = mock_with_doc(&before);
+    let cfg = strict_cfg_with_alice_no_key();
+
+    let ops = vec![
+        BatchCommentOp::new(String::from("batch op 1")),
+        BatchCommentOp::new(String::from("batch op 2")),
+    ];
+
+    let result = batch_comment(&system, Path::new("/d/a.md"), &cfg, &ops);
+    let err = result.unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("alice"),
+        "error must name the identity, got: {msg}"
+    );
+    assert!(
+        msg.contains("no signing key"),
+        "error must say a signing key is missing, got: {msg}"
+    );
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert_eq!(
+        after, before,
+        "file must be byte-identical after fail-fast batch rejection"
     );
 }
 

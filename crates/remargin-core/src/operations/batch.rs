@@ -152,6 +152,11 @@ pub fn batch_comment(
 
     config.can_post(identity)?;
 
+    // Fail-fast in strict mode if the identity must sign but no signing
+    // key is resolvable. Checked BEFORE parsing / copying attachments so
+    // a failed batch leaves disk byte-identical (rem-dyz).
+    let signing_key = config.resolve_signing_key(identity)?;
+
     let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
 
     let mut doc = parser::parse_file(system, path)?;
@@ -222,13 +227,9 @@ pub fn batch_comment(
             ts: now,
         };
 
-        if config.requires_signature(identity) {
-            if let Some(key_path) = &config.key_path {
-                let sig = compute_signature(&comment, key_path, system)?;
-                comment.signature = Some(sig);
-            } else {
-                bail!("batch operation {idx}: strict mode requires signing key");
-            }
+        if let Some(key_path) = signing_key {
+            let sig = compute_signature(&comment, key_path, system)?;
+            comment.signature = Some(sig);
         }
 
         // Determine insertion position, adjusting AfterLine targets for

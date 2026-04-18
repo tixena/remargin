@@ -196,6 +196,41 @@ impl ResolvedConfig {
         })
     }
 
+    /// Enforce the "can we sign this right now?" pre-condition before a
+    /// mutating op touches disk.
+    ///
+    /// Returns `Ok(Some(key_path))` when the op must sign and a key is
+    /// resolvable — the caller should use that key to produce the
+    /// signature. Returns `Ok(None)` when no signature is required (open /
+    /// registered mode, or unregistered author in strict mode where
+    /// [`Self::can_post`] will or has already rejected). Returns an error
+    /// with an actionable message when a signature IS required but no
+    /// signing key is resolvable; the caller must propagate the error
+    /// instead of silently writing an unsigned artifact (which would then
+    /// be rejected by the post-write verify gate on the next mutation and
+    /// lock the file — see rem-dyz).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the active mode requires signing for
+    /// `author` but [`Self::key_path`] is `None`. The message names the
+    /// identity and lists the places the caller should check to supply a
+    /// key.
+    pub fn resolve_signing_key(&self, author: &str) -> Result<Option<&Path>> {
+        if !self.requires_signature(author) {
+            return Ok(None);
+        }
+        match &self.key_path {
+            Some(path) => Ok(Some(path.as_path())),
+            None => bail!(
+                "strict mode: cannot produce a signed artifact as {author:?} \
+                 — no signing key resolved (checked: --key flag, config \
+                 `.remargin.yaml` key field). Fix your config or pass --key \
+                 explicitly."
+            ),
+        }
+    }
+
     /// Apply per-call identity overrides to an already-resolved config
     /// (rem-3a2).
     ///

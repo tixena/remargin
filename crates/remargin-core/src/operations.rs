@@ -89,6 +89,11 @@ pub fn create_comment(
 
     config.can_post(identity)?;
 
+    // Fail-fast in strict mode if the identity must sign but no signing
+    // key is resolvable. Checked BEFORE parsing / copying attachments so
+    // the filesystem is untouched (rem-dyz).
+    let signing_key = config.resolve_signing_key(identity)?;
+
     if params.auto_ack && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
     }
@@ -153,13 +158,9 @@ pub fn create_comment(
         ts: now,
     };
 
-    if config.requires_signature(identity) {
-        if let Some(key_path) = &config.key_path {
-            let sig = compute_signature(&comment, key_path, system)?;
-            comment.signature = Some(sig);
-        } else {
-            bail!("strict mode requires a signing key but none is configured");
-        }
+    if let Some(key_path) = signing_key {
+        let sig = compute_signature(&comment, key_path, system)?;
+        comment.signature = Some(sig);
     }
 
     writer::insert_comment(&mut doc, comment, params.position)?;
@@ -417,6 +418,14 @@ pub fn edit_comment(
 ) -> Result<()> {
     let identity = config.identity.as_deref();
 
+    // Fail-fast in strict mode if the identity must sign but no signing
+    // key is resolvable. Checked BEFORE parsing the file so a failed
+    // edit never touches disk (rem-dyz).
+    let signing_key = match identity {
+        Some(author) => config.resolve_signing_key(author)?,
+        None => None,
+    };
+
     let mut doc = parser::parse_file(system, path)?;
 
     let cm = find_comment_mut(&mut doc, comment_id)
@@ -427,10 +436,7 @@ pub fn edit_comment(
 
     cm.ack.clear();
 
-    if let Some(author) = identity
-        && config.requires_signature(author)
-        && let Some(key_path) = &config.key_path
-    {
+    if let Some(key_path) = signing_key {
         let sig = compute_signature(cm, key_path, system)?;
         cm.signature = Some(sig);
     }
