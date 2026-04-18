@@ -18,6 +18,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 use serde::Serialize;
+use serde_json::{Value, json};
 
 use tixschema::model_schema;
 
@@ -79,6 +80,26 @@ pub struct RmResult {
 #[non_exhaustive]
 pub struct WriteOutcome {
     pub noop: bool,
+}
+
+impl WriteOutcome {
+    /// Serialize this outcome into the canonical JSON shape shared by
+    /// both CLI and MCP adapters: `{written, binary, raw, noop}`.
+    ///
+    /// The `raw` field surfaced to callers is `raw_opt || binary_opt`
+    /// because binary writes are raw by definition (they skip the
+    /// frontmatter / comment-preservation pass). Both adapters already
+    /// applied that OR inline; centralizing it here keeps the rule in
+    /// one place.
+    #[must_use]
+    pub fn to_json(self, written: &str, binary: bool, raw: bool) -> Value {
+        json!({
+            "written": written,
+            "binary": binary,
+            "raw": raw || binary,
+            "noop": self.noop,
+        })
+    }
 }
 
 /// Metadata for a single document.

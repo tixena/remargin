@@ -1373,7 +1373,7 @@ fn handle_sandbox_add(
         .context("identity is required for sandbox_add")?;
 
     let result = sandbox_ops::add_to_files(system, &files, identity, cfg)?;
-    Ok(sandbox_result_to_json(&result, base_dir, "added"))
+    Ok(result.to_json(base_dir, "added"))
 }
 
 /// Handle the `sandbox_remove` tool: unstage files from the caller's sandbox.
@@ -1394,7 +1394,7 @@ fn handle_sandbox_remove(
         .context("identity is required for sandbox_remove")?;
 
     let result = sandbox_ops::remove_from_files(system, &files, identity, cfg)?;
-    Ok(sandbox_result_to_json(&result, base_dir, "removed"))
+    Ok(result.to_json(base_dir, "removed"))
 }
 
 /// Handle the `sandbox_list` tool: list files staged for the caller.
@@ -1430,45 +1430,6 @@ fn handle_sandbox_list(
         })
         .collect();
     Ok(json!({ "files": items }))
-}
-
-fn sandbox_result_to_json(
-    result: &sandbox_ops::SandboxBulkResult,
-    base_dir: &Path,
-    changed_key: &str,
-) -> Value {
-    let changed: Vec<String> = result
-        .changed
-        .iter()
-        .map(|p| strip_prefix_display(p, base_dir))
-        .collect();
-    let skipped: Vec<String> = result
-        .skipped
-        .iter()
-        .map(|p| strip_prefix_display(p, base_dir))
-        .collect();
-    let failed: Vec<Value> = result
-        .failed
-        .iter()
-        .map(|f| {
-            json!({
-                "path": strip_prefix_display(&f.path, base_dir),
-                "reason": f.reason,
-            })
-        })
-        .collect();
-    json!({
-        changed_key: changed,
-        "skipped": skipped,
-        "failed": failed,
-    })
-}
-
-fn strip_prefix_display(path: &Path, base_dir: &Path) -> String {
-    path.strip_prefix(base_dir)
-        .unwrap_or(path)
-        .display()
-        .to_string()
 }
 
 /// Handle the `search` tool: search across documents for text matches.
@@ -1591,12 +1552,7 @@ fn handle_write(
     let target = Path::new(path_str);
     let outcome = document::write(system, base_dir, target, content, config, opts)?;
 
-    Ok(json!({
-        "written": path_str,
-        "binary": binary,
-        "raw": raw || binary,
-        "noop": outcome.noop,
-    }))
+    Ok(outcome.to_json(path_str, binary, raw))
 }
 
 /// Serialize a comment to a JSON value for the `comments` tool response.

@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, FixedOffset, Utc};
 use os_shim::System;
+use serde_json::{Value, json};
 
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
@@ -49,6 +50,44 @@ pub struct SandboxBulkResult {
     pub skipped: Vec<PathBuf>,
 }
 
+impl SandboxBulkResult {
+    /// Serialize this bulk result to the canonical JSON shape shared by
+    /// both CLI and MCP adapters.
+    ///
+    /// `base_dir` is stripped from each path so relative paths surface to
+    /// the caller. `changed_key` is the JSON key used for the `changed`
+    /// array — `"added"` for `sandbox add`, `"removed"` for
+    /// `sandbox remove`.
+    #[must_use]
+    pub fn to_json(&self, base_dir: &Path, changed_key: &str) -> Value {
+        let changed: Vec<String> = self
+            .changed
+            .iter()
+            .map(|p| strip_prefix_display(p, base_dir))
+            .collect();
+        let skipped: Vec<String> = self
+            .skipped
+            .iter()
+            .map(|p| strip_prefix_display(p, base_dir))
+            .collect();
+        let failed: Vec<Value> = self
+            .failed
+            .iter()
+            .map(|f| {
+                json!({
+                    "path": strip_prefix_display(&f.path, base_dir),
+                    "reason": f.reason,
+                })
+            })
+            .collect();
+        json!({
+            changed_key: changed,
+            "skipped": skipped,
+            "failed": failed,
+        })
+    }
+}
+
 /// A per-file failure record produced by bulk sandbox operations.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -64,6 +103,16 @@ pub struct SandboxFailure {
 pub struct SandboxListing {
     pub path: PathBuf,
     pub since: DateTime<FixedOffset>,
+}
+
+/// Strip `base` from `path` for display; if `path` is not anchored at
+/// `base`, render the full path. Used for adapter-friendly relative
+/// paths in response JSON.
+fn strip_prefix_display(path: &Path, base: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 /// Add the caller (`identity`) to the sandbox list of each file in

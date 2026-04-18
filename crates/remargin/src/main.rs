@@ -2226,31 +2226,7 @@ fn emit_sandbox_bulk_result(
     json_mode: bool,
 ) -> Result<()> {
     if json_mode {
-        let changed: Vec<String> = result
-            .changed
-            .iter()
-            .map(|p| strip_prefix_display(p, cwd))
-            .collect();
-        let skipped: Vec<String> = result
-            .skipped
-            .iter()
-            .map(|p| strip_prefix_display(p, cwd))
-            .collect();
-        let failed: Vec<Value> = result
-            .failed
-            .iter()
-            .map(|f| {
-                json!({
-                    "path": strip_prefix_display(&f.path, cwd),
-                    "reason": f.reason,
-                })
-            })
-            .collect();
-        out_json(&json!({
-            changed_key: changed,
-            "skipped": skipped,
-            "failed": failed,
-        }))?;
+        out_json(&result.to_json(cwd, changed_key))?;
     } else {
         for p in &result.changed {
             out(&strip_prefix_display(p, cwd))?;
@@ -2550,12 +2526,7 @@ fn cmd_write(
 
     print_output(
         wp.json_mode,
-        &json!({
-            "written": wp.path,
-            "binary": wp.opts.binary,
-            "raw": wp.opts.raw || wp.opts.binary,
-            "noop": outcome.noop,
-        }),
+        &outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw),
     )
 }
 
