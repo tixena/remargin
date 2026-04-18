@@ -117,8 +117,9 @@ pub struct SignResult {
 /// signatures on the first run and reports zero `signed` / every
 /// already-signed id under `skipped` on the second.
 ///
-/// When `dry_run` is true the candidate set and skip reasons are
-/// computed but no bytes are written — the file's mtime is unchanged.
+/// Callers who want to preview the outcome without writing should use
+/// `remargin plan sign` (rem-0ry dropped the per-op `--dry-run` flag
+/// in favour of the uniform plan projection).
 ///
 /// # Errors
 ///
@@ -138,7 +139,6 @@ pub fn sign_comments(
     path: &Path,
     config: &ResolvedConfig,
     selection: &SignSelection,
-    dry_run: bool,
 ) -> Result<SignResult> {
     let identity = config
         .identity
@@ -167,20 +167,6 @@ pub fn sign_comments(
     // the id → kind decision so the write loop is a pure projection
     // of the candidate set.
     let (targets, skipped_for_ids) = classify_candidates(&doc, identity, selection)?;
-
-    if dry_run {
-        let signed_preview = targets
-            .iter()
-            .map(|(id, ts)| SignedEntry {
-                id: id.clone(),
-                ts: ts.clone(),
-            })
-            .collect();
-        return Ok(SignResult {
-            signed: signed_preview,
-            skipped: skipped_for_ids,
-        });
-    }
 
     // Sign each target in the parsed document. Because signature_payload
     // excludes ack / reactions / checksum, and `compute_signature` is a

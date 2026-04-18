@@ -36,8 +36,11 @@ pub struct MigratedComment {
 
 /// Migrate all legacy comments in a document to Remargin format.
 ///
-/// If `dry_run` is true, returns migration info without writing.
 /// If `backup` is true, writes a `.bak` copy before modifying.
+///
+/// Callers who want to preview the outcome without writing should use
+/// `remargin plan migrate` (rem-0ry dropped the per-op `--dry-run` flag
+/// in favour of the uniform plan projection).
 ///
 /// # Errors
 ///
@@ -48,7 +51,6 @@ pub fn migrate(
     system: &dyn System,
     path: &Path,
     config: &ResolvedConfig,
-    dry_run: bool,
     backup: bool,
 ) -> Result<Vec<MigratedComment>> {
     let mut doc = parser::parse_file(system, path)?;
@@ -60,20 +62,6 @@ pub fn migrate(
 
     // Collect migration results.
     let mut results = Vec::new();
-
-    if dry_run {
-        for lc in doc.legacy_comments() {
-            let role_str = match lc.role {
-                LegacyRole::User => "user",
-                LegacyRole::Agent => "agent",
-            };
-            results.push(MigratedComment {
-                new_id: String::from("(dry-run)"),
-                original_role: String::from(role_str),
-            });
-        }
-        return Ok(results);
-    }
 
     // Create backup if requested.
     if backup {

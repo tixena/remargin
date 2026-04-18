@@ -64,13 +64,6 @@ struct Cli {
 }
 
 #[derive(clap::Args)]
-#[cfg_attr(
-    feature = "unrestricted",
-    expect(
-        clippy::struct_excessive_bools,
-        reason = "CLI flags are naturally boolean; struct_excessive_bools is not relevant here"
-    )
-)]
 struct GlobalFlags {
     /// Path to assets directory.
     #[arg(long)]
@@ -79,10 +72,6 @@ struct GlobalFlags {
     /// Path to the config file.
     #[arg(long)]
     config: Option<PathBuf>,
-
-    /// Dry-run mode: preview changes without writing.
-    #[arg(long)]
-    dry_run: bool,
 
     /// Identity (author name) for this operation.
     #[arg(long)]
@@ -699,17 +688,12 @@ enum ObsidianAction {
     },
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "CLI flags are naturally boolean"
-)]
 struct CommentParams<'cmd> {
     after_comment: Option<&'cmd str>,
     after_line: Option<usize>,
     attachments: &'cmd [PathBuf],
     auto_ack: bool,
     content: &'cmd str,
-    dry_run: bool,
     file: &'cmd str,
     json_mode: bool,
     reply_to: Option<&'cmd str>,
@@ -758,7 +742,6 @@ struct SearchParams<'cmd> {
 
 struct SignParams<'cmd> {
     all_mine: bool,
-    dry_run: bool,
     file: &'cmd str,
     ids: &'cmd [String],
     json_mode: bool,
@@ -1164,7 +1147,6 @@ fn dispatch_with_config(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let json_mode = cli.global.json;
-    let dry_run = cli.global.dry_run;
 
     match &cli.command {
         Commands::Ack {
@@ -1203,7 +1185,6 @@ fn dispatch_with_config(
                 attachments: attach,
                 auto_ack: *auto_ack,
                 content: &resolved_content,
-                dry_run,
                 file,
                 json_mode,
                 reply_to: reply_to.as_deref(),
@@ -1240,10 +1221,10 @@ fn dispatch_with_config(
         Commands::Ls { path } => cmd_ls(system, cwd, config, path, json_mode),
         Commands::Metadata { path } => cmd_metadata(system, cwd, config, path, json_mode),
         Commands::Migrate { file, backup } => {
-            cmd_migrate(system, cwd, config, file, dry_run, *backup, json_mode)
+            cmd_migrate(system, cwd, config, file, *backup, json_mode)
         }
         Commands::Plan { action } => cmd_plan(system, cwd, config, action, json_mode),
-        Commands::Purge { file } => cmd_purge(system, cwd, config, file, dry_run, json_mode),
+        Commands::Purge { file } => cmd_purge(system, cwd, config, file, json_mode),
         Commands::Query {
             path,
             author,
@@ -1317,7 +1298,6 @@ fn dispatch_with_config(
         } => {
             let sp = SignParams {
                 all_mine: *all_mine,
-                dry_run,
                 file,
                 ids,
                 json_mode,
@@ -1451,10 +1431,6 @@ fn cmd_comment(
 
     // Replies always go after their parent — explicit placement is ignored.
     let position = resolve_comment_position(cp.reply_to, cp.after_comment, cp.after_line);
-
-    if cp.dry_run {
-        return print_output(cp.json_mode, &json!({ "dry_run": true, "file": cp.file }));
-    }
 
     let mut params = operations::CreateCommentParams::new(cp.content, &position);
     params.attachments = cp.attachments;
@@ -1840,26 +1816,24 @@ fn cmd_migrate(
     cwd: &Path,
     config: &ResolvedConfig,
     file: &str,
-    dry_run: bool,
     backup: bool,
     json_mode: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
-    let migrated = migrate::migrate(system, &path, config, dry_run, backup)?;
+    let migrated = migrate::migrate(system, &path, config, backup)?;
 
     if json_mode {
         let results: Vec<Value> = migrated
             .iter()
             .map(|m| json!({ "new_id": m.new_id, "original_role": m.original_role }))
             .collect();
-        print_output(true, &json!({ "migrated": results, "dry_run": dry_run }))
+        print_output(true, &json!({ "migrated": results }))
     } else if migrated.is_empty() {
         eprintln!("No legacy comments found.");
         Ok(())
     } else {
-        let label = if dry_run { "dry-run" } else { "migrated" };
         for m in &migrated {
-            eprintln!("{} -> {} ({label})", m.original_role, m.new_id);
+            eprintln!("{} -> {} (migrated)", m.original_role, m.new_id);
         }
         Ok(())
     }
@@ -2033,18 +2007,16 @@ fn cmd_purge(
     cwd: &Path,
     config: &ResolvedConfig,
     file: &str,
-    dry_run: bool,
     json_mode: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
-    let result = purge::purge(system, &path, config, dry_run)?;
+    let result = purge::purge(system, &path, config)?;
 
     print_output(
         json_mode,
         &json!({
             "comments_removed": result.comments_removed,
             "attachments_cleaned": result.attachments_cleaned,
-            "dry_run": dry_run
         }),
     )
 }
@@ -2481,18 +2453,17 @@ fn cmd_sign(
 ) -> Result<()> {
     let SignParams {
         all_mine,
-        dry_run,
         file,
         ids,
         json_mode,
     } = *params;
     let selection = build_sign_selection(all_mine, ids)?;
     let path = resolve_doc_path(system, cwd, file)?;
-    let result = operations::sign::sign_comments(system, &path, config, &selection, dry_run)?;
+    let result = operations::sign::sign_comments(system, &path, config, &selection)?;
     if json_mode {
-        print_output(true, &sign_result_json(&result, dry_run))
+        print_output(true, &sign_result_json(&result))
     } else {
-        render_sign_result_text(&result, dry_run)
+        render_sign_result_text(&result)
     }
 }
 
@@ -2507,7 +2478,7 @@ fn build_sign_selection(all_mine: bool, ids: &[String]) -> Result<operations::si
     })
 }
 
-fn sign_result_json(result: &operations::sign::SignResult, dry_run: bool) -> Value {
+fn sign_result_json(result: &operations::sign::SignResult) -> Value {
     let signed: Vec<Value> = result
         .signed
         .iter()
@@ -2518,13 +2489,12 @@ fn sign_result_json(result: &operations::sign::SignResult, dry_run: bool) -> Val
         .iter()
         .map(|entry| json!({ "id": entry.id, "reason": entry.reason }))
         .collect();
-    json!({ "signed": signed, "skipped": skipped, "dry_run": dry_run })
+    json!({ "signed": signed, "skipped": skipped })
 }
 
-fn render_sign_result_text(result: &operations::sign::SignResult, dry_run: bool) -> Result<()> {
-    let prefix = if dry_run { "would sign" } else { "signed" };
+fn render_sign_result_text(result: &operations::sign::SignResult) -> Result<()> {
     for entry in &result.signed {
-        out(&format!("{prefix}: {} (ts={})", entry.id, entry.ts))?;
+        out(&format!("signed: {} (ts={})", entry.id, entry.ts))?;
     }
     for entry in &result.skipped {
         out(&format!("skipped: {} ({})", entry.id, entry.reason))?;

@@ -1,6 +1,6 @@
 ---
 name: remargin
-description: "Document access layer and structured commenting system for markdown files. Use remargin MCP tools (ls, get, write, comment, ack, query) instead of Read/Edit/Write when working with markdown documents. Provides threaded multi-player comments, integrity checks, batch operations, sandbox staging, dry-run plan projection, and file access through MCP."
+description: "Document access layer and structured commenting system for markdown files. Use remargin MCP tools (ls, get, write, comment, ack, query) instead of Read/Edit/Write when working with markdown documents. Provides threaded multi-player comments, integrity checks, batch operations, sandbox staging, plan-based previews for every mutating op, and file access through MCP."
 user-invocable: true
 ---
 
@@ -516,8 +516,7 @@ docs/design.md:25
 
 ## Escape hatches
 
-- **Preview before committing.** Any mutating op can be previewed via `plan`. Use it when you are unsure about strict-mode gating, noop detection, or comment placement.
-- **Dry-run.** The CLI supports `--dry-run` on most mutating commands; it runs the operation up to but not including the disk write.
+- **Preview before committing.** Any mutating op can be previewed via `plan`. Use it when you are unsure about strict-mode gating, noop detection, or comment placement. `plan` is the single preview surface — the per-op `--dry-run` flag was removed.
 - **Verify failures.** If `verify` reports a mismatch, do NOT rewrite the file to "fix" the checksum — that is the symptom, not the cause. Surface the mismatch to the user; it usually means a manual edit or a cross-identity signing issue.
 - **Clobbered files.** If a write fails comment preservation, re-read the current file via `get`, re-build the correct content, and retry. Never delete comments to unblock.
 - **Not sure which mode.** Run `remargin resolve-mode` and `remargin identity` before composing in unfamiliar directories.
@@ -532,4 +531,4 @@ docs/design.md:25
 - **Comment preservation**: the tools guarantee no comments are lost during writes — the before and after comment list must match exactly with only the expected delta.
 - **Noop**: a write producing byte-identical content to the on-disk file returns `noop: true` without touching the file — retries and idempotent re-submits settle here without disturbing mtime.
 - **Sandbox**: a per-identity marker claimed via `sandbox_add`, listed via `sandbox_list`, and released via `sandbox_remove`. Persisted in document frontmatter. Not the same as "committed" or "submitted" — it is a soft claim only.
-- **Plan**: a dry-run projection (`plan <op>`) that returns the predicted outcome of a mutating op without writing anything. Covers all 11 mutating ops.
+- **Plan**: a projection (`plan <op>`) that returns the predicted outcome of a mutating op without writing anything. This is the one and only preview surface — per-op `--dry-run` flags were removed. Covers every mutating op.

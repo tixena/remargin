@@ -294,12 +294,11 @@ fn desc_metadata() -> ToolDesc {
 fn desc_migrate() -> ToolDesc {
     ToolDesc {
         name: "migrate",
-        description: "Convert old-format comments to remargin format",
+        description: "Convert old-format comments to remargin format. To preview without writing, use `plan` with op=\"migrate\".",
         schema: json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
-                "dry_run": { "type": "boolean", "description": "Preview without writing", "default": false },
                 "backup": { "type": "boolean", "description": "Create .bak backup", "default": false }
             },
             "required": ["file"]
@@ -375,12 +374,11 @@ fn desc_plan() -> ToolDesc {
 fn desc_purge() -> ToolDesc {
     ToolDesc {
         name: "purge",
-        description: "Strip all comments from a document",
+        description: "Strip all comments from a document. To preview without writing, use `plan` with op=\"purge\".",
         schema: json!({
             "type": "object",
             "properties": {
-                "file": { "type": "string", "description": "Path to the document" },
-                "dry_run": { "type": "boolean", "description": "Preview without writing", "default": false }
+                "file": { "type": "string", "description": "Path to the document" }
             },
             "required": ["file"]
         }),
@@ -474,7 +472,8 @@ fn desc_sign() -> ToolDesc {
         description: "Back-sign missing-signature comments authored by the current identity. \
              Refuses to sign comments authored by anyone else (forgery guard). \
              Already-signed comments listed under `ids` are reported as skipped; \
-             `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`.",
+             `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`. \
+             To preview without writing, use `plan` with op=\"sign\".",
         schema: json!({
             "type": "object",
             "properties": {
@@ -485,7 +484,6 @@ fn desc_sign() -> ToolDesc {
                     "description": "Comment ids to sign. Mutually exclusive with all_mine."
                 },
                 "all_mine": { "type": "boolean", "description": "Sign every unsigned comment authored by the current identity.", "default": false },
-                "dry_run": { "type": "boolean", "description": "Preview without writing", "default": false },
                 "identity": { "type": "string", "description": "Override identity for this operation" },
                 "author_type": { "type": "string", "description": "Override author type: human or agent" }
             },
@@ -1179,11 +1177,10 @@ fn handle_migrate(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let dry_run = optional_bool(params, "dry_run");
     let backup = optional_bool(params, "backup");
 
     let path = base_dir.join(file);
-    let migrated = migrate::migrate(system, &path, config, dry_run, backup)?;
+    let migrated = migrate::migrate(system, &path, config, backup)?;
 
     let results: Vec<Value> = migrated
         .iter()
@@ -1352,10 +1349,9 @@ fn handle_purge(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let dry_run = optional_bool(params, "dry_run");
 
     let path = base_dir.join(file);
-    let result = purge::purge(system, &path, config, dry_run)?;
+    let result = purge::purge(system, &path, config)?;
 
     Ok(json!({
         "comments_removed": result.comments_removed,
@@ -1611,14 +1607,13 @@ fn handle_sign(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let dry_run = optional_bool(params, "dry_run");
     let selection = build_sign_selection(params, "sign")?;
 
     let overridden = apply_identity_overrides(config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    let result = operations::sign::sign_comments(system, &path, cfg, &selection, dry_run)?;
+    let result = operations::sign::sign_comments(system, &path, cfg, &selection)?;
 
     let signed: Vec<Value> = result
         .signed
@@ -1634,7 +1629,6 @@ fn handle_sign(
     Ok(json!({
         "signed": signed,
         "skipped": skipped,
-        "dry_run": dry_run,
     }))
 }
 

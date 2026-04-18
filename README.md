@@ -341,9 +341,10 @@ remargin [OPTIONS] <COMMAND>
 | `--mode <open\|registered\|strict>` | Enforcement mode |
 | `--key <PATH>` | Path to Ed25519 signing key |
 | `--assets-dir <PATH>` | Assets directory path |
-| `--dry-run` | Preview changes without writing |
 | `--json` | Output as JSON |
 | `--verbose` | Enable tracing output |
+
+> To preview a mutating op without writing, use `remargin plan <op>`. The per-op `--dry-run` flag was removed in favour of the uniform `plan` projection.
 
 ## Claude Code Integration
 
@@ -486,7 +487,7 @@ If you have documents using the older `user comments` / `agent comments` fenced 
 
 ```bash
 # Preview what would change
-remargin migrate docs/old-doc.md --dry-run
+remargin plan migrate docs/old-doc.md
 
 # Convert
 remargin migrate docs/old-doc.md

@@ -5,7 +5,6 @@
 //!   the signature verifies byte-identically against the registry pubkey
 //! - idempotency: running sign twice yields zero signed / every id under
 //!   skipped on the second pass
-//! - dry-run: candidate set computed but no bytes written (mtime stable)
 //! - forgery guard: `--ids` entry authored by a different participant is
 //!   a hard error before any byte hits disk
 //! - not-found: `--ids` entry that does not exist errors out
@@ -14,6 +13,10 @@
 //! - no-key: sign with a config that has no resolvable key is a hard
 //!   error regardless of mode (stricter than create/edit's fail-fast —
 //!   sign without a key has nothing to do)
+//!
+//! Dry-run coverage: the per-op `--dry-run` flag was removed in rem-0ry
+//! in favour of `remargin plan sign`. The projection test lives in
+//! `operations/tests.rs::project_sign_*`.
 
 extern crate alloc;
 
@@ -187,14 +190,8 @@ fn sign_all_mine_writes_signature_for_owned_unsigned_comments() {
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    let result = sign_comments(
-        &system,
-        Path::new("/d/a.md"),
-        &cfg,
-        &SignSelection::AllMine,
-        false,
-    )
-    .unwrap();
+    let result =
+        sign_comments(&system, Path::new("/d/a.md"), &cfg, &SignSelection::AllMine).unwrap();
 
     assert_eq!(result.signed.len(), 1, "should sign alice's comment only");
     assert_eq!(result.signed[0].id, "alc");
@@ -229,7 +226,6 @@ fn sign_ids_signs_listed_comments() {
         Path::new("/d/a.md"),
         &cfg,
         &SignSelection::Ids(vec![String::from("alc")]),
-        false,
     )
     .unwrap();
 
@@ -255,7 +251,6 @@ fn sign_ids_foreign_author_is_hard_error() {
         Path::new("/d/a.md"),
         &cfg,
         &SignSelection::Ids(vec![String::from("bob")]),
-        false,
     );
 
     let err = result.unwrap_err();
@@ -284,7 +279,6 @@ fn sign_ids_missing_id_is_hard_error() {
         Path::new("/d/a.md"),
         &cfg,
         &SignSelection::Ids(vec![String::from("ghost")]),
-        false,
     );
 
     let err = result.unwrap_err();
@@ -318,7 +312,6 @@ fn sign_ids_already_signed_reported_as_skipped() {
         Path::new("/d/a.md"),
         &cfg,
         &SignSelection::Ids(vec![String::from("alc")]),
-        false,
     )
     .unwrap();
 
@@ -338,58 +331,18 @@ fn sign_all_mine_is_idempotent() {
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
     // First run: signs alice's one comment.
-    let r1 = sign_comments(
-        &system,
-        Path::new("/d/a.md"),
-        &cfg,
-        &SignSelection::AllMine,
-        false,
-    )
-    .unwrap();
+    let r1 = sign_comments(&system, Path::new("/d/a.md"), &cfg, &SignSelection::AllMine).unwrap();
     assert_eq!(r1.signed.len(), 1);
 
     // Second run: alice has no unsigned comments left. --all-mine is
     // a filter, so already-signed ids are silently excluded.
-    let r2 = sign_comments(
-        &system,
-        Path::new("/d/a.md"),
-        &cfg,
-        &SignSelection::AllMine,
-        false,
-    )
-    .unwrap();
+    let r2 = sign_comments(&system, Path::new("/d/a.md"), &cfg, &SignSelection::AllMine).unwrap();
     assert_eq!(r2.signed.len(), 0, "second pass must sign nothing");
     assert_eq!(
         r2.skipped.len(),
         0,
         "--all-mine must not report non-candidates as skipped"
     );
-}
-
-// ---- Dry run ---------------------------------------------------------
-
-#[test]
-fn sign_dry_run_does_not_write() {
-    let before = two_author_doc();
-    let system = mock_with(&before);
-    let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
-
-    let result = sign_comments(
-        &system,
-        Path::new("/d/a.md"),
-        &cfg,
-        &SignSelection::AllMine,
-        true,
-    )
-    .unwrap();
-
-    // The preview lists what would be signed.
-    assert_eq!(result.signed.len(), 1);
-    assert_eq!(result.signed[0].id, "alc");
-
-    // But no bytes landed.
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
-    assert_eq!(after, before, "dry run must leave disk byte-identical");
 }
 
 // ---- No key -----------------------------------------------------------
@@ -405,13 +358,7 @@ fn sign_without_resolvable_key_is_hard_error() {
     let mut cfg = make_config(Mode::Registered, "alice", None);
     cfg.key_path = None;
 
-    let result = sign_comments(
-        &system,
-        Path::new("/d/a.md"),
-        &cfg,
-        &SignSelection::AllMine,
-        false,
-    );
+    let result = sign_comments(&system, Path::new("/d/a.md"), &cfg, &SignSelection::AllMine);
 
     let err = result.unwrap_err();
     let msg = format!("{err:#}");
@@ -435,14 +382,7 @@ fn signed_comment_survives_reparse_with_signature() {
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    sign_comments(
-        &system,
-        Path::new("/d/a.md"),
-        &cfg,
-        &SignSelection::AllMine,
-        false,
-    )
-    .unwrap();
+    sign_comments(&system, Path::new("/d/a.md"), &cfg, &SignSelection::AllMine).unwrap();
 
     let doc = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
     let signed_count = doc

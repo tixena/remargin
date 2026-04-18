@@ -30,19 +30,16 @@ pub struct PurgeResult {
 
 /// Remove all Remargin comment blocks from a document.
 ///
-/// If `dry_run` is true, returns stats without writing.
+/// Callers who want to preview the outcome without writing should use
+/// `remargin plan purge` (rem-0ry dropped the per-op `--dry-run` flag
+/// in favour of the uniform plan projection).
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The file cannot be read or written
 /// - The document cannot be parsed
-pub fn purge(
-    system: &dyn System,
-    path: &Path,
-    config: &ResolvedConfig,
-    dry_run: bool,
-) -> Result<PurgeResult> {
+pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Result<PurgeResult> {
     let mut doc = parser::parse_file(system, path)?;
 
     // Count comments and collect attachment paths.
@@ -53,13 +50,6 @@ pub fn purge(
         .iter()
         .flat_map(|cm| cm.attachments.clone())
         .collect();
-
-    if dry_run {
-        return Ok(PurgeResult {
-            attachments_cleaned: attachment_paths.len(),
-            comments_removed,
-        });
-    }
 
     // Remove all Comment and LegacyComment segments.
     doc.segments.retain(|seg| matches!(seg, Segment::Body(_)));

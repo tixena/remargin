@@ -71,7 +71,7 @@ fn simple_purge() {
         .unwrap();
 
     let config = open_config();
-    let result = purge(&system, Path::new("/docs/test.md"), &config, false).unwrap();
+    let result = purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     assert_eq!(result.comments_removed, 2);
 
@@ -87,7 +87,7 @@ fn body_text_preserved() {
         .unwrap();
 
     let config = open_config();
-    purge(&system, Path::new("/docs/test.md"), &config, false).unwrap();
+    purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert!(content.contains("Some text before."));
@@ -102,7 +102,7 @@ fn frontmatter_cleanup() {
         .unwrap();
 
     let config = open_config();
-    purge(&system, Path::new("/docs/test.md"), &config, false).unwrap();
+    purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     // User field preserved.
@@ -113,22 +113,8 @@ fn frontmatter_cleanup() {
     assert!(!content.contains("remargin_last_activity"));
 }
 
-#[test]
-fn dry_run() {
-    let system = MockSystem::new()
-        .with_file(Path::new("/docs/test.md"), doc_with_comments().as_bytes())
-        .unwrap();
-
-    let config = open_config();
-    let result = purge(&system, Path::new("/docs/test.md"), &config, true).unwrap();
-
-    assert_eq!(result.comments_removed, 2);
-
-    // File should be unchanged.
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
-    let doc = parser::parse(&content).unwrap();
-    assert_eq!(doc.comments().len(), 2);
-}
+// Note: per-op `--dry-run` was removed in rem-0ry; `plan purge` covers
+// that preview path now.
 
 #[test]
 fn no_comments() {
@@ -138,7 +124,7 @@ fn no_comments() {
         .unwrap();
 
     let config = open_config();
-    let result = purge(&system, Path::new("/docs/test.md"), &config, false).unwrap();
+    let result = purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     assert_eq!(result.comments_removed, 0);
 }
@@ -150,7 +136,7 @@ fn no_excessive_blank_lines() {
         .unwrap();
 
     let config = open_config();
-    purge(&system, Path::new("/docs/test.md"), &config, false).unwrap();
+    purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     // Should not have 3+ consecutive newlines.

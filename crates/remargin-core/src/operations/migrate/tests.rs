@@ -36,7 +36,7 @@ This is feedback from the user.
         .unwrap();
     let config = open_config();
 
-    let results = migrate(&system, Path::new("/docs/test.md"), &config, false, false).unwrap();
+    let results = migrate(&system, Path::new("/docs/test.md"), &config, false).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].original_role, "user");
 
@@ -64,7 +64,7 @@ Agent response.
         .unwrap();
     let config = open_config();
 
-    let results = migrate(&system, Path::new("/docs/test.md"), &config, false, false).unwrap();
+    let results = migrate(&system, Path::new("/docs/test.md"), &config, false).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].original_role, "agent");
 
@@ -77,27 +77,10 @@ Agent response.
     assert_eq!(cm.ack[0].author, "legacy-user");
 }
 
-#[test]
-fn dry_run_no_changes() {
-    let doc = "\
-```user comments
-Feedback.
-```
-";
-    let system = MockSystem::new()
-        .with_file(Path::new("/docs/test.md"), doc.as_bytes())
-        .unwrap();
-    let config = open_config();
-
-    let results = migrate(&system, Path::new("/docs/test.md"), &config, true, false).unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].new_id, "(dry-run)");
-
-    // File unchanged.
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
-    let parsed = parser::parse(&content).unwrap();
-    assert_eq!(parsed.legacy_comments().len(), 1);
-}
+// Note: per-op `--dry-run` was removed in rem-0ry; `plan migrate`
+// covers that preview path now. The projection test lives in
+// `operations/tests.rs::project_*` (plan migrate is scheduled under
+// the broader plan-wiring epic).
 
 #[test]
 fn no_legacy_comments() {
@@ -107,7 +90,7 @@ fn no_legacy_comments() {
         .unwrap();
     let config = open_config();
 
-    let results = migrate(&system, Path::new("/docs/test.md"), &config, false, false).unwrap();
+    let results = migrate(&system, Path::new("/docs/test.md"), &config, false).unwrap();
     assert!(results.is_empty());
 }
 
@@ -123,7 +106,7 @@ Content.
         .unwrap();
     let config = open_config();
 
-    migrate(&system, Path::new("/docs/test.md"), &config, false, true).unwrap();
+    migrate(&system, Path::new("/docs/test.md"), &config, true).unwrap();
 
     let backup_exists = system.exists(Path::new("/docs/test.md.bak")).unwrap();
     assert!(backup_exists);

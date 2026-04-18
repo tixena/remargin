@@ -614,61 +614,8 @@ fn verify_checks_checksum_integrity() {
     assert!(result["ok"].as_bool().unwrap(), "verify should pass");
 }
 
-#[test]
-fn purge_dry_run_reports_count() {
-    let base = Path::new("/docs");
-    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody.\n");
-    let config = test_config();
-
-    // Create two comments.
-    call(
-        &system,
-        base,
-        &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1_i32,
-            "method": "tools/call",
-            "params": {
-                "name": "comment",
-                "arguments": { "file": "doc.md", "content": "Comment A" }
-            }
-        }),
-    );
-    call(
-        &system,
-        base,
-        &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 2_i32,
-            "method": "tools/call",
-            "params": {
-                "name": "comment",
-                "arguments": { "file": "doc.md", "content": "Comment B" }
-            }
-        }),
-    );
-
-    // Purge dry run.
-    let response = call(
-        &system,
-        base,
-        &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 3_i32,
-            "method": "tools/call",
-            "params": {
-                "name": "purge",
-                "arguments": { "file": "doc.md", "dry_run": true }
-            }
-        }),
-    );
-
-    let result = extract_tool_text(&response);
-    assert_eq!(result["comments_removed"], 2_i32);
-}
+// Note: the purge `dry_run` smoke test was removed in rem-0ry along
+// with the flag itself; `plan` with op="purge" is the preview path.
 
 #[test]
 fn metadata_returns_document_info() {
