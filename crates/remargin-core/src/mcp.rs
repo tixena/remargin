@@ -300,7 +300,7 @@ fn desc_migrate() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Currently wired ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove. `write` still returns a 'not yet landed' error.",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. All ops are wired: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, write.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -348,7 +348,11 @@ fn desc_plan() -> ToolDesc {
                         },
                         "required": ["content"]
                     }
-                }
+                },
+                "binary": { "type": "boolean", "description": "For write: content is base64 binary (implies raw)", "default": false },
+                "create": { "type": "boolean", "description": "For write: create the file if missing", "default": false },
+                "lines": { "type": "string", "description": "For write: partial-write line range as START-END (1-indexed inclusive)" },
+                "raw": { "type": "boolean", "description": "For write: treat content as raw bytes; plan returns a non-Markdown reject_reason", "default": false }
             },
             "required": ["op"]
         }),
@@ -1257,7 +1261,21 @@ fn handle_plan(
             ))
         }
         "write" => {
-            bail!("plan {op}: per-op wiring not yet landed (tracked under rem-bhk)")
+            let file = required_str(params, "file")?;
+            let content = required_str(params, "content")?;
+            let binary = optional_bool(params, "binary");
+            let create = optional_bool(params, "create");
+            let raw = optional_bool(params, "raw");
+            let lines = optional_str(params, "lines");
+            let line_range = lines.map(parse_plan_line_range).transpose()?;
+            let opts = document::WriteOptions::new()
+                .binary(binary)
+                .create(create)
+                .lines(line_range)
+                .raw(raw);
+            let projection =
+                document::project_write(system, base_dir, Path::new(file), content, cfg, opts)?;
+            build_write_plan_value(&projection, cfg)
         }
         other => bail!("plan: unknown op {other:?}"),
     }
@@ -1354,6 +1372,51 @@ fn build_plan_identity(cfg: &ResolvedConfig) -> plan_ops::PlanIdentity {
         AuthorType::Human => String::from("human"),
     });
     plan_ops::PlanIdentity::new(cfg.identity.clone(), author_type, cfg.key_path.is_some())
+}
+
+/// Parse the `lines` field of a `plan.write` request into a
+/// `(start, end)` 1-indexed tuple. Mirrors the CLI's `parse_line_range`.
+fn parse_plan_line_range(raw: &str) -> Result<(usize, usize)> {
+    let (start_str, end_str) = raw
+        .split_once('-')
+        .with_context(|| format!("lines expects START-END, got {raw:?}"))?;
+    let start: usize = start_str
+        .parse()
+        .with_context(|| format!("lines: invalid start value {start_str:?}"))?;
+    let end: usize = end_str
+        .parse()
+        .with_context(|| format!("lines: invalid end value {end_str:?}"))?;
+    Ok((start, end))
+}
+
+/// Serialize a [`document::WriteProjection`] into a `plan write` JSON
+/// report. Mirrors the CLI's `cmd_plan_write` output so both adapters
+/// produce byte-identical plan payloads.
+fn build_write_plan_value(
+    projection: &document::WriteProjection,
+    cfg: &ResolvedConfig,
+) -> Result<Value> {
+    let identity = build_plan_identity(cfg);
+    let report = match projection {
+        document::WriteProjection::Markdown {
+            before,
+            after,
+            noop,
+        } => {
+            let mut report = plan_ops::project_report("write", before, after, cfg, identity);
+            report.noop = report.noop || *noop;
+            report
+        }
+        document::WriteProjection::Unsupported { reason } => {
+            let empty =
+                parser::parse("").context("parsing empty before-document for plan write")?;
+            let mut report = plan_ops::project_report("write", &empty, &empty, cfg, identity);
+            report.reject_reason = Some(reason.clone());
+            report.would_commit = false;
+            report
+        }
+    };
+    serde_json::to_value(&report).context("serializing plan write report")
 }
 
 /// Handle the `purge` tool: strip all comments from a document.

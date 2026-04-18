@@ -2104,13 +2104,18 @@ fn mcp_plan_rejects_missing_comment_id() {
 }
 
 #[test]
-fn mcp_plan_write_is_not_yet_wired() {
-    // rem-3uo scopes plan to ack / delete / react. Other ops (write
-    // included on the MCP dispatcher) should surface the canonical
-    // "not yet landed" message so callers know what to wait for. The
-    // wired CLI plan write uses a different code path.
+fn mcp_plan_write_markdown_create_projects_without_writing_disk() {
+    // rem-bhk: `plan write` now projects the same PlanReport the CLI
+    // emits, without touching disk. Use `create: true` against a fresh
+    // filename so the preservation check has no prior comments to
+    // enforce.
     let base = Path::new("/docs");
-    let system = MockSystem::new();
+    // Seed a sibling file so `/docs` exists as a directory in the
+    // `MockSystem`; the sandbox resolver needs the parent to be present
+    // even when the target file is still missing.
+    let system = MockSystem::new()
+        .with_file(base.join("seed.md"), b"# seed\n")
+        .unwrap();
     let config = test_config();
 
     let response = call(
@@ -2123,17 +2128,71 @@ fn mcp_plan_write_is_not_yet_wired() {
             "method": "tools/call",
             "params": {
                 "name": "plan",
-                "arguments": { "op": "write" }
+                "arguments": {
+                    "op": "write",
+                    "file": "new.md",
+                    "content": "# Brand new doc\n\nBody text.\n",
+                    "create": true
+                }
             }
         }),
     );
 
-    assert!(is_tool_error(&response));
-    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        msg.contains("not yet landed"),
-        "expected not-yet-landed message, got: {msg}"
+        !is_tool_error(&response),
+        "plan write (create) should succeed: {response}"
     );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert_eq!(report["op"], "write");
+    assert!(!report["noop"].as_bool().unwrap());
+
+    assert!(
+        system.read_to_string(&base.join("new.md")).is_err(),
+        "plan write must not write disk"
+    );
+}
+
+#[test]
+fn mcp_plan_write_raw_non_markdown_returns_unsupported_reject_reason() {
+    // `raw` / `binary` writes to non-markdown files produce a degraded
+    // `WriteProjection::Unsupported` report with `reject_reason` and
+    // `would_commit: false`. `.md` + `raw` is a hard error in
+    // `validate_write_opts` (symmetric with CLI), so exercise the
+    // reachable branch with a `.txt` path.
+    let base = Path::new("/docs");
+    let path = base.join("data.txt");
+    let system = MockSystem::new().with_file(&path, b"old bytes\n").unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "write",
+                    "file": "data.txt",
+                    "content": "new raw bytes",
+                    "raw": true
+                }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan write raw (non-md) should return a report, not an error: {response}"
+    );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert!(!report["would_commit"].as_bool().unwrap());
+    assert!(report["reject_reason"].is_string());
 }
 
 #[test]
