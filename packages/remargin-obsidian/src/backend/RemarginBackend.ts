@@ -15,6 +15,7 @@ import {
 import { expandPath } from "@/lib/expandPath";
 import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
+import { buildIdentityArgs } from "./buildIdentityArgs";
 import type {
   BatchCommentOp,
   CommentOpts,
@@ -419,17 +420,7 @@ export class RemarginBackend {
   }
 
   private buildIdentityArgs(): string[] {
-    if (this.settings.identityMode === "config" && this.settings.configFilePath) {
-      return ["--config", expandPath(this.settings.configFilePath), "--type", "human"];
-    }
-    const args: string[] = [];
-    if (this.settings.authorName) {
-      args.push("--identity", this.settings.authorName);
-    }
-    // NOTE: keyFilePath is not currently forwarded to the CLI here, but when
-    // it is, it should go through expandPath as well.
-    args.push("--type", "human");
-    return args;
+    return buildIdentityArgs(this.settings);
   }
 
   /**

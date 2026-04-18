@@ -104,13 +104,6 @@ const YAML_CONFIG_FILTERS: FilePickerFilter[] = [
   { name: "All Files", extensions: ["*"] },
 ];
 
-const KEY_FILE_FILTERS: FilePickerFilter[] = [
-  // Signing keys often have no extension, so "All Files" is the primary
-  // filter — we still offer common SSH-style extensions for convenience.
-  { name: "All Files", extensions: ["*"] },
-  { name: "Key", extensions: ["pem", "key", "pub"] },
-];
-
 type ModeValue = "open" | "registered" | "strict";
 const MODE_OPTIONS: readonly ModeValue[] = ["open", "registered", "strict"];
 const isModeValue = (value: string): value is ModeValue =>
@@ -328,13 +321,12 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
                 placeholder="Author name"
                 className="font-mono text-sm bg-bg-primary border-bg-border"
               />
-              <PathInput
-                value={current.keyFilePath}
-                onChange={(next) => update("keyFilePath", next)}
-                placeholder="Path to signing key"
-                filters={KEY_FILE_FILTERS}
-                dialogTitle="Select signing key"
-              />
+              <p className="text-xs text-text-muted font-sans">
+                Manual mode does not forward a signing key to the CLI. If you need to sign comments
+                (strict mode), switch to Config file and point the plugin at a .remargin.yaml that
+                declares a <code>key:</code>
+                field.
+              </p>
             </div>
           )}
         </SettingsField>
