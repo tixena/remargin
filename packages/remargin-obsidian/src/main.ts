@@ -185,8 +185,8 @@ export default class RemarginPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "add-comment",
-      name: "Add comment",
+      id: "add-comment-at-cursor",
+      name: "Add comment at cursor",
       callback: () => {
         void this.addComment();
       },
@@ -294,7 +294,7 @@ export default class RemarginPlugin extends Plugin {
    * Stable accessor for "the most recently used markdown editor." Returns
    * null only when there is no markdown file open at all -- it does NOT
    * return null just because focus moved to the sidebar. Used by the `+`
-   * button's reactive disabled state and by the `Add comment` command.
+   * button's reactive disabled state and by the `Add comment at cursor` command.
    */
   getLastMarkdownView(): MarkdownView | null {
     if (this.lastMarkdownView && this.lastMarkdownView.file) {
@@ -333,7 +333,7 @@ export default class RemarginPlugin extends Plugin {
 
   /**
    * Shared entry point for "add a comment at the cursor." Both the `+`
-   * button and the `Add comment` command route through here so the two
+   * button and the `Add comment at cursor` command route through here so the two
    * paths can never drift apart.
    */
   async addComment() {
