@@ -128,11 +128,12 @@ export function CommentCard({
         <div className="flex items-center gap-1.5 flex-wrap">
           {comment.id &&
             (viewerAcked ? (
-              <AckToggle ack={ackAuthors} me={me} />
+              <AckToggle ack={ackAuthors} me={me} toTargets={toTargets} />
             ) : (
               <AckButton
                 ack={ackAuthors}
                 me={me}
+                toTargets={toTargets}
                 onAck={() => {
                   if (comment.id) onAck(comment.id, false);
                 }}

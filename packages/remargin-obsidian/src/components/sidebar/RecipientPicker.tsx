@@ -1,7 +1,6 @@
 import { Lock, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useParticipants } from "@/hooks/useParticipants";
 import { authorLabel } from "@/lib/authorLabel";
@@ -150,17 +149,43 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
           </Badge>
         );
       })}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-5 w-5 p-0 text-text-faint hover:text-text-normal"
+      {/*
+       * Inline style mirrors the panel-header refresh button so this
+       * icon-only trigger renders borderless across Obsidian themes;
+       * Tailwind/Button utility classes alone don't reliably suppress
+       * the default Obsidian button chrome here.
+       */}
+      <button
+        type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-label="Add recipient"
         title="Add recipient"
         aria-expanded={open}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 20,
+          height: 20,
+          borderRadius: 4,
+          border: "none",
+          cursor: "pointer",
+          backgroundColor: "transparent",
+          padding: 0,
+          color: "var(--text-faint)",
+          flexShrink: 0,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = "var(--background-modifier-hover)";
+          e.currentTarget.style.color = "var(--text-normal)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = "transparent";
+          e.currentTarget.style.color = "var(--text-faint)";
+        }}
       >
         <Plus className="w-2.5 h-2.5" />
-      </Button>
+      </button>
       {open && (
         <div className="absolute top-full left-0 z-30 mt-1 w-60 max-w-full rounded border border-bg-border bg-bg-primary shadow-lg p-1">
           <Input

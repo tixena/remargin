@@ -20,7 +20,12 @@ const noop = (): void => {
   /* intentional — tests only inspect static markup */
 };
 
-function render(props: { ack: string[]; me?: string | null; onAck?: () => void }): string {
+function render(props: {
+  ack: string[];
+  me?: string | null;
+  onAck?: () => void;
+  toTargets?: string[];
+}): string {
   __resetParticipantsCacheForTests();
   return renderToStaticMarkup(
     createElement(
@@ -61,5 +66,25 @@ describe("AckButton", () => {
   it("falls back to a neutral tooltip when the ack list is empty", () => {
     const html = render({ ack: [], me: "eduardo" });
     assert.ok(html.includes('title="No acknowledgments yet"'), `got: ${html}`);
+  });
+
+  // Ack-visual precedence parity with AckToggle: the button must share
+  // the same arrow/color rules so clicking it doesn't flip the visual.
+  it("renders green double arrow when directed to no one and an outsider acked (rule 1)", () => {
+    const html = render({ ack: ["alice"], me: "eduardo", toTargets: [] });
+    assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
+    assert.ok(html.includes("lucide-check-check"), `expected double arrow, got: ${html}`);
+  });
+
+  it("renders green single arrow when directed to me and only an outsider acked (rule 3)", () => {
+    const html = render({ ack: ["adrian"], me: "eduardo", toTargets: ["eduardo"] });
+    assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
+    assert.ok(!html.includes("lucide-check-check"), `expected single arrow, got: ${html}`);
+  });
+
+  it("renders normal muted single arrow when nobody acked (rule 4)", () => {
+    const html = render({ ack: [], me: "eduardo", toTargets: ["eduardo"] });
+    assert.ok(!html.includes("text-green-500"), `expected muted tone, got: ${html}`);
+    assert.ok(!html.includes("lucide-check-check"), `expected single arrow, got: ${html}`);
   });
 });

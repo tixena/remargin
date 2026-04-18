@@ -1,6 +1,7 @@
 import { Check, CheckCheck } from "lucide-react";
 import { useParticipants } from "@/hooks/useParticipants";
 import { ackStateFor } from "@/lib/ack-state";
+import { ackVisualFor } from "@/lib/ack-visual";
 import { cn } from "@/lib/utils";
 
 export type { AckState } from "@/lib/ack-state";
@@ -11,19 +12,33 @@ export interface AckToggleProps {
   ack: readonly string[];
   /** Current identity name; used to pick between me-acked and others-acked. */
   me?: string | null;
+  /**
+   * Effective `to:` recipients the card is showing — `comment.to` when
+   * non-empty, else the parent comment's author for replies, else `[]`.
+   * Drives the arrow + color precedence defined in ackVisualFor.
+   */
+  toTargets?: readonly string[];
 }
 
 /**
- * Non-interactive Ack label with three visual states (see ackStateFor).
+ * Non-interactive Ack label. Arrow + color are driven by `ackVisualFor`
+ * (see lib/ack-visual.ts): double arrow + green when the directed-at
+ * recipient has acked (or the comment was directed to nobody and anyone
+ * acked), single arrow + green when only an outsider acked, single arrow
+ * + muted when there are no acks at all. The green "me-acked" special
+ * case still stands because a viewer who is in `to:` and also in `ack`
+ * trips rule 2 on the double-green branch.
  *
  * Originally a click-to-toggle button, this was downgraded to a passive
  * label after repeated mis-clicks accidentally removed acks. The Unack
- * action now lives in the comment card's ellipsis menu (see CommentCard),
- * where intent is explicit.
+ * action now lives in the comment card's ellipsis menu.
  */
-export function AckToggle({ ack, me }: AckToggleProps) {
+export function AckToggle({ ack, me, toTargets = [] }: AckToggleProps) {
+  const visual = ackVisualFor(toTargets, ack);
+  const Icon = visual.arrow === "double" ? CheckCheck : Check;
+  // `ackStateFor` still drives the label text so existing tests / tooltips
+  // stay meaningful — the visual variant is orthogonal.
   const state = ackStateFor(ack, me);
-  const Icon = state === "me-acked" ? CheckCheck : Check;
   const label = state === "unacked" ? "unacked" : "acked";
   const count = ack.length;
   const { resolveDisplayName } = useParticipants();
@@ -38,9 +53,8 @@ export function AckToggle({ ack, me }: AckToggleProps) {
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[10px] leading-none font-semibold",
-        state === "me-acked" && "bg-green-500/20 text-green-500 border border-green-500/40",
-        state === "others-acked" && "bg-bg-hover text-text-muted border border-bg-border",
-        state === "unacked" && "bg-transparent text-text-muted border border-bg-border"
+        visual.tone === "green" && "bg-green-500/20 text-green-500 border border-green-500/40",
+        visual.tone === "normal" && "bg-transparent text-text-muted border border-bg-border"
       )}
       aria-label={tooltip}
       title={tooltip}

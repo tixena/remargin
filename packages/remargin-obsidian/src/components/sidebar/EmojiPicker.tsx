@@ -45,13 +45,45 @@ export function EmojiPicker({ onPick, disabled }: EmojiPickerProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
+        {/*
+         * Inline style mirrors the panel-header refresh button
+         * (SidebarShell) — Obsidian's host theme paints a default
+         * background + border on bare <button> elements which Tailwind
+         * classes alone don't reliably override. Setting `border:none`
+         * and `backgroundColor:transparent` explicitly keeps the icon
+         * borderless regardless of theme.
+         */}
         <button
           type="button"
-          className="inline-flex items-center justify-center w-5 h-5 rounded-sm text-text-faint hover:text-text-muted hover:bg-bg-hover disabled:opacity-40 disabled:pointer-events-none"
           onClick={(e) => e.stopPropagation()}
           disabled={disabled}
           aria-label="Add reaction"
           title="Add reaction"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 20,
+            height: 20,
+            borderRadius: 4,
+            border: "none",
+            cursor: "pointer",
+            backgroundColor: "transparent",
+            padding: 0,
+            color: "var(--text-faint)",
+            flexShrink: 0,
+            opacity: disabled ? 0.4 : 1,
+            pointerEvents: disabled ? "none" : "auto",
+          }}
+          onMouseEnter={(e) => {
+            if (disabled) return;
+            e.currentTarget.style.backgroundColor = "var(--background-modifier-hover)";
+            e.currentTarget.style.color = "var(--text-muted)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "transparent";
+            e.currentTarget.style.color = "var(--text-faint)";
+          }}
         >
           <ObsidianIcon icon="smile-plus" size={12} />
         </button>

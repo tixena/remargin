@@ -18,7 +18,7 @@ const backendStub = {
   registryShow: (): Promise<Participant[]> => Promise.resolve([]),
 } as unknown as RemarginBackend;
 
-function render(props: { ack: string[]; me?: string | null }): string {
+function render(props: { ack: string[]; me?: string | null; toTargets?: string[] }): string {
   __resetParticipantsCacheForTests();
   return renderToStaticMarkup(
     createElement(
@@ -66,5 +66,35 @@ describe("AckToggle", () => {
   it("falls back to a neutral tooltip when the ack list is empty", () => {
     const html = render({ ack: [], me: "eduardo" });
     assert.ok(html.includes('title="No acknowledgments yet"'), `got: ${html}`);
+  });
+
+  // Ack-visual precedence (see ackVisualFor): these tests lock the four
+  // rules down at the DOM-class level so a regression in the helper or
+  // the toTargets threading surfaces here.
+  it("renders green double arrow when directed to no one and anyone acked (rule 1)", () => {
+    const html = render({ ack: ["alice"], me: "eduardo", toTargets: [] });
+    assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
+    assert.ok(html.includes("lucide-check-check"), `expected double arrow, got: ${html}`);
+  });
+
+  it("renders green double arrow when to=[X] and X acked (rule 2)", () => {
+    const html = render({ ack: ["eduardo"], me: "eduardo", toTargets: ["eduardo"] });
+    assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
+    assert.ok(html.includes("lucide-check-check"), `expected double arrow, got: ${html}`);
+  });
+
+  it("renders green single arrow when to=[me] and only an outsider acked (rule 3)", () => {
+    // Eduardo's concrete example: directed to me (eduardo), acked by
+    // Adrian — must render green single arrow, not double.
+    const html = render({ ack: ["adrian"], me: "eduardo", toTargets: ["eduardo"] });
+    assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
+    assert.ok(!html.includes("lucide-check-check"), `expected single arrow, got: ${html}`);
+    assert.ok(html.includes("lucide-check"), `expected single check icon, got: ${html}`);
+  });
+
+  it("renders normal muted single arrow when nobody acked (rule 4)", () => {
+    const html = render({ ack: [], me: "eduardo", toTargets: ["eduardo"] });
+    assert.ok(!html.includes("text-green-500"), `expected muted tone, got: ${html}`);
+    assert.ok(!html.includes("lucide-check-check"), `expected single arrow, got: ${html}`);
   });
 });

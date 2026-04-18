@@ -33,12 +33,20 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
   return (
     <div className="flex items-center justify-between gap-2 w-full">
       <div className="flex items-center gap-1.5 min-w-0">
-        <div
-          className={`inline-flex h-5 w-5 items-center justify-center rounded-full font-mono text-[9px] font-semibold leading-none ${avatarClass}`}
+        {/*
+         * The author-type badge, the id badge, and the line badge share
+         * the same base Badge styling (px-1 py-0 text-[9px] leading-none)
+         * so they all settle at the same visual height. The avatar's
+         * rounded-full shape and colored background are the only
+         * overrides; stray sizing (`h-5 w-5`) would make it taller than
+         * its siblings and break the header row's visual rhythm.
+         */}
+        <Badge
+          className={`px-1 py-0 rounded-full font-mono text-[9px] font-semibold leading-none ${avatarClass}`}
           aria-label={isAgent ? "AI agent" : "Human"}
         >
           {initials}
-        </div>
+        </Badge>
         {comment.id && (
           <Badge className="px-1 py-0 rounded-sm bg-slate-500 text-white font-mono text-[9px] font-semibold leading-none">
             {comment.id}
