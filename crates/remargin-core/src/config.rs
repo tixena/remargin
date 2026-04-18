@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::parser::AuthorType;
+use crate::path::expand_path;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
@@ -454,24 +455,19 @@ fn parse_mode(mode_str: &str) -> Result<Mode> {
 }
 
 /// Resolve the key path shorthand:
-/// - Plain name (no `/` or `~`) maps to `~/.ssh/<name>`
-/// - Path with `/` or `~` is treated as a literal path
-///
-/// Uses the `HOME` environment variable from the system abstraction.
+/// - Plain name (no `/` or `~` or `$`) maps to `~/.ssh/<name>`.
+/// - Anything else is treated as a literal path and run through
+///   [`expand_path`] so `~`, `$VAR`, and `${VAR}` resolve
+///   identically to every other path surface (rem-3xo).
 ///
 /// # Errors
 ///
-/// Returns an error if `HOME` is not set (when resolving a plain name).
+/// Returns an error if the `HOME` environment variable is not set (when
+/// resolving a plain name) or if [`expand_path`] rejects the literal
+/// form.
 pub fn resolve_key_path(system: &dyn System, key: &str) -> Result<PathBuf> {
-    if key.contains('/') {
-        if let Some(rest) = key.strip_prefix("~/") {
-            let home = system
-                .env_var("HOME")
-                .context("HOME environment variable not set")?;
-            Ok(PathBuf::from(home).join(rest))
-        } else {
-            Ok(PathBuf::from(key))
-        }
+    if key.contains('/') || key.starts_with('~') || key.contains('$') {
+        Ok(expand_path(system, key)?)
     } else {
         let home = system
             .env_var("HOME")

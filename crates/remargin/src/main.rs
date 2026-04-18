@@ -34,6 +34,7 @@ use remargin_core::operations::query;
 use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
 use remargin_core::parser;
+use remargin_core::path::expand_path;
 use remargin_core::skill;
 use remargin_core::writer::InsertPosition;
 
@@ -742,6 +743,14 @@ struct WriteParams<'cmd> {
     path: &'cmd str,
 }
 
+/// Owning buffer for overrides that need post-expansion copies. The CLI
+/// holds one on the stack for the lifetime of `run`.
+#[derive(Default)]
+struct OverrideScratch {
+    assets_dir: Option<String>,
+    key: Option<String>,
+}
+
 fn out(msg: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{msg}").context("writing to stdout")
@@ -852,8 +861,25 @@ fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathB
             .context("writing stdin to temp file")?;
         Ok(temp_path)
     } else {
-        Ok(cwd.join(file))
+        let expanded = expand_cli_path(system, file)?;
+        Ok(cwd.join(expanded))
     }
+}
+
+/// Expand a string-typed CLI path argument through [`expand_path`] and
+/// surface a clear error naming the offending input. Downstream callers
+/// layer their own path semantics (joining against `cwd`, validating that
+/// the file exists, etc.) on top of the expanded `PathBuf`.
+fn expand_cli_path(system: &dyn System, raw: &str) -> Result<PathBuf> {
+    expand_path(system, raw).with_context(|| format!("expanding path argument {raw:?}"))
+}
+
+/// Same as [`expand_cli_path`] but for a `&Path`. Used by flags that clap
+/// already parsed as [`PathBuf`] — we round-trip through `to_string_lossy`
+/// so `~`, `$VAR`, etc. in the original arg still get expanded.
+fn expand_cli_pathbuf(system: &dyn System, raw: &Path) -> Result<PathBuf> {
+    let raw_str = raw.to_string_lossy();
+    expand_cli_path(system, raw_str.as_ref())
 }
 
 const fn author_type_str(at: &parser::AuthorType) -> &'static str {
@@ -959,18 +985,45 @@ fn classify_error(err: &anyhow::Error) -> u8 {
     }
 }
 
-fn build_overrides(global: &GlobalFlags) -> CliOverrides<'_> {
+fn build_overrides<'cli>(
+    system: &dyn System,
+    global: &'cli GlobalFlags,
+    scratch: &'cli mut OverrideScratch,
+) -> Result<CliOverrides<'cli>> {
+    // Expand path-shaped overrides (`--assets-dir`, `--key`) once at the
+    // adapter boundary so downstream callers never see an unexpanded `~`
+    // or `$VAR`. The `scratch` buffer owns the expanded strings for the
+    // lifetime of the returned overrides.
+    scratch.assets_dir = match global.assets_dir.as_deref() {
+        Some(raw) => Some(expand_cli_path(system, raw)?.to_string_lossy().into_owned()),
+        None => None,
+    };
+    scratch.key = match global.key.as_deref() {
+        Some(raw) => {
+            // `--key` accepts a bare name shorthand (e.g. `mykey` → `~/.ssh/mykey`).
+            // Expand only when the raw value contains a path sigil — bare
+            // names are resolved later by `resolve_key_path`.
+            if raw.starts_with('~') || raw.contains('$') {
+                Some(expand_cli_path(system, raw)?.to_string_lossy().into_owned())
+            } else {
+                Some(String::from(raw))
+            }
+        }
+        None => None,
+    };
+
     let mut overrides = CliOverrides::default();
-    overrides.assets_dir = global.assets_dir.as_deref();
+    overrides.assets_dir = scratch.assets_dir.as_deref();
     overrides.author_type = global.r#type.as_deref();
     overrides.identity = global.identity.as_deref();
-    overrides.key = global.key.as_deref();
+    overrides.key = scratch.key.as_deref();
     overrides.mode = global.mode.as_deref();
-    overrides
+    Ok(overrides)
 }
 
 fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
-    let overrides = build_overrides(&cli.global);
+    let mut scratch = OverrideScratch::default();
+    let overrides = build_overrides(system, &cli.global, &mut scratch)?;
 
     // Commands that do not need config.
     match &cli.command {
@@ -985,10 +1038,17 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             return cmd_identity(system, cwd, author_type.as_deref(), cli.global.json);
         }
         Commands::ResolveMode { cwd: override_cwd } => {
-            let start_dir = override_cwd.as_deref().unwrap_or(cwd);
+            let override_expanded = override_cwd
+                .as_deref()
+                .map(|c| expand_cli_pathbuf(system, c))
+                .transpose()?;
+            let start_dir = override_expanded.as_deref().unwrap_or(cwd);
             return cmd_resolve_mode(system, start_dir, cli.global.json);
         }
-        Commands::Keygen { output } => return cmd_keygen(system, output),
+        Commands::Keygen { output } => {
+            let expanded_output = expand_cli_pathbuf(system, output)?;
+            return cmd_keygen(system, &expanded_output);
+        }
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { action } => {
             return cmd_obsidian(system, cwd, action, cli.global.json);
@@ -1425,7 +1485,8 @@ fn cmd_get(
     config: &ResolvedConfig,
     gp: &GetParams<'_>,
 ) -> Result<()> {
-    let target = Path::new(gp.path);
+    let target_buf = expand_cli_path(system, gp.path)?;
+    let target = target_buf.as_path();
 
     if gp.binary {
         return cmd_get_binary(system, cwd, config, gp, target);
@@ -1650,7 +1711,8 @@ fn cmd_ls(
     path_str: &str,
     json_mode: bool,
 ) -> Result<()> {
-    let target = Path::new(path_str);
+    let target_buf = expand_cli_path(system, path_str)?;
+    let target = target_buf.as_path();
     let entries = document::ls(system, cwd, target, config)?;
 
     if json_mode {
@@ -1682,7 +1744,8 @@ fn cmd_metadata(
     path_str: &str,
     json_mode: bool,
 ) -> Result<()> {
-    let target = Path::new(path_str);
+    let target_buf = expand_cli_path(system, path_str)?;
+    let target = target_buf.as_path();
     let meta = document::metadata(system, cwd, target, config.unrestricted)?;
 
     // File-level fields are always present. Markdown fields are only emitted
@@ -1862,7 +1925,7 @@ fn cmd_plan(
                 .lines(line_range)
                 .raw(*raw);
             plan_ops::PlanRequest::Write {
-                path: PathBuf::from(path),
+                path: expand_cli_path(system, path)?,
                 content: &write_body,
                 opts,
             }
@@ -1920,7 +1983,7 @@ fn cmd_purge(
 }
 
 fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Result<()> {
-    let target = cwd.join(params.path);
+    let target = cwd.join(expand_cli_path(system, params.path)?);
 
     let since_dt = params
         .since
@@ -1982,7 +2045,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
 }
 
 fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Result<()> {
-    let target = cwd.join(params.path);
+    let target = cwd.join(expand_cli_path(system, params.path)?);
 
     let scope = match params.scope {
         "body" => search::SearchScope::Body,
@@ -2140,13 +2203,14 @@ fn cmd_sandbox(
             let absolute: Vec<PathBuf> = files
                 .iter()
                 .map(|f| {
-                    if f.is_absolute() {
-                        f.clone()
+                    let expanded = expand_cli_pathbuf(system, f)?;
+                    Ok::<PathBuf, anyhow::Error>(if expanded.is_absolute() {
+                        expanded
                     } else {
-                        cwd.join(f)
-                    }
+                        cwd.join(expanded)
+                    })
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             let result = sandbox_ops::add_to_files(system, &absolute, identity, config)?;
             emit_sandbox_bulk_result(&result, cwd, "added", json_mode)?;
             if result.failed.is_empty() {
@@ -2159,13 +2223,14 @@ fn cmd_sandbox(
             let absolute: Vec<PathBuf> = files
                 .iter()
                 .map(|f| {
-                    if f.is_absolute() {
-                        f.clone()
+                    let expanded = expand_cli_pathbuf(system, f)?;
+                    Ok::<PathBuf, anyhow::Error>(if expanded.is_absolute() {
+                        expanded
                     } else {
-                        cwd.join(f)
-                    }
+                        cwd.join(expanded)
+                    })
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             let result = sandbox_ops::remove_from_files(system, &absolute, identity, config)?;
             emit_sandbox_bulk_result(&result, cwd, "removed", json_mode)?;
             if result.failed.is_empty() {
@@ -2175,9 +2240,10 @@ fn cmd_sandbox(
             }
         }
         SandboxAction::List { absolute, path } => {
-            let root = path
-                .as_ref()
-                .map_or_else(|| cwd.to_path_buf(), |p| cwd.join(p));
+            let root = match path.as_ref() {
+                Some(p) => cwd.join(expand_cli_pathbuf(system, p)?),
+                None => cwd.to_path_buf(),
+            };
             let listings = sandbox_ops::list_for_identity(system, &root, identity)?;
 
             if json_mode {
@@ -2258,8 +2324,8 @@ fn cmd_rm(
     file: &str,
     json_mode: bool,
 ) -> Result<()> {
-    let target = Path::new(file);
-    let result = document::rm(system, cwd, target, config)?;
+    let target = expand_cli_path(system, file)?;
+    let result = document::rm(system, cwd, &target, config)?;
 
     if json_mode {
         out_json(&json!({
@@ -2271,6 +2337,14 @@ fn cmd_rm(
     } else {
         out(&format!("already absent: {file}"))
     }
+}
+
+/// Expand an optional `--vault-path` for the obsidian subcommand.
+#[cfg(feature = "obsidian")]
+fn expand_vault_path(system: &dyn System, vault_path: Option<&Path>) -> Result<Option<PathBuf>> {
+    vault_path
+        .map(|v| expand_cli_pathbuf(system, v))
+        .transpose()
 }
 
 #[cfg(feature = "obsidian")]
@@ -2288,7 +2362,8 @@ fn cmd_obsidian(
                     obsidian::plugin_version()
                 );
             }
-            let report = obsidian::install(system, cwd, vault_path.as_deref())?;
+            let expanded = expand_vault_path(system, vault_path.as_deref())?;
+            let report = obsidian::install(system, cwd, expanded.as_deref())?;
             if json_mode {
                 print_output(true, &report.to_json())
             } else {
@@ -2297,7 +2372,8 @@ fn cmd_obsidian(
             }
         }
         ObsidianAction::Uninstall { vault_path } => {
-            let status = obsidian::uninstall(system, cwd, vault_path.as_deref())?;
+            let expanded = expand_vault_path(system, vault_path.as_deref())?;
+            let status = obsidian::uninstall(system, cwd, expanded.as_deref())?;
             match status {
                 obsidian::UninstallStatus::Removed { plugin_dir } => {
                     if json_mode {
@@ -2507,7 +2583,8 @@ fn cmd_write(
     config: &ResolvedConfig,
     wp: &WriteParams<'_>,
 ) -> Result<()> {
-    let target = Path::new(wp.path);
+    let target_buf = expand_cli_path(system, wp.path)?;
+    let target = target_buf.as_path();
 
     let body = match wp.content {
         Some(s) => String::from(s),

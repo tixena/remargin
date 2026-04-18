@@ -15,5 +15,6 @@ pub mod linter;
 pub mod mcp;
 pub mod operations;
 pub mod parser;
+pub mod path;
 pub mod skill;
 pub mod writer;

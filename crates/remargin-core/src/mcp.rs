@@ -30,6 +30,7 @@ use crate::operations::query::{self, QueryFilter};
 use crate::operations::sandbox as sandbox_ops;
 use crate::operations::search;
 use crate::parser;
+use crate::path::expand_path;
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -46,6 +47,16 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Server name reported in the initialize response.
 const SERVER_NAME: &str = "remargin";
+
+/// Path-like top-level fields that every tool accepts. Each is run through
+/// [`expand_path`] before the dispatch hands the params off to the per-tool
+/// handler so `~` / `$VAR` behave identically to the CLI side. The list is
+/// deliberately narrow — adding a new path-shaped field to an MCP schema is
+/// a deliberate act, and it belongs here.
+const SCALAR_PATH_FIELDS: &[&str] = &["file", "path"];
+
+/// Array-valued path fields — each element is expanded independently.
+const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -639,6 +650,44 @@ fn optional_bool(params: &Map<String, Value>, field: &str) -> bool {
     params.get(field).and_then(Value::as_bool).unwrap_or(false)
 }
 
+/// Return a copy of `params` with every path-like field expanded via
+/// [`expand_path`]. Fields not present are skipped; fields present but
+/// not strings are passed through unchanged (the downstream handler
+/// will produce the usual "expected string" error).
+fn normalize_path_fields(
+    system: &dyn System,
+    params: &Map<String, Value>,
+) -> Result<Map<String, Value>> {
+    let mut out = params.clone();
+    for field in SCALAR_PATH_FIELDS {
+        if let Some(Value::String(raw)) = out.get(*field).cloned() {
+            let expanded = expand_path(system, &raw)
+                .with_context(|| format!("expanding path field `{field}` ({raw:?})"))?;
+            out.insert(
+                (*field).to_owned(),
+                Value::String(expanded.to_string_lossy().into_owned()),
+            );
+        }
+    }
+    for field in ARRAY_PATH_FIELDS {
+        if let Some(Value::Array(arr)) = out.get(*field).cloned() {
+            let mut expanded_arr = Vec::with_capacity(arr.len());
+            for (idx, item) in arr.iter().enumerate() {
+                if let Value::String(raw) = item {
+                    let expanded = expand_path(system, raw).with_context(|| {
+                        format!("expanding path field `{field}[{idx}]` ({raw:?})")
+                    })?;
+                    expanded_arr.push(Value::String(expanded.to_string_lossy().into_owned()));
+                } else {
+                    expanded_arr.push(item.clone());
+                }
+            }
+            out.insert((*field).to_owned(), Value::Array(expanded_arr));
+        }
+    }
+    Ok(out)
+}
+
 /// Extract an optional string field from a JSON object.
 fn optional_str<'val>(params: &'val Map<String, Value>, field: &str) -> Option<&'val str> {
     params.get(field).and_then(Value::as_str)
@@ -724,29 +773,38 @@ fn dispatch_tool(
     tool_name: &str,
     params: &Map<String, Value>,
 ) -> Value {
+    // Normalize path-like fields (`~`, `$VAR`, `${VAR}`) before dispatch
+    // so every downstream handler sees already-expanded paths. Keeps CLI +
+    // MCP in lockstep (rem-3a2). A normalization failure is reported as a
+    // tool-level error with the same surface as any other invalid param.
+    let normalized = match normalize_path_fields(system, params) {
+        Ok(map) => map,
+        Err(err) => return tool_result_error(&format!("{err:#}")),
+    };
+    let p = &normalized;
     let result = match tool_name {
-        "ack" => handle_ack(system, base_dir, config, params),
-        "batch" => handle_batch(system, base_dir, config, params),
-        "comment" => handle_comment(system, base_dir, config, params),
-        "comments" => handle_comments(system, base_dir, params),
-        "delete" => handle_delete(system, base_dir, config, params),
-        "edit" => handle_edit(system, base_dir, config, params),
-        "get" => handle_get(system, base_dir, params),
-        "lint" => handle_lint(system, base_dir, params),
-        "ls" => handle_ls(system, base_dir, config, params),
-        "metadata" => handle_metadata(system, base_dir, params),
-        "migrate" => handle_migrate(system, base_dir, config, params),
-        "plan" => handle_plan(system, base_dir, config, params),
-        "purge" => handle_purge(system, base_dir, config, params),
-        "query" => handle_query(system, base_dir, params),
-        "react" => handle_react(system, base_dir, config, params),
-        "rm" => handle_rm(system, base_dir, config, params),
-        "sandbox_add" => handle_sandbox_add(system, base_dir, config, params),
-        "sandbox_list" => handle_sandbox_list(system, base_dir, config, params),
-        "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, params),
-        "search" => handle_search(system, base_dir, params),
-        "verify" => handle_verify(system, base_dir, config, params),
-        "write" => handle_write(system, base_dir, config, params),
+        "ack" => handle_ack(system, base_dir, config, p),
+        "batch" => handle_batch(system, base_dir, config, p),
+        "comment" => handle_comment(system, base_dir, config, p),
+        "comments" => handle_comments(system, base_dir, p),
+        "delete" => handle_delete(system, base_dir, config, p),
+        "edit" => handle_edit(system, base_dir, config, p),
+        "get" => handle_get(system, base_dir, p),
+        "lint" => handle_lint(system, base_dir, p),
+        "ls" => handle_ls(system, base_dir, config, p),
+        "metadata" => handle_metadata(system, base_dir, p),
+        "migrate" => handle_migrate(system, base_dir, config, p),
+        "plan" => handle_plan(system, base_dir, config, p),
+        "purge" => handle_purge(system, base_dir, config, p),
+        "query" => handle_query(system, base_dir, p),
+        "react" => handle_react(system, base_dir, config, p),
+        "rm" => handle_rm(system, base_dir, config, p),
+        "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
+        "sandbox_list" => handle_sandbox_list(system, base_dir, config, p),
+        "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, p),
+        "search" => handle_search(system, base_dir, p),
+        "verify" => handle_verify(system, base_dir, config, p),
+        "write" => handle_write(system, base_dir, config, p),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
     };
 
