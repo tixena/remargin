@@ -25,8 +25,12 @@ export interface CommentEditorConfig {
  * Features:
  * - Markdown syntax highlighting
  * - Obsidian-native theme via CSS custom properties
- * - Mod-Enter to submit, Escape to cancel (via CM6 keymap -- bypasses
- *   Obsidian's document-level capture-phase listeners)
+ * - Mod-Enter to submit, Escape to cancel. CM6's keymap facet registers
+ *   handlers on the editor's contentDOM, which fire in the at-target phase
+ *   AFTER Obsidian's document-level capture-phase hotkey dispatcher. To
+ *   actually win the race we attach a `window`-capture keydown listener
+ *   scoped to the editor's DOM — window capture runs before document
+ *   capture, so Obsidian never sees the event.
  * - Line wrapping, placeholder text, auto-focus
  */
 export function createCommentEditor(config: CommentEditorConfig): EditorView {
@@ -42,6 +46,10 @@ export function createCommentEditor(config: CommentEditorConfig): EditorView {
         commentEditorTheme,
         EditorView.lineWrapping,
         placeholderExt(config.placeholder),
+        // Kept as a fallback for environments where the window-capture
+        // interceptor below is bypassed (e.g. synthetic events dispatched
+        // directly on the contentDOM). The interceptor handles the common
+        // case of a real user keystroke.
         keymap.of([
           {
             key: "Mod-Enter",
@@ -67,6 +75,37 @@ export function createCommentEditor(config: CommentEditorConfig): EditorView {
     }),
     parent: config.parent,
   });
+
+  // Window-capture keydown interceptor. Runs in the capture phase at the
+  // topmost propagation target, so it beats Obsidian's document-capture
+  // hotkey dispatcher (which otherwise swallows Mod-Enter for the
+  // global "Toggle ..." bindings). We gate on `view.dom.contains(target)`
+  // so keystrokes outside the composer stay untouched.
+  const onKeyDownCapture = (event: KeyboardEvent) => {
+    const target = event.target;
+    if (!(target instanceof Node) || !view.dom.contains(target)) return;
+    const isModEnter = event.key === "Enter" && (event.ctrlKey || event.metaKey);
+    const isEscape = event.key === "Escape";
+    if (!isModEnter && !isEscape) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (isModEnter) {
+      config.onSubmit();
+    } else {
+      config.onCancel();
+    }
+  };
+  window.addEventListener("keydown", onKeyDownCapture, true);
+
+  // Tear down the window listener when CM6 destroys the view. `destroy` is
+  // called by consumers in their unmount path; piggybacking on it keeps the
+  // lifetime of the listener tied to the view without an extra API.
+  const originalDestroy = view.destroy.bind(view);
+  view.destroy = () => {
+    window.removeEventListener("keydown", onKeyDownCapture, true);
+    originalDestroy();
+  };
 
   view.focus();
   return view;
