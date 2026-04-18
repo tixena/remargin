@@ -26,10 +26,11 @@ use os_shim::System;
 use serde_yaml::Value;
 
 use crate::config::ResolvedConfig;
-use crate::crypto::compute_checksum;
+use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
 use crate::linter;
+use crate::operations::sign;
 use crate::operations::{
     collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
 };
@@ -773,6 +774,81 @@ pub fn project_react(
             .or_insert_with(Vec::new);
         if !authors.contains(&String::from(identity)) {
             authors.push(String::from(identity));
+        }
+    }
+
+    frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    Ok((before, after))
+}
+
+/// Projection sibling of [`crate::operations::sign::sign_comments`]
+/// (rem-7y3).
+///
+/// Returns the `(before, after)` pair without touching disk. Unlike the
+/// other plan projections, `project_sign` **does** load the signing key
+/// — the whole point of `sign` is to attach a cryptographic signature,
+/// so a projection that skipped key loading would produce an `after`
+/// doc byte-identical to `before` and report a misleading `noop: true`.
+/// Reading the key is a pure read; no disk writes occur.
+///
+/// Pre-flight mirrors [`sign_comments`](crate::operations::sign::sign_comments):
+/// - bails when no identity is configured,
+/// - bails when no `key_path` is configured (sign without a key has
+///   nothing to do — stricter than create/edit),
+/// - runs [`sign::classify_candidates`] so `--ids` rejections (unknown
+///   id, forgery guard) fire before any signing.
+///
+/// On success, every target comment in `after` carries a real signature
+/// computed with the configured key; already-signed ids listed under
+/// `--ids` remain unchanged in `after` (plan surfaces them via the
+/// `comments.preserved` bucket, matching the skip semantics of
+/// `sign_comments`).
+///
+/// # Errors
+///
+/// Surfaces the same preflight diagnostics `sign_comments` would:
+/// missing identity, missing key, unknown `--ids` entry, forgery-guard
+/// refusal, frontmatter issues.
+pub fn project_sign(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+    selection: &sign::SignSelection,
+) -> Result<(ParsedDocument, ParsedDocument)> {
+    let identity = config
+        .identity
+        .as_deref()
+        .context("identity is required to sign comments")?;
+
+    // Match `sign_comments` exactly: sign has no reason to exist without
+    // a key, so resolve from `key_path` directly and bail when unset
+    // regardless of mode.
+    let key_path = match &config.key_path {
+        Some(configured) => configured.clone(),
+        None => bail!(
+            "sign: no signing key resolved for {identity:?} (mode={:?}). \
+             Sign requires a key regardless of mode — pass --key or add \
+             a `key:` field to .remargin.yaml.",
+            config.mode.as_str(),
+        ),
+    };
+
+    let (before, mut after) = parse_file_twice(system, path)?;
+
+    // Validate `--ids` up front (forgery guard + unknown-id rejection)
+    // before touching any comment. The returned skip list is discarded
+    // here — plan surfaces already-signed ids via `comments.preserved`.
+    let (targets, _skipped) = sign::classify_candidates(&after, identity, selection)?;
+    let target_ids: HashSet<String> = targets.iter().map(|(id, _)| id.clone()).collect();
+
+    for seg in &mut after.segments {
+        if let Segment::Comment(cm) = seg
+            && target_ids.contains(&cm.id)
+        {
+            let sig = compute_signature(cm, &key_path, system)
+                .with_context(|| format!("signing comment {:?}", cm.id))?;
+            cm.signature = Some(sig);
         }
     }
 

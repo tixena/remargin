@@ -569,6 +569,18 @@ enum PlanAction {
         /// Path to the document.
         path: String,
     },
+    /// Project a `sign` op (rem-7y3).
+    Sign {
+        /// Path to the document.
+        path: String,
+        /// Comment ids to sign. Mutually exclusive with `--all-mine`.
+        #[arg(long, value_delimiter = ',', conflicts_with = "all_mine")]
+        ids: Vec<String>,
+        /// Sign every unsigned comment authored by the current
+        /// identity. Mutually exclusive with `--ids`.
+        #[arg(long)]
+        all_mine: bool,
+    },
     /// Project a `write` op (rem-imc).
     Write {
         /// Path to the file.
@@ -1952,6 +1964,14 @@ fn cmd_plan(
         },
         PlanAction::SandboxRemove { path } => plan_ops::PlanRequest::SandboxRemove {
             path: resolve_doc_path(system, cwd, path)?,
+        },
+        PlanAction::Sign {
+            path,
+            ids,
+            all_mine,
+        } => plan_ops::PlanRequest::Sign {
+            path: resolve_doc_path(system, cwd, path)?,
+            selection: build_sign_selection(*all_mine, ids)?,
         },
         PlanAction::Write {
             path,

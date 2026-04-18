@@ -54,7 +54,7 @@ use crate::writer;
 /// Classified candidate set returned by [`classify_candidates`]: first
 /// element is the list of (id, ts) pairs to sign, second is the list of
 /// skip entries (already-signed ids listed under `--ids`).
-type Classification = (Vec<(String, String)>, Vec<SkippedEntry>);
+pub(crate) type Classification = (Vec<(String, String)>, Vec<SkippedEntry>);
 
 /// Which comments to consider for signing.
 #[derive(Debug, Clone)]
@@ -221,7 +221,10 @@ pub fn sign_comments(
 /// reason" / "ignore" based on the selection and ownership. Returns an
 /// error when an `--ids` entry does not exist or is authored by someone
 /// else — forgery guard refusals fire here.
-fn classify_candidates(
+///
+/// Shared between [`sign_comments`] and the `plan sign` projection
+/// (rem-7y3) so both surfaces reject and skip under identical rules.
+pub(crate) fn classify_candidates(
     doc: &parser::ParsedDocument,
     identity: &str,
     selection: &SignSelection,

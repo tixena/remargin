@@ -8,7 +8,7 @@ use os_shim::mock::MockSystem;
 use crate::config::{Mode, ResolvedConfig};
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, projections,
-    react, sandbox as sandbox_ops,
+    react, sandbox as sandbox_ops, sign,
 };
 use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
@@ -23,6 +23,19 @@ author: eduardo
 # Test Document
 
 Some body text.
+";
+
+/// Ed25519 test key used by the `project_sign` tests. Matched pair with
+/// the public key registered for `eduardo` under `sign_config()` — keeps
+/// the projection's signature output verifiable against the registry.
+const PROJECT_SIGN_PRIVATE_KEY: &str = "\
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACC1X7nyFUdfsMF7x8GI40lTjtT8jK7q/sqImy3eaP4ZlQAAAJDk27dx5Nu3
+cQAAAAtzc2gtZWQyNTUxOQAAACC1X7nyFUdfsMF7x8GI40lTjtT8jK7q/sqImy3eaP4ZlQ
+AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
+1PyMrur+yoibLd5o/hmVAAAADXRlc3RAcmVtYXJnaW4=
+-----END OPENSSH PRIVATE KEY-----
 ";
 
 /// A document with one existing comment.
@@ -127,6 +140,52 @@ fn open_config() -> ResolvedConfig {
 fn system_with_doc(content: &str) -> MockSystem {
     MockSystem::new()
         .with_file(Path::new("/docs/test.md"), content.as_bytes())
+        .unwrap()
+}
+
+/// Config used by `project_sign` tests. Identity is `eduardo`, key is
+/// wired to `/keys/ed25519`, and the registry maps `eduardo` to the
+/// public half of [`PROJECT_SIGN_PRIVATE_KEY`]. Mode is `open` to keep
+/// the verify gate neutral during fixture setup.
+fn sign_config() -> ResolvedConfig {
+    let public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+wwXvHwYjjSVOO1PyMrur+yoibLd5o/hmV test@remargin";
+    let yaml = format!(
+        "\
+participants:
+  eduardo:
+    type: human
+    status: active
+    pubkeys:
+      - {public_key}
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - {public_key}
+"
+    );
+    let registry = serde_yaml::from_str(&yaml).unwrap();
+    ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type: Some(AuthorType::Human),
+        identity: Some(String::from("eduardo")),
+        ignore: Vec::new(),
+        key_path: Some(PathBuf::from("/keys/ed25519")),
+        mode: Mode::Open,
+        registry: Some(registry),
+        unrestricted: false,
+    }
+}
+
+/// `MockSystem` seeded with a document and the matching signing key.
+fn sign_system(doc: &str) -> MockSystem {
+    MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc.as_bytes())
+        .unwrap()
+        .with_file(
+            Path::new("/keys/ed25519"),
+            PROJECT_SIGN_PRIVATE_KEY.as_bytes(),
+        )
         .unwrap()
 }
 
@@ -2269,5 +2328,248 @@ fn project_sandbox_add_rejects_non_markdown_path() {
     assert!(
         err.to_string().contains("not a markdown file"),
         "expected `not a markdown file` error, got: {err}"
+    );
+}
+
+// ---- project_sign ---------------------------------------------------------
+// Exercises the `plan sign` projection added under rem-7y3. Unlike the
+// other `project_*` helpers, project_sign deliberately loads the signing
+// key because its whole purpose is the signature — a projection that
+// skipped key loading would produce misleading `noop: true` plans.
+
+/// Two-comment document: eduardo's note + alice's note, both unsigned,
+/// checksums pre-computed so the verify gate stays neutral.
+fn two_author_doc_for_sign() -> String {
+    use crate::crypto;
+    let eduardo_content = "eduardo's note";
+    let alice_content = "alice's note";
+    let eduardo_cksum = crypto::compute_checksum(eduardo_content);
+    let alice_cksum = crypto::compute_checksum(alice_content);
+    format!(
+        "\
+---
+title: Test
+---
+
+# Doc
+
+```remargin
+---
+id: ed1
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: {eduardo_cksum}
+---
+{eduardo_content}
+```
+
+```remargin
+---
+id: al1
+author: alice
+type: human
+ts: 2026-04-06T13:00:00-04:00
+checksum: {alice_cksum}
+---
+{alice_content}
+```
+"
+    )
+}
+
+#[test]
+fn project_sign_all_mine_signs_only_own_comments() {
+    let system = sign_system(&two_author_doc_for_sign());
+    let config = sign_config();
+
+    let (before, after) = projections::project_sign(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::AllMine,
+    )
+    .unwrap();
+
+    // Before: neither is signed.
+    let before_ed = before
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            parser::Segment::Comment(c) if c.id == "ed1" => Some(c),
+            parser::Segment::Body(_)
+            | parser::Segment::Comment(_)
+            | parser::Segment::LegacyComment(_) => None,
+        })
+        .unwrap();
+    assert!(before_ed.signature.is_none());
+
+    // After: eduardo's comment is signed, alice's is untouched.
+    let after_ed = after
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            parser::Segment::Comment(c) if c.id == "ed1" => Some(c),
+            parser::Segment::Body(_)
+            | parser::Segment::Comment(_)
+            | parser::Segment::LegacyComment(_) => None,
+        })
+        .unwrap();
+    let after_al = after
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            parser::Segment::Comment(c) if c.id == "al1" => Some(c),
+            parser::Segment::Body(_)
+            | parser::Segment::Comment(_)
+            | parser::Segment::LegacyComment(_) => None,
+        })
+        .unwrap();
+    assert!(
+        after_ed.signature.is_some(),
+        "eduardo's comment must be signed under --all-mine"
+    );
+    assert!(
+        after_al.signature.is_none(),
+        "alice's comment must remain untouched under --all-mine"
+    );
+}
+
+#[test]
+fn project_sign_ids_signs_only_listed() {
+    let system = sign_system(&two_author_doc_for_sign());
+    let config = sign_config();
+
+    let (_, after) = projections::project_sign(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::Ids(vec![String::from("ed1")]),
+    )
+    .unwrap();
+
+    let after_ed = after
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            parser::Segment::Comment(c) if c.id == "ed1" => Some(c),
+            parser::Segment::Body(_)
+            | parser::Segment::Comment(_)
+            | parser::Segment::LegacyComment(_) => None,
+        })
+        .unwrap();
+    assert!(after_ed.signature.is_some());
+}
+
+#[test]
+fn project_sign_ids_rejects_foreign_author() {
+    let system = sign_system(&two_author_doc_for_sign());
+    let config = sign_config();
+
+    let err = projections::project_sign(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::Ids(vec![String::from("al1")]),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("al1") || msg.to_lowercase().contains("author"),
+        "forgery guard must fire for a foreign-authored id; got: {msg}"
+    );
+}
+
+#[test]
+fn project_sign_ids_unknown_errors_out() {
+    let system = sign_system(&two_author_doc_for_sign());
+    let config = sign_config();
+
+    let err = projections::project_sign(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::Ids(vec![String::from("does-not-exist")]),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("does-not-exist"),
+        "unknown id must surface in the error; got: {err}"
+    );
+}
+
+#[test]
+fn project_sign_missing_key_bails() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/test.md"),
+            two_author_doc_for_sign().as_bytes(),
+        )
+        .unwrap();
+    let mut config = sign_config();
+    config.key_path = None;
+
+    let err = projections::project_sign(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::AllMine,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("key"),
+        "missing key must surface in the error; got: {err}"
+    );
+}
+
+#[test]
+fn project_sign_already_signed_stays_preserved() {
+    // Build a doc that already has a signed comment by running
+    // project_sign once, then feed its output back into project_sign to
+    // check that --all-mine leaves the signature untouched.
+    let system1 = sign_system(&two_author_doc_for_sign());
+    let config = sign_config();
+    let (_, pre_signed) = projections::project_sign(
+        &system1,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::AllMine,
+    )
+    .unwrap();
+    let pre_signed_md = pre_signed.to_markdown();
+
+    let system2 = sign_system(&pre_signed_md);
+    let (_, after) = projections::project_sign(
+        &system2,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::AllMine,
+    )
+    .unwrap();
+
+    // Signatures should be byte-identical on the second projection.
+    let first_sig = pre_signed
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            parser::Segment::Comment(c) if c.id == "ed1" => c.signature.clone(),
+            parser::Segment::Body(_)
+            | parser::Segment::Comment(_)
+            | parser::Segment::LegacyComment(_) => None,
+        })
+        .unwrap();
+    let second_sig = after
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            parser::Segment::Comment(c) if c.id == "ed1" => c.signature.clone(),
+            parser::Segment::Body(_)
+            | parser::Segment::Comment(_)
+            | parser::Segment::LegacyComment(_) => None,
+        })
+        .unwrap();
+    assert_eq!(
+        first_sig, second_sig,
+        "already-signed comment must keep its signature under re-sign"
     );
 }

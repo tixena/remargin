@@ -34,6 +34,7 @@ use sha2::{Digest as _, Sha256};
 use crate::config::ResolvedConfig;
 use crate::document::{self, WriteOptions, WriteProjection};
 use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
+use crate::operations::sign::SignSelection;
 use crate::operations::verify::{VerifyReport, verify_document};
 use crate::parser::{self, ParsedDocument};
 
@@ -246,6 +247,18 @@ pub enum PlanRequest<'req> {
     SandboxAdd { path: PathBuf },
     /// `plan sandbox-remove` — projects unstaging the file from the caller's sandbox.
     SandboxRemove { path: PathBuf },
+    /// `plan sign` — projects back-signing missing-signature comments
+    /// authored by the current identity (rem-7y3). Unlike most plan ops,
+    /// this loads the configured signing key and attaches real
+    /// signatures to the projected `after` document so `verify_after`
+    /// can faithfully predict the post-op gate.
+    Sign {
+        path: PathBuf,
+        /// Which comments to consider. `Ids` rejections (unknown id,
+        /// forgery guard) and `AllMine` filtering match the mutating
+        /// `sign` op.
+        selection: SignSelection,
+    },
     /// `plan write` — projects a whole-file / partial-range write.
     ///
     /// `path` is passed as-is to [`document::project_write`] so the
@@ -275,6 +288,7 @@ impl PlanRequest<'_> {
             Self::React { .. } => "react",
             Self::SandboxAdd { .. } => "sandbox-add",
             Self::SandboxRemove { .. } => "sandbox-remove",
+            Self::Sign { .. } => "sign",
             Self::Write { .. } => "write",
         }
     }
@@ -402,6 +416,10 @@ pub fn dispatch(
         }
         PlanRequest::SandboxRemove { path } => {
             let (before, after) = projections::project_sandbox_remove(system, path, cfg)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Sign { path, selection } => {
+            let (before, after) = projections::project_sign(system, path, cfg, selection)?;
             Ok(project_report(label, &before, &after, cfg, identity))
         }
         PlanRequest::Write {

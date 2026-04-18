@@ -311,17 +311,18 @@ fn desc_migrate() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. All ops are wired: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, write.",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. All ops are wired: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write.",
         schema: json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | sandbox-add | sandbox-remove" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | sandbox-add | sandbox-remove | sign | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired ops)" },
                 "ids": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Comment IDs (used by ack / delete)"
+                    "description": "Comment IDs (used by ack / delete / sign)"
                 },
+                "all_mine": { "type": "boolean", "description": "For sign: project signing every unsigned comment authored by the current identity. Mutually exclusive with `ids`.", "default": false },
                 "id": { "type": "string", "description": "Single comment ID (used by edit / react)" },
                 "content": { "type": "string", "description": "Body text (used by comment / edit)" },
                 "to": {
@@ -1276,6 +1277,10 @@ fn handle_plan(
         "sandbox-remove" => plan_ops::PlanRequest::SandboxRemove {
             path: base_dir.join(required_str(params, "file")?),
         },
+        "sign" => plan_ops::PlanRequest::Sign {
+            path: base_dir.join(required_str(params, "file")?),
+            selection: build_sign_selection(params, "plan sign")?,
+        },
         "write" => {
             let file = required_str(params, "file")?;
             let content = required_str(params, "content")?;
@@ -1575,6 +1580,28 @@ fn handle_search(
     Ok(json!({ "matches": matches }))
 }
 
+/// Resolve the `ids` / `all_mine` selection shared by `sign` and
+/// `plan sign` (rem-7y3). `op` labels the error messages so callers can
+/// tell the two tools apart.
+fn build_sign_selection(
+    params: &Map<String, Value>,
+    op: &str,
+) -> Result<operations::sign::SignSelection> {
+    let all_mine = optional_bool(params, "all_mine");
+    let ids = string_array(params, "ids");
+    if all_mine && !ids.is_empty() {
+        bail!("{op}: `ids` and `all_mine` are mutually exclusive");
+    }
+    if !all_mine && ids.is_empty() {
+        bail!("{op}: pass `ids` (array of comment ids) or `all_mine: true`");
+    }
+    Ok(if all_mine {
+        operations::sign::SignSelection::AllMine
+    } else {
+        operations::sign::SignSelection::Ids(ids)
+    })
+}
+
 /// Handle the `sign` tool: back-sign missing-signature comments authored
 /// by the resolved identity.
 fn handle_sign(
@@ -1585,21 +1612,7 @@ fn handle_sign(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let dry_run = optional_bool(params, "dry_run");
-    let all_mine = optional_bool(params, "all_mine");
-    let ids = string_array(params, "ids");
-
-    if all_mine && !ids.is_empty() {
-        bail!("sign: `ids` and `all_mine` are mutually exclusive");
-    }
-    if !all_mine && ids.is_empty() {
-        bail!("sign: pass `ids` (array of comment ids) or `all_mine: true`");
-    }
-
-    let selection = if all_mine {
-        operations::sign::SignSelection::AllMine
-    } else {
-        operations::sign::SignSelection::Ids(ids)
-    };
+    let selection = build_sign_selection(params, "sign")?;
 
     let overridden = apply_identity_overrides(config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
