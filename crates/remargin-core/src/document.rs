@@ -4,6 +4,7 @@
 //! and dotfile hiding.
 
 pub mod allowlist;
+pub mod mime;
 
 #[cfg(test)]
 mod tests;
@@ -63,16 +64,30 @@ pub struct WriteOutcome {
 }
 
 /// Metadata for a single document.
+///
+/// Shape-switches on file type (rem-lqz):
+/// - File-level fields (`binary`, `mime`, `path`, `size_bytes`) are always
+///   populated so callers can peek at any allowlisted file.
+/// - Markdown-only fields (`comment_count`, `frontmatter`, `last_activity`,
+///   `line_count`, `pending_count`, `pending_for`) are `None` / empty for
+///   binary files because the parse step is skipped.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct DocumentMetadata {
-    pub comment_count: usize,
+    /// True when the file is not `text/*` (derived from `mime`).
+    pub binary: bool,
+    pub comment_count: Option<usize>,
     pub frontmatter: Option<serde_yaml::Value>,
     pub last_activity: Option<String>,
-    pub line_count: usize,
-    pub pending_count: usize,
-    /// Unique recipients on unacked comments.
+    pub line_count: Option<usize>,
+    /// Extension-based MIME type. Unknown extensions → `application/octet-stream`.
+    pub mime: &'static str,
+    /// Resolved (canonical) path of the file.
+    pub path: PathBuf,
+    pub pending_count: Option<usize>,
+    /// Unique recipients on unacked comments. Empty for binary files.
     pub pending_for: Vec<String>,
+    pub size_bytes: u64,
 }
 
 /// Options for the `write` function.
@@ -692,6 +707,31 @@ pub fn metadata(
         bail!("file not visible: {}", path.display());
     }
 
+    let mime_type = mime::mime_for_extension(&resolved);
+    let binary = mime::is_binary_mime(mime_type);
+
+    let size_bytes = system
+        .metadata(&resolved)
+        .with_context(|| format!("stat {}", resolved.display()))?
+        .len;
+
+    // Binary files: return file-level metadata only; skip the parse step.
+    if binary {
+        return Ok(DocumentMetadata {
+            binary,
+            comment_count: None,
+            frontmatter: None,
+            last_activity: None,
+            line_count: None,
+            mime: mime_type,
+            path: resolved,
+            pending_count: None,
+            pending_for: Vec::new(),
+            size_bytes,
+        });
+    }
+
+    // Text files: read + parse for markdown-shaped fields.
     let content = system
         .read_to_string(&resolved)
         .with_context(|| format!("reading {}", resolved.display()))?;
@@ -724,12 +764,16 @@ pub fn metadata(
     let fm = extract_frontmatter(&content);
 
     Ok(DocumentMetadata {
-        comment_count,
+        binary,
+        comment_count: Some(comment_count),
         frontmatter: fm,
         last_activity,
-        line_count,
-        pending_count,
+        line_count: Some(line_count),
+        mime: mime_type,
+        path: resolved,
+        pending_count: Some(pending_count),
         pending_for,
+        size_bytes,
     })
 }
 

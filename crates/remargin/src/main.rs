@@ -1593,12 +1593,24 @@ fn cmd_metadata(
     let target = Path::new(path_str);
     let meta = document::metadata(system, cwd, target, config.unrestricted)?;
 
+    // File-level fields are always present. Markdown fields are only emitted
+    // when the file was parsed (rem-lqz).
     let mut result = json!({
-        "comment_count": meta.comment_count,
-        "line_count": meta.line_count,
-        "pending_count": meta.pending_count,
+        "binary": meta.binary,
+        "mime": meta.mime,
+        "path": meta.path,
+        "size_bytes": meta.size_bytes,
     });
     let map = result.as_object_mut().unwrap();
+    if let Some(count) = meta.comment_count {
+        map.insert("comment_count".into(), json!(count));
+    }
+    if let Some(count) = meta.line_count {
+        map.insert("line_count".into(), json!(count));
+    }
+    if let Some(count) = meta.pending_count {
+        map.insert("pending_count".into(), json!(count));
+    }
     if !meta.pending_for.is_empty() {
         map.insert("pending_for".into(), json!(meta.pending_for));
     }

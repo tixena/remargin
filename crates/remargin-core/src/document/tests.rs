@@ -380,11 +380,91 @@ fn metadata_correct_counts() {
 
     let meta =
         document::metadata(&system, Path::new("/project"), Path::new("doc.md"), false).unwrap();
-    assert_eq!(meta.comment_count, 2);
-    assert_eq!(meta.pending_count, 1); // abc is unacked
+    assert_eq!(meta.comment_count, Some(2));
+    assert_eq!(meta.pending_count, Some(1)); // abc is unacked
     assert_eq!(meta.pending_for, vec!["alice"]); // abc has to: [alice]
     assert!(meta.last_activity.is_some());
     assert!(meta.frontmatter.is_some());
+    assert!(!meta.binary);
+    assert_eq!(meta.mime, "text/markdown");
+    assert!(meta.line_count.is_some());
+}
+
+#[test]
+fn metadata_binary_file_returns_file_level_fields_only() {
+    // PNG file: is allowlisted, binary, no markdown parse step.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/pic.png"), &[0x89, b'P', b'N', b'G'])
+        .unwrap();
+
+    let meta =
+        document::metadata(&system, Path::new("/project"), Path::new("pic.png"), false).unwrap();
+
+    assert!(meta.binary);
+    assert_eq!(meta.mime, "image/png");
+    assert!(meta.path.ends_with("pic.png"));
+    // Markdown-shaped fields must be absent for binary files.
+    assert_eq!(meta.comment_count, None);
+    assert_eq!(meta.line_count, None);
+    assert_eq!(meta.pending_count, None);
+    assert!(meta.pending_for.is_empty());
+    assert!(meta.last_activity.is_none());
+    assert!(meta.frontmatter.is_none());
+}
+
+#[test]
+fn metadata_non_md_text_file_returns_markdown_fields() {
+    // .txt is text/plain — still text, so we parse it (no comments expected).
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/notes.txt"), b"line one\nline two\n")
+        .unwrap();
+
+    let meta = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("notes.txt"),
+        false,
+    )
+    .unwrap();
+
+    assert!(!meta.binary);
+    assert_eq!(meta.mime, "text/plain");
+    assert_eq!(meta.comment_count, Some(0));
+    assert_eq!(meta.pending_count, Some(0));
+    assert!(meta.line_count.is_some());
+}
+
+#[test]
+fn metadata_pdf_is_binary() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.pdf"), b"%PDF-1.4")
+        .unwrap();
+
+    let meta =
+        document::metadata(&system, Path::new("/project"), Path::new("doc.pdf"), false).unwrap();
+
+    assert!(meta.binary);
+    assert_eq!(meta.mime, "application/pdf");
+    assert_eq!(meta.comment_count, None);
+}
+
+#[test]
+fn metadata_missing_file_errors() {
+    let system = MockSystem::new().with_current_dir("/project").unwrap();
+
+    let result = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("nonexistent.md"),
+        false,
+    );
+    result.unwrap_err();
 }
 
 #[test]

@@ -255,11 +255,15 @@ fn desc_ls() -> ToolDesc {
 fn desc_metadata() -> ToolDesc {
     ToolDesc {
         name: "metadata",
-        description: "Get document metadata",
+        description: "Get file metadata. Always returns size_bytes, mime, \
+             binary, path. Markdown files additionally return comment_count, \
+             line_count, pending_count, pending_for, last_activity, \
+             frontmatter. Use before `get --binary` to avoid pulling large \
+             blobs.",
         schema: json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Path to the document" }
+                "path": { "type": "string", "description": "Path to the file (any allowlisted extension)" }
             },
             "required": ["path"]
         }),
@@ -984,13 +988,25 @@ fn handle_metadata(
 
     let meta = document::metadata(system, base_dir, target, false)?;
 
+    // File-level fields are always present; markdown fields are emitted only
+    // when the file was parsed (rem-lqz).
     let mut result = json!({
-        "comment_count": meta.comment_count,
-        "line_count": meta.line_count,
-        "pending_count": meta.pending_count,
+        "binary": meta.binary,
+        "mime": meta.mime,
+        "path": meta.path,
+        "size_bytes": meta.size_bytes,
     });
     let map = result.as_object_mut().unwrap();
 
+    if let Some(count) = meta.comment_count {
+        map.insert("comment_count".into(), json!(count));
+    }
+    if let Some(count) = meta.line_count {
+        map.insert("line_count".into(), json!(count));
+    }
+    if let Some(count) = meta.pending_count {
+        map.insert("pending_count".into(), json!(count));
+    }
     if !meta.pending_for.is_empty() {
         map.insert("pending_for".into(), json!(meta.pending_for));
     }

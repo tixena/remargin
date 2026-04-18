@@ -707,6 +707,47 @@ fn metadata_returns_document_info() {
     assert_eq!(result["comment_count"], 1_i32);
     assert_eq!(result["pending_count"], 1_i32);
     assert!(result["line_count"].as_u64().unwrap() > 0_u64);
+    // File-level fields from rem-lqz are always present.
+    assert_eq!(result["binary"], false);
+    assert_eq!(result["mime"], "text/markdown");
+    assert!(result["path"].is_string());
+    assert!(result["size_bytes"].is_number());
+}
+
+#[test]
+fn metadata_binary_file_omits_markdown_fields() {
+    let base = Path::new("/docs");
+    // Content is irrelevant for PNG metadata: only the extension drives
+    // mime/binary detection. Use an ASCII placeholder to keep the helper's
+    // &str signature happy.
+    let system = system_with_doc(base, "pic.png", "fake-png-bytes");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "metadata",
+                "arguments": { "path": "pic.png" }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["binary"], true);
+    assert_eq!(result["mime"], "image/png");
+    assert!(result["path"].is_string());
+    assert!(result["size_bytes"].is_number());
+    // Markdown-shaped fields must be absent.
+    assert!(result.get("comment_count").is_none());
+    assert!(result.get("line_count").is_none());
+    assert!(result.get("pending_count").is_none());
+    assert!(result.get("frontmatter").is_none());
 }
 
 #[test]
