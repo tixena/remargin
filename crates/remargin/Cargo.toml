@@ -1,6 +1,6 @@
 [package]
 name = "remargin"
-description = "CLI and code-generation binaries for the remargin document access layer"
+description = "CLI binary for the remargin document access layer"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -13,10 +13,6 @@ workspace = true
 [[bin]]
 name = "remargin"
 path = "src/main.rs"
-
-[[bin]]
-name = "generate_types"
-path = "src/bin/generate_types.rs"
 
 [features]
 default = ["zod", "jsonschema"]

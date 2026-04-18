@@ -4,7 +4,7 @@ default:
 
 # Generate TypeScript types + Zod schemas from Rust models.
 generate-types:
-    cargo run --bin generate_types
+    cargo xtask generate-types
     pnpm -C packages/remargin-obsidian exec biome check --write src/generated/
 
 # Lint Rust (clippy + fmt check) and TypeScript (biome + tsc).

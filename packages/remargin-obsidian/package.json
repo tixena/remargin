@@ -6,7 +6,7 @@
   "description": "Remargin plugin for Obsidian",
   "main": "main.js",
   "scripts": {
-    "generate-types": "cd ../.. && cargo run --bin generate_types && cd packages/remargin-obsidian && pnpm exec biome check --write src/generated/",
+    "generate-types": "cd ../.. && cargo xtask generate-types && cd packages/remargin-obsidian && pnpm exec biome check --write src/generated/",
     "predev": "pnpm run generate-types",
     "dev": "node esbuild.config.mjs",
     "prebuild": "pnpm run generate-types",
