@@ -1,45 +1,69 @@
 ---
 name: remargin
-description: "Document access layer and structured commenting system for markdown files. Use remargin MCP tools (ls, get, write, comment, ack, query) instead of Read/Edit/Write when working with markdown documents. Provides threaded multi-player comments, integrity checks, batch operations, and file access through MCP."
+description: "Document access layer and structured commenting system for markdown files. Use remargin MCP tools (ls, get, write, comment, ack, query) instead of Read/Edit/Write when working with markdown documents. Provides threaded multi-player comments, integrity checks, batch operations, sandbox staging, dry-run plan projection, and file access through MCP."
 user-invocable: true
 ---
 
 # Remargin
 
-Remargin is a **document access layer** and **structured commenting system** for markdown files. It replaces direct filesystem access with a set of MCP tools that read, write, comment on, and query markdown documents.
+Remargin is a **document access layer** and **structured commenting system** for markdown files. It replaces direct filesystem access with a set of MCP tools (and a mirrored CLI) that read, write, comment on, and query markdown documents while enforcing identity, signatures, comment-preservation, and a per-directory enforcement mode.
 
-## When to Use
+## When to use remargin
 
 Use remargin when:
-- Reading or writing markdown documents under review or discussion
-- Adding comments, replies, reactions, or acknowledgments to documents
-- Searching across documents for pending comments or activity
-- Working in a project where remargin MCP is configured
 
-**Trigger phrases**: "remargin that", "remargin this", "let's discuss", "let's review", "review this document", "discuss this document", "discuss on that document", "comment on", "discuss this doc", "what comments are pending", "acknowledge", "react to", "check the document", "start a discussion", "leave a comment", "any pending comments"
+- Reading or writing markdown documents under review or discussion.
+- Adding comments, replies, reactions, or acknowledgments to documents.
+- Searching across documents for pending comments or activity.
+- Working in a project where the remargin MCP server is configured or the `remargin` CLI is on `$PATH`.
 
-## Critical Rule: Never Operate on Files Directly
+**Trigger phrases**: "remargin that", "remargin this", "let's discuss", "let's review", "review this document", "discuss this document", "comment on", "what comments are pending", "acknowledge", "react to", "check the document", "start a discussion", "leave a comment", "any pending comments".
 
-**NEVER use `Read`, `Edit`, `Write`, or `Bash` (awk, sed, cat, grep) to read, modify, or inspect markdown documents that remargin manages.** Always use the remargin MCP tools instead:
+## Which surface: MCP or CLI?
 
-- Use `remargin get` to read file contents (with `start_line`/`end_line` for ranges, `line_numbers=true` to see line numbers)
-- Use `remargin search` to find text and get line numbers
-- Use `remargin write` to update body content
-- Use `remargin comment` / `batch` to add comments
-- Use `remargin comments` to list comments in a file
+**If the `mcp__remargin__*` tools are available in your context, use MCP.** The CLI (`remargin ...`) is a fallback for shell / script contexts only.
+
+Reasons:
+
+- MCP inputs are structured JSON — no shell-escape hazards on content containing quotes, backticks, `$`, or `---`.
+- MCP returns structured JSON — no output parsing guesswork.
+- Both surfaces share the same core; MCP and CLI produce equivalent results. There is no MCP-only or CLI-only feature in the mutating surface.
+
+The CLI has a small admin surface that has no MCP equivalent (`keygen`, `mcp`, `obsidian`, `registry`, `resolve-mode`, `skill`, `version`). Those are user-facing setup tools, not agent tools.
+
+## Critical rule: never operate on managed files directly
+
+**NEVER use `Read`, `Edit`, `Write`, or `Bash` (`awk`, `sed`, `cat`, `grep`) to read, modify, or inspect markdown documents remargin manages.** Always go through the remargin tools.
+
+- Use `remargin get` to read file contents (with `start_line`/`end_line` for ranges, `line_numbers=true` to prefix each line).
+- Use `remargin search` to find text across files and get line numbers.
+- Use `remargin write` to update body content.
+- Use `remargin comment` / `batch` to add comments.
+- Use `remargin comments` to list comments in a file.
 
 This ensures:
 
-- Comments are never accidentally deleted or corrupted
-- Document integrity (checksums, signatures) is preserved
-- Comment threading and acknowledgment state stays consistent
-- Structural lint checks run before and after every operation
-
-The document access layer exists to prevent agents from corrupting comments. Bypassing it with direct filesystem tools defeats the entire purpose of remargin.
+- Comments are never accidentally deleted or corrupted.
+- Document integrity (checksums, signatures) is preserved.
+- Comment threading and acknowledgment state stays consistent.
+- Structural lint checks run before and after every operation.
 
 Use `Grep` and `Glob` only for discovery (finding files across the repo), not for reading or modifying managed documents.
 
-## Permissions Setup
+## The identity rule — read this before posting anything
+
+**Never pass `identity`, `author_type`, `--identity`, or `--type` overrides unless the user has explicitly asked you to act as someone else.** Your identity is resolved from the configured registry and signing key. Overriding = impersonation. This rule surfaced directly from a real incident (2026-04-16) where an agent posted comments under the wrong identity because the override path was taken without justification.
+
+- ❌ `remargin comment file=doc.md content="..." identity="eduardo" author_type="human"` — agent is impersonating a human.
+- ❌ `mcp__remargin__comment { file, content, identity: "someone-else" }` — same impersonation via MCP.
+- ✅ `remargin comment file=doc.md content="..."` — uses the configured identity (yours).
+- ✅ `mcp__remargin__comment { file, content }` — same, via MCP.
+
+If the user tells you "post this as the release bot" or similar, the override is warranted — keep the original request in context so you can show it if questioned.
+
+`identity` and `author_type` are accepted by every mutating tool (`comment`, `batch`, `edit`, `delete`, `ack`, `react`, `sandbox_add`, `sandbox_remove`, `plan`) for the rare case you need to set them. Treat every one of those sites as an impersonation risk.
+
+## Permissions setup
 
 If remargin MCP tools require approval on every call, ask the user to add this wildcard to their `settings.local.json` (or `settings.json`) allow list:
 
@@ -55,79 +79,143 @@ If remargin MCP tools require approval on every call, ask the user to add this w
 
 This approves all remargin tools at once — no per-tool confirmation needed.
 
-## MCP Tools Reference
+## Core ops reference
 
-### Document Access
+Each op lives at both surfaces: the MCP tool name is `mcp__remargin__<op>`; the CLI invocation is `remargin <op>`. Only the highest-impact flags are shown inline — run `remargin <op> --help` for the exhaustive list.
 
-| Tool | Purpose |
-|------|---------|
-| `ls` | List files and directories |
-| `get` | Read a file's contents (supports `start_line`/`end_line` for ranges, `line_numbers` to prefix each line with its number) |
-| `write` | Write file contents (comment-preserving — never destroys existing comments). Pass `create=true` to create a new file. |
-| `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
+### Document access
 
-#### `write` safety
-
-`write` replaces the **entire file content**. All existing comments must be carried **intact** in the new content — the checksum on each comment validates this. If the write would remove or alter any comment, remargin rejects it. This is by design — it is the core reason remargin exists.
-
-- Never use `write` as a shortcut to rewrite a file that has other participants' comments. If you need to update body text, read the full file first with `get`, make targeted changes to body segments only, and write back the complete content including all comment blocks verbatim.
-- If a `write` fails due to comment preservation, do **NOT** delete comments to make it work. Find an alternative approach (e.g., write to a different file) or ask the user.
-
-#### Never delete comments you didn't author
-
-Never delete another participant's comment unless the user explicitly tells you to. If an operation fails because of someone else's comment, find an alternative approach or ask the user. Deleting someone's comment to unblock your own operation is never acceptable.
+| Op | Purpose |
+|----|---------|
+| `ls` | List files and directories (supports `path`). |
+| `get` | Read a file (supports `start_line`/`end_line`, `line_numbers`, `binary`). Run `metadata` first to check size on binary reads. |
+| `write` | Write file content (comment-preserving). Use `create=true` for new files, `raw=true` for non-markdown, `binary=true` for base64 bytes, `start_line`/`end_line` for partial writes. |
+| `metadata` | Document metadata (frontmatter, comment counts, pending counts, mime, size). |
+| `rm` | Remove a file from the managed tree. |
 
 ### Commenting
 
-| Tool | Purpose |
-|------|---------|
-| `comment` | Add a comment to a document (supports `reply_to`, `after_line`, `after_comment`, `auto_ack`, attachments) |
-| `comments` | List all comments in a document |
-| `batch` | Add multiple comments atomically (one write, one diff; per-operation `auto_ack` support) |
-| `edit` | Edit an existing comment (cascading ack clear on children) |
-| `delete` | Delete one or more comments (cleans up attachments) |
-| `ack` | Acknowledge one or more comments (omit `file` to resolve by ID across folder tree, scoped by `path`) |
-| `react` | Add or remove an emoji reaction |
+| Op | Purpose |
+|----|---------|
+| `comment` | Add a comment. Supports `reply_to`, `after_line`, `after_comment`, `auto_ack`, `attachments`, `to`, `sandbox`. |
+| `comments` | List comments in a file. `pretty=true` for human-readable threaded display. |
+| `batch` | Add multiple comments atomically (single write, single verify). Each sub-op supports its own `auto_ack`. |
+| `edit` | Edit an existing comment. Cascades ack-clear to children. |
+| `delete` | Delete one or more comments. Cleans up attachments. |
+| `ack` | Acknowledge one or more comments. Omit `file` to resolve by ID across the directory tree (scoped by `path`). |
+| `react` | Add or remove an emoji reaction. Use `remove=true` to unreact. |
 
-#### `auto_ack` on comment and batch
+### Sandbox
 
-When replying to a comment (`reply_to`), pass `auto_ack=true` to acknowledge the parent comment in the same operation. This is a single atomic write — the reply is created and the parent is acked together.
+Sandbox staging is a per-identity, per-file marker ("I am working on this") stored in document frontmatter. It does not hide or copy the file — it is a soft-claim, surface-able via `sandbox_list`.
 
-In `batch`, `auto_ack` is set per-operation, so each reply independently decides whether to ack its parent.
+| Op | Purpose |
+|----|---------|
+| `sandbox_add` | Stage one or more markdown files in the caller's sandbox. Idempotent per identity. |
+| `sandbox_remove` | Remove the caller's sandbox entry from one or more markdown files. Idempotent. |
+| `sandbox_list` | List markdown files in a directory that are currently staged for the caller's identity. |
 
-`auto_ack` without `reply_to` is an error.
+### Search and quality
 
-#### Identity and author type overrides
+| Op | Purpose |
+|----|---------|
+| `query` | Search across documents for comments. Filters: `pending`, `pending_for`, `author`, `since`, `comment_id`. Use `expanded=true` to include matching comments inline. |
+| `search` | Search across documents for text. Supports `regex`, `scope` (all/body/comments), `context` lines, `ignore_case`. |
+| `lint` | Structural lint checks on a document. |
+| `verify` | Verify comment integrity (checksums and signatures) against the participant registry. |
+| `migrate` | Convert old-format inline comments to remargin format. |
+| `purge` | Strip all comments from a document (destructive — user-initiated only). |
 
-The write tools (`comment`, `batch`, `edit`, `delete`, `ack`, `react`) accept optional `identity` and `author_type` parameters to override the configured identity for that specific operation. Use these when acting on behalf of a different author.
+### Dry-run projection
 
-- `identity` (string) — override the author name
-- `author_type` (string) — override the author type: `"human"` or `"agent"`
+`plan` is the pre-commit projection: it simulates a mutating op and returns the predicted outcome (noop status, would-commit flag, reject-reason, checksums, changed line ranges, comment diff) **without touching disk**. Use it whenever you want to preview an op before committing, especially in strict mode or before a batch.
 
-#### Folder-wide ack
+| Op | Purpose |
+|----|---------|
+| `plan` | Projection for any mutating op. Takes `op` plus the same arguments you would pass to the mutating call. All 11 mutating ops are wired: `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `write`. |
 
-When `ack` is called without a `file` parameter, it searches the directory tree (scoped by `path`, default `"."`) to find which document contains the comment ID. If the ID is found in exactly one file, it acks it there. If found in multiple files, it returns an error (ambiguous). If not found, it returns an error.
+### Admin (CLI-only)
 
-### Search and Quality
+These are user-facing setup tools and do not appear as MCP tools:
 
-| Tool | Purpose |
-|------|---------|
-| `query` | Search across documents for comments — filter by `pending`, `pending_for`, `author`, `since`, `comment_id`; use `expanded=true` to include matching comments inline |
-| `search` | Search across documents for text matches — supports `regex`, `scope` (all/body/comments), `context` lines, `ignore_case` |
-| `lint` | Run structural lint checks on a document |
-| `verify` | Verify comment integrity (checksums and signatures) |
-| `migrate` | Convert old-format inline comments to remargin format |
-| `purge` | Strip all comments from a document |
+- `keygen` — generate an Ed25519 signing key pair.
+- `mcp` — run the stdio MCP server (entry point for `mcp__remargin__*`).
+- `obsidian` — install / uninstall the Obsidian vault plugin (feature-gated).
+- `registry` — manage the participant registry file.
+- `resolve-mode` — resolve the effective enforcement mode for a directory.
+- `skill` — manage the Claude Code skill (this file).
+- `identity` — resolve and print the configured identity.
+- `version` — print version information.
 
-#### `expanded` on query
+## Agent-safety rules
 
-Pass `expanded=true` to include the individual matching comments in each result, grouped by file. Only comments that match the active filters are included — not all comments in the file.
+Each rule below states a clear "don't" with paired ✅/❌ examples. They compound: a single violation can break multiple rules at once.
 
-Without `expanded`, query returns file-level summaries (path, comment count, pending count).
+### Identity override
 
-## Comment Format
+Already covered above; it is rule number one. Don't override `identity` / `author_type` without explicit user instruction.
 
-Comments use a fenced code block with language tag `remargin` and a YAML header:
+### Reply threading
+
+Always set `reply_to` when you are replying. A comment without `reply_to` is a **new thread at the current insertion point**, not a reply — it will not be grouped under the message you meant to answer, and the parent's author will not get a pending-for count decrement when you ack it.
+
+- ❌ `remargin comment file=doc.md content="Good question. I'd add a revoked_keys list." after_comment=abc` — creates a sibling comment, not a reply.
+- ✅ `remargin comment file=doc.md content="Good question. I'd add a revoked_keys list." reply_to=abc` — threaded reply.
+
+### Auto-ack discipline
+
+`auto_ack: true` is allowed only when you are replying to a comment that was addressed to you (via the `to` field) and your reply fully addresses it. Auto-acking a comment addressed to someone else is speaking on their behalf.
+
+- ❌ Auto-acking a comment addressed to `eduardo` while signed in as `claude-agent`.
+- ✅ Auto-acking a comment addressed to you (`to: [claude-agent]`) whose content your reply has fully answered.
+
+`auto_ack` without `reply_to` is rejected by the core — treat that as intentional guardrail, not a bug.
+
+### Line-number volatility
+
+Comment IDs are stable; line numbers are not. Any mutation (comment, edit, delete, write) shifts every subsequent line number in the file. Never hold a line number across more than one mutation.
+
+- ❌ Run `search` for "error handling", get line 42, then later in the session post a comment with `after_line=42`. If anything was inserted in the meantime, line 42 is not what it used to be.
+- ✅ Anchor to comment IDs or heading text when possible (`after_comment=abc`). If you must use a line, re-resolve it via `search` or `get line_numbers=true` immediately before the mutation.
+
+### Batch for multiple mutations on the same file
+
+When placing 2 or more comments on the same file, **always use `batch`**. Do not call `comment` sequentially.
+
+Why: each `comment` call inserts a block, shifting subsequent line numbers. If you comment at line 50, line 80 in the original file is now line 90. Your second `comment after_line=80` lands in the wrong place. `batch` resolves all line numbers against the original document in one atomic pass.
+
+- ❌ Two back-to-back `comment` calls referencing original-document line numbers.
+- ✅ `batch operations=[{content: "...", after_line: 50}, {content: "...", after_line: 80}, {content: "...", reply_to: "abc", auto_ack: true}]`
+
+### Strict-mode awareness
+
+Before composing in an unknown directory, run `remargin resolve-mode` (or the mirrored MCP tool if you have one wired). Possible values:
+
+- `open` — anyone may post; no signatures required.
+- `registered` — only identities in the registry may post; still no signatures.
+- `strict` — registered identities only, and every comment must carry a valid Ed25519 signature.
+
+In strict mode, an unsigned or unregistered post is rejected by the verify gate that runs before every write (rem-ef1). If you are not sure whether your identity has a signing key configured, run `remargin identity` first. Do not assume an earlier op succeeding implies future ops in the same mode will.
+
+### Sandbox ≠ commit
+
+`sandbox_add` is a two-step workflow: `add` returns a staged marker. The file is not "committed" or "submitted" — that is an adapter-level concept `sandbox` does not enforce. If a user says "stage this for review", `sandbox_add` is the right call; if they say "submit this", clarify first.
+
+### Don't delete others' comments
+
+Never delete another participant's comment unless the user explicitly tells you to. If an operation fails because of someone else's comment, find an alternative approach or ask the user. Deleting to unblock your own operation is never acceptable.
+
+### `write` safety
+
+`write` replaces the **entire file content**. All existing comments must be carried intact in the new content — the checksum on each comment validates this. If the write would remove or alter any comment, remargin rejects it.
+
+- Never use `write` to rewrite a file that has other participants' comments without reading the full file first. Read it with `get`, make targeted body changes only, and write back the complete content including all comment blocks verbatim.
+- If a `write` fails due to comment preservation, do **NOT** delete comments to make it work. Find an alternative approach or ask the user.
+- For non-markdown files, pass `raw=true`. For binary files, pass `binary=true` with base64 content (rejected for `.md`).
+
+## Comment format
+
+Comments use a fenced code block with language tag `remargin` and a YAML header. **You do not write this format manually.** The tools produce it.
 
 ````markdown
 ```remargin
@@ -144,7 +232,7 @@ It can be multiple paragraphs with **markdown formatting**.
 ```
 ````
 
-With threading and acknowledgment:
+Threading and acknowledgment add more keys:
 
 ````markdown
 ```remargin
@@ -163,9 +251,7 @@ Replying to the comment above.
 ```
 ````
 
-**You do not write this format manually.** The MCP tools produce it. Use `comment`, `batch`, `ack`, and `react` tools to create and manage comments.
-
-## Common Workflows
+## Common workflows
 
 ### Read a document
 
@@ -173,10 +259,9 @@ Replying to the comment above.
 remargin get path="docs/design.md"
 remargin get path="docs/design.md" start_line=1 end_line=50
 remargin get path="docs/design.md" line_numbers=true
-remargin get path="docs/design.md" start_line=50 end_line=60 line_numbers=true
 ```
 
-### List files in a directory
+### List files
 
 ```
 remargin ls path="docs/"
@@ -193,36 +278,47 @@ remargin comment file="docs/design.md" content="This section needs more detail o
 ```
 remargin comment file="docs/design.md" content="Good point, I'll expand this." reply_to="abc"
 
-# Reply and acknowledge the parent in one step
+# Reply and acknowledge the parent in one atomic write (only when addressed to you)
 remargin comment file="docs/design.md" content="Addressed." reply_to="abc" auto_ack=true
 ```
 
-### Add a comment after a specific line
+### Add a comment at a specific anchor
 
 ```
 remargin comment file="docs/design.md" content="Consider edge case X here." after_line=42
+remargin comment file="docs/design.md" content="Also relevant here." after_comment="abc"
 ```
 
-### Add multiple comments at once
+### Multiple comments at once (atomic)
 
 ```
-remargin batch file="docs/design.md" comments=[{content: "First note", after_line: 10}, {content: "Second note", after_line: 25}]
+remargin batch file="docs/design.md" operations='[
+  {"content": "First note", "after_line": 50},
+  {"content": "Second note", "after_line": 80},
+  {"content": "Reply to abc", "reply_to": "abc", "auto_ack": true}
+]'
 ```
+
+On MCP, the same call takes a structured `operations` array directly — no JSON string encoding.
 
 ### Acknowledge comments
 
 ```
 remargin ack file="docs/design.md" ids=["abc", "def"]
 
-# Folder-wide ack (finds the comment by ID across the directory tree)
+# Folder-wide ack (resolves by ID across the directory tree)
 remargin ack ids=["abc"]
 remargin ack ids=["abc"] path="docs/"
+
+# Unacknowledge
+remargin ack file="docs/design.md" ids=["abc"] remove=true
 ```
 
 ### React to a comment
 
 ```
 remargin react file="docs/design.md" id="abc" emoji="👍"
+remargin react file="docs/design.md" id="abc" emoji="👍" remove=true
 ```
 
 ### Find pending comments across documents
@@ -234,7 +330,7 @@ remargin query path="." pending_for="eduardo" expanded=true
 remargin query path="." comment_id="abc"
 ```
 
-### Search for text across documents
+### Search text across documents
 
 ```
 remargin search pattern="notification"
@@ -242,53 +338,27 @@ remargin search pattern="error" path="docs/" scope="comments"
 remargin search pattern="TODO|FIXME" regex=true ignore_case=true context=2
 ```
 
-### Review a document (full workflow)
-
-1. `ls` to find the document
-2. `get` to read its contents
-3. `comments` to see existing discussion
-4. `comment` or `batch` to add your review comments
-5. Process and `ack` comments addressed to you (see below)
-6. `query` to check for anything else pending
-
-### Processing comments addressed to you
-
-When comments are addressed to you (via `to` field) or the user asks you to "process" comments, follow this workflow **in order**. Ack is the **last step**, not the first.
-
-1. **Read** the comment and any referenced documents, links, or files mentioned in it
-2. **Reason** about what the comment is saying — what is the author asking, deciding, or informing you about?
-3. **Execute** any actionable items:
-   - If the comment asks you to read something, read it and form an understanding
-   - If the comment asks you to do work, do the work (create files, update docs, write code, create tasks)
-   - If the comment makes a decision, update your plans and any affected documents accordingly
-   - If the comment asks a question, reply with a substantive answer (not a summary of the question)
-4. **Reply** with a comment (via `reply_to`) that demonstrates you did the work — reference specifics, share conclusions, raise concerns. Do not reply with summaries of what the comment said back to the person who wrote it.
-5. **Ack** the comment only after all the above is complete. Ack means "I have fully addressed this." A premature ack is a lie — it tells the author their comment was handled when it wasn't.
-
-**When NOT to reply:**
-- When someone agrees with your comment (e.g., "Agreed with all", "Sounds good"), just ack their reply and move on. Do NOT create a new comment just to say "Acked." or "Noted." It adds zero information and creates a pending item the other person has to waste time on. Only reply if you have something substantive to add.
-
-**Common mistakes to avoid:**
-- Do NOT ack immediately after reading. Ack is not "I read this."
-- Do NOT reply with a surface-level summary. "Understood, phase 1 is CLI backend" adds nothing.
-- Do NOT ack and then start doing the work. The work must be done before the ack.
-- Do NOT skip referenced files. If the comment says "look at X", you must read X before acking.
-- Do NOT reply to agreements with "Acked." — that's noise, not communication.
-
-### Multiple comments on the same file
-
-When placing 2 or more comments on the same file, **always use `batch`**. Do not call `comment` sequentially.
-
-Why: each `comment` call inserts a block into the file, shifting all subsequent line numbers. If you place comment A at line 50, line 80 in the original file is now line 90 (or whatever). Your second `comment --after-line 80` will land in the wrong place.
-
-`batch` is atomic — all line numbers are resolved against the original document in a single operation. No displacement.
+### Dry-run a mutation
 
 ```
-remargin batch file="docs/design.md" operations=[
-  {content: "First note", after_line: 50},
-  {content: "Second note", after_line: 80},
-  {content: "Reply to abc", reply_to: "abc", auto_ack: true}
-]
+# Preview what `comment` would produce without writing
+remargin plan comment file="docs/design.md" content="Preview this first."
+
+# Preview a batch
+remargin plan batch file="docs/design.md" ops='[...]'
+
+# Preview a write (returns reject_reason if raw/binary/unsupported)
+remargin plan write file="docs/design.md" content="..."
+```
+
+On MCP, `plan` takes the op name as a field: `plan { op: "comment", file, content, ... }`.
+
+### Stage files for review (sandbox)
+
+```
+remargin sandbox add files=["docs/design.md", "docs/api.md"]
+remargin sandbox list path="docs/"
+remargin sandbox remove files=["docs/design.md"]
 ```
 
 ### Write document content
@@ -297,41 +367,20 @@ remargin batch file="docs/design.md" operations=[
 remargin write path="docs/design.md" content="Updated content here..."
 ```
 
-The `write` tool preserves all existing comments in the document. It will not destroy comment blocks.
+`write` preserves all existing comments. It will not destroy comment blocks.
 
-#### Non-markdown files: use `--raw`
-
-When the file you are writing is **not** a markdown file (e.g., `.json`, `.yaml`, `.toml`, `.pen`, `.txt`, or any other non-`.md` extension), pass `raw=true`. Raw mode writes the content verbatim, skipping frontmatter injection and comment preservation logic that only applies to markdown. Without `raw`, the write may inject markdown-specific metadata into your file.
+**Non-markdown files:** use `raw=true`.
 
 ```
 remargin write path="config/settings.json" content='{"key": "value"}' raw=true
 remargin write path="assets/data.yaml" content="name: example" raw=true create=true
 ```
 
-Note: `raw=true` is rejected for `.md` files — markdown documents always go through the comment-preserving write path.
+`raw=true` is rejected for `.md` files — markdown always goes through the comment-preserving path.
 
-### Binary content
+**Binary files:** use `binary=true` (base64-encoded `content`); implies `raw=true`.
 
-To fetch non-markdown files (images, PDFs, audio, etc.) as bytes, pass `binary=true` to `get`. The response carries the file's `mime`, `size_bytes`, `path`, and the bytes themselves base64-encoded in `content`.
-
-```
-remargin get path="assets/screenshot.png" binary=true
-```
-
-**Before fetching binary content, always call `metadata` first** to check `size_bytes` and `mime`. Base64 inflates payloads by roughly 33%, so large blobs through JSON mode are the caller's responsibility — don't pull a 20 MB video just to discover it was the wrong file.
-
-```
-remargin metadata path="assets/screenshot.png"
-# -> { binary: true, mime: "image/png", size_bytes: 48321, ... }
-```
-
-`binary=true` is rejected for `.md` files — markdown must go through the text path so comment-preservation is never bypassed. This is symmetric with `write binary=true` (which also rejects `.md`).
-
-On the CLI, `--binary` also supports `--out <path>` to write the bytes to a file and print only a summary to stdout (useful for large payloads):
-
-```
-remargin get --binary --out /tmp/pic.png assets/screenshot.png
-```
+**Partial writes:** use `start_line`/`end_line` (1-indexed inclusive) to replace a specific line range without rewriting the whole file. Incompatible with `create`, `raw`, and `binary`.
 
 ### Create a new document
 
@@ -339,20 +388,78 @@ remargin get --binary --out /tmp/pic.png assets/screenshot.png
 remargin write path="docs/new-doc.md" content="# New Document\n\nInitial content." create=true
 ```
 
-The `create` flag creates a new file. It will fail if the file already exists (to prevent accidental overwrites).
+`create=true` fails if the file already exists (prevents accidental overwrites).
 
-## Comment Display Format
+### Fetch binary content
+
+To fetch non-markdown files (images, PDFs, audio, etc.) as bytes, pass `binary=true` to `get`. The response carries `mime`, `size_bytes`, `path`, and the bytes themselves base64-encoded in `content`.
+
+```
+remargin get path="assets/screenshot.png" binary=true
+```
+
+**Before fetching binary content, always call `metadata` first** to check `size_bytes` and `mime`. Base64 inflates payloads by ~33%, so large blobs through JSON mode are the caller's responsibility.
+
+```
+remargin metadata path="assets/screenshot.png"
+# -> { binary: true, mime: "image/png", size_bytes: 48321, ... }
+```
+
+`binary=true` is rejected for `.md` files — markdown must go through the text path so comment preservation is never bypassed.
+
+On the CLI, `get --binary --out <path>` writes the bytes to a file and prints only a summary:
+
+```
+remargin get --binary --out /tmp/pic.png assets/screenshot.png
+```
+
+### Review a document (full workflow)
+
+1. `ls` to find the document.
+2. `get` to read its contents.
+3. `comments` to see existing discussion.
+4. `comment` or `batch` to add your review comments.
+5. Process and `ack` comments addressed to you (see "Processing comments addressed to you" below).
+6. `query` to check for anything else pending.
+
+### Processing comments addressed to you
+
+When comments are addressed to you (via `to` field) or the user asks you to "process" comments, follow this workflow **in order**. Ack is the **last step**, not the first.
+
+1. **Read** the comment and any referenced documents, links, or files.
+2. **Reason** about what the comment is saying — what is the author asking, deciding, or informing you about?
+3. **Execute** any actionable items:
+   - If the comment asks you to read something, read it and form an understanding.
+   - If the comment asks you to do work, do the work (create files, update docs, write code, create tasks).
+   - If the comment makes a decision, update your plans and any affected documents accordingly.
+   - If the comment asks a question, reply with a substantive answer (not a summary of the question).
+4. **Reply** with a comment (via `reply_to`) that demonstrates you did the work — reference specifics, share conclusions, raise concerns. Do not reply with summaries of what the comment said back to the person who wrote it.
+5. **Ack** the comment only after all the above is complete. Ack means "I have fully addressed this." A premature ack is a lie — it tells the author their comment was handled when it wasn't.
+
+**When NOT to reply:**
+
+- When someone agrees with your comment ("Agreed", "Sounds good"), just ack their reply and move on. Do NOT create a new comment just to say "Acked." or "Noted." — it adds zero information and creates a pending item the other person has to clear. Only reply if you have something substantive to add.
+
+**Common mistakes to avoid:**
+
+- Do NOT ack immediately after reading. Ack is not "I read this."
+- Do NOT reply with a surface-level summary.
+- Do NOT ack and then start doing the work. Work first, ack second.
+- Do NOT skip referenced files. If the comment says "look at X", read X before acking.
+- Do NOT reply to agreements with "Acked." — that's noise, not communication.
+
+## Comment display format
 
 The `comments` tool supports two output modes:
 
-- **Default (no flag)**: Returns JSON -- use when you need to process comment data programmatically (e.g., to ack, reply, filter, or reason over comments).
-- **`pretty=true`**: Returns a pre-formatted, human-readable threaded display -- use when the user asks to see comments interactively (e.g., "show me the comments", "what comments are pending", "review this document").
+- **Default (no flag)**: returns JSON. Use when you need to process comment data programmatically (to ack, reply, filter, or reason about content).
+- **`pretty=true`**: returns a pre-formatted, human-readable threaded display. Use when the user asks to see comments interactively ("show me the comments", "what comments are pending", "review this document").
 
 **CRITICAL: MCP tool results are not visible to the user.** The user only sees the tool call indicator in their terminal, not the returned content. When using `pretty=true`, you **must** copy the full result into your text response so the user can actually see it. Calling the tool alone is not enough.
 
 ### When to use `pretty=true`
 
-When the user asks to see, review, or display comments, use `pretty=true` and **pass the output through verbatim**. Do not paraphrase, summarize, or re-render the output. The tool produces the exact format needed for terminal display with ctrl+clickable `file:line` links.
+When the user asks to see, review, or display comments, use `pretty=true` and **pass the output through verbatim**. Do not paraphrase, summarize, or re-render. The tool produces the exact format for terminal display with ctrl+clickable `file:line` links.
 
 **After showing pretty output, STOP.** Do not add summaries, reformatted lists, or any restatement of comment data below the tool output. The pretty output is the complete answer. Any text you write that references comment IDs, line numbers, or content from memory will be wrong.
 
@@ -362,7 +469,7 @@ remargin comments file="docs/design.md" pretty=true
 
 ### When to use default JSON
 
-When you need to process comments programmatically -- to ack them, reply to them, filter them, or reason about their content -- use the default JSON output.
+When you need to process comments programmatically — to ack them, reply to them, filter them, or reason about their content — use default JSON.
 
 ```
 remargin comments file="docs/design.md"
@@ -407,29 +514,22 @@ docs/design.md:25
 3 comments · 2 pending
 ```
 
-### Format rules
+## Escape hatches
 
-These rules are enforced by the tool when `pretty=true`. They are documented here for reference only -- the agent does not need to implement them.
+- **Preview before committing.** Any mutating op can be previewed via `plan`. Use it when you are unsure about strict-mode gating, noop detection, or comment placement.
+- **Dry-run.** The CLI supports `--dry-run` on most mutating commands; it runs the operation up to but not including the disk write.
+- **Verify failures.** If `verify` reports a mismatch, do NOT rewrite the file to "fix" the checksum — that is the symptom, not the cause. Surface the mismatch to the user; it usually means a manual edit or a cross-identity signing issue.
+- **Clobbered files.** If a write fails comment preservation, re-read the current file via `get`, re-build the correct content, and retry. Never delete comments to unblock.
+- **Not sure which mode.** Run `remargin resolve-mode` and `remargin identity` before composing in unfamiliar directories.
 
-1. **`file:line` per comment**: Every comment gets its own `path:line` link on a line by itself.
-2. **Repeat file path per comment**: Even in threads, repeat the full `path:line` on each.
-3. **Root comments indent 2 spaces**: The `id · author · timestamp` header line starts with 2 spaces.
-4. **Replies indent 2 more**: Each level of reply nesting adds 2 spaces (reply = 4 spaces, reply-to-reply = 6 spaces, etc.).
-5. **Content lines use `│` bar prefix**: All content lines start with `│` at the same indent as the header.
-6. **Threading marker**: Replies show `│ ⤷ reply-to: <id>` as the first content line.
-7. **Reactions before status**: If the comment has reactions, show them on their own line before the status line (e.g. `│ 👍 jorge, alice`).
-8. **Status as last content line**: Show `│ pending` or `│ ✓ acked by <who> @ <when>`.
-9. **Content truncation at 5 lines**: When content exceeds 5 lines, show the first 4 lines fully, then `│ ...` on the 5th line.
-10. **Timestamp format**: Use short format in the header: `YYYY-MM-DD HH:MM` (no timezone, no seconds).
-11. **Blank line between comments**: Separate each comment block with a blank line.
-12. **Summary footer**: End with a `─────` separator and a line showing `N comments · M pending`.
-13. **Addressees**: If the comment has a `to` field, show `│ to: name1, name2` before the content.
+## Key concepts
 
-## Key Concepts
-
-- **Identity**: Every comment has an author (string identifier) and type (`human` or `agent`)
-- **Threading**: Comments can reply to other comments via `reply_to` (direct parent) and `thread` (root ancestor)
-- **Acknowledgment**: Comments are acknowledged with `ack`, recording who and when (full timestamp)
-- **Integrity**: Every comment gets a checksum. In strict mode, comments are also signed with Ed25519 keys
-- **Batch atomicity**: Multiple comment operations in one `batch` call produce a single document write
-- **Comment preservation**: The tool guarantees no comments are lost during writes — the comment list before and after must match exactly with only the expected delta
+- **Identity**: every comment has an author (string identifier) and type (`human` or `agent`).
+- **Threading**: comments can reply to other comments via `reply_to` (direct parent) and `thread` (root ancestor).
+- **Acknowledgment**: comments are acknowledged with `ack`, recording who and when (full timestamp).
+- **Integrity**: every comment gets a checksum. In strict mode, comments are also signed with Ed25519 keys.
+- **Batch atomicity**: multiple comment operations in one `batch` call produce a single document write and a single verify pass.
+- **Comment preservation**: the tools guarantee no comments are lost during writes — the before and after comment list must match exactly with only the expected delta.
+- **Noop**: a write producing byte-identical content to the on-disk file returns `noop: true` without touching the file — retries and idempotent re-submits settle here without disturbing mtime.
+- **Sandbox**: a per-identity marker claimed via `sandbox_add`, listed via `sandbox_list`, and released via `sandbox_remove`. Persisted in document frontmatter. Not the same as "committed" or "submitted" — it is a soft claim only.
+- **Plan**: a dry-run projection (`plan <op>`) that returns the predicted outcome of a mutating op without writing anything. Covers all 11 mutating ops.
