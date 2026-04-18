@@ -215,8 +215,9 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       threadContent={
         activeFile ? (
           <ThreadedComments
-            key={`${activeFile}:${refreshKey}`}
+            key={activeFile}
             file={activeFile}
+            refreshKey={refreshKey}
             onGoToLine={(line) => handleOpenAtLine(activeFile, line)}
             onMutation={bumpRefresh}
             onReply={(commentId) => {
