@@ -391,6 +391,30 @@ enum Commands {
         #[arg(long, short = 'i')]
         ignore_case: bool,
     },
+    /// Back-sign missing-signature comments authored by the current
+    /// identity (rem-1ec).
+    ///
+    /// Adds an SSH signature to each selected comment. The canonical
+    /// signed payload excludes ack / reactions / checksum, so signing
+    /// never invalidates an existing comment — it only promotes an
+    /// unsigned artifact into one that verifies under the
+    /// participant-registry pubkey.
+    ///
+    /// The op refuses to sign comments authored by anyone other than
+    /// the resolved identity (forgery guard). Already-signed comments
+    /// listed under `--ids` are reported as skipped, not re-signed;
+    /// `--all-mine` silently excludes them.
+    Sign {
+        /// Path to the document.
+        file: String,
+        /// Comment ids to sign. Mutually exclusive with `--all-mine`.
+        #[arg(long, value_delimiter = ',', conflicts_with = "all_mine")]
+        ids: Vec<String>,
+        /// Sign every unsigned comment authored by the current
+        /// identity. Mutually exclusive with `--ids`.
+        #[arg(long)]
+        all_mine: bool,
+    },
     /// Manage the Claude Code skill.
     Skill {
         /// Subcommand: install, uninstall, test.
@@ -718,6 +742,14 @@ struct SearchParams<'cmd> {
     pattern: &'cmd str,
     regex: bool,
     scope: &'cmd str,
+}
+
+struct SignParams<'cmd> {
+    all_mine: bool,
+    dry_run: bool,
+    file: &'cmd str,
+    ids: &'cmd [String],
+    json_mode: bool,
 }
 
 struct AckParams<'cmd> {
@@ -1073,6 +1105,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::Rm { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
+        | Commands::Sign { .. }
         | Commands::Verify { .. }
         | Commands::Write { .. } => {}
     }
@@ -1264,6 +1297,20 @@ fn dispatch_with_config(
                 scope: scope.as_str(),
             };
             cmd_search(system, cwd, &s)
+        }
+        Commands::Sign {
+            file,
+            ids,
+            all_mine,
+        } => {
+            let sp = SignParams {
+                all_mine: *all_mine,
+                dry_run,
+                file,
+                ids,
+                json_mode,
+            };
+            cmd_sign(system, cwd, config, &sp)
         }
         Commands::Verify { file } => cmd_verify(system, cwd, file, config, json_mode),
         Commands::Write {
@@ -2404,6 +2451,68 @@ fn cmd_obsidian(
             }
         }
     }
+}
+
+fn cmd_sign(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    params: &SignParams<'_>,
+) -> Result<()> {
+    let SignParams {
+        all_mine,
+        dry_run,
+        file,
+        ids,
+        json_mode,
+    } = *params;
+    let selection = build_sign_selection(all_mine, ids)?;
+    let path = resolve_doc_path(system, cwd, file)?;
+    let result = operations::sign::sign_comments(system, &path, config, &selection, dry_run)?;
+    if json_mode {
+        print_output(true, &sign_result_json(&result, dry_run))
+    } else {
+        render_sign_result_text(&result, dry_run)
+    }
+}
+
+fn build_sign_selection(all_mine: bool, ids: &[String]) -> Result<operations::sign::SignSelection> {
+    if !all_mine && ids.is_empty() {
+        bail!("sign: pass --ids <ID[,ID...]> or --all-mine");
+    }
+    Ok(if all_mine {
+        operations::sign::SignSelection::AllMine
+    } else {
+        operations::sign::SignSelection::Ids(ids.to_vec())
+    })
+}
+
+fn sign_result_json(result: &operations::sign::SignResult, dry_run: bool) -> Value {
+    let signed: Vec<Value> = result
+        .signed
+        .iter()
+        .map(|entry| json!({ "id": entry.id, "ts": entry.ts }))
+        .collect();
+    let skipped: Vec<Value> = result
+        .skipped
+        .iter()
+        .map(|entry| json!({ "id": entry.id, "reason": entry.reason }))
+        .collect();
+    json!({ "signed": signed, "skipped": skipped, "dry_run": dry_run })
+}
+
+fn render_sign_result_text(result: &operations::sign::SignResult, dry_run: bool) -> Result<()> {
+    let prefix = if dry_run { "would sign" } else { "signed" };
+    for entry in &result.signed {
+        out(&format!("{prefix}: {} (ts={})", entry.id, entry.ts))?;
+    }
+    for entry in &result.skipped {
+        out(&format!("skipped: {} ({})", entry.id, entry.reason))?;
+    }
+    if result.signed.is_empty() && result.skipped.is_empty() {
+        out("no candidates")?;
+    }
+    Ok(())
 }
 
 fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Result<()> {

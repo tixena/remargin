@@ -466,6 +466,33 @@ fn desc_search() -> ToolDesc {
     }
 }
 
+/// Build the sign tool descriptor.
+fn desc_sign() -> ToolDesc {
+    ToolDesc {
+        name: "sign",
+        description: "Back-sign missing-signature comments authored by the current identity. \
+             Refuses to sign comments authored by anyone else (forgery guard). \
+             Already-signed comments listed under `ids` are reported as skipped; \
+             `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "Path to the document" },
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Comment ids to sign. Mutually exclusive with all_mine."
+                },
+                "all_mine": { "type": "boolean", "description": "Sign every unsigned comment authored by the current identity.", "default": false },
+                "dry_run": { "type": "boolean", "description": "Preview without writing", "default": false },
+                "identity": { "type": "string", "description": "Override identity for this operation" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+            },
+            "required": ["file"]
+        }),
+    }
+}
+
 /// Build the verify tool descriptor.
 fn desc_verify() -> ToolDesc {
     ToolDesc {
@@ -584,6 +611,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_sandbox_list(),
         desc_sandbox_remove(),
         desc_search(),
+        desc_sign(),
         desc_verify(),
         desc_write(),
     ]
@@ -803,6 +831,7 @@ fn dispatch_tool(
         "sandbox_list" => handle_sandbox_list(system, base_dir, config, p),
         "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, p),
         "search" => handle_search(system, base_dir, p),
+        "sign" => handle_sign(system, base_dir, config, p),
         "verify" => handle_verify(system, base_dir, config, p),
         "write" => handle_write(system, base_dir, config, p),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
@@ -1544,6 +1573,56 @@ fn handle_search(
         .collect();
 
     Ok(json!({ "matches": matches }))
+}
+
+/// Handle the `sign` tool: back-sign missing-signature comments authored
+/// by the resolved identity.
+fn handle_sign(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let file = required_str(params, "file")?;
+    let dry_run = optional_bool(params, "dry_run");
+    let all_mine = optional_bool(params, "all_mine");
+    let ids = string_array(params, "ids");
+
+    if all_mine && !ids.is_empty() {
+        bail!("sign: `ids` and `all_mine` are mutually exclusive");
+    }
+    if !all_mine && ids.is_empty() {
+        bail!("sign: pass `ids` (array of comment ids) or `all_mine: true`");
+    }
+
+    let selection = if all_mine {
+        operations::sign::SignSelection::AllMine
+    } else {
+        operations::sign::SignSelection::Ids(ids)
+    };
+
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+
+    let path = base_dir.join(file);
+    let result = operations::sign::sign_comments(system, &path, cfg, &selection, dry_run)?;
+
+    let signed: Vec<Value> = result
+        .signed
+        .iter()
+        .map(|e| json!({ "id": e.id, "ts": e.ts }))
+        .collect();
+    let skipped: Vec<Value> = result
+        .skipped
+        .iter()
+        .map(|e| json!({ "id": e.id, "reason": e.reason }))
+        .collect();
+
+    Ok(json!({
+        "signed": signed,
+        "skipped": skipped,
+        "dry_run": dry_run,
+    }))
 }
 
 /// Handle the `verify` tool: verify comment integrity.

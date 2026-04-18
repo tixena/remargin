@@ -8,6 +8,7 @@ pub mod purge;
 pub mod query;
 pub mod sandbox;
 pub mod search;
+pub mod sign;
 pub mod threading;
 pub mod verify;
 
