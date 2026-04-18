@@ -13,7 +13,9 @@ use serde_json::{Value, json};
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::mcp;
+use crate::operations::{CreateCommentParams, create_comment};
 use crate::parser::{self, AuthorType};
+use crate::writer::InsertPosition;
 
 /// Document with two comments for expanded query tests.
 const DOC_EXPANDED: &str = "\
@@ -167,7 +169,7 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 21_usize);
+    assert_eq!(tools.len(), 22_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -185,6 +187,7 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"get"));
     assert!(names.contains(&"write"));
     assert!(names.contains(&"metadata"));
+    assert!(names.contains(&"plan"));
     assert!(names.contains(&"query"));
     assert!(names.contains(&"rm"));
     assert!(names.contains(&"search"));
@@ -1932,5 +1935,232 @@ fn mcp_reply_prepends_parent_author_to_list() {
         reply.to,
         vec![String::from("eduardo"), String::from("bob")],
         "MCP comment handler should prepend parent author to explicit to",
+    );
+}
+
+/// Seed a document through the real `operations::create_comment` path so
+/// comment checksums are valid. Returns the generated comment id so tests
+/// can reference it in plan requests.
+fn seed_real_comment(base: &Path, filename: &str) -> (MockSystem, ResolvedConfig, String) {
+    let path = base.join(filename);
+    let system = MockSystem::new()
+        .with_file(&path, b"# Plan fixture\n\nBody text.\n")
+        .unwrap();
+    let config = test_config();
+    let id = create_comment(
+        &system,
+        &path,
+        &config,
+        &CreateCommentParams::new("seed comment", &InsertPosition::Append),
+    )
+    .unwrap();
+    (system, config, id)
+}
+
+#[test]
+fn mcp_plan_ack_returns_report_without_touching_disk() {
+    let base = Path::new("/docs");
+    let (system, config, id) = seed_real_comment(base, "doc.md");
+
+    // Capture on-disk bytes before the call so we can assert idempotence.
+    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "ack",
+                    "file": "doc.md",
+                    "ids": [id],
+                    "identity": "bob",
+                    "author_type": "human"
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "ack");
+    assert_eq!(report["would_commit"], true);
+    assert_eq!(report["noop"], false);
+    assert!(report["checksum_before"].is_string());
+    assert!(report["checksum_after"].is_string());
+    assert_ne!(report["checksum_before"], report["checksum_after"]);
+    // ack mutates the `ack` metadata list; the comment content is
+    // unchanged so its content-derived checksum stays identical, and the
+    // diff classes it as `preserved`.
+    assert_eq!(report["comments"]["preserved"].as_array().unwrap().len(), 1);
+
+    // Disk is untouched: plan is side-effect-free.
+    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert_eq!(before_bytes, after_bytes);
+}
+
+#[test]
+fn mcp_plan_delete_reports_modified_ranges() {
+    let base = Path::new("/docs");
+    let (system, config, id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "delete",
+                    "file": "doc.md",
+                    "ids": [id]
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "delete");
+    assert_eq!(report["would_commit"], true);
+    assert_eq!(report["comments"]["destroyed"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn mcp_plan_react_adds_emoji() {
+    let base = Path::new("/docs");
+    let (system, config, id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "react",
+                    "file": "doc.md",
+                    "id": id,
+                    "emoji": "+1"
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "react");
+    assert_eq!(report["would_commit"], true);
+    // React touches the reactions map on the comment (metadata, not
+    // content), so the diff reports it as preserved rather than
+    // modified — content-derived checksums are unchanged.
+    assert_eq!(report["comments"]["preserved"].as_array().unwrap().len(), 1);
+    assert_ne!(report["checksum_before"], report["checksum_after"]);
+}
+
+#[test]
+fn mcp_plan_rejects_missing_comment_id() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "ack",
+                    "file": "doc.md",
+                    "ids": ["does-not-exist"]
+                }
+            }
+        }),
+    );
+
+    assert!(
+        is_tool_error(&response),
+        "expected projection failure for missing comment id: {response}"
+    );
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("not found"),
+        "expected not-found message, got: {msg}"
+    );
+}
+
+#[test]
+fn mcp_plan_write_is_not_yet_wired() {
+    // rem-3uo scopes plan to ack / delete / react. Other ops (write
+    // included on the MCP dispatcher) should surface the canonical
+    // "not yet landed" message so callers know what to wait for. The
+    // wired CLI plan write uses a different code path.
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "write" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("not yet landed"),
+        "expected not-yet-landed message, got: {msg}"
+    );
+}
+
+#[test]
+fn mcp_plan_rejects_unknown_op() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "nope" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("unknown op"),
+        "expected unknown-op message, got: {msg}"
     );
 }

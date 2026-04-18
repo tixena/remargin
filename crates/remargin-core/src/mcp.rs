@@ -23,6 +23,8 @@ use crate::linter;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
 use crate::operations::migrate;
+use crate::operations::plan as plan_ops;
+use crate::operations::projections;
 use crate::operations::purge;
 use crate::operations::query::{self, QueryFilter};
 use crate::operations::sandbox as sandbox_ops;
@@ -294,6 +296,32 @@ fn desc_migrate() -> ToolDesc {
     }
 }
 
+/// Build the plan tool descriptor.
+fn desc_plan() -> ToolDesc {
+    ToolDesc {
+        name: "plan",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Currently wired ops: ack, delete, react. Other ops return a 'not yet landed' error.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "op": { "type": "string", "description": "Op to project: ack | delete | react | comment | edit | batch | migrate | purge | sandbox-add | sandbox-remove" },
+                "file": { "type": "string", "description": "Path to the document (required for wired ops)" },
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Comment IDs (used by ack / delete)"
+                },
+                "id": { "type": "string", "description": "Single comment ID (used by react)" },
+                "emoji": { "type": "string", "description": "Emoji for react op" },
+                "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
+                "identity": { "type": "string", "description": "Override identity for this projection" },
+                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+            },
+            "required": ["op"]
+        }),
+    }
+}
+
 /// Build the purge tool descriptor.
 fn desc_purge() -> ToolDesc {
     ToolDesc {
@@ -499,6 +527,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_ls(),
         desc_metadata(),
         desc_migrate(),
+        desc_plan(),
         desc_purge(),
         desc_query(),
         desc_react(),
@@ -691,6 +720,7 @@ fn dispatch_tool(
         "ls" => handle_ls(system, base_dir, config, params),
         "metadata" => handle_metadata(system, base_dir, params),
         "migrate" => handle_migrate(system, base_dir, config, params),
+        "plan" => handle_plan(system, base_dir, config, params),
         "purge" => handle_purge(system, base_dir, config, params),
         "query" => handle_query(system, base_dir, params),
         "react" => handle_react(system, base_dir, config, params),
@@ -1077,6 +1107,83 @@ fn handle_migrate(
         .collect();
 
     Ok(json!({ "migrated": results }))
+}
+
+/// Handle the `plan` tool: project a mutating op into a [`plan_ops::PlanReport`]
+/// without touching disk (rem-3uo).
+///
+/// Mirrors the CLI `plan` subcommand tree: ack / delete / react are fully
+/// wired; other ops return a deliberate "not yet landed" error so callers
+/// discover the surface.
+fn handle_plan(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let op = required_str(params, "op")?;
+    let overridden = apply_identity_overrides(config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+
+    match op {
+        "ack" => {
+            let file = required_str(params, "file")?;
+            let ids = string_array(params, "ids");
+            let remove = optional_bool(params, "remove");
+            let path = base_dir.join(file);
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let (before, after) = projections::project_ack(system, &path, cfg, &id_refs, remove)?;
+            Ok(build_plan_report_value("ack", &before, &after, cfg))
+        }
+        "delete" => {
+            let file = required_str(params, "file")?;
+            let ids = string_array(params, "ids");
+            let path = base_dir.join(file);
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let (before, after) = projections::project_delete(system, &path, cfg, &id_refs)?;
+            Ok(build_plan_report_value("delete", &before, &after, cfg))
+        }
+        "react" => {
+            let file = required_str(params, "file")?;
+            let comment_id = required_str(params, "id")?;
+            let emoji = required_str(params, "emoji")?;
+            let remove = optional_bool(params, "remove");
+            let path = base_dir.join(file);
+            let (before, after) =
+                projections::project_react(system, &path, cfg, comment_id, emoji, remove)?;
+            Ok(build_plan_report_value("react", &before, &after, cfg))
+        }
+        "batch" | "comment" | "edit" | "migrate" | "purge" | "sandbox-add" | "sandbox-remove"
+        | "write" => {
+            bail!("plan {op}: per-op wiring not yet landed (tracked under rem-bhk)")
+        }
+        other => bail!("plan: unknown op {other:?}"),
+    }
+}
+
+/// Serialize a projected `(before, after)` pair into a JSON [`plan_ops::PlanReport`]
+/// value. Shared by every branch of [`handle_plan`].
+fn build_plan_report_value(
+    op_label: &str,
+    before: &parser::ParsedDocument,
+    after: &parser::ParsedDocument,
+    cfg: &ResolvedConfig,
+) -> Value {
+    let identity = build_plan_identity(cfg);
+    let report = plan_ops::project_report(op_label, before, after, cfg, identity);
+    serde_json::to_value(&report).unwrap_or_else(|_| json!({ "error": "serialization failure" }))
+}
+
+/// Build a [`plan_ops::PlanIdentity`] from the active resolved config.
+///
+/// `would_sign` is `true` when a key path is configured. The key is not
+/// loaded here — `plan` stays side-effect-free per rem-bhk.
+fn build_plan_identity(cfg: &ResolvedConfig) -> plan_ops::PlanIdentity {
+    let author_type = cfg.author_type.as_ref().map(|t| match t {
+        AuthorType::Agent => String::from("agent"),
+        AuthorType::Human => String::from("human"),
+    });
+    plan_ops::PlanIdentity::new(cfg.identity.clone(), author_type, cfg.key_path.is_some())
 }
 
 /// Handle the `purge` tool: strip all comments from a document.
