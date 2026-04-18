@@ -120,6 +120,20 @@ pub struct PlanIdentity {
     pub would_sign: bool,
 }
 
+impl PlanIdentity {
+    /// Build a [`PlanIdentity`] from the three fields documented in
+    /// rem-bhk. The constructor exists so external crates can populate
+    /// the struct without tripping `#[non_exhaustive]`.
+    #[must_use]
+    pub const fn new(name: Option<String>, author_type: Option<String>, would_sign: bool) -> Self {
+        Self {
+            author_type,
+            name,
+            would_sign,
+        }
+    }
+}
+
 /// Structured prediction of what a mutating op would do against a
 /// [`ParsedDocument`], without touching disk.
 ///

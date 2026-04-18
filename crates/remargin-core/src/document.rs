@@ -128,6 +128,35 @@ impl WriteOptions {
     }
 }
 
+/// Projection result for a planned `write` op (rem-imc).
+///
+/// Returned by [`project_write`] — the projection-only sibling of
+/// [`write`] — so the `plan write` subcommand can report what the op
+/// would do without touching disk.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum WriteProjection {
+    /// Normal markdown projection: `before` is the parsed on-disk
+    /// document (empty-segmented for `--create`), `after` is the parsed
+    /// prospective content with frontmatter already normalized through
+    /// [`frontmatter::ensure_frontmatter`]. `noop` mirrors the byte-
+    /// identical shortcut [`write`] uses pre-commit.
+    Markdown {
+        after: parser::ParsedDocument,
+        before: parser::ParsedDocument,
+        noop: bool,
+    },
+    /// Projection not representable as a markdown document diff
+    /// (`--raw` or `--binary` mode). The caller should emit a degraded
+    /// plan report whose comment diff is empty and whose `reject_reason`
+    /// explains the limitation.
+    Unsupported {
+        /// Human-readable reason (`"raw mode"`, `"binary mode"`) suitable
+        /// for the `PlanReport::reject_reason` field.
+        reason: String,
+    },
+}
+
 /// List files and directories at the given path.
 ///
 /// Filters by allowlist, hides dotfiles and dot-directories.
@@ -432,6 +461,98 @@ pub fn write(
     })?;
 
     Ok(WriteOutcome { noop: false })
+}
+
+/// Pure projection of a `write` op: runs the same pipeline [`write`]
+/// does up through `ensure_frontmatter`, but stops before invoking
+/// [`commit_with_verify`] and never calls `system.write`.
+///
+/// Used by the `remargin plan write` subcommand (rem-imc) to feed a
+/// before/after pair into
+/// [`crate::operations::plan::project_report`]. The returned
+/// [`WriteProjection::Markdown::before`] is the on-disk document (empty
+/// for `--create`), and `after` is the prospective document with
+/// frontmatter normalized.
+///
+/// # Errors
+///
+/// Surfaces the same diagnostics [`write`] would on its pre-commit
+/// path: invalid option combinations, sandbox escapes, allowlist
+/// rejections, parse failures, and comment-preservation violations.
+pub fn project_write(
+    system: &dyn System,
+    base_dir: &Path,
+    path: &Path,
+    content: &str,
+    config: &ResolvedConfig,
+    opts: WriteOptions,
+) -> Result<WriteProjection> {
+    validate_write_opts(path, &opts)?;
+
+    let resolved = if opts.create {
+        let target =
+            allowlist::resolve_sandboxed_create(system, base_dir, path, config.unrestricted)?;
+        if system.read_to_string(&target).is_ok() {
+            bail!(
+                "file already exists (use write without --create): {}",
+                path.display()
+            );
+        }
+        target
+    } else {
+        allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?
+    };
+
+    if !allowlist::is_visible(&resolved, false) {
+        bail!("file not visible: {}", path.display());
+    }
+
+    if opts.binary {
+        return Ok(WriteProjection::Unsupported {
+            reason: String::from("binary mode is not representable as a markdown plan"),
+        });
+    }
+    if opts.raw {
+        return Ok(WriteProjection::Unsupported {
+            reason: String::from("raw mode is not representable as a markdown plan"),
+        });
+    }
+
+    let content_to_parse: String = if let Some((start, end)) = opts.lines {
+        let existing = system
+            .read_to_string(&resolved)
+            .with_context(|| format!("reading {} for partial write", resolved.display()))?;
+        splice_lines(&existing, start, end, content)
+    } else {
+        String::from(content)
+    };
+
+    let new_doc = parser::parse(&content_to_parse).context("parsing incoming content")?;
+
+    let before = if opts.create {
+        parser::parse("").context("parsing empty before-document for create")?
+    } else {
+        match system.read_to_string(&resolved) {
+            Ok(existing) => {
+                let old_doc = parser::parse(&existing).context("parsing existing document")?;
+                check_comment_preservation(&old_doc, &new_doc)?;
+                old_doc
+            }
+            Err(_) => parser::parse("").context("parsing empty before-document")?,
+        }
+    };
+
+    let mut after = new_doc;
+    frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    let after_bytes = after.to_markdown();
+    let noop = !opts.create && is_byte_identical(system, &resolved, after_bytes.as_bytes());
+
+    Ok(WriteProjection::Markdown {
+        after,
+        before,
+        noop,
+    })
 }
 
 /// Return true when the on-disk bytes at `path` exactly match `new_bytes`.

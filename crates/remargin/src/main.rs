@@ -24,6 +24,7 @@ use remargin_core::mcp;
 use remargin_core::operations;
 use remargin_core::operations::batch::BatchCommentOp;
 use remargin_core::operations::migrate;
+use remargin_core::operations::plan as plan_ops;
 use remargin_core::operations::purge;
 use remargin_core::operations::query;
 use remargin_core::operations::sandbox as sandbox_ops;
@@ -444,8 +445,32 @@ enum PlanAction {
     SandboxAdd,
     /// Project a `sandbox remove` op.
     SandboxRemove,
-    /// Project a `write` op.
-    Write,
+    /// Project a `write` op (rem-imc).
+    Write {
+        /// Path to the file.
+        path: String,
+        /// File content to write (read from stdin if omitted).
+        content: Option<String>,
+        /// Content is base64-encoded binary data (implies --raw). Not
+        /// supported for markdown (.md) files and not representable as
+        /// a structured plan — the report will carry a `reject_reason`.
+        #[arg(long)]
+        binary: bool,
+        /// Create a new file (parent directory must exist, file must not).
+        #[arg(long)]
+        create: bool,
+        /// Replace only lines `START-END` (1-indexed, inclusive) and
+        /// leave every other line byte-identical. See `write --lines`
+        /// for the full semantics.
+        #[arg(long, value_name = "START-END")]
+        lines: Option<String>,
+        /// Write content exactly as provided, skipping frontmatter and
+        /// comment preservation. Not supported for markdown (.md) files
+        /// and not representable as a structured plan — the report will
+        /// carry a `reject_reason`.
+        #[arg(long)]
+        raw: bool,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -1011,7 +1036,7 @@ fn dispatch_with_config(
         Commands::Migrate { file, backup } => {
             cmd_migrate(system, cwd, config, file, dry_run, *backup, json_mode)
         }
-        Commands::Plan { action } => cmd_plan(action, json_mode),
+        Commands::Plan { action } => cmd_plan(system, cwd, config, action, json_mode),
         Commands::Purge { file } => cmd_purge(system, cwd, config, file, dry_run, json_mode),
         Commands::Query {
             path,
@@ -1590,26 +1615,110 @@ fn cmd_migrate(
 
 /// Route a `plan` subcommand to the correct per-op projection.
 ///
-/// rem-2qr ships the shared infrastructure (`PlanReport` shape + projection
-/// helper in `remargin_core::operations::plan`); per-op wiring lands
-/// under rem-imc / rem-3uo / rem-qll. Until then every variant returns
-/// a deliberate "not yet wired" error so callers can discover the
-/// subcommand tree and failures are loud.
-fn cmd_plan(action: &PlanAction, _json_mode: bool) -> Result<()> {
-    let op_label = match action {
-        PlanAction::Ack => "ack",
-        PlanAction::Batch => "batch",
-        PlanAction::Comment => "comment",
-        PlanAction::Delete => "delete",
-        PlanAction::Edit => "edit",
-        PlanAction::Migrate => "migrate",
-        PlanAction::Purge => "purge",
-        PlanAction::React => "react",
-        PlanAction::SandboxAdd => "sandbox-add",
-        PlanAction::SandboxRemove => "sandbox-remove",
-        PlanAction::Write => "write",
-    };
+/// Lightweight ops that have not yet been wired (tracked under rem-3uo /
+/// rem-qll) surface a deliberate "not yet landed" error so callers
+/// discover the subcommand tree and failures are loud. `plan write` is
+/// fully wired per rem-imc.
+fn cmd_plan(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    action: &PlanAction,
+    json_mode: bool,
+) -> Result<()> {
+    match action {
+        PlanAction::Write {
+            path,
+            content,
+            binary,
+            create,
+            lines,
+            raw,
+        } => {
+            let body = match content {
+                Some(s) => String::from(s),
+                None => read_stdin()?,
+            };
+            let line_range = lines.as_deref().map(parse_line_range).transpose()?;
+            let opts = document::WriteOptions::new()
+                .binary(*binary)
+                .create(*create)
+                .lines(line_range)
+                .raw(*raw);
+            let projection = document::project_write(
+                system,
+                cwd,
+                Path::new(path.as_str()),
+                &body,
+                config,
+                opts,
+            )?;
+            let identity = build_plan_identity(config);
+            let report = match projection {
+                document::WriteProjection::Markdown {
+                    before,
+                    after,
+                    noop,
+                } => {
+                    let mut report =
+                        plan_ops::project_report("write", &before, &after, config, identity);
+                    // `project_write` already performed the byte-identical
+                    // shortcut; carry the flag through in case the caller
+                    // wants the richer diagnostic than `checksum_before ==
+                    // checksum_after` alone implies.
+                    report.noop = report.noop || noop;
+                    report
+                }
+                document::WriteProjection::Unsupported { reason } => {
+                    // `--raw` / `--binary` cannot produce a structured
+                    // markdown plan; return a degraded report with an
+                    // explicit `reject_reason`.
+                    let empty = parser::parse("").context("parsing empty document")?;
+                    let mut report =
+                        plan_ops::project_report("write", &empty, &empty, config, identity);
+                    report.reject_reason = Some(reason);
+                    report.would_commit = false;
+                    report
+                }
+                _ => anyhow::bail!("unhandled WriteProjection variant"),
+            };
+            let value = serde_json::to_value(&report).context("serializing plan report")?;
+            print_output(json_mode, &value)
+        }
+        PlanAction::Ack => bail_plan_not_yet_wired("ack"),
+        PlanAction::Batch => bail_plan_not_yet_wired("batch"),
+        PlanAction::Comment => bail_plan_not_yet_wired("comment"),
+        PlanAction::Delete => bail_plan_not_yet_wired("delete"),
+        PlanAction::Edit => bail_plan_not_yet_wired("edit"),
+        PlanAction::Migrate => bail_plan_not_yet_wired("migrate"),
+        PlanAction::Purge => bail_plan_not_yet_wired("purge"),
+        PlanAction::React => bail_plan_not_yet_wired("react"),
+        PlanAction::SandboxAdd => bail_plan_not_yet_wired("sandbox-add"),
+        PlanAction::SandboxRemove => bail_plan_not_yet_wired("sandbox-remove"),
+    }
+}
+
+/// Shared bail for the not-yet-wired plan actions (rem-bhk follow-ups).
+fn bail_plan_not_yet_wired(op_label: &str) -> Result<()> {
     anyhow::bail!("plan {op_label}: per-op wiring not yet landed (tracked under rem-bhk)")
+}
+
+/// Build a [`plan_ops::PlanIdentity`] from the active resolved config.
+///
+/// `would_sign` is `true` when a key path is configured. We do not load
+/// the key here — that would cost a disk read and/or a password prompt,
+/// and per rem-bhk `plan` must stay side-effect-free.
+fn build_plan_identity(config: &ResolvedConfig) -> plan_ops::PlanIdentity {
+    let author_type = config.author_type.as_ref().map(|t| match t {
+        parser::AuthorType::Agent => String::from("agent"),
+        parser::AuthorType::Human => String::from("human"),
+        _ => String::from("unknown"),
+    });
+    plan_ops::PlanIdentity::new(
+        config.identity.clone(),
+        author_type,
+        config.key_path.is_some(),
+    )
 }
 
 fn cmd_purge(

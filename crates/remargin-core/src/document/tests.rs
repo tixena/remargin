@@ -9,7 +9,7 @@ use os_shim::System as _;
 use os_shim::mock::MockSystem;
 
 use crate::config::{Mode, ResolvedConfig};
-use crate::document::{self, WriteOptions, allowlist};
+use crate::document::{self, WriteOptions, WriteProjection, allowlist};
 use crate::parser::AuthorType;
 
 /// A markdown document with comments for metadata testing.
@@ -2174,4 +2174,289 @@ fn list_entry_json_shape_matches_schema() {
             "optional key `{key}` should be skipped when None"
         );
     }
+}
+
+// --- project_write tests (rem-imc) ---
+//
+// `project_write` is the projection-only sibling of `write` used by the
+// `remargin plan write` subcommand. These tests pin three invariants:
+//
+// 1. The disk state is never mutated (file bytes stay byte-identical).
+// 2. Binary / raw modes degrade to `WriteProjection::Unsupported` with a
+//    human-readable reason, never to a bogus `Markdown` projection.
+// 3. The returned `before` / `after` pair mirrors what `write` would
+//    actually parse — same frontmatter normalization, same comment-
+//    preservation rejection, same empty-doc shape for `--create`.
+
+#[test]
+fn project_write_happy_path_projects_markdown_without_mutating_disk() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+    let before_bytes = read_bytes(&system, Path::new("/project/doc.md"));
+
+    // Write appends a new body line; preserves both existing comments.
+    let new_content = format!("{DOC_WITH_COMMENTS}\nA trailing paragraph.\n");
+    let projection = document::project_write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &new_content,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+
+    assert!(
+        matches!(projection, WriteProjection::Markdown { .. }),
+        "expected Markdown projection, got {projection:?}"
+    );
+    let WriteProjection::Markdown {
+        after,
+        before,
+        noop,
+    } = projection
+    else {
+        return;
+    };
+    assert!(!noop, "expected a real diff, got noop projection");
+    assert_eq!(
+        before.comments().len(),
+        2,
+        "before should reflect the on-disk document"
+    );
+    assert_eq!(
+        after.comments().len(),
+        2,
+        "after should still carry the preserved comments"
+    );
+
+    // Core invariant: on-disk bytes are byte-identical post-projection.
+    let after_bytes = read_bytes(&system, Path::new("/project/doc.md"));
+    assert_eq!(
+        before_bytes, after_bytes,
+        "project_write must not mutate disk"
+    );
+}
+
+#[test]
+fn project_write_detects_noop_when_content_matches() {
+    // Seed a file and do a real write first, so the on-disk bytes are
+    // already in the shape `ensure_frontmatter` produces. Re-submitting
+    // the same content should then trip the byte-identical noop path.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        DOC_WITH_COMMENTS,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+
+    // Capture the canonicalized on-disk bytes after the real write.
+    let canonical = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let before_bytes = canonical.clone().into_bytes();
+
+    // Now project_write with those exact bytes — this is the true noop
+    // case a caller would observe (planning a re-save of the current
+    // document). `ensure_frontmatter` is idempotent on an already-
+    // normalized document, so `after.to_markdown()` should match disk.
+    let projection = document::project_write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &canonical,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+
+    assert!(
+        matches!(projection, WriteProjection::Markdown { .. }),
+        "expected Markdown projection, got {projection:?}"
+    );
+    let WriteProjection::Markdown { noop, .. } = projection else {
+        return;
+    };
+    assert!(noop, "re-submitting canonical bytes should be a noop");
+
+    // And project_write still must not mutate disk on a noop.
+    let after_bytes = read_bytes(&system, Path::new("/project/doc.md"));
+    assert_eq!(before_bytes, after_bytes);
+}
+
+#[test]
+fn project_write_create_returns_empty_before_and_leaves_disk_untouched() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    let content = "---\ntitle: New\n---\n\n# Brand new\n";
+
+    let projection = document::project_write(
+        &system,
+        Path::new("/project"),
+        Path::new("new.md"),
+        content,
+        &config,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        matches!(projection, WriteProjection::Markdown { .. }),
+        "expected Markdown projection, got {projection:?}"
+    );
+    let WriteProjection::Markdown {
+        after,
+        before,
+        noop,
+    } = projection
+    else {
+        return;
+    };
+    // `before` is the parsed empty doc for --create.
+    assert!(
+        before.comments().is_empty(),
+        "create projections must have an empty before-doc"
+    );
+    assert_eq!(after.comments().len(), 0);
+    // --create projections are never considered noop: the file
+    // does not exist yet, so the byte-identical shortcut is skipped.
+    assert!(!noop);
+
+    // Core invariant: plan must not create the file.
+    assert!(
+        system.read_to_string(Path::new("/project/new.md")).is_err(),
+        "project_write(--create) must not touch disk"
+    );
+}
+
+#[test]
+fn project_write_raw_mode_returns_unsupported() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/design.pen"), b"existing")
+        .unwrap();
+
+    let config = open_config();
+
+    let projection = document::project_write(
+        &system,
+        Path::new("/project"),
+        Path::new("design.pen"),
+        "new pen payload",
+        &config,
+        WriteOptions {
+            raw: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        matches!(projection, WriteProjection::Unsupported { .. }),
+        "raw mode must degrade to Unsupported, got {projection:?}"
+    );
+    let WriteProjection::Unsupported { reason } = projection else {
+        return;
+    };
+    assert!(
+        reason.to_lowercase().contains("raw"),
+        "reason should mention raw mode, got: {reason}"
+    );
+}
+
+#[test]
+fn project_write_binary_mode_returns_unsupported() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/image.png"), b"\x89PNG\r\n")
+        .unwrap();
+
+    let config = open_config();
+
+    // base64("new") — content is irrelevant because binary mode bails
+    // out before parsing.
+    let projection = document::project_write(
+        &system,
+        Path::new("/project"),
+        Path::new("image.png"),
+        "bmV3",
+        &config,
+        WriteOptions {
+            binary: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(
+        matches!(projection, WriteProjection::Unsupported { .. }),
+        "binary mode must degrade to Unsupported, got {projection:?}"
+    );
+    let WriteProjection::Unsupported { reason } = projection else {
+        return;
+    };
+    assert!(
+        reason.to_lowercase().contains("binary"),
+        "reason should mention binary mode, got: {reason}"
+    );
+}
+
+#[test]
+fn project_write_missing_comment_rejected_like_real_write() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+    // Strip both comments — comment-preservation must refuse this.
+    let new_content = "---\ntitle: Test\n---\n\n# Test\n";
+    let before_bytes = read_bytes(&system, Path::new("/project/doc.md"));
+
+    let err = document::project_write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        new_content,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap_err();
+
+    assert!(
+        err.to_string().to_lowercase().contains("comment"),
+        "expected comment-preservation error, got: {err}"
+    );
+
+    // Even on rejection, disk must stay byte-identical.
+    let after_bytes = read_bytes(&system, Path::new("/project/doc.md"));
+    assert_eq!(
+        before_bytes, after_bytes,
+        "project_write rejection must not mutate disk"
+    );
 }
