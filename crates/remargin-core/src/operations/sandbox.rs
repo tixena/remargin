@@ -31,8 +31,10 @@ use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, FixedOffset, Utc};
 use os_shim::System;
 
+use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::frontmatter;
+use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, SandboxEntry};
 
 /// Outcome of a bulk `sandbox add` or `sandbox remove` invocation.
@@ -82,6 +84,7 @@ pub fn add_to_files(
     system: &dyn System,
     files: &[PathBuf],
     identity: &str,
+    config: &ResolvedConfig,
 ) -> Result<SandboxBulkResult> {
     if identity.is_empty() {
         bail!("identity is required for sandbox add");
@@ -91,7 +94,7 @@ pub fn add_to_files(
     let mut result = SandboxBulkResult::default();
 
     for file in files {
-        match add_one(system, file, identity, now) {
+        match add_one(system, file, identity, now, config) {
             Ok(true) => result.changed.push(file.clone()),
             Ok(false) => result.skipped.push(file.clone()),
             Err(err) => result.failed.push(SandboxFailure {
@@ -119,6 +122,7 @@ pub fn remove_from_files(
     system: &dyn System,
     files: &[PathBuf],
     identity: &str,
+    config: &ResolvedConfig,
 ) -> Result<SandboxBulkResult> {
     if identity.is_empty() {
         bail!("identity is required for sandbox remove");
@@ -127,7 +131,7 @@ pub fn remove_from_files(
     let mut result = SandboxBulkResult::default();
 
     for file in files {
-        match remove_one(system, file, identity) {
+        match remove_one(system, file, identity, config) {
             Ok(true) => result.changed.push(file.clone()),
             Ok(false) => result.skipped.push(file.clone()),
             Err(err) => result.failed.push(SandboxFailure {
@@ -201,6 +205,7 @@ fn add_one(
     file: &Path,
     identity: &str,
     now: DateTime<FixedOffset>,
+    config: &ResolvedConfig,
 ) -> Result<bool> {
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
@@ -208,10 +213,12 @@ fn add_one(
     let added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
     if added {
         frontmatter::write_sandbox_entries(&mut doc, &entries)?;
-        let markdown = doc.to_markdown();
-        system
-            .write(file, markdown.as_bytes())
-            .with_context(|| format!("writing {}", file.display()))?;
+        commit_with_verify(&doc, config, |verified_doc| {
+            let markdown = verified_doc.to_markdown();
+            system
+                .write(file, markdown.as_bytes())
+                .with_context(|| format!("writing {}", file.display()))
+        })?;
     }
     Ok(added)
 }
@@ -219,17 +226,24 @@ fn add_one(
 /// Parse a file, remove the caller's sandbox entry if present, and write
 /// the result back. Returns `Ok(true)` on removal, `Ok(false)` when the
 /// caller had no entry.
-fn remove_one(system: &dyn System, file: &Path, identity: &str) -> Result<bool> {
+fn remove_one(
+    system: &dyn System,
+    file: &Path,
+    identity: &str,
+    config: &ResolvedConfig,
+) -> Result<bool> {
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
     let mut entries = frontmatter::read_sandbox_entries(&doc)?;
     let removed = frontmatter::remove_sandbox_entry_for(&mut entries, identity);
     if removed {
         frontmatter::write_sandbox_entries(&mut doc, &entries)?;
-        let markdown = doc.to_markdown();
-        system
-            .write(file, markdown.as_bytes())
-            .with_context(|| format!("writing {}", file.display()))?;
+        commit_with_verify(&doc, config, |verified_doc| {
+            let markdown = verified_doc.to_markdown();
+            system
+                .write(file, markdown.as_bytes())
+                .with_context(|| format!("writing {}", file.display()))
+        })?;
     }
     Ok(removed)
 }

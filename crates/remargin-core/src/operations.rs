@@ -7,6 +7,7 @@ pub mod query;
 pub mod sandbox;
 pub mod search;
 pub mod threading;
+pub mod verify;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,7 @@ use crate::crypto::{compute_checksum, compute_reaction_checksum, compute_signatu
 use crate::frontmatter;
 use crate::id;
 use crate::linter;
+use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::writer::{self, InsertPosition};
 
@@ -192,7 +194,15 @@ pub fn create_comment(
     let markdown_after = doc.to_markdown();
     linter::lint_or_fail(&markdown_after).context("document has structural issues after write")?;
 
-    writer::write_document(system, path, &doc, &expected_added, &expected_removed)?;
+    commit_with_verify(&doc, config, |verified_doc| {
+        writer::write_document(
+            system,
+            path,
+            verified_doc,
+            &expected_added,
+            &expected_removed,
+        )
+    })?;
 
     Ok(new_id)
 }
@@ -255,7 +265,9 @@ pub fn ack_comments(
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
     let empty: HashSet<String> = HashSet::new();
-    writer::write_document(system, path, &doc, &empty, &empty)?;
+    commit_with_verify(&doc, config, |verified_doc| {
+        writer::write_document(system, path, verified_doc, &empty, &empty)
+    })?;
 
     Ok(())
 }
@@ -310,7 +322,9 @@ pub fn react(
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
     let empty: HashSet<String> = HashSet::new();
-    writer::write_document(system, path, &doc, &empty, &empty)?;
+    commit_with_verify(&doc, config, |verified_doc| {
+        writer::write_document(system, path, verified_doc, &empty, &empty)
+    })?;
 
     Ok(())
 }
@@ -369,7 +383,15 @@ pub fn delete_comments(
 
     let expected_added: HashSet<String> = HashSet::new();
     let expected_removed: HashSet<String> = comment_ids.iter().map(|s| String::from(*s)).collect();
-    writer::write_document(system, path, &doc, &expected_added, &expected_removed)?;
+    commit_with_verify(&doc, config, |verified_doc| {
+        writer::write_document(
+            system,
+            path,
+            verified_doc,
+            &expected_added,
+            &expected_removed,
+        )
+    })?;
 
     Ok(())
 }
@@ -422,7 +444,9 @@ pub fn edit_comment(
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
     let empty: HashSet<String> = HashSet::new();
-    writer::write_document(system, path, &doc, &empty, &empty)?;
+    commit_with_verify(&doc, config, |verified_doc| {
+        writer::write_document(system, path, verified_doc, &empty, &empty)
+    })?;
 
     Ok(())
 }

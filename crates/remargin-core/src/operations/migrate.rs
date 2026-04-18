@@ -20,6 +20,7 @@ use crate::config::ResolvedConfig;
 use crate::crypto::compute_checksum;
 use crate::frontmatter;
 use crate::id;
+use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, LegacyRole, Segment};
 use crate::writer;
 
@@ -163,7 +164,9 @@ pub fn migrate(
     // Write.
     let added_ids: HashSet<String> = results.iter().map(|r| r.new_id.clone()).collect();
     let removed: HashSet<String> = HashSet::new();
-    writer::write_document(system, path, &doc, &added_ids, &removed)?;
+    commit_with_verify(&doc, config, |verified_doc| {
+        writer::write_document(system, path, verified_doc, &added_ids, &removed)
+    })?;
 
     Ok(results)
 }

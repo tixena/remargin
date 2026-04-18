@@ -17,7 +17,6 @@ use os_shim::real::RealSystem;
 use serde_json::{Value, json};
 
 use remargin_core::config::{self, CliOverrides, ResolvedConfig};
-use remargin_core::crypto;
 use remargin_core::display;
 use remargin_core::document;
 use remargin_core::linter;
@@ -369,13 +368,16 @@ enum Commands {
         #[command(subcommand)]
         action: SkillAction,
     },
-    /// Verify comment integrity (checksums and signatures).
+    /// Verify comment integrity (checksums and signatures) against the
+    /// participant registry.
+    ///
+    /// No flags: the registry is the single source of truth for pubkeys.
+    /// Per-comment resolution runs unconditionally and the aggregate
+    /// pass/fail follows the mode-driven severity table (see
+    /// `operations::verify`).
     Verify {
         /// Path to the document.
         file: String,
-        /// OpenSSH public key for signature verification.
-        #[arg(long)]
-        public_key: Option<String>,
     },
     /// Print version information.
     Version,
@@ -1013,9 +1015,7 @@ fn dispatch_with_config(
             };
             cmd_search(system, cwd, &s)
         }
-        Commands::Verify { file, public_key } => {
-            cmd_verify(system, cwd, file, public_key.as_deref(), json_mode)
-        }
+        Commands::Verify { file } => cmd_verify(system, cwd, file, config, json_mode),
         Commands::Write {
             path,
             content,
@@ -1772,7 +1772,7 @@ fn cmd_sandbox(
                     }
                 })
                 .collect();
-            let result = sandbox_ops::add_to_files(system, &absolute, identity)?;
+            let result = sandbox_ops::add_to_files(system, &absolute, identity, config)?;
             emit_sandbox_bulk_result(&result, cwd, "added", json_mode)?;
             if result.failed.is_empty() {
                 Ok(())
@@ -1791,7 +1791,7 @@ fn cmd_sandbox(
                     }
                 })
                 .collect();
-            let result = sandbox_ops::remove_from_files(system, &absolute, identity)?;
+            let result = sandbox_ops::remove_from_files(system, &absolute, identity, config)?;
             emit_sandbox_bulk_result(&result, cwd, "removed", json_mode)?;
             if result.failed.is_empty() {
                 Ok(())
@@ -2110,63 +2110,40 @@ fn cmd_verify(
     system: &dyn System,
     cwd: &Path,
     file: &str,
-    public_key: Option<&str>,
+    config: &ResolvedConfig,
     json_mode: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
     let doc = parser::parse_file(system, &path)?;
-    let comments = doc.comments();
 
-    let mut all_ok = true;
-    let mut results: Vec<Value> = Vec::new();
-
-    for cm in &comments {
-        let checksum_ok = crypto::verify_checksum(cm);
-        if !checksum_ok {
-            all_ok = false;
-        }
-
-        let signature_status = public_key.map_or("not_checked", |pubkey| {
-            if cm.signature.is_some() {
-                match crypto::verify_signature(cm, pubkey) {
-                    Ok(true) => "valid",
-                    Ok(false) => {
-                        all_ok = false;
-                        "invalid"
-                    }
-                    Err(_) => {
-                        all_ok = false;
-                        "error"
-                    }
-                }
-            } else {
-                "missing"
-            }
-        });
-
-        results.push(json!({
-            "id": cm.id,
-            "checksum_ok": checksum_ok,
-            "signature": signature_status
-        }));
-    }
+    let report = operations::verify::verify_document(&doc, config);
+    let results: Vec<Value> = report
+        .results
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.id,
+                "checksum_ok": row.checksum_ok,
+                "signature": row.signature.as_str(),
+            })
+        })
+        .collect();
 
     if json_mode {
-        print_output(true, &json!({ "results": results, "ok": all_ok }))?;
+        print_output(true, &json!({ "results": results, "ok": report.ok }))?;
     } else {
-        for r in &results {
-            let id = r["id"].as_str().unwrap_or("?");
-            let chk = if r["checksum_ok"].as_bool().unwrap_or(false) {
-                "ok"
-            } else {
-                "FAIL"
-            };
-            let sig = r["signature"].as_str().unwrap_or("?");
-            out(&format!("{id}: checksum={chk} signature={sig}"))?;
+        for row in &report.results {
+            let chk = if row.checksum_ok { "ok" } else { "FAIL" };
+            out(&format!(
+                "{}: checksum={} signature={}",
+                row.id,
+                chk,
+                row.signature.as_str(),
+            ))?;
         }
     }
 
-    if all_ok {
+    if report.ok {
         Ok(())
     } else {
         anyhow::bail!("integrity check failed");

@@ -6,9 +6,26 @@ use chrono::DateTime;
 use os_shim::System as _;
 use os_shim::mock::MockSystem;
 
+use crate::config::{Mode, ResolvedConfig};
 use crate::frontmatter;
 use crate::operations::sandbox::{add_to_files, list_for_identity, remove_from_files};
-use crate::parser;
+use crate::parser::{self, AuthorType};
+
+/// Open-mode config used by every sandbox test that doesn't care about
+/// verify-gate severity. Sandbox ops mutate frontmatter only, so the
+/// post-write verify gate is neutral by construction in open mode.
+fn open_config() -> ResolvedConfig {
+    ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type: Some(AuthorType::Human),
+        identity: Some(String::from("eduardo")),
+        ignore: Vec::new(),
+        key_path: None,
+        mode: Mode::Open,
+        registry: None,
+        unrestricted: false,
+    }
+}
 
 /// A tiny markdown document with no sandbox state.
 fn simple_doc() -> &'static str {
@@ -39,7 +56,12 @@ Body.
 }
 
 /// A markdown document that already contains a remargin comment with a
-/// signature/checksum we will later assert survives frontmatter mutation.
+/// real checksum we will later assert survives frontmatter mutation.
+///
+/// Note: a `signature:` field is intentionally omitted so the
+/// `signature=missing` verify status is neutral under open mode. The test
+/// still asserts the full signature byte (here `None`) survives the
+/// sandbox round-trip.
 fn doc_with_comment() -> &'static str {
     "\
 ---
@@ -54,8 +76,7 @@ id: aaa111
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:deadbeef
-signature: ed25519:somebase64
+checksum: sha256:2d8bd7d9bb5f85ba643f0110d50cb506a1fe439e769a22503193ea6046bb87f7
 ---
 Hello.
 ```
@@ -117,7 +138,7 @@ fn add_to_new_file_adds_entry() {
     write_file(&system, "/docs/a.md", simple_doc());
 
     let files = vec![PathBuf::from("/docs/a.md")];
-    let result = add_to_files(&system, &files, "eduardo").unwrap();
+    let result = add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
 
     assert_eq!(result.changed.len(), 1);
     assert!(result.skipped.is_empty());
@@ -134,11 +155,11 @@ fn add_is_idempotent_and_preserves_timestamp() {
     write_file(&system, "/docs/a.md", simple_doc());
 
     let files = vec![PathBuf::from("/docs/a.md")];
-    add_to_files(&system, &files, "eduardo").unwrap();
+    add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
     let first = read_file(&system, "/docs/a.md");
 
     // Second add must be a no-op.
-    let result = add_to_files(&system, &files, "eduardo").unwrap();
+    let result = add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
     assert!(result.changed.is_empty());
     assert_eq!(result.skipped.len(), 1);
 
@@ -152,7 +173,7 @@ fn add_multi_identity_preserves_existing_entries() {
     write_file(&system, "/docs/a.md", doc_with_jorge());
 
     let files = vec![PathBuf::from("/docs/a.md")];
-    add_to_files(&system, &files, "eduardo").unwrap();
+    add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
 
     let content = read_file(&system, "/docs/a.md");
     assert!(content.contains("jorge@2026-04-11T12:00:00+00:00"));
@@ -165,7 +186,7 @@ fn add_rejects_non_markdown_file() {
     write_file(&system, "/tmp/foo.txt", "not markdown");
 
     let files = vec![PathBuf::from("/tmp/foo.txt")];
-    let result = add_to_files(&system, &files, "eduardo").unwrap();
+    let result = add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
 
     assert!(result.changed.is_empty());
     assert_eq!(result.failed.len(), 1);
@@ -187,7 +208,7 @@ fn add_partial_failure_best_effort() {
         PathBuf::from("/docs/b.md"),
         PathBuf::from("/docs/c.md"),
     ];
-    let result = add_to_files(&system, &files, "eduardo").unwrap();
+    let result = add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
 
     assert_eq!(result.changed.len(), 2);
     assert_eq!(result.failed.len(), 1);
@@ -207,9 +228,9 @@ fn remove_last_entry_deletes_key() {
     let system = MockSystem::new();
     write_file(&system, "/docs/a.md", simple_doc());
     let files = vec![PathBuf::from("/docs/a.md")];
-    add_to_files(&system, &files, "eduardo").unwrap();
+    add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
 
-    let result = remove_from_files(&system, &files, "eduardo").unwrap();
+    let result = remove_from_files(&system, &files, "eduardo", &open_config()).unwrap();
     assert_eq!(result.changed.len(), 1);
 
     let content = read_file(&system, "/docs/a.md");
@@ -226,8 +247,8 @@ fn remove_preserves_other_identities() {
     let files = vec![PathBuf::from("/docs/a.md")];
 
     // Eduardo joins, then Eduardo leaves — jorge must still be there.
-    add_to_files(&system, &files, "eduardo").unwrap();
-    let result = remove_from_files(&system, &files, "eduardo").unwrap();
+    add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
+    let result = remove_from_files(&system, &files, "eduardo", &open_config()).unwrap();
     assert_eq!(result.changed.len(), 1);
 
     let content = read_file(&system, "/docs/a.md");
@@ -242,7 +263,7 @@ fn remove_noop_when_no_entry() {
     let files = vec![PathBuf::from("/docs/a.md")];
 
     // Eduardo removes even though only jorge is staged.
-    let result = remove_from_files(&system, &files, "eduardo").unwrap();
+    let result = remove_from_files(&system, &files, "eduardo", &open_config()).unwrap();
     assert!(result.changed.is_empty());
     assert_eq!(result.skipped.len(), 1);
 
@@ -256,7 +277,13 @@ fn remove_does_not_touch_other_identity_entries() {
     write_file(&system, "/docs/a.md", doc_with_jorge());
 
     // Eduardo tries to remove jorge's entry — must be a no-op.
-    let result = remove_from_files(&system, &[PathBuf::from("/docs/a.md")], "eduardo").unwrap();
+    let result = remove_from_files(
+        &system,
+        &[PathBuf::from("/docs/a.md")],
+        "eduardo",
+        &open_config(),
+    )
+    .unwrap();
     assert!(result.changed.is_empty());
 
     let content = read_file(&system, "/docs/a.md");
@@ -283,6 +310,7 @@ fn list_walks_and_filters_by_identity() {
             PathBuf::from("/root/nested/b.md"),
         ],
         "eduardo",
+        &open_config(),
     )
     .unwrap();
 
@@ -298,7 +326,13 @@ fn list_walks_and_filters_by_identity() {
 fn list_filters_jorge_returns_jorge_only_files() {
     let system = MockSystem::new();
     write_file(&system, "/root/shared.md", doc_with_jorge());
-    add_to_files(&system, &[PathBuf::from("/root/shared.md")], "eduardo").unwrap();
+    add_to_files(
+        &system,
+        &[PathBuf::from("/root/shared.md")],
+        "eduardo",
+        &open_config(),
+    )
+    .unwrap();
 
     let jorge = list_for_identity(&system, Path::new("/root"), "jorge").unwrap();
     let eduardo = list_for_identity(&system, Path::new("/root"), "eduardo").unwrap();
@@ -325,7 +359,13 @@ fn sandbox_mutation_preserves_signed_comment_payload() {
     let before_doc = parser::parse(&before).unwrap();
     let before_comment = before_doc.comments()[0].clone();
 
-    add_to_files(&system, &[PathBuf::from("/docs/signed.md")], "eduardo").unwrap();
+    add_to_files(
+        &system,
+        &[PathBuf::from("/docs/signed.md")],
+        "eduardo",
+        &open_config(),
+    )
+    .unwrap();
 
     let after = read_file(&system, "/docs/signed.md");
     assert!(after.contains("sandbox:"));

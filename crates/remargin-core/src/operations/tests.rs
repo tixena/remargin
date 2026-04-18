@@ -43,7 +43,7 @@ id: abc
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ---
 First comment.
 ```
@@ -68,7 +68,7 @@ id: root
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:aaa
+checksum: sha256:36bdfea47737fe3a6a75940e2f6eaed328a8a6e810c40f4c67fc68ae43047a98
 ack:
   - alice@2026-04-06T13:00:00-04:00
 ---
@@ -83,7 +83,7 @@ type: human
 ts: 2026-04-06T13:00:00-04:00
 reply-to: root
 thread: root
-checksum: sha256:bbb
+checksum: sha256:4e8651a2833c950fa75cb2cf8ae7993a2b9be0d152981653d2c04e642916cfd9
 ack:
   - eduardo@2026-04-06T14:00:00-04:00
 ---
@@ -98,7 +98,7 @@ type: human
 ts: 2026-04-06T14:00:00-04:00
 reply-to: child1
 thread: root
-checksum: sha256:ccc
+checksum: sha256:d995882cea93224578ce6079bff70d0a280a0aff4957929bbc149e2af66d4c6f
 ack:
   - alice@2026-04-06T15:00:00-04:00
 ---
@@ -366,7 +366,7 @@ id: abc
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:82f813dda444d58a0f0fcb5b097cdac27e01647eb2fefaf24972a1d554eb377f
 reactions:
   thumbsup: [eduardo]
 ---
@@ -879,7 +879,7 @@ id: xyz
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:959fab49e20f26dac6eb9d2599717216f2c6ff587e065d65cbc69508e1b2a1f7
 ---
 A comment at the end.
 ```
@@ -1062,7 +1062,7 @@ id: abc
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ack:
   - alice@2026-04-06T13:00:00-04:00
   - alice@2026-04-06T14:00:00-04:00
@@ -1162,7 +1162,7 @@ id: abc
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ack:
   - alice@2026-04-06T13:00:00-04:00
   - alice@2026-04-06T14:00:00-04:00

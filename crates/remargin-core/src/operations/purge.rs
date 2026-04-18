@@ -15,6 +15,7 @@ use os_shim::System;
 use serde_yaml::Value;
 
 use crate::config::ResolvedConfig;
+use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Segment};
 
 /// Result of a purge operation.
@@ -81,11 +82,16 @@ pub fn purge(
         }
     }
 
-    // Write the clean document.
-    let markdown = doc.to_markdown();
-    system
-        .write(path, markdown.as_bytes())
-        .with_context(|| format!("writing {}", path.display()))?;
+    // Write the clean document. Purge removes every comment, so the
+    // post-write verify gate has no rows to evaluate — report is
+    // vacuously `ok`. Keeping the gate present still guards against
+    // future refactors that might mutate comments as part of purge.
+    commit_with_verify(&doc, config, |verified_doc| {
+        let markdown = verified_doc.to_markdown();
+        system
+            .write(path, markdown.as_bytes())
+            .with_context(|| format!("writing {}", path.display()))
+    })?;
 
     Ok(PurgeResult {
         attachments_cleaned,

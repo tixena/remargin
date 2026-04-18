@@ -199,7 +199,7 @@ id: existing
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:aaa
+checksum: sha256:3cab90b5212f96cab801b036db0366251e4dcf5959fd2e90a03ea7c7c15a6500
 ---
 Existing comment.
 ```
@@ -472,7 +472,7 @@ id: root
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:aaa
+checksum: sha256:36bdfea47737fe3a6a75940e2f6eaed328a8a6e810c40f4c67fc68ae43047a98
 ---
 Root comment.
 ```
@@ -640,7 +640,7 @@ id: abc
 author: alice
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ---
 First comment.
 ```
@@ -788,7 +788,7 @@ id: abc
 author: alice
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ---
 First comment.
 ```
@@ -859,7 +859,7 @@ id: aaa
 author: alice
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:d2b025ea93e03a294a931e6a69c174ce560e006aa8d8396020a7bed180e36be7
 ---
 Comment aaa.
 ```
@@ -872,7 +872,7 @@ id: bbb
 author: alice
 type: human
 ts: 2026-04-06T13:00:00-04:00
-checksum: sha256:f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+checksum: sha256:b3dc79aa4e694fb8370c67562a7eb18d0c5e74e48f8a021506f6c7b7a6a54b7b
 ---
 Comment bbb.
 ```

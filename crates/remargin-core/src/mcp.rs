@@ -15,7 +15,6 @@ use os_shim::System;
 use serde_json::{Map, Value, json};
 
 use crate::config::{CliOverrides, ResolvedConfig, load_config, load_registry};
-use crate::crypto;
 use crate::display;
 use crate::document;
 use crate::linter;
@@ -384,12 +383,12 @@ fn desc_search() -> ToolDesc {
 fn desc_verify() -> ToolDesc {
     ToolDesc {
         name: "verify",
-        description: "Verify comment integrity (checksums and signatures)",
+        description: "Verify comment integrity (checksums and signatures) against the participant registry. \
+             Per-comment status plus an aggregate `ok` flag driven by the active mode.",
         schema: json!({
             "type": "object",
             "properties": {
-                "file": { "type": "string", "description": "Path to the document" },
-                "public_key": { "type": "string", "description": "OpenSSH public key for signature verification" }
+                "file": { "type": "string", "description": "Path to the document" }
             },
             "required": ["file"]
         }),
@@ -687,7 +686,7 @@ fn dispatch_tool(
         "sandbox_list" => handle_sandbox_list(system, base_dir, config, params),
         "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, params),
         "search" => handle_search(system, base_dir, params),
-        "verify" => handle_verify(system, base_dir, params),
+        "verify" => handle_verify(system, base_dir, config, params),
         "write" => handle_write(system, base_dir, config, params),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
     };
@@ -1150,7 +1149,7 @@ fn handle_sandbox_add(
         .as_deref()
         .context("identity is required for sandbox_add")?;
 
-    let result = sandbox_ops::add_to_files(system, &files, identity)?;
+    let result = sandbox_ops::add_to_files(system, &files, identity, cfg)?;
     Ok(sandbox_result_to_json(&result, base_dir, "added"))
 }
 
@@ -1171,7 +1170,7 @@ fn handle_sandbox_remove(
         .as_deref()
         .context("identity is required for sandbox_remove")?;
 
-    let result = sandbox_ops::remove_from_files(system, &files, identity)?;
+    let result = sandbox_ops::remove_from_files(system, &files, identity, cfg)?;
     Ok(sandbox_result_to_json(&result, base_dir, "removed"))
 }
 
@@ -1309,40 +1308,28 @@ fn handle_search(
 fn handle_verify(
     system: &dyn System,
     base_dir: &Path,
+    config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let public_key = optional_str(params, "public_key");
 
     let path = base_dir.join(file);
     let doc = parser::parse_file(system, &path)?;
-    let comments = doc.comments();
 
-    let mut results: Vec<Value> = Vec::new();
+    let report = operations::verify::verify_document(&doc, config);
+    let results: Vec<Value> = report
+        .results
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.id,
+                "checksum_ok": row.checksum_ok,
+                "signature": row.signature.as_str(),
+            })
+        })
+        .collect();
 
-    for cm in &comments {
-        let checksum_ok = crypto::verify_checksum(cm);
-
-        let signature_status = public_key.map_or("not_checked", |pubkey| {
-            if cm.signature.is_some() {
-                match crypto::verify_signature(cm, pubkey) {
-                    Ok(true) => "valid",
-                    Ok(false) => "invalid",
-                    Err(_) => "error",
-                }
-            } else {
-                "missing"
-            }
-        });
-
-        results.push(json!({
-            "id": cm.id,
-            "checksum_ok": checksum_ok,
-            "signature": signature_status
-        }));
-    }
-
-    Ok(json!({ "results": results }))
+    Ok(json!({ "results": results, "ok": report.ok }))
 }
 
 /// Handle the `write` tool: write document contents.

@@ -64,7 +64,7 @@ id: aaa
 author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
-checksum: sha256:abc123
+checksum: sha256:3e5121224e71bb75be3d2a2ac568d2117b6cd3aa10a54f7abc9b19cdb1976b2e
 ---
 Original comment.
 ```
@@ -604,7 +604,10 @@ fn verify_checks_checksum_integrity() {
     let results = result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1_usize);
     assert!(results[0]["checksum_ok"].as_bool().unwrap());
-    assert_eq!(results[0]["signature"], "not_checked");
+    // No signature block on the freshly-written comment + no registry in
+    // the test config → status is `missing` (neutral in open mode).
+    assert_eq!(results[0]["signature"], "missing");
+    assert!(result["ok"].as_bool().unwrap(), "verify should pass");
 }
 
 #[test]

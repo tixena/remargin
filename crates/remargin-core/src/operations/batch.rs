@@ -21,8 +21,9 @@ use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
 use crate::linter;
+use crate::operations::verify::commit_with_verify;
 use crate::operations::{copy_attachments, find_comment_mut};
-use crate::parser::{self, Acknowledgment, AuthorType, Comment};
+use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument};
 use crate::writer::{self, InsertPosition};
 
 /// A single comment creation operation within a batch.
@@ -219,12 +220,33 @@ pub fn batch_comment(
     linter::lint_or_fail(&markdown_after)
         .context("document has structural issues after batch write")?;
 
-    // Write with preservation check.
-    let expected_added: HashSet<String> = created_ids.iter().cloned().collect();
-    let expected_removed: HashSet<String> = HashSet::new();
-    writer::write_document(system, path, &doc, &expected_added, &expected_removed)?;
+    write_batch_result(system, path, config, &doc, &created_ids)?;
 
     Ok(created_ids)
+}
+
+/// Write the batch result with preservation check + post-mutation verify gate.
+///
+/// Per the "verify runs once after all ops complete in-memory" rule in
+/// rem-ef1 — batch is atomic end-to-end.
+fn write_batch_result(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+    doc: &ParsedDocument,
+    created_ids: &[String],
+) -> Result<()> {
+    let expected_added: HashSet<String> = created_ids.iter().cloned().collect();
+    let expected_removed: HashSet<String> = HashSet::new();
+    commit_with_verify(doc, config, |verified_doc| {
+        writer::write_document(
+            system,
+            path,
+            verified_doc,
+            &expected_added,
+            &expected_removed,
+        )
+    })
 }
 
 /// Resolve the insertion position for a batch operation, adjusting

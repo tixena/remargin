@@ -21,6 +21,7 @@ use tixschema::model_schema;
 
 use crate::config::ResolvedConfig;
 use crate::frontmatter;
+use crate::operations::verify::commit_with_verify;
 use crate::parser;
 
 /// A single entry from a directory listing.
@@ -404,10 +405,12 @@ pub fn write(
     let mut final_doc = new_doc;
     frontmatter::ensure_frontmatter(&mut final_doc, config)?;
 
-    let final_content = final_doc.to_markdown();
-    system
-        .write(&resolved, final_content.as_bytes())
-        .with_context(|| format!("writing {}", resolved.display()))?;
+    commit_with_verify(&final_doc, config, |verified_doc| {
+        let final_content = verified_doc.to_markdown();
+        system
+            .write(&resolved, final_content.as_bytes())
+            .with_context(|| format!("writing {}", resolved.display()))
+    })?;
 
     Ok(())
 }

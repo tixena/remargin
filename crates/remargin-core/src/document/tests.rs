@@ -27,7 +27,7 @@ author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
 to: [alice]
-checksum: sha256:aaa
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ---
 First comment.
 ```
@@ -38,7 +38,7 @@ id: def
 author: alice
 type: human
 ts: 2026-04-06T13:00:00-04:00
-checksum: sha256:bbb
+checksum: sha256:904b58fc3d0b777a58bd2afe36e349d24278364d74e63664923c3b826f997008
 ack:
   - eduardo@2026-04-06T14:00:00-04:00
 ---
@@ -438,7 +438,7 @@ author: eduardo
 type: human
 ts: 2026-04-06T12:00:00-04:00
 to: [alice]
-checksum: sha256:aaa
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
 ---
 First comment.
 ```
