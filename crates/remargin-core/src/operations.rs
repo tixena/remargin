@@ -3,6 +3,7 @@
 pub mod batch;
 pub mod migrate;
 pub mod plan;
+pub mod projections;
 pub mod purge;
 pub mod query;
 pub mod sandbox;
@@ -462,7 +463,7 @@ pub fn edit_comment(
 /// (`\n` from fence + `\n\n` from body).  We handle this by also
 /// considering the surrounding context when normalizing whitespace-only
 /// body segments.
-fn collapse_body_segments(segments: &mut Vec<Segment>) {
+pub(crate) fn collapse_body_segments(segments: &mut Vec<Segment>) {
     // 1. Merge adjacent Body segments into one.
     let mut idx = 0;
     while idx + 1 < segments.len() {

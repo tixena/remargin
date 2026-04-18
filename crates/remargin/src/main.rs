@@ -25,6 +25,7 @@ use remargin_core::operations;
 use remargin_core::operations::batch::BatchCommentOp;
 use remargin_core::operations::migrate;
 use remargin_core::operations::plan as plan_ops;
+use remargin_core::operations::projections;
 use remargin_core::operations::purge;
 use remargin_core::operations::query;
 use remargin_core::operations::sandbox as sandbox_ops;
@@ -425,22 +426,47 @@ enum Commands {
 /// wiring is tracked under rem-imc / rem-3uo / rem-qll.
 #[derive(clap::Subcommand)]
 enum PlanAction {
-    /// Project an `ack` op.
-    Ack,
+    /// Project an `ack` op (rem-3uo).
+    Ack {
+        /// Path to the document.
+        path: String,
+        /// Comment IDs to ack (or un-ack with `--remove`).
+        #[arg(required = true)]
+        ids: Vec<String>,
+        /// Remove the current identity's ack from each comment.
+        #[arg(long)]
+        remove: bool,
+    },
     /// Project a `batch` op.
     Batch,
     /// Project a `comment` creation op.
     Comment,
-    /// Project a `delete` op.
-    Delete,
+    /// Project a `delete` op (rem-3uo).
+    Delete {
+        /// Path to the document.
+        path: String,
+        /// Comment IDs to delete.
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
     /// Project an `edit` op.
     Edit,
     /// Project a `migrate` op.
     Migrate,
     /// Project a `purge` op.
     Purge,
-    /// Project a `react` op.
-    React,
+    /// Project a `react` op (rem-3uo).
+    React {
+        /// Path to the document.
+        path: String,
+        /// Comment ID to react to.
+        id: String,
+        /// Emoji to add (or remove with `--remove`).
+        emoji: String,
+        /// Remove the current identity's reaction with this emoji.
+        #[arg(long)]
+        remove: bool,
+    },
     /// Project a `sandbox add` op.
     SandboxAdd,
     /// Project a `sandbox remove` op.
@@ -1685,17 +1711,54 @@ fn cmd_plan(
             let value = serde_json::to_value(&report).context("serializing plan report")?;
             print_output(json_mode, &value)
         }
-        PlanAction::Ack => bail_plan_not_yet_wired("ack"),
+        PlanAction::Ack { path, ids, remove } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let (before, after) =
+                projections::project_ack(system, &doc_path, config, &id_refs, *remove)?;
+            emit_plan_report("ack", &before, &after, config, json_mode)
+        }
+        PlanAction::Delete { path, ids } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let (before, after) = projections::project_delete(system, &doc_path, config, &id_refs)?;
+            emit_plan_report("delete", &before, &after, config, json_mode)
+        }
+        PlanAction::React {
+            path,
+            id,
+            emoji,
+            remove,
+        } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let (before, after) =
+                projections::project_react(system, &doc_path, config, id, emoji, *remove)?;
+            emit_plan_report("react", &before, &after, config, json_mode)
+        }
         PlanAction::Batch => bail_plan_not_yet_wired("batch"),
         PlanAction::Comment => bail_plan_not_yet_wired("comment"),
-        PlanAction::Delete => bail_plan_not_yet_wired("delete"),
         PlanAction::Edit => bail_plan_not_yet_wired("edit"),
         PlanAction::Migrate => bail_plan_not_yet_wired("migrate"),
         PlanAction::Purge => bail_plan_not_yet_wired("purge"),
-        PlanAction::React => bail_plan_not_yet_wired("react"),
         PlanAction::SandboxAdd => bail_plan_not_yet_wired("sandbox-add"),
         PlanAction::SandboxRemove => bail_plan_not_yet_wired("sandbox-remove"),
     }
+}
+
+/// Shared helper: build a [`plan_ops::PlanReport`] from a `(before,
+/// after)` pair and emit it through [`print_output`]. Used by every
+/// lightweight plan op (rem-3uo).
+fn emit_plan_report(
+    op_label: &str,
+    before: &parser::ParsedDocument,
+    after: &parser::ParsedDocument,
+    config: &ResolvedConfig,
+    json_mode: bool,
+) -> Result<()> {
+    let identity = build_plan_identity(config);
+    let report = plan_ops::project_report(op_label, before, after, config, identity);
+    let value = serde_json::to_value(&report).context("serializing plan report")?;
+    print_output(json_mode, &value)
 }
 
 /// Shared bail for the not-yet-wired plan actions (rem-bhk follow-ups).

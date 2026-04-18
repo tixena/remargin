@@ -7,7 +7,8 @@ use os_shim::mock::MockSystem;
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::operations::{
-    CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, react,
+    CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, projections,
+    react,
 };
 use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
@@ -1591,4 +1592,204 @@ fn reply_auto_populates_to_different_author() {
         vec![String::from("alice")],
         "to should auto-populate from child1's author (alice)"
     );
+}
+
+// --- Projection tests (rem-3uo) ---
+//
+// Each `project_*` helper returns a `(before, after)` pair suitable for
+// feeding into `plan_ops::project_report`. These tests pin the invariant
+// that projections never mutate disk and that their `after` doc matches
+// what the paired mutating op would have written.
+
+#[test]
+fn project_ack_adds_ack_without_mutating_disk() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let (before, after) = projections::project_ack(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    // `before` must reflect the on-disk document exactly.
+    assert_eq!(before.comments().len(), 1);
+    assert!(before.find_comment("abc").unwrap().ack.is_empty());
+
+    // `after` carries the projected ack.
+    let after_comment = after.find_comment("abc").unwrap();
+    assert_eq!(after_comment.ack.len(), 1);
+    assert_eq!(after_comment.ack[0].author, "eduardo");
+
+    // Disk must be unchanged.
+    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(before_bytes, after_disk, "project_ack must not mutate disk");
+}
+
+#[test]
+fn project_ack_missing_comment_surfaces_error() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let err = projections::project_ack(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["does-not-exist"],
+        false,
+    )
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("not found"),
+        "expected 'not found' error, got: {err}"
+    );
+}
+
+#[test]
+fn project_delete_removes_comment_without_mutating_disk() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let (before, after) =
+        projections::project_delete(&system, Path::new("/docs/test.md"), &config, &["abc"])
+            .unwrap();
+
+    assert_eq!(before.comments().len(), 1);
+    assert_eq!(after.comments().len(), 0);
+
+    // Disk must be unchanged even though the projection removed a comment.
+    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_disk,
+        "project_delete must not mutate disk"
+    );
+}
+
+#[test]
+fn project_delete_missing_comment_surfaces_error() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let err = projections::project_delete(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["does-not-exist"],
+    )
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("not found"),
+        "expected 'not found' error, got: {err}"
+    );
+}
+
+#[test]
+fn project_react_adds_reaction_without_mutating_disk() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let (before, after) = projections::project_react(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        ":thumbsup:",
+        false,
+    )
+    .unwrap();
+
+    assert!(before.find_comment("abc").unwrap().reactions.is_empty());
+
+    let after_reactions = &after.find_comment("abc").unwrap().reactions;
+    assert_eq!(after_reactions.len(), 1);
+    assert_eq!(
+        after_reactions.get(":thumbsup:"),
+        Some(&vec![String::from("eduardo")])
+    );
+
+    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_disk,
+        "project_react must not mutate disk"
+    );
+}
+
+#[test]
+fn project_react_remove_is_idempotent_for_missing_emoji() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let (_before, after) = projections::project_react(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        ":heart:",
+        true,
+    )
+    .unwrap();
+
+    // Removing a reaction that was never set leaves the map empty.
+    assert!(after.find_comment("abc").unwrap().reactions.is_empty());
+}
+
+#[test]
+fn project_ack_matches_real_ack_comments_after_output() {
+    // Property: project_ack's `after` document should be byte-identical
+    // to what `ack_comments` writes to disk — modulo `ts` which is a
+    // wall clock read. We compare structural invariants instead of raw
+    // bytes.
+    let seeded = doc_with_comment();
+
+    // Real path.
+    let system_real = system_with_doc(&seeded);
+    let config = open_config();
+    ack_comments(
+        &system_real,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+    let real_doc = parser::parse(
+        &system_real
+            .read_to_string(Path::new("/docs/test.md"))
+            .unwrap(),
+    )
+    .unwrap();
+
+    // Projection path against a fresh mock.
+    let system_plan = system_with_doc(&seeded);
+    let (_before, projected) = projections::project_ack(
+        &system_plan,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap();
+
+    // The real writer and the projection should agree on comment ids,
+    // content, and ack authors (the ts field is a wall-clock read, so we
+    // don't compare it).
+    assert_eq!(real_doc.comments().len(), projected.comments().len());
+    let real_ack = &real_doc.find_comment("abc").unwrap().ack;
+    let proj_ack = &projected.find_comment("abc").unwrap().ack;
+    assert_eq!(real_ack.len(), proj_ack.len());
+    assert_eq!(real_ack[0].author, proj_ack[0].author);
 }
