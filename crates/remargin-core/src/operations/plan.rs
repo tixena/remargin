@@ -24,13 +24,18 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context as _, Result};
+use os_shim::System;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use crate::config::ResolvedConfig;
+use crate::document::{self, WriteOptions, WriteProjection};
+use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
 use crate::operations::verify::{VerifyReport, verify_document};
-use crate::parser::ParsedDocument;
+use crate::parser::{self, ParsedDocument};
 
 /// Serialization-friendly mirror of one row of a [`VerifyReport`].
 ///
@@ -188,6 +193,93 @@ pub struct PlanReport {
     pub would_commit: bool,
 }
 
+/// A `plan` request for a single mutating op, normalized so CLI + MCP
+/// can share one dispatch path (rem-oqv / rem-3a2).
+///
+/// Each variant mirrors one mutating op. Adapters construct the variant
+/// from their native input shape; [`dispatch`] converts it to a
+/// [`PlanReport`]. Adapters must not re-implement the per-op projection
+/// wiring; when a new plan op lands, extend this enum and [`dispatch`]
+/// once — both surfaces pick up the change automatically.
+#[non_exhaustive]
+pub enum PlanRequest<'req> {
+    /// `plan ack` — projects the ack/unack of one or more comments.
+    Ack {
+        /// Document path (already joined against the base dir / cwd).
+        path: PathBuf,
+        /// Comment ids to ack / unack.
+        ids: Vec<String>,
+        /// `true` to remove this identity's ack; `false` to add one.
+        remove: bool,
+    },
+    /// `plan batch` — projects atomic creation of multiple comments.
+    Batch {
+        path: PathBuf,
+        ops: Vec<ProjectBatchOp>,
+    },
+    /// `plan comment` — projects creating a single comment.
+    Comment {
+        path: PathBuf,
+        params: ProjectCommentParams<'req>,
+    },
+    /// `plan delete` — projects deletion of one or more comments.
+    Delete { path: PathBuf, ids: Vec<String> },
+    /// `plan edit` — projects editing a comment's content.
+    Edit {
+        path: PathBuf,
+        id: &'req str,
+        content: &'req str,
+    },
+    /// `plan migrate` — projects conversion of legacy comments.
+    Migrate { path: PathBuf },
+    /// `plan purge` — projects removal of all comments.
+    Purge { path: PathBuf },
+    /// `plan react` — projects add/remove of an emoji reaction.
+    React {
+        path: PathBuf,
+        id: &'req str,
+        emoji: &'req str,
+        /// `true` to remove the reaction; `false` to add.
+        remove: bool,
+    },
+    /// `plan sandbox-add` — projects staging the file in the caller's sandbox.
+    SandboxAdd { path: PathBuf },
+    /// `plan sandbox-remove` — projects unstaging the file from the caller's sandbox.
+    SandboxRemove { path: PathBuf },
+    /// `plan write` — projects a whole-file / partial-range write.
+    ///
+    /// `path` is passed as-is to [`document::project_write`] so the
+    /// allowlist / partial-range / create-new-file semantics land in
+    /// exactly one place.
+    Write {
+        /// The path relative to `base_dir`, exactly as the adapter
+        /// received it.
+        path: PathBuf,
+        content: &'req str,
+        opts: WriteOptions,
+    },
+}
+
+impl PlanRequest<'_> {
+    /// Short human-readable label used as [`PlanReport::op`].
+    #[must_use]
+    pub const fn op_label(&self) -> &'static str {
+        match self {
+            Self::Ack { .. } => "ack",
+            Self::Batch { .. } => "batch",
+            Self::Comment { .. } => "comment",
+            Self::Delete { .. } => "delete",
+            Self::Edit { .. } => "edit",
+            Self::Migrate { .. } => "migrate",
+            Self::Purge { .. } => "purge",
+            Self::React { .. } => "react",
+            Self::SandboxAdd { .. } => "sandbox-add",
+            Self::SandboxRemove { .. } => "sandbox-remove",
+            Self::Write { .. } => "write",
+        }
+    }
+}
+
 /// Compute a [`PlanReport`] from a `before`/`after` pair of documents.
 ///
 /// Pure: no disk IO, no signing, no registry mutation. `op_label` is the
@@ -238,6 +330,117 @@ pub fn project_report(
         reject_reason,
         verify_after,
         would_commit,
+    }
+}
+
+/// Canonical plan dispatcher shared by CLI + MCP (rem-oqv / rem-3a2).
+///
+/// Runs the right `project_*` helper for the requested op, folds the
+/// result through [`project_report`] with [`PlanIdentity::from_config`],
+/// and returns a [`PlanReport`] both adapters can serialize in their
+/// native format. `base_dir` is the CLI's `cwd` or the MCP server's
+/// `base_dir`; only the [`PlanRequest::Write`] arm consults it
+/// (every other projection is already handed a joined `path`).
+///
+/// # Errors
+///
+/// Propagates preflight failures from the per-op projection helpers
+/// (missing identity, linter violations, bad frontmatter, etc.).
+pub fn dispatch(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    request: &PlanRequest<'_>,
+) -> Result<PlanReport> {
+    let label = request.op_label();
+    let identity = PlanIdentity::from_config(cfg);
+
+    match request {
+        PlanRequest::Ack { path, ids, remove } => {
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let (before, after) = projections::project_ack(system, path, cfg, &id_refs, *remove)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Batch { path, ops } => {
+            let (before, after) = projections::project_batch(system, path, cfg, ops)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Comment { path, params } => {
+            let (before, after) = projections::project_comment(system, path, cfg, params)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Delete { path, ids } => {
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let (before, after) = projections::project_delete(system, path, cfg, &id_refs)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Edit { path, id, content } => {
+            let (before, after) = projections::project_edit(system, path, cfg, id, content)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Migrate { path } => {
+            let (before, after) = projections::project_migrate(system, path, cfg)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Purge { path } => {
+            let (before, after) = projections::project_purge(system, path, cfg)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::React {
+            path,
+            id,
+            emoji,
+            remove,
+        } => {
+            let (before, after) =
+                projections::project_react(system, path, cfg, id, emoji, *remove)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::SandboxAdd { path } => {
+            let (before, after) = projections::project_sandbox_add(system, path, cfg)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::SandboxRemove { path } => {
+            let (before, after) = projections::project_sandbox_remove(system, path, cfg)?;
+            Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Write {
+            path,
+            content,
+            opts,
+        } => {
+            let projection = document::project_write(system, base_dir, path, content, cfg, *opts)?;
+            dispatch_write_projection(&projection, cfg, identity)
+        }
+    }
+}
+
+/// Convert a [`WriteProjection`] into a [`PlanReport`]. Shared by every
+/// caller so the Markdown / Unsupported handling does not drift between
+/// adapters.
+fn dispatch_write_projection(
+    projection: &WriteProjection,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+) -> Result<PlanReport> {
+    match projection {
+        WriteProjection::Markdown {
+            before,
+            after,
+            noop,
+        } => {
+            let mut report = project_report("write", before, after, cfg, identity);
+            report.noop = report.noop || *noop;
+            Ok(report)
+        }
+        WriteProjection::Unsupported { reason } => {
+            let empty =
+                parser::parse("").context("parsing empty before-document for plan write")?;
+            let mut report = project_report("write", &empty, &empty, cfg, identity);
+            report.reject_reason = Some(reason.clone());
+            report.would_commit = false;
+            Ok(report)
+        }
     }
 }
 

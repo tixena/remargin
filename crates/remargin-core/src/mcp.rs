@@ -1125,16 +1125,10 @@ fn handle_migrate(
     Ok(json!({ "migrated": results }))
 }
 
-/// Handle the `plan` tool: project a mutating op into a [`plan_ops::PlanReport`]
-/// without touching disk (rem-3uo).
-///
-/// Mirrors the CLI `plan` subcommand tree: ack / delete / react are fully
-/// wired; other ops return a deliberate "not yet landed" error so callers
-/// discover the surface.
-#[expect(
-    clippy::too_many_lines,
-    reason = "single dispatch match is clearer than per-op helper functions here"
-)]
+/// Handle the `plan` tool: parse the request shape, build a
+/// [`plan_ops::PlanRequest`], and delegate to the canonical
+/// [`plan_ops::dispatch`] (rem-oqv / rem-3a2). The adapter-layer work is
+/// limited to JSON field extraction and the final `serde_json::to_value`.
 fn handle_plan(
     system: &dyn System,
     base_dir: &Path,
@@ -1145,119 +1139,92 @@ fn handle_plan(
     let overridden = apply_identity_overrides(config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
-    match op {
-        "ack" => {
-            let file = required_str(params, "file")?;
-            let ids = string_array(params, "ids");
-            let remove = optional_bool(params, "remove");
-            let path = base_dir.join(file);
-            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-            let (before, after) = projections::project_ack(system, &path, cfg, &id_refs, remove)?;
-            Ok(build_plan_report_value("ack", &before, &after, cfg))
-        }
+    // `comment` needs an owned `InsertPosition` + attach refs that outlive
+    // the `ProjectCommentParams` it feeds into — we stage them here so the
+    // borrow survives long enough for the dispatch call below.
+    let reply_to_owned;
+    let to_owned;
+    let attach_names;
+    let attach_refs: Vec<&str>;
+    let position;
+
+    let request = match op {
+        "ack" => plan_ops::PlanRequest::Ack {
+            path: base_dir.join(required_str(params, "file")?),
+            ids: string_array(params, "ids"),
+            remove: optional_bool(params, "remove"),
+        },
         "comment" => {
             let file = required_str(params, "file")?;
             let content = required_str(params, "content")?;
-            let to = string_array(params, "to");
-            let reply_to = optional_str(params, "reply_to").map(String::from);
-            let auto_ack = optional_bool(params, "auto_ack");
-            let sandbox = optional_bool(params, "sandbox");
-            let attach_names = string_array(params, "attach_names");
-            let attach_refs: Vec<&str> = attach_names.iter().map(String::as_str).collect();
-            let position = resolve_insert_position(params, reply_to.as_deref());
+            to_owned = string_array(params, "to");
+            reply_to_owned = optional_str(params, "reply_to").map(String::from);
+            attach_names = string_array(params, "attach_names");
+            attach_refs = attach_names.iter().map(String::as_str).collect();
+            position = resolve_insert_position(params, reply_to_owned.as_deref());
             let project_params = projections::ProjectCommentParams::new(content, &position)
                 .with_attachment_filenames(&attach_refs)
-                .with_auto_ack(auto_ack)
-                .with_reply_to(reply_to.as_deref())
-                .with_sandbox(sandbox)
-                .with_to(&to);
-            let path = base_dir.join(file);
-            let (before, after) =
-                projections::project_comment(system, &path, cfg, &project_params)?;
-            Ok(build_plan_report_value("comment", &before, &after, cfg))
+                .with_auto_ack(optional_bool(params, "auto_ack"))
+                .with_reply_to(reply_to_owned.as_deref())
+                .with_sandbox(optional_bool(params, "sandbox"))
+                .with_to(&to_owned);
+            plan_ops::PlanRequest::Comment {
+                path: base_dir.join(file),
+                params: project_params,
+            }
         }
-        "delete" => {
-            let file = required_str(params, "file")?;
-            let ids = string_array(params, "ids");
-            let path = base_dir.join(file);
-            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-            let (before, after) = projections::project_delete(system, &path, cfg, &id_refs)?;
-            Ok(build_plan_report_value("delete", &before, &after, cfg))
-        }
-        "edit" => {
-            let file = required_str(params, "file")?;
-            let comment_id = required_str(params, "id")?;
-            let new_content = required_str(params, "content")?;
-            let path = base_dir.join(file);
-            let (before, after) =
-                projections::project_edit(system, &path, cfg, comment_id, new_content)?;
-            Ok(build_plan_report_value("edit", &before, &after, cfg))
-        }
-        "react" => {
-            let file = required_str(params, "file")?;
-            let comment_id = required_str(params, "id")?;
-            let emoji = required_str(params, "emoji")?;
-            let remove = optional_bool(params, "remove");
-            let path = base_dir.join(file);
-            let (before, after) =
-                projections::project_react(system, &path, cfg, comment_id, emoji, remove)?;
-            Ok(build_plan_report_value("react", &before, &after, cfg))
-        }
-        "batch" => {
-            let file = required_str(params, "file")?;
-            let ops = parse_plan_batch_ops(params)?;
-            let path = base_dir.join(file);
-            let (before, after) = projections::project_batch(system, &path, cfg, &ops)?;
-            Ok(build_plan_report_value("batch", &before, &after, cfg))
-        }
-        "migrate" => {
-            let file = required_str(params, "file")?;
-            let path = base_dir.join(file);
-            let (before, after) = projections::project_migrate(system, &path, cfg)?;
-            Ok(build_plan_report_value("migrate", &before, &after, cfg))
-        }
-        "purge" => {
-            let file = required_str(params, "file")?;
-            let path = base_dir.join(file);
-            let (before, after) = projections::project_purge(system, &path, cfg)?;
-            Ok(build_plan_report_value("purge", &before, &after, cfg))
-        }
-        "sandbox-add" => {
-            let file = required_str(params, "file")?;
-            let path = base_dir.join(file);
-            let (before, after) = projections::project_sandbox_add(system, &path, cfg)?;
-            Ok(build_plan_report_value("sandbox-add", &before, &after, cfg))
-        }
-        "sandbox-remove" => {
-            let file = required_str(params, "file")?;
-            let path = base_dir.join(file);
-            let (before, after) = projections::project_sandbox_remove(system, &path, cfg)?;
-            Ok(build_plan_report_value(
-                "sandbox-remove",
-                &before,
-                &after,
-                cfg,
-            ))
-        }
+        "delete" => plan_ops::PlanRequest::Delete {
+            path: base_dir.join(required_str(params, "file")?),
+            ids: string_array(params, "ids"),
+        },
+        "edit" => plan_ops::PlanRequest::Edit {
+            path: base_dir.join(required_str(params, "file")?),
+            id: required_str(params, "id")?,
+            content: required_str(params, "content")?,
+        },
+        "react" => plan_ops::PlanRequest::React {
+            path: base_dir.join(required_str(params, "file")?),
+            id: required_str(params, "id")?,
+            emoji: required_str(params, "emoji")?,
+            remove: optional_bool(params, "remove"),
+        },
+        "batch" => plan_ops::PlanRequest::Batch {
+            path: base_dir.join(required_str(params, "file")?),
+            ops: parse_plan_batch_ops(params)?,
+        },
+        "migrate" => plan_ops::PlanRequest::Migrate {
+            path: base_dir.join(required_str(params, "file")?),
+        },
+        "purge" => plan_ops::PlanRequest::Purge {
+            path: base_dir.join(required_str(params, "file")?),
+        },
+        "sandbox-add" => plan_ops::PlanRequest::SandboxAdd {
+            path: base_dir.join(required_str(params, "file")?),
+        },
+        "sandbox-remove" => plan_ops::PlanRequest::SandboxRemove {
+            path: base_dir.join(required_str(params, "file")?),
+        },
         "write" => {
             let file = required_str(params, "file")?;
             let content = required_str(params, "content")?;
-            let binary = optional_bool(params, "binary");
-            let create = optional_bool(params, "create");
-            let raw = optional_bool(params, "raw");
             let lines = optional_str(params, "lines");
             let line_range = lines.map(parse_plan_line_range).transpose()?;
             let opts = document::WriteOptions::new()
-                .binary(binary)
-                .create(create)
+                .binary(optional_bool(params, "binary"))
+                .create(optional_bool(params, "create"))
                 .lines(line_range)
-                .raw(raw);
-            let projection =
-                document::project_write(system, base_dir, Path::new(file), content, cfg, opts)?;
-            build_write_plan_value(&projection, cfg)
+                .raw(optional_bool(params, "raw"));
+            plan_ops::PlanRequest::Write {
+                path: PathBuf::from(file),
+                content,
+                opts,
+            }
         }
         other => bail!("plan: unknown op {other:?}"),
-    }
+    };
+
+    let report = plan_ops::dispatch(system, base_dir, cfg, &request)?;
+    serde_json::to_value(&report).context("serializing plan report")
 }
 
 /// Parse the `ops` array from a `plan.batch` MCP request into
@@ -1328,19 +1295,6 @@ fn parse_plan_batch_ops(params: &Map<String, Value>) -> Result<Vec<projections::
     Ok(ops)
 }
 
-/// Serialize a projected `(before, after)` pair into a JSON [`plan_ops::PlanReport`]
-/// value. Shared by every branch of [`handle_plan`].
-fn build_plan_report_value(
-    op_label: &str,
-    before: &parser::ParsedDocument,
-    after: &parser::ParsedDocument,
-    cfg: &ResolvedConfig,
-) -> Value {
-    let identity = plan_ops::PlanIdentity::from_config(cfg);
-    let report = plan_ops::project_report(op_label, before, after, cfg, identity);
-    serde_json::to_value(&report).unwrap_or_else(|_| json!({ "error": "serialization failure" }))
-}
-
 /// Parse the `lines` field of a `plan.write` request into a
 /// `(start, end)` 1-indexed tuple. Mirrors the CLI's `parse_line_range`.
 fn parse_plan_line_range(raw: &str) -> Result<(usize, usize)> {
@@ -1354,36 +1308,6 @@ fn parse_plan_line_range(raw: &str) -> Result<(usize, usize)> {
         .parse()
         .with_context(|| format!("lines: invalid end value {end_str:?}"))?;
     Ok((start, end))
-}
-
-/// Serialize a [`document::WriteProjection`] into a `plan write` JSON
-/// report. Mirrors the CLI's `cmd_plan_write` output so both adapters
-/// produce byte-identical plan payloads.
-fn build_write_plan_value(
-    projection: &document::WriteProjection,
-    cfg: &ResolvedConfig,
-) -> Result<Value> {
-    let identity = plan_ops::PlanIdentity::from_config(cfg);
-    let report = match projection {
-        document::WriteProjection::Markdown {
-            before,
-            after,
-            noop,
-        } => {
-            let mut report = plan_ops::project_report("write", before, after, cfg, identity);
-            report.noop = report.noop || *noop;
-            report
-        }
-        document::WriteProjection::Unsupported { reason } => {
-            let empty =
-                parser::parse("").context("parsing empty before-document for plan write")?;
-            let mut report = plan_ops::project_report("write", &empty, &empty, cfg, identity);
-            report.reject_reason = Some(reason.clone());
-            report.would_commit = false;
-            report
-        }
-    };
-    serde_json::to_value(&report).context("serializing plan write report")
 }
 
 /// Handle the `purge` tool: strip all comments from a document.

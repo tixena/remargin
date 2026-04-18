@@ -1800,56 +1800,24 @@ fn cmd_plan(
     action: &PlanAction,
     json_mode: bool,
 ) -> Result<()> {
-    match action {
-        PlanAction::Write {
-            path,
-            content,
-            binary,
-            create,
-            lines,
-            raw,
-        } => cmd_plan_write(
-            system,
-            cwd,
-            config,
-            path,
-            content.as_deref(),
-            *binary,
-            *create,
-            lines.as_deref(),
-            *raw,
-            json_mode,
-        ),
-        PlanAction::Ack { path, ids, remove } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-            let (before, after) =
-                projections::project_ack(system, &doc_path, config, &id_refs, *remove)?;
-            emit_plan_report("ack", &before, &after, config, json_mode)
-        }
-        PlanAction::Delete { path, ids } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-            let (before, after) = projections::project_delete(system, &doc_path, config, &id_refs)?;
-            emit_plan_report("delete", &before, &after, config, json_mode)
-        }
-        PlanAction::React {
-            path,
-            id,
-            emoji,
-            remove,
-        } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let (before, after) =
-                projections::project_react(system, &doc_path, config, id, emoji, *remove)?;
-            emit_plan_report("react", &before, &after, config, json_mode)
-        }
-        PlanAction::Batch { path, ops_file } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let ops = read_plan_batch_ops(ops_file)?;
-            let (before, after) = projections::project_batch(system, &doc_path, config, &ops)?;
-            emit_plan_report("batch", &before, &after, config, json_mode)
-        }
+    // `Comment` / `Write` arms need owned buffers that outlive the
+    // `PlanRequest` (it borrows `&str` / `ProjectCommentParams<'_>`).
+    // Stage them here so the borrows survive through `plan_ops::dispatch`.
+    let comment_body;
+    let write_body;
+    let attach_refs: Vec<&str>;
+    let position;
+
+    let request = match action {
+        PlanAction::Ack { path, ids, remove } => plan_ops::PlanRequest::Ack {
+            path: resolve_doc_path(system, cwd, path)?,
+            ids: ids.clone(),
+            remove: *remove,
+        },
+        PlanAction::Batch { path, ops_file } => plan_ops::PlanRequest::Batch {
+            path: resolve_doc_path(system, cwd, path)?,
+            ops: read_plan_batch_ops(ops_file)?,
+        },
         PlanAction::Comment {
             path,
             content,
@@ -1860,48 +1828,90 @@ fn cmd_plan(
             reply_to,
             sandbox,
             to,
-        } => cmd_plan_comment(
-            system,
-            cwd,
-            config,
+        } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            comment_body = match content {
+                Some(s) => s.clone(),
+                None => read_stdin()?,
+            };
+            position = resolve_comment_position(
+                reply_to.as_deref(),
+                after_comment.as_deref(),
+                *after_line,
+            );
+            attach_refs = attach_names.iter().map(String::as_str).collect();
+            let params = projections::ProjectCommentParams::new(&comment_body, &position)
+                .with_attachment_filenames(&attach_refs)
+                .with_auto_ack(*auto_ack)
+                .with_reply_to(reply_to.as_deref())
+                .with_sandbox(*sandbox)
+                .with_to(to);
+            plan_ops::PlanRequest::Comment {
+                path: doc_path,
+                params,
+            }
+        }
+        PlanAction::Delete { path, ids } => plan_ops::PlanRequest::Delete {
+            path: resolve_doc_path(system, cwd, path)?,
+            ids: ids.clone(),
+        },
+        PlanAction::Edit { path, id, content } => plan_ops::PlanRequest::Edit {
+            path: resolve_doc_path(system, cwd, path)?,
+            id,
+            content,
+        },
+        PlanAction::Migrate { path } => plan_ops::PlanRequest::Migrate {
+            path: resolve_doc_path(system, cwd, path)?,
+        },
+        PlanAction::Purge { path } => plan_ops::PlanRequest::Purge {
+            path: resolve_doc_path(system, cwd, path)?,
+        },
+        PlanAction::React {
             path,
-            content.as_deref(),
-            after_comment.as_deref(),
-            *after_line,
-            attach_names,
-            *auto_ack,
-            reply_to.as_deref(),
-            *sandbox,
-            to,
-            json_mode,
-        ),
-        PlanAction::Edit { path, id, content } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let (before, after) =
-                projections::project_edit(system, &doc_path, config, id, content)?;
-            emit_plan_report("edit", &before, &after, config, json_mode)
+            id,
+            emoji,
+            remove,
+        } => plan_ops::PlanRequest::React {
+            path: resolve_doc_path(system, cwd, path)?,
+            id,
+            emoji,
+            remove: *remove,
+        },
+        PlanAction::SandboxAdd { path } => plan_ops::PlanRequest::SandboxAdd {
+            path: resolve_doc_path(system, cwd, path)?,
+        },
+        PlanAction::SandboxRemove { path } => plan_ops::PlanRequest::SandboxRemove {
+            path: resolve_doc_path(system, cwd, path)?,
+        },
+        PlanAction::Write {
+            path,
+            content,
+            binary,
+            create,
+            lines,
+            raw,
+        } => {
+            write_body = match content {
+                Some(s) => s.clone(),
+                None => read_stdin()?,
+            };
+            let line_range = lines.as_deref().map(parse_line_range).transpose()?;
+            let opts = document::WriteOptions::new()
+                .binary(*binary)
+                .create(*create)
+                .lines(line_range)
+                .raw(*raw);
+            plan_ops::PlanRequest::Write {
+                path: PathBuf::from(path),
+                content: &write_body,
+                opts,
+            }
         }
-        PlanAction::Migrate { path } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let (before, after) = projections::project_migrate(system, &doc_path, config)?;
-            emit_plan_report("migrate", &before, &after, config, json_mode)
-        }
-        PlanAction::Purge { path } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let (before, after) = projections::project_purge(system, &doc_path, config)?;
-            emit_plan_report("purge", &before, &after, config, json_mode)
-        }
-        PlanAction::SandboxAdd { path } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let (before, after) = projections::project_sandbox_add(system, &doc_path, config)?;
-            emit_plan_report("sandbox-add", &before, &after, config, json_mode)
-        }
-        PlanAction::SandboxRemove { path } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            let (before, after) = projections::project_sandbox_remove(system, &doc_path, config)?;
-            emit_plan_report("sandbox-remove", &before, &after, config, json_mode)
-        }
-    }
+    };
+
+    let report = plan_ops::dispatch(system, cwd, config, &request)?;
+    let value = serde_json::to_value(&report).context("serializing plan report")?;
+    print_output(json_mode, &value)
 }
 
 /// Read a JSON file (or stdin when `path == "-"`) into a vector of
@@ -1967,119 +1977,6 @@ fn read_plan_batch_ops(path: &str) -> Result<Vec<projections::ProjectBatchOp>> {
         ops.push(op);
     }
     Ok(ops)
-}
-
-/// Per-op helper: `plan write` projection + `PlanReport` emission (rem-imc).
-#[expect(
-    clippy::too_many_arguments,
-    clippy::fn_params_excessive_bools,
-    reason = "mirrors CLI flag surface for `plan write`"
-)]
-fn cmd_plan_write(
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-    path: &str,
-    content: Option<&str>,
-    binary: bool,
-    create: bool,
-    lines: Option<&str>,
-    raw: bool,
-    json_mode: bool,
-) -> Result<()> {
-    let body = match content {
-        Some(s) => String::from(s),
-        None => read_stdin()?,
-    };
-    let line_range = lines.map(parse_line_range).transpose()?;
-    let opts = document::WriteOptions::new()
-        .binary(binary)
-        .create(create)
-        .lines(line_range)
-        .raw(raw);
-    let projection = document::project_write(system, cwd, Path::new(path), &body, config, opts)?;
-    let identity = plan_ops::PlanIdentity::from_config(config);
-    let report = match projection {
-        document::WriteProjection::Markdown {
-            before,
-            after,
-            noop,
-        } => {
-            let mut report = plan_ops::project_report("write", &before, &after, config, identity);
-            // `project_write` already performed the byte-identical
-            // shortcut; carry the flag through so the caller gets the
-            // richer diagnostic than `checksum_before == checksum_after`
-            // alone implies.
-            report.noop = report.noop || noop;
-            report
-        }
-        document::WriteProjection::Unsupported { reason } => {
-            // `--raw` / `--binary` cannot produce a structured markdown
-            // plan; return a degraded report with an explicit
-            // `reject_reason`.
-            let empty = parser::parse("").context("parsing empty document")?;
-            let mut report = plan_ops::project_report("write", &empty, &empty, config, identity);
-            report.reject_reason = Some(reason);
-            report.would_commit = false;
-            report
-        }
-        _ => anyhow::bail!("unhandled WriteProjection variant"),
-    };
-    let value = serde_json::to_value(&report).context("serializing plan report")?;
-    print_output(json_mode, &value)
-}
-
-/// Per-op helper: `plan comment` projection + `PlanReport` emission (rem-3fp).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors CLI flag surface for `plan comment`"
-)]
-fn cmd_plan_comment(
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-    path: &str,
-    content: Option<&str>,
-    after_comment: Option<&str>,
-    after_line: Option<usize>,
-    attach_names: &[String],
-    auto_ack: bool,
-    reply_to: Option<&str>,
-    sandbox: bool,
-    to: &[String],
-    json_mode: bool,
-) -> Result<()> {
-    let doc_path = resolve_doc_path(system, cwd, path)?;
-    let body = match content {
-        Some(s) => String::from(s),
-        None => read_stdin()?,
-    };
-    let position = resolve_comment_position(reply_to, after_comment, after_line);
-    let attachment_refs: Vec<&str> = attach_names.iter().map(String::as_str).collect();
-    let project_params = projections::ProjectCommentParams::new(&body, &position)
-        .with_attachment_filenames(&attachment_refs)
-        .with_auto_ack(auto_ack)
-        .with_reply_to(reply_to)
-        .with_sandbox(sandbox)
-        .with_to(to);
-    let (before, after) = projections::project_comment(system, &doc_path, config, &project_params)?;
-    emit_plan_report("comment", &before, &after, config, json_mode)
-}
-
-/// Shared helper: build a [`plan_ops::PlanReport`] from a `(before,
-/// after)` pair and emit it through [`print_output`]. Used by every
-/// lightweight plan op (rem-3uo).
-fn emit_plan_report(
-    op_label: &str,
-    before: &parser::ParsedDocument,
-    after: &parser::ParsedDocument,
-    config: &ResolvedConfig,
-    json_mode: bool,
-) -> Result<()> {
-    let identity = plan_ops::PlanIdentity::from_config(config);
-    let report = plan_ops::project_report(op_label, before, after, config, identity);
-    let value = serde_json::to_value(&report).context("serializing plan report")?;
-    print_output(json_mode, &value)
 }
 
 fn cmd_purge(
