@@ -300,18 +300,34 @@ fn desc_migrate() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Currently wired ops: ack, delete, react. Other ops return a 'not yet landed' error.",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Currently wired ops: ack, comment, delete, edit, react. Other ops return a 'not yet landed' error.",
         schema: json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | delete | react | comment | edit | batch | migrate | purge | sandbox-add | sandbox-remove" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | sandbox-add | sandbox-remove" },
                 "file": { "type": "string", "description": "Path to the document (required for wired ops)" },
                 "ids": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Comment IDs (used by ack / delete)"
                 },
-                "id": { "type": "string", "description": "Single comment ID (used by react)" },
+                "id": { "type": "string", "description": "Single comment ID (used by edit / react)" },
+                "content": { "type": "string", "description": "Body text (used by comment / edit)" },
+                "to": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Addressees (used by comment)"
+                },
+                "reply_to": { "type": "string", "description": "Parent comment ID (used by comment)" },
+                "after_comment": { "type": "string", "description": "Insert after this comment ID (used by comment)" },
+                "after_line": { "type": "integer", "description": "Insert after this 1-indexed line (used by comment)" },
+                "attach_names": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Attachment basenames to record on the projected comment. Bytes are NOT copied by plan."
+                },
+                "auto_ack": { "type": "boolean", "description": "For comment replies: auto-ack the parent", "default": false },
+                "sandbox": { "type": "boolean", "description": "For comment: atomically project a sandbox entry", "default": false },
                 "emoji": { "type": "string", "description": "Emoji for react op" },
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
                 "identity": { "type": "string", "description": "Override identity for this projection" },
@@ -1135,6 +1151,27 @@ fn handle_plan(
             let (before, after) = projections::project_ack(system, &path, cfg, &id_refs, remove)?;
             Ok(build_plan_report_value("ack", &before, &after, cfg))
         }
+        "comment" => {
+            let file = required_str(params, "file")?;
+            let content = required_str(params, "content")?;
+            let to = string_array(params, "to");
+            let reply_to = optional_str(params, "reply_to").map(String::from);
+            let auto_ack = optional_bool(params, "auto_ack");
+            let sandbox = optional_bool(params, "sandbox");
+            let attach_names = string_array(params, "attach_names");
+            let attach_refs: Vec<&str> = attach_names.iter().map(String::as_str).collect();
+            let position = resolve_insert_position(params, reply_to.as_deref());
+            let project_params = projections::ProjectCommentParams::new(content, &position)
+                .with_attachment_filenames(&attach_refs)
+                .with_auto_ack(auto_ack)
+                .with_reply_to(reply_to.as_deref())
+                .with_sandbox(sandbox)
+                .with_to(&to);
+            let path = base_dir.join(file);
+            let (before, after) =
+                projections::project_comment(system, &path, cfg, &project_params)?;
+            Ok(build_plan_report_value("comment", &before, &after, cfg))
+        }
         "delete" => {
             let file = required_str(params, "file")?;
             let ids = string_array(params, "ids");
@@ -1142,6 +1179,15 @@ fn handle_plan(
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             let (before, after) = projections::project_delete(system, &path, cfg, &id_refs)?;
             Ok(build_plan_report_value("delete", &before, &after, cfg))
+        }
+        "edit" => {
+            let file = required_str(params, "file")?;
+            let comment_id = required_str(params, "id")?;
+            let new_content = required_str(params, "content")?;
+            let path = base_dir.join(file);
+            let (before, after) =
+                projections::project_edit(system, &path, cfg, comment_id, new_content)?;
+            Ok(build_plan_report_value("edit", &before, &after, cfg))
         }
         "react" => {
             let file = required_str(params, "file")?;
@@ -1153,8 +1199,7 @@ fn handle_plan(
                 projections::project_react(system, &path, cfg, comment_id, emoji, remove)?;
             Ok(build_plan_report_value("react", &before, &after, cfg))
         }
-        "batch" | "comment" | "edit" | "migrate" | "purge" | "sandbox-add" | "sandbox-remove"
-        | "write" => {
+        "batch" | "migrate" | "purge" | "sandbox-add" | "sandbox-remove" | "write" => {
             bail!("plan {op}: per-op wiring not yet landed (tracked under rem-bhk)")
         }
         other => bail!("plan: unknown op {other:?}"),

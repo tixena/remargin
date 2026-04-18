@@ -525,7 +525,7 @@ pub(crate) fn collapse_body_segments(segments: &mut Vec<Segment>) {
 }
 
 /// Collect all descendant comment IDs in the reply chain (depth-first).
-fn collect_descendants(doc: &ParsedDocument, root_id: &str) -> Vec<String> {
+pub(super) fn collect_descendants(doc: &ParsedDocument, root_id: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut stack = vec![String::from(root_id)];
 
@@ -597,7 +597,7 @@ pub(crate) fn find_comment_mut<'doc>(
 ///
 /// If the parent has a thread, inherit it. Otherwise, use the parent's ID
 /// as the thread root.
-fn resolve_thread(doc: &ParsedDocument, parent_id: &str) -> String {
+pub(super) fn resolve_thread(doc: &ParsedDocument, parent_id: &str) -> String {
     doc.find_comment(parent_id)
         .and_then(|parent| parent.thread.clone())
         .unwrap_or_else(|| String::from(parent_id))

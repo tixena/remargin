@@ -1793,3 +1793,222 @@ fn project_ack_matches_real_ack_comments_after_output() {
     assert_eq!(real_ack.len(), proj_ack.len());
     assert_eq!(real_ack[0].author, proj_ack[0].author);
 }
+
+// --- project_comment / project_edit (rem-3fp) ---
+
+#[test]
+fn project_comment_appends_without_mutating_disk() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let params = projections::ProjectCommentParams::new("Projected body.", &InsertPosition::Append);
+    let (before, after) =
+        projections::project_comment(&system, Path::new("/docs/test.md"), &config, &params)
+            .unwrap();
+
+    assert_eq!(before.comments().len(), 1);
+    assert_eq!(after.comments().len(), 2);
+
+    // The appended comment carries the body, author from config, empty
+    // ack list, and no signature (plan never signs).
+    let new_cm = after
+        .comments()
+        .into_iter()
+        .find(|cm| cm.id != "abc")
+        .unwrap();
+    assert_eq!(new_cm.content, "Projected body.");
+    assert_eq!(new_cm.author, "eduardo");
+    assert!(new_cm.ack.is_empty());
+    assert!(new_cm.signature.is_none());
+
+    // Disk untouched.
+    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_disk,
+        "project_comment must not mutate disk"
+    );
+}
+
+#[test]
+fn project_comment_auto_ack_without_reply_errors() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let params = projections::ProjectCommentParams {
+        attachment_filenames: &[],
+        auto_ack: true,
+        content: "bad params",
+        position: &InsertPosition::Append,
+        reply_to: None,
+        sandbox: false,
+        to: &[],
+    };
+    let err = projections::project_comment(&system, Path::new("/docs/test.md"), &config, &params)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("--auto-ack requires --reply-to"),
+        "expected auto-ack guard, got: {err}"
+    );
+}
+
+#[test]
+fn project_comment_reply_auto_acks_parent() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let params = projections::ProjectCommentParams {
+        attachment_filenames: &[],
+        auto_ack: true,
+        content: "reply body",
+        position: &InsertPosition::AfterComment(String::from("abc")),
+        reply_to: Some("abc"),
+        sandbox: false,
+        to: &[],
+    };
+    let (_before, after) =
+        projections::project_comment(&system, Path::new("/docs/test.md"), &config, &params)
+            .unwrap();
+
+    // Parent (`abc`) now carries an ack from the acting identity.
+    let parent = after.find_comment("abc").unwrap();
+    assert_eq!(parent.ack.len(), 1);
+    assert_eq!(parent.ack[0].author, "eduardo");
+
+    // Reply carries reply_to + inherited thread.
+    let reply = after
+        .comments()
+        .into_iter()
+        .find(|cm| cm.id != "abc")
+        .unwrap();
+    assert_eq!(reply.reply_to.as_deref(), Some("abc"));
+    assert_eq!(reply.thread.as_deref(), Some("abc"));
+}
+
+#[test]
+fn project_comment_attachments_are_not_copied() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let attach = ["photo.png"];
+    let params = projections::ProjectCommentParams {
+        attachment_filenames: &attach,
+        auto_ack: false,
+        content: "with fake attachment",
+        position: &InsertPosition::Append,
+        reply_to: None,
+        sandbox: false,
+        to: &[],
+    };
+    let (_before, after) =
+        projections::project_comment(&system, Path::new("/docs/test.md"), &config, &params)
+            .unwrap();
+
+    let new_cm = after
+        .comments()
+        .into_iter()
+        .find(|cm| cm.id != "abc")
+        .unwrap();
+    assert_eq!(new_cm.attachments, vec![String::from("assets/photo.png")]);
+
+    // Assets dir must not exist on disk (plan is pure).
+    assert!(
+        !system.exists(Path::new("/docs/assets")).unwrap_or(false),
+        "project_comment must not create the assets directory"
+    );
+    assert!(
+        !system
+            .exists(Path::new("/docs/assets/photo.png"))
+            .unwrap_or(false),
+        "project_comment must not copy attachment bytes"
+    );
+}
+
+#[test]
+fn project_edit_recomputes_checksum_and_clears_ack() {
+    // Start from a doc where `abc` already has an ack so we can observe
+    // edit's cascading clear.
+    let seeded = "---\ntitle: Test\nauthor: eduardo\n---\n\n# Body\n\n```remargin\n---\nid: abc\nauthor: eduardo\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\nack:\n  - alice@2026-04-06T13:00:00-04:00\n---\nFirst comment.\n```\n";
+    let system = system_with_doc(seeded);
+    let config = open_config();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let (before, after) = projections::project_edit(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        "Edited body.",
+    )
+    .unwrap();
+
+    assert_eq!(before.find_comment("abc").unwrap().ack.len(), 1);
+
+    let edited = after.find_comment("abc").unwrap();
+    assert_eq!(edited.content, "Edited body.");
+    assert_ne!(
+        edited.checksum,
+        before.find_comment("abc").unwrap().checksum
+    );
+    assert!(edited.ack.is_empty(), "edit must clear acks on the target");
+    assert!(
+        edited.signature.is_none(),
+        "edit must clear signature on the target"
+    );
+
+    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_disk,
+        "project_edit must not mutate disk"
+    );
+}
+
+#[test]
+fn project_edit_missing_comment_surfaces_error() {
+    let seeded = doc_with_comment();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    let err = projections::project_edit(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "does-not-exist",
+        "whatever",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("not found"),
+        "expected 'not found' error, got: {err}"
+    );
+}
+
+#[test]
+fn project_edit_cascades_ack_clear_to_descendants() {
+    let seeded = doc_with_thread();
+    let system = system_with_doc(&seeded);
+    let config = open_config();
+
+    // Sanity: root and child1 both start with an ack.
+    let parsed_before = parser::parse(&seeded).unwrap();
+    assert!(!parsed_before.find_comment("root").unwrap().ack.is_empty());
+    assert!(!parsed_before.find_comment("child1").unwrap().ack.is_empty());
+
+    let (_before, after) = projections::project_edit(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "root",
+        "Rewritten root.",
+    )
+    .unwrap();
+
+    // Root's content was changed — ack cleared.
+    assert!(after.find_comment("root").unwrap().ack.is_empty());
+    // child1 is a descendant of root — ack cleared via the cascade.
+    assert!(after.find_comment("child1").unwrap().ack.is_empty());
+}

@@ -2137,6 +2137,143 @@ fn mcp_plan_write_is_not_yet_wired() {
 }
 
 #[test]
+fn mcp_plan_comment_projects_new_comment() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "comment",
+                    "file": "doc.md",
+                    "content": "Projected via MCP."
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "comment");
+    assert_eq!(
+        report["comments"]["added"].as_array().unwrap().len(),
+        1,
+        "expected 1 added comment, got report: {report:#}"
+    );
+
+    // Disk untouched.
+    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert_eq!(before_bytes, after_bytes);
+}
+
+#[test]
+fn mcp_plan_comment_reply_auto_acks_parent() {
+    let base = Path::new("/docs");
+    let (system, config, parent_id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "comment",
+                    "file": "doc.md",
+                    "content": "reply",
+                    "reply_to": parent_id,
+                    "auto_ack": true
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "comment");
+    assert_eq!(report["comments"]["added"].as_array().unwrap().len(), 1);
+    // Parent stays in the `preserved` set (its content-checksum is
+    // unchanged; only the ack list flipped).
+    let preserved_has_parent = report["comments"]["preserved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str() == Some(parent_id.as_str()));
+    assert!(preserved_has_parent, "expected parent in preserved set");
+}
+
+#[test]
+fn mcp_plan_edit_changes_content_and_clears_acks() {
+    let base = Path::new("/docs");
+    let (system, config, id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "edit",
+                    "file": "doc.md",
+                    "id": id,
+                    "content": "Rewritten via plan."
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "edit");
+    // Edit recomputes the content-derived checksum, so the comment moves
+    // to the `modified` set.
+    assert_eq!(report["comments"]["modified"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn mcp_plan_edit_missing_comment_errors() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "edit",
+                    "file": "doc.md",
+                    "id": "missing",
+                    "content": "noop"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+#[test]
 fn mcp_plan_rejects_unknown_op() {
     let base = Path::new("/docs");
     let system = MockSystem::new();

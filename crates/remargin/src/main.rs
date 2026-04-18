@@ -454,8 +454,37 @@ enum PlanAction {
     },
     /// Project a `batch` op.
     Batch,
-    /// Project a `comment` creation op.
-    Comment,
+    /// Project a `comment` creation op (rem-3fp).
+    Comment {
+        /// Path to the document.
+        path: String,
+        /// Comment body text (read from stdin if omitted).
+        content: Option<String>,
+        /// Insert after this comment ID.
+        #[arg(long)]
+        after_comment: Option<String>,
+        /// Insert after this line number (1-indexed).
+        #[arg(long)]
+        after_line: Option<usize>,
+        /// Attachment basenames to record on the projected comment.
+        /// Bytes are *not* copied — `plan` stays side-effect-free. The
+        /// caller is responsible for the corresponding files existing
+        /// when the mutating `comment` op runs.
+        #[arg(long = "attach-name")]
+        attach_names: Vec<String>,
+        /// Automatically acknowledge the parent comment when replying.
+        #[arg(long)]
+        auto_ack: bool,
+        /// ID of the comment to reply to.
+        #[arg(long)]
+        reply_to: Option<String>,
+        /// Atomically project a sandbox entry in the frontmatter.
+        #[arg(long)]
+        sandbox: bool,
+        /// Addressees of the comment.
+        #[arg(long)]
+        to: Vec<String>,
+    },
     /// Project a `delete` op (rem-3uo).
     Delete {
         /// Path to the document.
@@ -464,8 +493,15 @@ enum PlanAction {
         #[arg(required = true)]
         ids: Vec<String>,
     },
-    /// Project an `edit` op.
-    Edit,
+    /// Project an `edit` op (rem-3fp).
+    Edit {
+        /// Path to the document.
+        path: String,
+        /// Comment ID to edit.
+        id: String,
+        /// New comment body.
+        content: String,
+    },
     /// Project a `migrate` op.
     Migrate,
     /// Project a `purge` op.
@@ -1758,57 +1794,18 @@ fn cmd_plan(
             create,
             lines,
             raw,
-        } => {
-            let body = match content {
-                Some(s) => String::from(s),
-                None => read_stdin()?,
-            };
-            let line_range = lines.as_deref().map(parse_line_range).transpose()?;
-            let opts = document::WriteOptions::new()
-                .binary(*binary)
-                .create(*create)
-                .lines(line_range)
-                .raw(*raw);
-            let projection = document::project_write(
-                system,
-                cwd,
-                Path::new(path.as_str()),
-                &body,
-                config,
-                opts,
-            )?;
-            let identity = build_plan_identity(config);
-            let report = match projection {
-                document::WriteProjection::Markdown {
-                    before,
-                    after,
-                    noop,
-                } => {
-                    let mut report =
-                        plan_ops::project_report("write", &before, &after, config, identity);
-                    // `project_write` already performed the byte-identical
-                    // shortcut; carry the flag through in case the caller
-                    // wants the richer diagnostic than `checksum_before ==
-                    // checksum_after` alone implies.
-                    report.noop = report.noop || noop;
-                    report
-                }
-                document::WriteProjection::Unsupported { reason } => {
-                    // `--raw` / `--binary` cannot produce a structured
-                    // markdown plan; return a degraded report with an
-                    // explicit `reject_reason`.
-                    let empty = parser::parse("").context("parsing empty document")?;
-                    let mut report =
-                        plan_ops::project_report("write", &empty, &empty, config, identity);
-                    report.reject_reason = Some(reason);
-                    report.would_commit = false;
-                    report
-                }
-                _ => anyhow::bail!("unhandled WriteProjection variant"),
-            };
-            let value = serde_json::to_value(&report).context("serializing plan report")?;
-            print_output(json_mode, &value)
-        }
+        } => cmd_plan_write(
+            system,
+            cwd,
+            config,
+            path,
+            content.as_deref(),
+            *binary,
+            *create,
+            lines.as_deref(),
+            *raw,
+            json_mode,
+        ),
         PlanAction::Ack { path, ids, remove } => {
             let doc_path = resolve_doc_path(system, cwd, path)?;
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -1834,13 +1831,139 @@ fn cmd_plan(
             emit_plan_report("react", &before, &after, config, json_mode)
         }
         PlanAction::Batch => bail_plan_not_yet_wired("batch"),
-        PlanAction::Comment => bail_plan_not_yet_wired("comment"),
-        PlanAction::Edit => bail_plan_not_yet_wired("edit"),
+        PlanAction::Comment {
+            path,
+            content,
+            after_comment,
+            after_line,
+            attach_names,
+            auto_ack,
+            reply_to,
+            sandbox,
+            to,
+        } => cmd_plan_comment(
+            system,
+            cwd,
+            config,
+            path,
+            content.as_deref(),
+            after_comment.as_deref(),
+            *after_line,
+            attach_names,
+            *auto_ack,
+            reply_to.as_deref(),
+            *sandbox,
+            to,
+            json_mode,
+        ),
+        PlanAction::Edit { path, id, content } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let (before, after) =
+                projections::project_edit(system, &doc_path, config, id, content)?;
+            emit_plan_report("edit", &before, &after, config, json_mode)
+        }
         PlanAction::Migrate => bail_plan_not_yet_wired("migrate"),
         PlanAction::Purge => bail_plan_not_yet_wired("purge"),
         PlanAction::SandboxAdd => bail_plan_not_yet_wired("sandbox-add"),
         PlanAction::SandboxRemove => bail_plan_not_yet_wired("sandbox-remove"),
     }
+}
+
+/// Per-op helper: `plan write` projection + `PlanReport` emission (rem-imc).
+#[expect(
+    clippy::too_many_arguments,
+    clippy::fn_params_excessive_bools,
+    reason = "mirrors CLI flag surface for `plan write`"
+)]
+fn cmd_plan_write(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    path: &str,
+    content: Option<&str>,
+    binary: bool,
+    create: bool,
+    lines: Option<&str>,
+    raw: bool,
+    json_mode: bool,
+) -> Result<()> {
+    let body = match content {
+        Some(s) => String::from(s),
+        None => read_stdin()?,
+    };
+    let line_range = lines.map(parse_line_range).transpose()?;
+    let opts = document::WriteOptions::new()
+        .binary(binary)
+        .create(create)
+        .lines(line_range)
+        .raw(raw);
+    let projection = document::project_write(system, cwd, Path::new(path), &body, config, opts)?;
+    let identity = build_plan_identity(config);
+    let report = match projection {
+        document::WriteProjection::Markdown {
+            before,
+            after,
+            noop,
+        } => {
+            let mut report = plan_ops::project_report("write", &before, &after, config, identity);
+            // `project_write` already performed the byte-identical
+            // shortcut; carry the flag through so the caller gets the
+            // richer diagnostic than `checksum_before == checksum_after`
+            // alone implies.
+            report.noop = report.noop || noop;
+            report
+        }
+        document::WriteProjection::Unsupported { reason } => {
+            // `--raw` / `--binary` cannot produce a structured markdown
+            // plan; return a degraded report with an explicit
+            // `reject_reason`.
+            let empty = parser::parse("").context("parsing empty document")?;
+            let mut report = plan_ops::project_report("write", &empty, &empty, config, identity);
+            report.reject_reason = Some(reason);
+            report.would_commit = false;
+            report
+        }
+        _ => anyhow::bail!("unhandled WriteProjection variant"),
+    };
+    let value = serde_json::to_value(&report).context("serializing plan report")?;
+    print_output(json_mode, &value)
+}
+
+/// Per-op helper: `plan comment` projection + `PlanReport` emission (rem-3fp).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors CLI flag surface for `plan comment`"
+)]
+fn cmd_plan_comment(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    path: &str,
+    content: Option<&str>,
+    after_comment: Option<&str>,
+    after_line: Option<usize>,
+    attach_names: &[String],
+    auto_ack: bool,
+    reply_to: Option<&str>,
+    sandbox: bool,
+    to: &[String],
+    json_mode: bool,
+) -> Result<()> {
+    let doc_path = resolve_doc_path(system, cwd, path)?;
+    let body = match content {
+        Some(s) => String::from(s),
+        None => read_stdin()?,
+    };
+    let position = resolve_comment_position(reply_to, after_comment, after_line);
+    let attachment_refs: Vec<&str> = attach_names.iter().map(String::as_str).collect();
+    let project_params = projections::ProjectCommentParams::new(&body, &position)
+        .with_attachment_filenames(&attachment_refs)
+        .with_auto_ack(auto_ack)
+        .with_reply_to(reply_to)
+        .with_sandbox(sandbox)
+        .with_to(to);
+    let (before, after) = projections::project_comment(system, &doc_path, config, &project_params)?;
+    emit_plan_report("comment", &before, &after, config, json_mode)
 }
 
 /// Shared helper: build a [`plan_ops::PlanReport`] from a `(before,
