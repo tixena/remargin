@@ -468,6 +468,81 @@ fn metadata_missing_file_errors() {
 }
 
 #[test]
+fn read_binary_returns_bytes_and_mime() {
+    let bytes: &[u8] = &[0x89, b'P', b'N', b'G', 1, 2, 3];
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/pic.png"), bytes)
+        .unwrap();
+
+    let payload =
+        document::read_binary(&system, Path::new("/project"), Path::new("pic.png"), false).unwrap();
+
+    assert_eq!(payload.bytes, bytes);
+    assert_eq!(payload.mime, "image/png");
+    assert!(payload.path.ends_with("pic.png"));
+}
+
+#[test]
+fn read_binary_rejects_markdown() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"# hi\n")
+        .unwrap();
+
+    let err = document::read_binary(&system, Path::new("/project"), Path::new("doc.md"), false)
+        .unwrap_err();
+    assert!(format!("{err}").contains("cannot fetch .md as binary"));
+}
+
+#[test]
+fn read_binary_unknown_extension_is_octet_stream() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/blob.bin"), b"raw")
+        .unwrap();
+
+    // `.bin` is NOT allowlisted — this should error on visibility.
+    let result =
+        document::read_binary(&system, Path::new("/project"), Path::new("blob.bin"), false);
+    result.unwrap_err();
+}
+
+#[test]
+fn read_binary_rejects_dotfile() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/.env"), b"secret")
+        .unwrap();
+
+    let result = document::read_binary(&system, Path::new("/project"), Path::new(".env"), false);
+    result.unwrap_err();
+}
+
+#[test]
+fn read_binary_escape_attempt() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_file(Path::new("/etc/passwd"), b"root:x:0:0")
+        .unwrap();
+
+    let result = document::read_binary(
+        &system,
+        Path::new("/project"),
+        Path::new("../../etc/passwd"),
+        false,
+    );
+    result.unwrap_err();
+}
+
+#[test]
 fn write_preserves_comments() {
     let system = MockSystem::new()
         .with_current_dir("/project")

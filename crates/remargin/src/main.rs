@@ -4,6 +4,7 @@
 mod obsidian;
 
 use std::env;
+use std::fs;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -11,6 +12,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use clap::Parser;
 use os_shim::System;
 use os_shim::real::RealSystem;
@@ -192,17 +195,29 @@ enum Commands {
         /// New comment body.
         content: String,
     },
-    /// Read a file's contents.
+    /// Read a file's contents. Add `--binary` to fetch non-markdown files as
+    /// bytes (base64 in `--json` mode, raw bytes to stdout otherwise, or
+    /// written to `--out <path>`). Run `remargin metadata <path>` first to
+    /// check `size_bytes` and `mime` before pulling large blobs.
     Get {
         /// Path to the file.
         path: String,
-        /// End line (1-indexed, inclusive).
+        /// Fetch as bytes. Rejects `.md` (use the text path for markdown).
+        /// Mime is derived from the file extension.
+        #[arg(long)]
+        binary: bool,
+        /// End line (1-indexed, inclusive). Text mode only.
         #[arg(long)]
         end: Option<usize>,
-        /// Show line numbers in output.
+        /// Show line numbers in output. Text mode only.
         #[arg(short = 'n', long = "line-numbers")]
         line_numbers: bool,
-        /// Start line (1-indexed).
+        /// Write the fetched bytes to this path (binary mode only). Stdout
+        /// receives a summary instead of the bytes. The caller names the
+        /// target path — no auto-cleanup.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Start line (1-indexed). Text mode only.
         #[arg(long)]
         start: Option<usize>,
     },
@@ -608,9 +623,11 @@ struct CommentParams<'cmd> {
 }
 
 struct GetParams<'cmd> {
+    binary: bool,
     end: Option<usize>,
     json_mode: bool,
     line_numbers: bool,
+    out: Option<&'cmd Path>,
     path: &'cmd str,
     start: Option<usize>,
 }
@@ -1043,14 +1060,18 @@ fn dispatch_with_config(
         }
         Commands::Get {
             path,
+            binary,
             start,
             end,
             line_numbers,
+            out,
         } => {
             let gp = GetParams {
+                binary: *binary,
                 end: *end,
                 json_mode,
                 line_numbers: *line_numbers,
+                out: out.as_deref(),
                 path,
                 start: *start,
             };
@@ -1399,6 +1420,15 @@ fn cmd_get(
     gp: &GetParams<'_>,
 ) -> Result<()> {
     let target = Path::new(gp.path);
+
+    if gp.binary {
+        return cmd_get_binary(system, cwd, config, gp, target);
+    }
+
+    if gp.out.is_some() {
+        bail!("--out requires --binary");
+    }
+
     let lines = match (gp.start, gp.end) {
         (Some(s), Some(e)) => Some((s, e)),
         _ => None,
@@ -1428,6 +1458,62 @@ fn cmd_get(
             out_raw(&content)
         }
     }
+}
+
+/// Binary-mode `get` dispatch (rem-cdr). Reads bytes once through the shared
+/// core helper, then surfaces them in the caller's chosen shape:
+/// - `--out <path>` — write bytes to disk, stdout shows `{path, size_bytes, mime}`.
+/// - `--json` — base64-encoded `content` in the payload alongside mime / size.
+/// - default — raw bytes to stdout (so `remargin get --binary x.png > out.png` works).
+///
+/// Incompatible flags (`--start`, `--end`, `-n`) are rejected up front so
+/// binary requests never silently drop text-mode options.
+fn cmd_get_binary(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    gp: &GetParams<'_>,
+    target: &Path,
+) -> Result<()> {
+    if gp.start.is_some() || gp.end.is_some() {
+        bail!("--start / --end are not supported with --binary");
+    }
+    if gp.line_numbers {
+        bail!("--line-numbers is not supported with --binary");
+    }
+
+    let payload = document::read_binary(system, cwd, target, config.unrestricted)?;
+
+    if let Some(out_path) = gp.out {
+        fs::write(out_path, &payload.bytes)
+            .with_context(|| format!("writing {}", out_path.display()))?;
+        let summary = json!({
+            "mime": payload.mime,
+            "out": out_path,
+            "path": payload.path,
+            "size_bytes": payload.size_bytes,
+        });
+        return print_output(gp.json_mode, &summary);
+    }
+
+    if gp.json_mode {
+        let encoded = BASE64_STANDARD.encode(&payload.bytes);
+        return print_output(
+            true,
+            &json!({
+                "binary": true,
+                "content": encoded,
+                "mime": payload.mime,
+                "path": payload.path,
+                "size_bytes": payload.size_bytes,
+            }),
+        );
+    }
+
+    // Non-JSON, no --out: raw bytes to stdout so shell redirection works.
+    io::stdout()
+        .write_all(&payload.bytes)
+        .context("writing bytes to stdout")
 }
 
 fn cmd_identity(

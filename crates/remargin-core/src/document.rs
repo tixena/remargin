@@ -10,6 +10,7 @@ pub mod mime;
 mod tests;
 
 use std::collections::HashSet;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
@@ -24,6 +25,23 @@ use crate::config::ResolvedConfig;
 use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser;
+
+/// Bytes + mime + size for a binary file read.
+///
+/// Returned by [`read_binary`] (rem-cdr). Callers decide how to surface the
+/// payload: base64 in JSON, raw bytes to stdout, or written to a caller-named
+/// file. The helper deliberately does not special-case image/* vs other
+/// binary mimes — that is an adapter-level concern (e.g. MCP returning an
+/// image content block).
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct BinaryPayload {
+    pub bytes: Vec<u8>,
+    pub mime: &'static str,
+    /// Resolved (canonical) path of the file that was read.
+    pub path: PathBuf,
+    pub size_bytes: u64,
+}
 
 /// A single entry from a directory listing.
 #[derive(Debug, Serialize)]
@@ -304,6 +322,71 @@ pub fn get(
             }
         }
     }
+}
+
+/// Read a file as raw bytes, enforcing the same sandbox + visibility rules as
+/// [`get`]. Rejects markdown files so the comment-preservation pipeline is
+/// never bypassed through the binary path.
+///
+/// Mime is derived from the file extension; unknown extensions map to
+/// `application/octet-stream`. This is symmetric with [`write`]'s `binary`
+/// option and is the shared core for CLI `get --binary` and MCP `get` with
+/// `binary: true` (rem-cdr).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The path escapes the sandbox.
+/// - The file is a dotfile or has a disallowed extension.
+/// - The file is markdown (`.md`) — use the text `get` path instead.
+/// - The file cannot be opened or read.
+pub fn read_binary(
+    system: &dyn System,
+    base_dir: &Path,
+    path: &Path,
+    unrestricted: bool,
+) -> Result<BinaryPayload> {
+    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
+
+    if !allowlist::is_visible(&resolved, false) {
+        bail!("file not visible: {}", path.display());
+    }
+
+    // Never bypass comment-preservation through the binary surface. Symmetric
+    // with `write`'s `.md`-rejects-binary behaviour.
+    let ext = resolved
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if ext == "md" {
+        bail!(
+            "cannot fetch .md as binary: {} (use `get` without --binary)",
+            path.display()
+        );
+    }
+
+    let size_bytes = system
+        .metadata(&resolved)
+        .with_context(|| format!("stat {}", resolved.display()))?
+        .len;
+
+    let mut reader = system
+        .open(&resolved)
+        .with_context(|| format!("opening {}", resolved.display()))?;
+    let mut bytes = Vec::with_capacity(usize::try_from(size_bytes).unwrap_or(0));
+    reader
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("reading {}", resolved.display()))?;
+
+    let mime = mime::mime_for_extension(&resolved);
+
+    Ok(BinaryPayload {
+        bytes,
+        mime,
+        path: resolved,
+        size_bytes,
+    })
 }
 
 /// `start_num` is the 1-indexed line number of the first line in the slice.

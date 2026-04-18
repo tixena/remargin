@@ -715,6 +715,62 @@ fn metadata_returns_document_info() {
 }
 
 #[test]
+fn get_binary_returns_base64_and_mime() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "pic.png", "fake-png-bytes");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get",
+                "arguments": { "path": "pic.png", "binary": true }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["binary"], true);
+    assert_eq!(result["mime"], "image/png");
+    assert!(result["path"].is_string());
+    assert!(result["size_bytes"].is_number());
+    // base64 of "fake-png-bytes"
+    assert_eq!(result["content"], "ZmFrZS1wbmctYnl0ZXM=");
+}
+
+#[test]
+fn get_binary_rejects_markdown() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# hi\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get",
+                "arguments": { "path": "doc.md", "binary": true }
+            }
+        }),
+    );
+
+    // Error surfaces as an `isError: true` tool response, not a JSON-RPC error.
+    let is_error = response["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(is_error, "binary get on .md should be an error response");
+}
+
+#[test]
 fn metadata_binary_file_omits_markdown_fields() {
     let base = Path::new("/docs");
     // Content is irrelevant for PNG metadata: only the extension drives

@@ -10,7 +10,9 @@ use std::io::{self, BufRead as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 use serde_json::{Map, Value, json};
 
@@ -207,14 +209,19 @@ fn desc_edit() -> ToolDesc {
 fn desc_get() -> ToolDesc {
     ToolDesc {
         name: "get",
-        description: "Read a file's contents",
+        description: "Read a file's contents. Text mode (default) returns \
+             UTF-8 content. Pass `binary: true` to fetch non-markdown files \
+             as bytes; returns `{binary, content (base64), mime, path, \
+             size_bytes}`. Rejects `.md` in binary mode. Run `metadata` first \
+             to check size before pulling large blobs.",
         schema: json!({
             "type": "object",
             "properties": {
-                "end_line": { "type": "integer", "description": "End line (1-indexed)" },
-                "line_numbers": { "type": "boolean", "description": "Prefix each line with its 1-indexed line number", "default": false },
+                "binary": { "type": "boolean", "description": "Return raw bytes base64-encoded; rejects .md", "default": false },
+                "end_line": { "type": "integer", "description": "End line (1-indexed). Text mode only." },
+                "line_numbers": { "type": "boolean", "description": "Prefix each line with its 1-indexed line number. Text mode only.", "default": false },
                 "path": { "type": "string", "description": "Path to the file" },
-                "start_line": { "type": "integer", "description": "Start line (1-indexed)" }
+                "start_line": { "type": "integer", "description": "Start line (1-indexed). Text mode only." }
             },
             "required": ["path"]
         }),
@@ -906,13 +913,38 @@ fn handle_edit(
 }
 
 /// Handle the `get` tool: read a file's contents.
+///
+/// When `binary: true`, bytes are read through the shared `read_binary`
+/// core helper (symmetric with CLI `get --binary`) and returned base64-
+/// encoded alongside size + mime. Markdown files are rejected in this mode
+/// so comment-preservation is never bypassed (rem-cdr).
 fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>) -> Result<Value> {
     let path_str = required_str(params, "path")?;
+    let binary = optional_bool(params, "binary");
     let end_line = optional_usize(params, "end_line");
     let line_numbers = optional_bool(params, "line_numbers");
     let start_line = optional_usize(params, "start_line");
 
     let target = Path::new(path_str);
+
+    if binary {
+        if start_line.is_some() || end_line.is_some() {
+            bail!("start_line / end_line are not supported with binary: true");
+        }
+        if line_numbers {
+            bail!("line_numbers is not supported with binary: true");
+        }
+        let payload = document::read_binary(system, base_dir, target, false)?;
+        let encoded = BASE64_STANDARD.encode(&payload.bytes);
+        return Ok(json!({
+            "binary": true,
+            "content": encoded,
+            "mime": payload.mime,
+            "path": payload.path,
+            "size_bytes": payload.size_bytes,
+        }));
+    }
+
     let lines = match (start_line, end_line) {
         (Some(start), Some(end)) => Some((start, end)),
         _ => None,

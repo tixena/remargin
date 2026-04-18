@@ -310,6 +310,29 @@ remargin write path="assets/data.yaml" content="name: example" raw=true create=t
 
 Note: `raw=true` is rejected for `.md` files — markdown documents always go through the comment-preserving write path.
 
+### Binary content
+
+To fetch non-markdown files (images, PDFs, audio, etc.) as bytes, pass `binary=true` to `get`. The response carries the file's `mime`, `size_bytes`, `path`, and the bytes themselves base64-encoded in `content`.
+
+```
+remargin get path="assets/screenshot.png" binary=true
+```
+
+**Before fetching binary content, always call `metadata` first** to check `size_bytes` and `mime`. Base64 inflates payloads by roughly 33%, so large blobs through JSON mode are the caller's responsibility — don't pull a 20 MB video just to discover it was the wrong file.
+
+```
+remargin metadata path="assets/screenshot.png"
+# -> { binary: true, mime: "image/png", size_bytes: 48321, ... }
+```
+
+`binary=true` is rejected for `.md` files — markdown must go through the text path so comment-preservation is never bypassed. This is symmetric with `write binary=true` (which also rejects `.md`).
+
+On the CLI, `--binary` also supports `--out <path>` to write the bytes to a file and print only a summary to stdout (useful for large payloads):
+
+```
+remargin get --binary --out /tmp/pic.png assets/screenshot.png
+```
+
 ### Create a new document
 
 ```
