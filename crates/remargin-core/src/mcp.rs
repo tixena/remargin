@@ -830,27 +830,12 @@ fn handle_batch(
         .and_then(Value::as_array)
         .context("missing required field: operations")?;
 
-    let mut batch_ops = Vec::new();
+    let mut batch_ops = Vec::with_capacity(ops_value.len());
     for (idx, op_value) in ops_value.iter().enumerate() {
         let op_obj = op_value
             .as_object()
-            .with_context(|| format!("batch operation {idx}: expected object"))?;
-
-        let content =
-            required_str(op_obj, "content").with_context(|| format!("batch operation {idx}"))?;
-
-        batch_ops.push(BatchCommentOp {
-            after_comment: optional_str(op_obj, "after_comment").map(String::from),
-            after_line: optional_usize(op_obj, "after_line"),
-            attachments: string_array(op_obj, "attachments")
-                .into_iter()
-                .map(PathBuf::from)
-                .collect(),
-            auto_ack: optional_bool(op_obj, "auto_ack"),
-            content: String::from(content),
-            reply_to: optional_str(op_obj, "reply_to").map(String::from),
-            to: string_array(op_obj, "to"),
-        });
+            .with_context(|| format!("batch op[{idx}]: expected object"))?;
+        batch_ops.push(BatchCommentOp::from_json_object(op_obj, idx)?);
     }
 
     let path = base_dir.join(file);
@@ -1246,51 +1231,8 @@ fn parse_plan_batch_ops(params: &Map<String, Value>) -> Result<Vec<projections::
     for (idx, entry) in ops_arr.iter().enumerate() {
         let obj = entry
             .as_object()
-            .with_context(|| format!("plan batch: ops[{idx}] must be an object"))?;
-        let content = obj
-            .get("content")
-            .and_then(Value::as_str)
-            .with_context(|| format!("plan batch: ops[{idx}].content is required"))?;
-
-        let mut op = projections::ProjectBatchOp::new(String::from(content));
-        op.reply_to = obj
-            .get("reply_to")
-            .and_then(Value::as_str)
-            .map(String::from);
-        op.after_comment = obj
-            .get("after_comment")
-            .and_then(Value::as_str)
-            .map(String::from);
-        op.after_line = obj
-            .get("after_line")
-            .and_then(Value::as_u64)
-            .and_then(|n| usize::try_from(n).ok());
-        op.auto_ack = obj
-            .get("auto_ack")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        op.attachment_filenames = obj
-            .get("attach_names")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-        op.to = obj
-            .get("to")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        ops.push(op);
+            .with_context(|| format!("plan batch op[{idx}]: expected object"))?;
+        ops.push(projections::ProjectBatchOp::from_json_object(obj, idx)?);
     }
     Ok(ops)
 }

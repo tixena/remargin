@@ -1302,52 +1302,12 @@ fn cmd_batch(
     let ops_value: Vec<Value> =
         serde_json::from_str(ops_json).context("parsing batch operations JSON")?;
 
-    let mut batch_ops = Vec::new();
+    let mut batch_ops = Vec::with_capacity(ops_value.len());
     for (idx, op_value) in ops_value.iter().enumerate() {
         let op_obj = op_value
             .as_object()
-            .with_context(|| format!("batch operation {idx}: expected object"))?;
-
-        let content = op_obj
-            .get("content")
-            .and_then(Value::as_str)
-            .with_context(|| format!("batch operation {idx}: missing content"))?;
-
-        let to: Vec<String> = op_obj
-            .get("to")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let reply_to = op_obj
-            .get("reply_to")
-            .and_then(Value::as_str)
-            .map(String::from);
-        let after_comment = op_obj
-            .get("after_comment")
-            .and_then(Value::as_str)
-            .map(String::from);
-        let after_line = op_obj
-            .get("after_line")
-            .and_then(Value::as_u64)
-            .and_then(|v| usize::try_from(v).ok());
-        let auto_ack = op_obj
-            .get("auto_ack")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-
-        let mut op = BatchCommentOp::new(String::from(content));
-        op.after_comment = after_comment;
-        op.after_line = after_line;
-        op.auto_ack = auto_ack;
-        op.reply_to = reply_to;
-        op.to = to;
-        batch_ops.push(op);
+            .with_context(|| format!("batch op[{idx}]: expected object"))?;
+        batch_ops.push(BatchCommentOp::from_json_object(op_obj, idx)?);
     }
 
     let created_ids = operations::batch::batch_comment(system, &path, config, &batch_ops)?;
@@ -1932,49 +1892,8 @@ fn read_plan_batch_ops(path: &str) -> Result<Vec<projections::ProjectBatchOp>> {
     for (idx, entry) in arr.iter().enumerate() {
         let obj = entry
             .as_object()
-            .with_context(|| format!("plan batch ops[{idx}] must be an object"))?;
-        let content = obj
-            .get("content")
-            .and_then(Value::as_str)
-            .with_context(|| format!("plan batch ops[{idx}].content is required"))?;
-        let mut op = projections::ProjectBatchOp::new(String::from(content));
-        op.reply_to = obj
-            .get("reply_to")
-            .and_then(Value::as_str)
-            .map(String::from);
-        op.after_comment = obj
-            .get("after_comment")
-            .and_then(Value::as_str)
-            .map(String::from);
-        op.after_line = obj
-            .get("after_line")
-            .and_then(Value::as_u64)
-            .and_then(|n| usize::try_from(n).ok());
-        op.auto_ack = obj
-            .get("auto_ack")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        op.attachment_filenames = obj
-            .get("attach_names")
-            .and_then(Value::as_array)
-            .map(|v| {
-                v.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-        op.to = obj
-            .get("to")
-            .and_then(Value::as_array)
-            .map(|v| {
-                v.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-        ops.push(op);
+            .with_context(|| format!("plan batch op[{idx}]: expected object"))?;
+        ops.push(projections::ProjectBatchOp::from_json_object(obj, idx)?);
     }
     Ok(ops)
 }

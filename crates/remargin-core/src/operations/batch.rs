@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use chrono::Utc;
 use os_shim::System;
+use serde_json::{Map, Value};
 
 use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_signature};
@@ -47,6 +48,68 @@ pub struct BatchCommentOp {
 }
 
 impl BatchCommentOp {
+    /// Decode a single batch-op JSON object into a [`BatchCommentOp`].
+    ///
+    /// Shared between the CLI (which receives the ops as a top-level
+    /// array) and the MCP adapter (which nests them under
+    /// `params.operations`). Both surfaces feed one object per call so
+    /// accepted field names and error messages stay in one place and
+    /// cannot drift.
+    ///
+    /// `idx` is the zero-based position of the op in its enclosing
+    /// array; it is only used to make error messages actionable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the required `content` field is missing or
+    /// not a string.
+    pub fn from_json_object(obj: &Map<String, Value>, idx: usize) -> Result<Self> {
+        let content = obj
+            .get("content")
+            .and_then(Value::as_str)
+            .with_context(|| format!("batch op[{idx}]: missing required field `content`"))?;
+
+        Ok(Self {
+            after_comment: obj
+                .get("after_comment")
+                .and_then(Value::as_str)
+                .map(String::from),
+            after_line: obj
+                .get("after_line")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok()),
+            attachments: obj
+                .get("attachments")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(PathBuf::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            auto_ack: obj
+                .get("auto_ack")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            content: String::from(content),
+            reply_to: obj
+                .get("reply_to")
+                .and_then(Value::as_str)
+                .map(String::from),
+            to: obj
+                .get("to")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+
     /// Create a new batch operation with the given content.
     #[must_use]
     pub const fn new(content: String) -> Self {

@@ -57,6 +57,68 @@ pub struct ProjectBatchOp {
 }
 
 impl ProjectBatchOp {
+    /// Decode a single plan-batch sub-op JSON object into a
+    /// [`ProjectBatchOp`]. Mirrors
+    /// [`BatchCommentOp::from_json_object`](crate::operations::batch::BatchCommentOp::from_json_object)
+    /// but produces the attachment-filenames (plan never copies bytes).
+    ///
+    /// `idx` is the zero-based position of the op in its enclosing
+    /// array; it is only used to make error messages actionable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the required `content` field is missing or
+    /// not a string.
+    pub fn from_json_object(
+        obj: &serde_json::Map<String, serde_json::Value>,
+        idx: usize,
+    ) -> Result<Self> {
+        let content = obj
+            .get("content")
+            .and_then(serde_json::Value::as_str)
+            .with_context(|| format!("plan batch op[{idx}]: missing required field `content`"))?;
+
+        Ok(Self {
+            after_comment: obj
+                .get("after_comment")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from),
+            after_line: obj
+                .get("after_line")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok()),
+            attachment_filenames: obj
+                .get("attach_names")
+                .and_then(serde_json::Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            auto_ack: obj
+                .get("auto_ack")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            content: String::from(content),
+            reply_to: obj
+                .get("reply_to")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from),
+            to: obj
+                .get("to")
+                .and_then(serde_json::Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+
     /// Minimum-viable sub-op with just content. Other fields default to
     /// empty / false.
     #[must_use]
