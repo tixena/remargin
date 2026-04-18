@@ -257,6 +257,17 @@ enum Commands {
         #[command(subcommand)]
         action: ObsidianAction,
     },
+    /// Structured pre-commit prediction for a mutating op (rem-bhk).
+    ///
+    /// Per-op subcommand routing wires this to the in-memory projection
+    /// of each mutating op. This crate ships the shared shape +
+    /// subcommand tree (rem-2qr); individual op wiring lands in
+    /// rem-imc, rem-3uo, rem-qll.
+    Plan {
+        /// Which mutating op to plan.
+        #[command(subcommand)]
+        action: PlanAction,
+    },
     /// Strip all comments from a document.
     Purge {
         /// Path to the document.
@@ -409,6 +420,34 @@ enum Commands {
 }
 
 /// Registry subcommands.
+/// Plan subcommands (rem-bhk). One variant per mutating op; per-op
+/// wiring is tracked under rem-imc / rem-3uo / rem-qll.
+#[derive(clap::Subcommand)]
+enum PlanAction {
+    /// Project an `ack` op.
+    Ack,
+    /// Project a `batch` op.
+    Batch,
+    /// Project a `comment` creation op.
+    Comment,
+    /// Project a `delete` op.
+    Delete,
+    /// Project an `edit` op.
+    Edit,
+    /// Project a `migrate` op.
+    Migrate,
+    /// Project a `purge` op.
+    Purge,
+    /// Project a `react` op.
+    React,
+    /// Project a `sandbox add` op.
+    SandboxAdd,
+    /// Project a `sandbox remove` op.
+    SandboxRemove,
+    /// Project a `write` op.
+    Write,
+}
+
 #[derive(clap::Subcommand)]
 enum RegistryAction {
     /// Show the current registry.
@@ -844,6 +883,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::Ls { .. }
         | Commands::Metadata { .. }
         | Commands::Migrate { .. }
+        | Commands::Plan { .. }
         | Commands::Purge { .. }
         | Commands::Query { .. }
         | Commands::React { .. }
@@ -971,6 +1011,7 @@ fn dispatch_with_config(
         Commands::Migrate { file, backup } => {
             cmd_migrate(system, cwd, config, file, dry_run, *backup, json_mode)
         }
+        Commands::Plan { action } => cmd_plan(action, json_mode),
         Commands::Purge { file } => cmd_purge(system, cwd, config, file, dry_run, json_mode),
         Commands::Query {
             path,
@@ -1545,6 +1586,30 @@ fn cmd_migrate(
         }
         Ok(())
     }
+}
+
+/// Route a `plan` subcommand to the correct per-op projection.
+///
+/// rem-2qr ships the shared infrastructure (`PlanReport` shape + projection
+/// helper in `remargin_core::operations::plan`); per-op wiring lands
+/// under rem-imc / rem-3uo / rem-qll. Until then every variant returns
+/// a deliberate "not yet wired" error so callers can discover the
+/// subcommand tree and failures are loud.
+fn cmd_plan(action: &PlanAction, _json_mode: bool) -> Result<()> {
+    let op_label = match action {
+        PlanAction::Ack => "ack",
+        PlanAction::Batch => "batch",
+        PlanAction::Comment => "comment",
+        PlanAction::Delete => "delete",
+        PlanAction::Edit => "edit",
+        PlanAction::Migrate => "migrate",
+        PlanAction::Purge => "purge",
+        PlanAction::React => "react",
+        PlanAction::SandboxAdd => "sandbox-add",
+        PlanAction::SandboxRemove => "sandbox-remove",
+        PlanAction::Write => "write",
+    };
+    anyhow::bail!("plan {op_label}: per-op wiring not yet landed (tracked under rem-bhk)")
 }
 
 fn cmd_purge(

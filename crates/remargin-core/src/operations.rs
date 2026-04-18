@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod migrate;
+pub mod plan;
 pub mod purge;
 pub mod query;
 pub mod sandbox;
