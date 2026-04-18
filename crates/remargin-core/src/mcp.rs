@@ -300,7 +300,7 @@ fn desc_migrate() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Currently wired ops: ack, comment, delete, edit, react. Other ops return a 'not yet landed' error.",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Currently wired ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove. `write` still returns a 'not yet landed' error.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -331,7 +331,24 @@ fn desc_plan() -> ToolDesc {
                 "emoji": { "type": "string", "description": "Emoji for react op" },
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
                 "identity": { "type": "string", "description": "Override identity for this projection" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "author_type": { "type": "string", "description": "Override author type: human or agent" },
+                "ops": {
+                    "type": "array",
+                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_line, attach_names, auto_ack, to.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string" },
+                            "reply_to": { "type": "string" },
+                            "after_comment": { "type": "string" },
+                            "after_line": { "type": "integer" },
+                            "attach_names": { "type": "array", "items": { "type": "string" } },
+                            "auto_ack": { "type": "boolean" },
+                            "to": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["content"]
+                    }
+                }
             },
             "required": ["op"]
         }),
@@ -1131,6 +1148,10 @@ fn handle_migrate(
 /// Mirrors the CLI `plan` subcommand tree: ack / delete / react are fully
 /// wired; other ops return a deliberate "not yet landed" error so callers
 /// discover the surface.
+#[expect(
+    clippy::too_many_lines,
+    reason = "single dispatch match is clearer than per-op helper functions here"
+)]
 fn handle_plan(
     system: &dyn System,
     base_dir: &Path,
@@ -1199,11 +1220,115 @@ fn handle_plan(
                 projections::project_react(system, &path, cfg, comment_id, emoji, remove)?;
             Ok(build_plan_report_value("react", &before, &after, cfg))
         }
-        "batch" | "migrate" | "purge" | "sandbox-add" | "sandbox-remove" | "write" => {
+        "batch" => {
+            let file = required_str(params, "file")?;
+            let ops = parse_plan_batch_ops(params)?;
+            let path = base_dir.join(file);
+            let (before, after) = projections::project_batch(system, &path, cfg, &ops)?;
+            Ok(build_plan_report_value("batch", &before, &after, cfg))
+        }
+        "migrate" => {
+            let file = required_str(params, "file")?;
+            let path = base_dir.join(file);
+            let (before, after) = projections::project_migrate(system, &path, cfg)?;
+            Ok(build_plan_report_value("migrate", &before, &after, cfg))
+        }
+        "purge" => {
+            let file = required_str(params, "file")?;
+            let path = base_dir.join(file);
+            let (before, after) = projections::project_purge(system, &path, cfg)?;
+            Ok(build_plan_report_value("purge", &before, &after, cfg))
+        }
+        "sandbox-add" => {
+            let file = required_str(params, "file")?;
+            let path = base_dir.join(file);
+            let (before, after) = projections::project_sandbox_add(system, &path, cfg)?;
+            Ok(build_plan_report_value("sandbox-add", &before, &after, cfg))
+        }
+        "sandbox-remove" => {
+            let file = required_str(params, "file")?;
+            let path = base_dir.join(file);
+            let (before, after) = projections::project_sandbox_remove(system, &path, cfg)?;
+            Ok(build_plan_report_value(
+                "sandbox-remove",
+                &before,
+                &after,
+                cfg,
+            ))
+        }
+        "write" => {
             bail!("plan {op}: per-op wiring not yet landed (tracked under rem-bhk)")
         }
         other => bail!("plan: unknown op {other:?}"),
     }
+}
+
+/// Parse the `ops` array from a `plan.batch` MCP request into
+/// [`projections::ProjectBatchOp`] values.
+///
+/// Each entry is an object with the same shape as the `batch` tool's sub-op
+/// (`content`, `reply_to`, `after_comment`, `after_line`, `attach_names`,
+/// `auto_ack`, `to`). Unknown fields are ignored; missing `content`
+/// rejects the whole batch.
+fn parse_plan_batch_ops(params: &Map<String, Value>) -> Result<Vec<projections::ProjectBatchOp>> {
+    let ops_val = params
+        .get("ops")
+        .context("plan batch: `ops` array is required")?;
+    let ops_arr = ops_val
+        .as_array()
+        .context("plan batch: `ops` must be an array")?;
+
+    let mut ops: Vec<projections::ProjectBatchOp> = Vec::with_capacity(ops_arr.len());
+    for (idx, entry) in ops_arr.iter().enumerate() {
+        let obj = entry
+            .as_object()
+            .with_context(|| format!("plan batch: ops[{idx}] must be an object"))?;
+        let content = obj
+            .get("content")
+            .and_then(Value::as_str)
+            .with_context(|| format!("plan batch: ops[{idx}].content is required"))?;
+
+        let mut op = projections::ProjectBatchOp::new(String::from(content));
+        op.reply_to = obj
+            .get("reply_to")
+            .and_then(Value::as_str)
+            .map(String::from);
+        op.after_comment = obj
+            .get("after_comment")
+            .and_then(Value::as_str)
+            .map(String::from);
+        op.after_line = obj
+            .get("after_line")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+        op.auto_ack = obj
+            .get("auto_ack")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        op.attachment_filenames = obj
+            .get("attach_names")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        op.to = obj
+            .get("to")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        ops.push(op);
+    }
+    Ok(ops)
 }
 
 /// Serialize a projected `(before, after)` pair into a JSON [`plan_ops::PlanReport`]

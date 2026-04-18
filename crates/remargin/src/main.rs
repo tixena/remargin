@@ -452,8 +452,18 @@ enum PlanAction {
         #[arg(long)]
         remove: bool,
     },
-    /// Project a `batch` op.
-    Batch,
+    /// Project a `batch` op (rem-qll).
+    ///
+    /// Reads the sub-op list from a JSON file (same shape as the
+    /// `batch` subcommand): an array of objects with `content` (required)
+    /// plus optional `reply_to`, `after_comment`, `after_line`,
+    /// `attach_names`, `auto_ack`, `to`.
+    Batch {
+        /// Path to the document.
+        path: String,
+        /// JSON file containing the `ops` array. Use `-` for stdin.
+        ops_file: String,
+    },
     /// Project a `comment` creation op (rem-3fp).
     Comment {
         /// Path to the document.
@@ -502,10 +512,16 @@ enum PlanAction {
         /// New comment body.
         content: String,
     },
-    /// Project a `migrate` op.
-    Migrate,
-    /// Project a `purge` op.
-    Purge,
+    /// Project a `migrate` op (rem-qll).
+    Migrate {
+        /// Path to the document.
+        path: String,
+    },
+    /// Project a `purge` op (rem-qll).
+    Purge {
+        /// Path to the document.
+        path: String,
+    },
     /// Project a `react` op (rem-3uo).
     React {
         /// Path to the document.
@@ -518,10 +534,16 @@ enum PlanAction {
         #[arg(long)]
         remove: bool,
     },
-    /// Project a `sandbox add` op.
-    SandboxAdd,
-    /// Project a `sandbox remove` op.
-    SandboxRemove,
+    /// Project a `sandbox add` op (rem-qll).
+    SandboxAdd {
+        /// Path to the document.
+        path: String,
+    },
+    /// Project a `sandbox remove` op (rem-qll).
+    SandboxRemove {
+        /// Path to the document.
+        path: String,
+    },
     /// Project a `write` op (rem-imc).
     Write {
         /// Path to the file.
@@ -1779,6 +1801,10 @@ fn cmd_migrate(
 /// rem-qll) surface a deliberate "not yet landed" error so callers
 /// discover the subcommand tree and failures are loud. `plan write` is
 /// fully wired per rem-imc.
+#[expect(
+    clippy::too_many_lines,
+    reason = "single dispatch match is clearer than per-op helpers here"
+)]
 fn cmd_plan(
     system: &dyn System,
     cwd: &Path,
@@ -1830,7 +1856,12 @@ fn cmd_plan(
                 projections::project_react(system, &doc_path, config, id, emoji, *remove)?;
             emit_plan_report("react", &before, &after, config, json_mode)
         }
-        PlanAction::Batch => bail_plan_not_yet_wired("batch"),
+        PlanAction::Batch { path, ops_file } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let ops = read_plan_batch_ops(ops_file)?;
+            let (before, after) = projections::project_batch(system, &doc_path, config, &ops)?;
+            emit_plan_report("batch", &before, &after, config, json_mode)
+        }
         PlanAction::Comment {
             path,
             content,
@@ -1862,11 +1893,92 @@ fn cmd_plan(
                 projections::project_edit(system, &doc_path, config, id, content)?;
             emit_plan_report("edit", &before, &after, config, json_mode)
         }
-        PlanAction::Migrate => bail_plan_not_yet_wired("migrate"),
-        PlanAction::Purge => bail_plan_not_yet_wired("purge"),
-        PlanAction::SandboxAdd => bail_plan_not_yet_wired("sandbox-add"),
-        PlanAction::SandboxRemove => bail_plan_not_yet_wired("sandbox-remove"),
+        PlanAction::Migrate { path } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let (before, after) = projections::project_migrate(system, &doc_path, config)?;
+            emit_plan_report("migrate", &before, &after, config, json_mode)
+        }
+        PlanAction::Purge { path } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let (before, after) = projections::project_purge(system, &doc_path, config)?;
+            emit_plan_report("purge", &before, &after, config, json_mode)
+        }
+        PlanAction::SandboxAdd { path } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let (before, after) = projections::project_sandbox_add(system, &doc_path, config)?;
+            emit_plan_report("sandbox-add", &before, &after, config, json_mode)
+        }
+        PlanAction::SandboxRemove { path } => {
+            let doc_path = resolve_doc_path(system, cwd, path)?;
+            let (before, after) = projections::project_sandbox_remove(system, &doc_path, config)?;
+            emit_plan_report("sandbox-remove", &before, &after, config, json_mode)
+        }
     }
+}
+
+/// Read a JSON file (or stdin when `path == "-"`) into a vector of
+/// [`projections::ProjectBatchOp`] values for `plan batch`.
+fn read_plan_batch_ops(path: &str) -> Result<Vec<projections::ProjectBatchOp>> {
+    let json_text = if path == "-" {
+        read_stdin()?
+    } else {
+        fs::read_to_string(path).with_context(|| format!("reading plan batch ops file {path}"))?
+    };
+    let raw: Value =
+        serde_json::from_str(&json_text).context("parsing plan batch ops JSON body")?;
+    let arr = raw
+        .as_array()
+        .context("plan batch ops JSON must be an array of objects")?;
+
+    let mut ops: Vec<projections::ProjectBatchOp> = Vec::with_capacity(arr.len());
+    for (idx, entry) in arr.iter().enumerate() {
+        let obj = entry
+            .as_object()
+            .with_context(|| format!("plan batch ops[{idx}] must be an object"))?;
+        let content = obj
+            .get("content")
+            .and_then(Value::as_str)
+            .with_context(|| format!("plan batch ops[{idx}].content is required"))?;
+        let mut op = projections::ProjectBatchOp::new(String::from(content));
+        op.reply_to = obj
+            .get("reply_to")
+            .and_then(Value::as_str)
+            .map(String::from);
+        op.after_comment = obj
+            .get("after_comment")
+            .and_then(Value::as_str)
+            .map(String::from);
+        op.after_line = obj
+            .get("after_line")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+        op.auto_ack = obj
+            .get("auto_ack")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        op.attachment_filenames = obj
+            .get("attach_names")
+            .and_then(Value::as_array)
+            .map(|v| {
+                v.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        op.to = obj
+            .get("to")
+            .and_then(Value::as_array)
+            .map(|v| {
+                v.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        ops.push(op);
+    }
+    Ok(ops)
 }
 
 /// Per-op helper: `plan write` projection + `PlanReport` emission (rem-imc).
@@ -1980,11 +2092,6 @@ fn emit_plan_report(
     let report = plan_ops::project_report(op_label, before, after, config, identity);
     let value = serde_json::to_value(&report).context("serializing plan report")?;
     print_output(json_mode, &value)
-}
-
-/// Shared bail for the not-yet-wired plan actions (rem-bhk follow-ups).
-fn bail_plan_not_yet_wired(op_label: &str) -> Result<()> {
-    anyhow::bail!("plan {op_label}: per-op wiring not yet landed (tracked under rem-bhk)")
 }
 
 /// Build a [`plan_ops::PlanIdentity`] from the active resolved config.

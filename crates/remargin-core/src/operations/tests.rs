@@ -8,7 +8,7 @@ use os_shim::mock::MockSystem;
 use crate::config::{Mode, ResolvedConfig};
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, projections,
-    react,
+    react, sandbox as sandbox_ops,
 };
 use crate::parser::{self, AuthorType};
 use crate::writer::InsertPosition;
@@ -2011,4 +2011,263 @@ fn project_edit_cascades_ack_clear_to_descendants() {
     assert!(after.find_comment("root").unwrap().ack.is_empty());
     // child1 is a descendant of root — ack cleared via the cascade.
     assert!(after.find_comment("child1").unwrap().ack.is_empty());
+}
+
+// --------------------------------------------------------------------
+// project_batch / project_purge / project_migrate / project_sandbox_*
+// (rem-qll): composite + destructive ops that sit on top of the
+// lightweight projections.
+// --------------------------------------------------------------------
+
+/// Seed a two-comment document by creating each comment via the real
+/// `create_comment` helper so checksums and frontmatter match what
+/// `verify` expects (same pattern as [`seed_with_comment`] below,
+/// extended to produce a second comment).
+fn seed_two_comments() -> (MockSystem, ResolvedConfig, String, String) {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let pos = InsertPosition::Append;
+
+    let first = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams::new("First comment.", &pos),
+    )
+    .unwrap();
+    let second = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams::new("Second comment.", &pos),
+    )
+    .unwrap();
+    (system, config, first, second)
+}
+
+/// Seed a one-comment document via the real `create_comment` helper
+/// so subsequent plan projections see a verify-clean baseline.
+fn seed_with_comment() -> (MockSystem, ResolvedConfig, String) {
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let pos = InsertPosition::Append;
+    let id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams::new("First comment.", &pos),
+    )
+    .unwrap();
+    (system, config, id)
+}
+
+#[test]
+fn project_batch_applies_sub_ops_in_order_without_mutating_disk() {
+    let (system, config, _first) = seed_with_comment();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let ops = vec![
+        projections::ProjectBatchOp::new(String::from("Second.")),
+        projections::ProjectBatchOp::new(String::from("Third.")),
+    ];
+    let (before, after) =
+        projections::project_batch(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
+
+    // Sanity on the before/after pair.
+    assert_eq!(before.comments().len(), 1);
+    assert_eq!(after.comments().len(), 3);
+
+    // Disk must be untouched.
+    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(before_bytes, after_bytes, "plan batch must not write disk");
+}
+
+#[test]
+fn project_batch_auto_ack_without_reply_rejects_with_index() {
+    let (system, config, _first) = seed_with_comment();
+
+    let mut op = projections::ProjectBatchOp::new(String::from("Missing reply_to."));
+    op.auto_ack = true;
+    let err = projections::project_batch(&system, Path::new("/docs/test.md"), &config, &[op])
+        .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("sub-op 0"),
+        "rejection must name the failing sub-op index: {msg}"
+    );
+}
+
+#[test]
+fn project_batch_reply_auto_acks_parent() {
+    let (system, config, first) = seed_with_comment();
+
+    let mut reply = projections::ProjectBatchOp::new(String::from("Reply."));
+    reply.reply_to = Some(first.clone());
+    reply.auto_ack = true;
+    let (_before, after) =
+        projections::project_batch(&system, Path::new("/docs/test.md"), &config, &[reply]).unwrap();
+
+    let parent = after.find_comment(&first).unwrap();
+    assert!(
+        parent.ack.iter().any(|a| a.author == "eduardo"),
+        "parent must be auto-acked by the plan projection"
+    );
+}
+
+#[test]
+fn project_purge_strips_every_comment_without_writing_disk() {
+    let (system, config, _first, _second) = seed_two_comments();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let (before, after) =
+        projections::project_purge(&system, Path::new("/docs/test.md"), &config).unwrap();
+
+    assert_eq!(before.comments().len(), 2);
+    assert!(
+        after.comments().is_empty(),
+        "project_purge must strip every comment"
+    );
+
+    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
+}
+
+#[test]
+fn project_migrate_no_op_when_no_legacy_comments() {
+    let (system, config, _first) = seed_with_comment();
+
+    let (before, after) =
+        projections::project_migrate(&system, Path::new("/docs/test.md"), &config).unwrap();
+
+    assert_eq!(
+        before.to_markdown(),
+        after.to_markdown(),
+        "migrate with no legacy comments must be a noop"
+    );
+}
+
+#[test]
+fn project_migrate_converts_legacy_markers_to_comments() {
+    let content = "\
+# Test
+
+```agent comments [done:2026-04-05]
+Agent response from the before-times.
+```
+";
+    let system = system_with_doc(content);
+    let config = open_config();
+
+    let (before, after) =
+        projections::project_migrate(&system, Path::new("/docs/test.md"), &config).unwrap();
+
+    assert!(
+        !before.legacy_comments().is_empty(),
+        "fixture must parse as at least one legacy comment"
+    );
+    assert!(
+        after.legacy_comments().is_empty(),
+        "every legacy marker must be converted"
+    );
+    assert_eq!(
+        after.comments().len(),
+        1,
+        "one legacy marker must produce one comment"
+    );
+    let new_cm = &after.comments()[0];
+    assert_eq!(new_cm.author, "legacy-agent");
+    assert!(
+        !new_cm.ack.is_empty(),
+        "`[done:DATE]` must produce an ack entry"
+    );
+}
+
+#[test]
+fn project_sandbox_add_projects_frontmatter_entry() {
+    let (system, config, _first) = seed_with_comment();
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
+    let (_before, after) =
+        projections::project_sandbox_add(&system, Path::new("/docs/test.md"), &config).unwrap();
+
+    assert!(
+        after.to_markdown().contains("sandbox:"),
+        "sandbox-add projection must rewrite the frontmatter"
+    );
+    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_bytes,
+        "plan sandbox-add must not write disk"
+    );
+}
+
+#[test]
+fn project_sandbox_add_is_idempotent_second_call_is_noop() {
+    let (system, config, _first) = seed_with_comment();
+
+    // First projection — not idempotent against the on-disk doc yet.
+    let (_b1, _a1) =
+        projections::project_sandbox_add(&system, Path::new("/docs/test.md"), &config).unwrap();
+
+    // Actually stage the sandbox on disk so the second projection sees
+    // an existing entry.
+    sandbox_ops::add_to_files(
+        &system,
+        &[PathBuf::from("/docs/test.md")],
+        "eduardo",
+        &config,
+    )
+    .unwrap();
+
+    let (before, after) =
+        projections::project_sandbox_add(&system, Path::new("/docs/test.md"), &config).unwrap();
+    assert_eq!(
+        before.to_markdown(),
+        after.to_markdown(),
+        "second sandbox-add must project a noop when an entry already exists"
+    );
+}
+
+#[test]
+fn project_sandbox_remove_clears_entry_without_writing_disk() {
+    let (system, config, _first) = seed_with_comment();
+    sandbox_ops::add_to_files(
+        &system,
+        &[PathBuf::from("/docs/test.md")],
+        "eduardo",
+        &config,
+    )
+    .unwrap();
+
+    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert!(before_bytes.contains("sandbox:"));
+
+    let (before, after) =
+        projections::project_sandbox_remove(&system, Path::new("/docs/test.md"), &config).unwrap();
+    assert!(before.to_markdown().contains("sandbox:"));
+    assert!(
+        !after.to_markdown().contains("sandbox:"),
+        "sandbox-remove must strip the frontmatter key when it was the only entry"
+    );
+
+    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_bytes,
+        "plan sandbox-remove must not write disk"
+    );
+}
+
+#[test]
+fn project_sandbox_add_rejects_non_markdown_path() {
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/test.txt"), b"not markdown")
+        .unwrap();
+    let config = open_config();
+
+    let err = projections::project_sandbox_add(&system, Path::new("/docs/test.txt"), &config)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("not a markdown file"),
+        "expected `not a markdown file` error, got: {err}"
+    );
 }

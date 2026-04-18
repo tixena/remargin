@@ -21,8 +21,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
-use chrono::Utc;
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone as _, Utc};
 use os_shim::System;
+use serde_yaml::Value;
 
 use crate::config::ResolvedConfig;
 use crate::crypto::compute_checksum;
@@ -32,8 +33,45 @@ use crate::linter;
 use crate::operations::{
     collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
 };
-use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{
+    self, Acknowledgment, AuthorType, Comment, LegacyRole, ParsedDocument, Segment,
+};
 use crate::writer::{self, InsertPosition};
+
+/// One sub-op inside a [`project_batch`] request: same shape as
+/// [`crate::operations::batch::BatchCommentOp`] except attachments become
+/// `attachment_filenames` (plan never copies bytes).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ProjectBatchOp {
+    pub after_comment: Option<String>,
+    pub after_line: Option<usize>,
+    /// File names (not paths) to record on the projected comment. Plan
+    /// never copies bytes — the caller supplies the basenames it expects
+    /// to land in the assets directory.
+    pub attachment_filenames: Vec<String>,
+    pub auto_ack: bool,
+    pub content: String,
+    pub reply_to: Option<String>,
+    pub to: Vec<String>,
+}
+
+impl ProjectBatchOp {
+    /// Minimum-viable sub-op with just content. Other fields default to
+    /// empty / false.
+    #[must_use]
+    pub const fn new(content: String) -> Self {
+        Self {
+            after_comment: None,
+            after_line: None,
+            attachment_filenames: Vec::new(),
+            auto_ack: false,
+            content,
+            reply_to: None,
+            to: Vec::new(),
+        }
+    }
+}
 
 /// Parameters for [`project_comment`]: mirror of
 /// [`crate::operations::CreateCommentParams`] minus `attachments` (which
@@ -155,6 +193,142 @@ pub fn project_ack(
                 author: String::from(identity),
                 ts: now,
             });
+        }
+    }
+
+    frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    Ok((before, after))
+}
+
+/// Projection sibling of [`crate::operations::batch::batch_comment`].
+///
+/// Applies every sub-op to an in-memory copy of the document in order,
+/// using the same `after_line` shift bookkeeping the real op does. No
+/// disk writes, no attachment copies, no signatures.
+///
+/// Per rem-qll, the real `batch_comment` is atomic: if any sub-op fails,
+/// nothing is written. The projection mirrors that: the first sub-op
+/// whose preflight rejects stops the walk — earlier sub-ops remain
+/// applied in the returned `after` so the caller can see the partial
+/// state, but the caller is expected to inspect the returned error and
+/// act accordingly. Per-sub-op preflight errors are surfaced prefixed
+/// with the failing sub-op index so callers can route the rejection
+/// back to the offending entry.
+///
+/// # Errors
+///
+/// Surfaces the same preflight diagnostics `batch_comment` would:
+/// missing identity, post-permission rejection, malformed linter state,
+/// any sub-op's `auto_ack` without `reply_to`, or a sub-op's
+/// `reply_to` pointing at a missing parent.
+pub fn project_batch(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+    operations: &[ProjectBatchOp],
+) -> Result<(ParsedDocument, ParsedDocument)> {
+    let identity = config
+        .identity
+        .as_deref()
+        .context("identity is required to create comments")?;
+
+    config.can_post(identity)?;
+
+    let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
+
+    let (before, mut after) = parse_file_twice(system, path)?;
+
+    let markdown_before = after.to_markdown();
+    linter::lint_or_fail(&markdown_before)
+        .context("document has structural issues before plan batch")?;
+
+    // Preflight the whole list before any mutation so we surface the
+    // failing sub-op index without leaving half the ops applied in
+    // `after` on a preventable rejection.
+    for (idx, op) in operations.iter().enumerate() {
+        if op.auto_ack && op.reply_to.is_none() {
+            bail!("batch sub-op {idx}: auto_ack requires reply_to");
+        }
+    }
+
+    let now = Utc::now().fixed_offset();
+    let mut line_shifts: Vec<(usize, usize)> = Vec::new();
+
+    for (idx, op) in operations.iter().enumerate() {
+        let existing_ids = after.comment_ids();
+        let new_id = id::generate(&existing_ids);
+        let checksum = compute_checksum(&op.content);
+
+        let thread = op.reply_to.as_deref().map(|parent_id| {
+            after
+                .find_comment(parent_id)
+                .and_then(|parent| parent.thread.clone())
+                .unwrap_or_else(|| String::from(parent_id))
+        });
+
+        let resolved_attachments: Vec<String> = op
+            .attachment_filenames
+            .iter()
+            .map(|fname| format!("{}/{fname}", config.assets_dir))
+            .collect();
+
+        let effective_to: Vec<String> = if op.to.is_empty() {
+            op.reply_to
+                .as_deref()
+                .and_then(|pid| after.find_comment(pid))
+                .map_or_else(Vec::new, |parent| vec![parent.author.clone()])
+        } else {
+            op.to.clone()
+        };
+
+        let comment = Comment {
+            ack: Vec::new(),
+            attachments: resolved_attachments,
+            author: String::from(identity),
+            author_type: author_type.clone(),
+            checksum,
+            content: op.content.clone(),
+            id: new_id,
+            line: 0,
+            reactions: BTreeMap::default(),
+            reply_to: op.reply_to.clone(),
+            signature: None,
+            thread,
+            to: effective_to,
+            ts: now,
+        };
+
+        let position = resolve_batch_position(op, &line_shifts);
+        let lines_before = after.to_markdown().matches('\n').count();
+
+        writer::insert_comment(&mut after, comment, &position)
+            .with_context(|| format!("batch sub-op {idx}: inserting comment"))?;
+
+        if op.auto_ack
+            && let Some(parent_id) = op.reply_to.as_deref()
+        {
+            let lines_before_ack = after.to_markdown().matches('\n').count();
+            let parent = find_comment_mut(&mut after, parent_id).with_context(|| {
+                format!("batch sub-op {idx}: auto-ack parent {parent_id:?} not found")
+            })?;
+            parent.ack.push(Acknowledgment {
+                author: String::from(identity),
+                ts: now,
+            });
+            let lines_after_ack = after.to_markdown().matches('\n').count();
+            let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
+            if ack_lines_added > 0
+                && let Some(parent_cm) = after.find_comment(parent_id)
+            {
+                line_shifts.push((parent_cm.line, ack_lines_added));
+            }
+        }
+
+        if let Some(original_target) = op.after_line {
+            let lines_after = after.to_markdown().matches('\n').count();
+            let lines_added = lines_after.saturating_sub(lines_before);
+            line_shifts.push((original_target, lines_added));
         }
     }
 
@@ -368,6 +542,132 @@ pub fn project_edit(
     Ok((before, after))
 }
 
+/// Projection sibling of [`crate::operations::migrate::migrate`].
+///
+/// Walks the document, converting every `LegacyComment` segment into a
+/// `Comment` with a freshly generated id, the derived content checksum,
+/// and — when the legacy marker carried a `[done:DATE]` — a single
+/// `Acknowledgment` row. The real op also writes a `.md.bak` when
+/// `backup` is set; the projection never copies bytes.
+///
+/// `after` is byte-identical to `before` when there are no legacy
+/// comments, giving a clean `noop` verdict.
+///
+/// # Errors
+///
+/// Surfaces the same diagnostics `migrate` would on its pre-commit path:
+/// frontmatter issues.
+pub fn project_migrate(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+) -> Result<(ParsedDocument, ParsedDocument)> {
+    let (before, mut after) = parse_file_twice(system, path)?;
+
+    if after.legacy_comments().is_empty() {
+        frontmatter::ensure_frontmatter(&mut after, config)?;
+        return Ok((before, after));
+    }
+
+    let now = Utc::now().fixed_offset();
+    let mut new_segments: Vec<Segment> = Vec::new();
+
+    for seg in &after.segments {
+        match seg {
+            Segment::LegacyComment(lc) => {
+                let existing_ids: HashSet<&str> = new_segments
+                    .iter()
+                    .filter_map(|s| match s {
+                        Segment::Comment(cm) => Some(cm.id.as_str()),
+                        Segment::Body(_) | Segment::LegacyComment(_) => None,
+                    })
+                    .collect();
+                let new_id = id::generate(&existing_ids);
+
+                let (author, author_type) = match lc.role {
+                    LegacyRole::User => (String::from("legacy-user"), AuthorType::Human),
+                    LegacyRole::Agent => (String::from("legacy-agent"), AuthorType::Agent),
+                };
+
+                let ack = lc
+                    .done_date
+                    .as_ref()
+                    .and_then(|date_str| parse_legacy_done_date(date_str))
+                    .map(|ts| {
+                        let ack_author = match lc.role {
+                            LegacyRole::User => "legacy-agent",
+                            LegacyRole::Agent => "legacy-user",
+                        };
+                        vec![Acknowledgment {
+                            author: String::from(ack_author),
+                            ts,
+                        }]
+                    })
+                    .unwrap_or_default();
+
+                let checksum = compute_checksum(&lc.content);
+
+                let comment = Comment {
+                    ack,
+                    attachments: Vec::new(),
+                    author,
+                    author_type,
+                    checksum,
+                    content: lc.content.clone(),
+                    id: new_id,
+                    line: 0,
+                    reactions: BTreeMap::default(),
+                    reply_to: None,
+                    signature: None,
+                    thread: None,
+                    to: Vec::new(),
+                    ts: now,
+                };
+                new_segments.push(Segment::Comment(Box::new(comment)));
+            }
+            Segment::Body(text) => new_segments.push(Segment::Body(text.clone())),
+            Segment::Comment(cm) => new_segments.push(Segment::Comment(cm.clone())),
+        }
+    }
+
+    after.segments = new_segments;
+
+    frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    Ok((before, after))
+}
+
+/// Projection sibling of [`crate::operations::purge::purge`].
+///
+/// Strips every `Comment` and `LegacyComment` segment from the document,
+/// collapses the remaining body text, and removes every `remargin_*`
+/// frontmatter key. Does *not* delete attachment files from disk — plan
+/// stays side-effect-free, and a caller acting on the report is expected
+/// to run the real `purge` afterwards.
+///
+/// # Errors
+///
+/// Surfaces the same diagnostics `purge` would on its pre-commit path:
+/// frontmatter issues.
+pub fn project_purge(
+    system: &dyn System,
+    path: &Path,
+    _config: &ResolvedConfig,
+) -> Result<(ParsedDocument, ParsedDocument)> {
+    let (before, mut after) = parse_file_twice(system, path)?;
+
+    after.segments.retain(|seg| matches!(seg, Segment::Body(_)));
+
+    collapse_body_segments(&mut after.segments);
+
+    clean_remargin_frontmatter(&mut after);
+
+    // `purge` strips all comments and removes `remargin_*` frontmatter
+    // keys; we *don't* call `ensure_frontmatter` here because that would
+    // re-inject the `remargin_version` key we just removed.
+    Ok((before, after))
+}
+
 /// Projection sibling of [`crate::operations::react`].
 ///
 /// Returns the `(before, after)` pair without touching disk.
@@ -417,6 +717,188 @@ pub fn project_react(
     frontmatter::ensure_frontmatter(&mut after, config)?;
 
     Ok((before, after))
+}
+
+/// Projection sibling of [`crate::operations::sandbox::add_to_files`]
+/// operating on a single document.
+///
+/// Adds the caller's identity + now timestamp to the `sandbox:`
+/// frontmatter list if absent. Idempotent: an existing entry for the
+/// caller leaves the file unchanged (projection returns a noop plan).
+///
+/// Non-markdown paths fail with `not a markdown file` — same as the real
+/// op. The projection operates on a single file because `plan` is a
+/// pre-commit prediction for one document; callers that want bulk
+/// behavior run the plan once per file.
+///
+/// # Errors
+///
+/// Surfaces the same preflight diagnostics `add_to_files` would:
+/// empty identity, non-markdown path, missing frontmatter.
+pub fn project_sandbox_add(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+) -> Result<(ParsedDocument, ParsedDocument)> {
+    let identity = config
+        .identity
+        .as_deref()
+        .context("identity is required for sandbox add")?;
+    if identity.is_empty() {
+        bail!("identity is required for sandbox add");
+    }
+    ensure_markdown_path(path)?;
+
+    let (before, mut after) = parse_file_twice(system, path)?;
+
+    let now = Utc::now().fixed_offset();
+    let mut entries = frontmatter::read_sandbox_entries(&after)?;
+    let added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
+    if added {
+        frontmatter::write_sandbox_entries(&mut after, &entries)?;
+    }
+
+    frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    Ok((before, after))
+}
+
+/// Projection sibling of [`crate::operations::sandbox::remove_from_files`]
+/// operating on a single document.
+///
+/// Removes the caller's sandbox entry if present. Idempotent: a file
+/// with no matching entry projects as a noop. When the caller's entry is
+/// the last one, the entire `sandbox:` key is removed from the
+/// frontmatter (matches the real op's empty-collapse behavior).
+///
+/// # Errors
+///
+/// Surfaces the same preflight diagnostics `remove_from_files` would:
+/// empty identity, non-markdown path, missing frontmatter.
+pub fn project_sandbox_remove(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+) -> Result<(ParsedDocument, ParsedDocument)> {
+    let identity = config
+        .identity
+        .as_deref()
+        .context("identity is required for sandbox remove")?;
+    if identity.is_empty() {
+        bail!("identity is required for sandbox remove");
+    }
+    ensure_markdown_path(path)?;
+
+    let (before, mut after) = parse_file_twice(system, path)?;
+
+    let mut entries = frontmatter::read_sandbox_entries(&after)?;
+    let removed = frontmatter::remove_sandbox_entry_for(&mut entries, identity);
+    if removed {
+        frontmatter::write_sandbox_entries(&mut after, &entries)?;
+    }
+
+    frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    Ok((before, after))
+}
+
+/// Strip every `remargin_*` key from the first Body segment if it starts
+/// with a YAML frontmatter block. Mirrors the private helper in
+/// `purge.rs` so the projection lands the same bytes as the real op.
+fn clean_remargin_frontmatter(doc: &mut ParsedDocument) {
+    let Some(Segment::Body(text)) = doc.segments.first() else {
+        return;
+    };
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("---") {
+        return;
+    }
+
+    let lines: Vec<&str> = text.split('\n').collect();
+    let opener = lines.iter().position(|line| line.trim() == "---");
+    let Some(opener_idx) = opener else {
+        return;
+    };
+    let closer = lines
+        .iter()
+        .enumerate()
+        .skip(opener_idx + 1)
+        .find(|(_, line)| line.trim() == "---")
+        .map(|(i, _)| i);
+    let Some(closer_idx) = closer else {
+        return;
+    };
+
+    let yaml_str: String = lines[opener_idx + 1..closer_idx].join("\n");
+    let parsed: Result<Value, _> = serde_yaml::from_str(&yaml_str);
+    let Ok(Value::Mapping(mut mapping)) = parsed else {
+        return;
+    };
+
+    let keys_to_remove: Vec<Value> = mapping
+        .keys()
+        .filter(|key| key.as_str().is_some_and(|s| s.starts_with("remargin_")))
+        .cloned()
+        .collect();
+    for key in &keys_to_remove {
+        let _: Option<Value> = mapping.remove(key);
+    }
+
+    if mapping.is_empty() {
+        let remaining = lines[closer_idx + 1..].join("\n");
+        let cleaned = remaining.trim_start_matches('\n');
+        doc.segments[0] = Segment::Body(String::from(cleaned));
+    } else {
+        let new_yaml = serde_yaml::to_string(&Value::Mapping(mapping)).unwrap_or_default();
+        let after_fm = lines[closer_idx + 1..].join("\n");
+        let new_body = format!("---\n{new_yaml}---\n{after_fm}");
+        doc.segments[0] = Segment::Body(new_body);
+    }
+}
+
+/// Ensure `path` has an `.md` extension. Mirrors the private helper in
+/// `sandbox.rs`.
+fn ensure_markdown_path(path: &Path) -> Result<()> {
+    let is_md = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+    if !is_md {
+        bail!("not a markdown file");
+    }
+    Ok(())
+}
+
+/// Parse a `[done:DATE]` date string into a `FixedOffset` timestamp.
+/// Mirrors the private helper in `migrate.rs`.
+fn parse_legacy_done_date(date_str: &str) -> Option<DateTime<FixedOffset>> {
+    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()?;
+    let naive_dt = date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
+    Some(Utc.from_utc_datetime(&naive_dt).fixed_offset())
+}
+
+/// Resolve the insertion position for a batch sub-op, adjusting any
+/// `after_line` target for lines added by previous insertions in the
+/// same batch. Mirrors the private helper in
+/// [`crate::operations::batch`]. `reply_to` always wins over explicit
+/// placement (matches the real op's semantics).
+fn resolve_batch_position(op: &ProjectBatchOp, line_shifts: &[(usize, usize)]) -> InsertPosition {
+    if let Some(parent_id) = &op.reply_to {
+        return InsertPosition::AfterComment(parent_id.clone());
+    }
+    if let Some(after_comment) = &op.after_comment {
+        return InsertPosition::AfterComment(after_comment.clone());
+    }
+    if let Some(target) = op.after_line {
+        let mut adjusted = target;
+        for &(prev_target, lines_added) in line_shifts {
+            if target >= prev_target {
+                adjusted += lines_added;
+            }
+        }
+        return InsertPosition::AfterLine(adjusted);
+    }
+    InsertPosition::Append
 }
 
 /// Parse a file from disk into two independent [`ParsedDocument`] values.

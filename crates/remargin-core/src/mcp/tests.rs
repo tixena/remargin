@@ -2274,6 +2274,228 @@ fn mcp_plan_edit_missing_comment_errors() {
 }
 
 #[test]
+fn mcp_plan_batch_projects_two_sub_ops() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "batch",
+                    "file": "doc.md",
+                    "ops": [
+                        { "content": "first new" },
+                        { "content": "second new" }
+                    ]
+                }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan batch should succeed: {response}"
+    );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert_eq!(report["op"], "batch");
+    assert_eq!(
+        report["comments"]["added"].as_array().unwrap().len(),
+        2,
+        "two sub-ops must produce two added comment ids"
+    );
+
+    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert_eq!(before_bytes, after_bytes, "plan batch must not write disk");
+}
+
+#[test]
+fn mcp_plan_batch_requires_ops_array() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "batch", "file": "doc.md" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("ops"),
+        "error message must mention missing `ops` array: {msg}"
+    );
+}
+
+#[test]
+fn mcp_plan_purge_destroys_every_comment_id() {
+    let base = Path::new("/docs");
+    let (system, config, id) = seed_real_comment(base, "doc.md");
+    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "purge", "file": "doc.md" }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan purge should succeed: {response}"
+    );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert_eq!(report["op"], "purge");
+    let destroyed: Vec<String> = report["comments"]["destroyed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| String::from(v.as_str().unwrap()))
+        .collect();
+    assert!(
+        destroyed.contains(&id),
+        "purge must destroy the seeded comment: {destroyed:?}"
+    );
+
+    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
+}
+
+#[test]
+fn mcp_plan_migrate_no_op_without_legacy_comments() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "migrate", "file": "doc.md" }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan migrate should succeed: {response}"
+    );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert_eq!(report["op"], "migrate");
+    assert!(
+        report["noop"].as_bool().unwrap(),
+        "migrate on a doc with no legacy markers must be a noop"
+    );
+}
+
+#[test]
+fn mcp_plan_sandbox_add_rewrites_frontmatter() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "sandbox-add", "file": "doc.md" }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan sandbox-add should succeed: {response}"
+    );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert_eq!(report["op"], "sandbox-add");
+    assert!(
+        !report["noop"].as_bool().unwrap(),
+        "sandbox-add against a clean doc must land a non-noop plan"
+    );
+
+    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert_eq!(
+        before_bytes, after_bytes,
+        "plan sandbox-add must not write disk"
+    );
+}
+
+#[test]
+fn mcp_plan_sandbox_remove_noop_when_not_present() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "sandbox-remove", "file": "doc.md" }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan sandbox-remove should succeed: {response}"
+    );
+    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
+    assert_eq!(report["op"], "sandbox-remove");
+    assert!(
+        report["noop"].as_bool().unwrap(),
+        "sandbox-remove on a doc without the caller's entry must be a noop"
+    );
+}
+
+#[test]
 fn mcp_plan_rejects_unknown_op() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
