@@ -15,7 +15,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
-use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment, required_fence_depth};
+use crate::parser::{self, Comment, ParsedDocument, Segment, required_fence_depth};
 
 /// Where to insert a new comment in a document.
 #[derive(Debug)]
@@ -27,6 +27,32 @@ pub enum InsertPosition {
     AfterLine(usize),
     /// Place at the end of the document.
     Append,
+}
+
+impl InsertPosition {
+    /// Canonical priority-based builder used by every adapter (CLI + MCP)
+    /// to turn the three placement knobs (`reply_to`, `after_comment`,
+    /// `after_line`) into an [`InsertPosition`] (rem-3a2).
+    ///
+    /// Precedence: replies always go after their parent (explicit
+    /// placement is ignored for replies); `after_comment` beats
+    /// `after_line`; absence of all three falls back to
+    /// [`InsertPosition::Append`]. Keeping the rule in one place prevents
+    /// adapter-layer drift on insertion semantics.
+    #[must_use]
+    pub fn from_hints(
+        reply_to: Option<&str>,
+        after_comment: Option<&str>,
+        after_line: Option<usize>,
+    ) -> Self {
+        if let Some(parent_id) = reply_to {
+            return Self::AfterComment(String::from(parent_id));
+        }
+        if let Some(after_id) = after_comment {
+            return Self::AfterComment(String::from(after_id));
+        }
+        after_line.map_or(Self::Append, Self::AfterLine)
+    }
 }
 
 /// Serialize a `Comment` into a remargin fenced code block string.
@@ -46,11 +72,7 @@ pub fn serialize_comment(comment: &Comment) -> String {
     // Required fields in canonical order.
     let _ = writeln!(out, "id: {}", comment.id);
     let _ = writeln!(out, "author: {}", comment.author);
-    let type_str = match comment.author_type {
-        AuthorType::Human => "human",
-        AuthorType::Agent => "agent",
-    };
-    let _ = writeln!(out, "type: {type_str}");
+    let _ = writeln!(out, "type: {}", comment.author_type.as_str());
     let _ = writeln!(out, "ts: {}", comment.ts.to_rfc3339());
 
     // Optional fields (only emit if non-default).

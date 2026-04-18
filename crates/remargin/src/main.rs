@@ -857,11 +857,7 @@ fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathB
 }
 
 const fn author_type_str(at: &parser::AuthorType) -> &'static str {
-    match at {
-        parser::AuthorType::Human => "human",
-        parser::AuthorType::Agent => "agent",
-        _ => "unknown",
-    }
+    at.as_str()
 }
 
 fn truncate_content(content: &str, max_len: usize) -> String {
@@ -1363,15 +1359,7 @@ fn resolve_comment_position(
     after_comment: Option<&str>,
     after_line: Option<usize>,
 ) -> InsertPosition {
-    reply_to.map_or_else(
-        || {
-            after_comment.map_or_else(
-                || after_line.map_or(InsertPosition::Append, InsertPosition::AfterLine),
-                |ac| InsertPosition::AfterComment(String::from(ac)),
-            )
-        },
-        |parent_id| InsertPosition::AfterComment(String::from(parent_id)),
-    )
+    InsertPosition::from_hints(reply_to, after_comment, after_line)
 }
 
 fn cmd_comment(
@@ -2010,7 +1998,7 @@ fn cmd_plan_write(
         .lines(line_range)
         .raw(raw);
     let projection = document::project_write(system, cwd, Path::new(path), &body, config, opts)?;
-    let identity = build_plan_identity(config);
+    let identity = plan_ops::PlanIdentity::from_config(config);
     let report = match projection {
         document::WriteProjection::Markdown {
             before,
@@ -2088,28 +2076,10 @@ fn emit_plan_report(
     config: &ResolvedConfig,
     json_mode: bool,
 ) -> Result<()> {
-    let identity = build_plan_identity(config);
+    let identity = plan_ops::PlanIdentity::from_config(config);
     let report = plan_ops::project_report(op_label, before, after, config, identity);
     let value = serde_json::to_value(&report).context("serializing plan report")?;
     print_output(json_mode, &value)
-}
-
-/// Build a [`plan_ops::PlanIdentity`] from the active resolved config.
-///
-/// `would_sign` is `true` when a key path is configured. We do not load
-/// the key here — that would cost a disk read and/or a password prompt,
-/// and per rem-bhk `plan` must stay side-effect-free.
-fn build_plan_identity(config: &ResolvedConfig) -> plan_ops::PlanIdentity {
-    let author_type = config.author_type.as_ref().map(|t| match t {
-        parser::AuthorType::Agent => String::from("agent"),
-        parser::AuthorType::Human => String::from("human"),
-        _ => String::from("unknown"),
-    });
-    plan_ops::PlanIdentity::new(
-        config.identity.clone(),
-        author_type,
-        config.key_path.is_some(),
-    )
 }
 
 fn cmd_purge(
@@ -2184,11 +2154,7 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
                 } else {
                     "acked"
                 };
-                let author_type = match cm.author_type {
-                    parser::AuthorType::Agent => "agent",
-                    parser::AuthorType::Human => "human",
-                    _ => "unknown",
-                };
+                let author_type = cm.author_type.as_str();
                 out(&format!(
                     "  {} {} ({}) [{}] {}",
                     cm.id, cm.author, author_type, status, cm.content,

@@ -47,6 +47,21 @@ pub enum AuthorType {
     Human,
 }
 
+impl AuthorType {
+    /// Canonical lowercase name for the author type, matching the YAML
+    /// representation and the CLI / MCP JSON output.
+    ///
+    /// The enum is `#[non_exhaustive]`; if a future variant is added,
+    /// extend the match below with the new variant's canonical name.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Human => "human",
+        }
+    }
+}
+
 /// A parsed Remargin comment with all metadata fields.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
@@ -281,11 +296,7 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
 
     let _ = writeln!(out, "id: {}", cm.id);
     let _ = writeln!(out, "author: {}", cm.author);
-    let type_str = match cm.author_type {
-        AuthorType::Human => "human",
-        AuthorType::Agent => "agent",
-    };
-    let _ = writeln!(out, "type: {type_str}");
+    let _ = writeln!(out, "type: {}", cm.author_type.as_str());
     let _ = writeln!(out, "ts: {}", cm.ts.to_rfc3339());
     let _ = writeln!(out, "checksum: {}", cm.checksum);
 

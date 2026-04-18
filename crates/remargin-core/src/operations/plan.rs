@@ -121,6 +121,18 @@ pub struct PlanIdentity {
 }
 
 impl PlanIdentity {
+    /// Canonical builder shared by every adapter (CLI + MCP).
+    ///
+    /// `would_sign` is `true` when a key path is configured. The key is
+    /// not loaded here — `plan` stays side-effect-free per rem-bhk. Both
+    /// adapters must use this constructor so plan reports are byte-
+    /// identical across surfaces (rem-3a2).
+    #[must_use]
+    pub fn from_config(cfg: &ResolvedConfig) -> Self {
+        let author_type = cfg.author_type.as_ref().map(|t| String::from(t.as_str()));
+        Self::new(cfg.identity.clone(), author_type, cfg.key_path.is_some())
+    }
+
     /// Build a [`PlanIdentity`] from the three fields documented in
     /// rem-bhk. The constructor exists so external crates can populate
     /// the struct without tripping `#[non_exhaustive]`.

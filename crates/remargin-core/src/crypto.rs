@@ -24,7 +24,7 @@ use os_shim::System;
 use sha2::{Digest as _, Sha256};
 use ssh_key::{HashAlg, PrivateKey, PublicKey};
 
-use crate::parser::{AuthorType, Comment, Reactions};
+use crate::parser::{Comment, Reactions};
 
 /// Namespace used for SSH signature operations (PROTOCOL.sshsig).
 const SIGNATURE_NAMESPACE: &str = "remargin";
@@ -154,11 +154,7 @@ fn signature_payload(comment: &Comment) -> String {
     let mut payload = String::new();
     let _ = writeln!(payload, "id:{}", comment.id);
     let _ = writeln!(payload, "author:{}", comment.author);
-    let type_str = match comment.author_type {
-        AuthorType::Human => "human",
-        AuthorType::Agent => "agent",
-    };
-    let _ = writeln!(payload, "type:{type_str}");
+    let _ = writeln!(payload, "type:{}", comment.author_type.as_str());
     let _ = writeln!(payload, "ts:{}", comment.ts.to_rfc3339());
     for recipient in &comment.to {
         let _ = writeln!(payload, "to:{recipient}");

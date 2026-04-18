@@ -194,6 +194,57 @@ impl ResolvedConfig {
             unrestricted: false,
         })
     }
+
+    /// Apply per-call identity overrides to an already-resolved config
+    /// (rem-3a2).
+    ///
+    /// Returns `Ok(None)` when both overrides are absent (the caller
+    /// continues to use the base config). Returns `Ok(Some(cfg))` with a
+    /// cloned and overridden config otherwise. Canonicalizes the
+    /// override-validation rules so CLI / MCP / future surfaces cannot
+    /// drift on the same knob:
+    ///
+    /// - `identity_override` replaces `identity`.
+    /// - `type_override` replaces `author_type`. When it is the only
+    ///   override supplied and disagrees with the base `author_type`, the
+    ///   call bails with the same message the config resolver emits for
+    ///   the equivalent CLI flag combination — you cannot swap roles
+    ///   without also declaring whose identity should be used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `type_override` is an unknown author type
+    /// string, or when it disagrees with the base config without an
+    /// accompanying `identity_override`.
+    pub fn with_identity_overrides(
+        &self,
+        identity_override: Option<&str>,
+        type_override: Option<&str>,
+    ) -> Result<Option<Self>> {
+        if identity_override.is_none() && type_override.is_none() {
+            return Ok(None);
+        }
+
+        let mut overridden = self.clone();
+
+        if let Some(id) = identity_override {
+            overridden.identity = Some(String::from(id));
+        }
+
+        if let Some(type_str) = type_override {
+            let new_type = parse_author_type(type_str)?;
+            if identity_override.is_none() && self.author_type.as_ref() != Some(&new_type) {
+                bail!(
+                    "author_type override {type_str:?} does not match resolved type {:?}; \
+                     provide an explicit identity",
+                    self.author_type,
+                );
+            }
+            overridden.author_type = Some(new_type);
+        }
+
+        Ok(Some(overridden))
+    }
 }
 
 /// Resolved mode with provenance, produced by [`resolve_mode`].
@@ -373,7 +424,16 @@ pub fn load_registry(system: &dyn System, start_dir: &Path) -> Result<Option<Reg
 /// # Errors
 ///
 /// Returns an error for unknown type strings.
-fn parse_author_type(type_str: &str) -> Result<AuthorType> {
+/// Parse the canonical lowercase name of an [`AuthorType`] (`"human"` or
+/// `"agent"`). Exposed publicly so per-call adapters (MCP tool handlers,
+/// future IPC surfaces) can accept the same strings the config loader does
+/// and reject unknown values identically.
+///
+/// # Errors
+///
+/// Returns an error when `type_str` is not one of the canonical lowercase
+/// names.
+pub fn parse_author_type(type_str: &str) -> Result<AuthorType> {
     match type_str {
         "human" => Ok(AuthorType::Human),
         "agent" => Ok(AuthorType::Agent),

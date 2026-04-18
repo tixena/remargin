@@ -29,7 +29,7 @@ use crate::operations::purge;
 use crate::operations::query::{self, QueryFilter};
 use crate::operations::sandbox as sandbox_ops;
 use crate::operations::search;
-use crate::parser::{self, AuthorType};
+use crate::parser;
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -676,40 +676,20 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
 ///
 /// Returns a cloned config with overrides applied if either `identity` or
 /// `author_type` is present in params. Returns `None` if no overrides.
+/// Parse the MCP `identity` / `author_type` override params and fold them
+/// onto the active [`ResolvedConfig`].
+///
+/// Delegates to [`ResolvedConfig::with_identity_overrides`] so the
+/// validation rules stay identical across every surface (rem-3a2). This
+/// function is the adapter-side shim: it extracts the two string fields
+/// from the JSON params map; the actual override semantics live in core.
 fn apply_identity_overrides(
     config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Option<ResolvedConfig>> {
     let identity_override = optional_str(params, "identity");
     let type_override = optional_str(params, "author_type");
-
-    if identity_override.is_none() && type_override.is_none() {
-        return Ok(None);
-    }
-
-    let mut overridden = config.clone();
-
-    if let Some(id) = identity_override {
-        overridden.identity = Some(String::from(id));
-    }
-
-    if let Some(type_str) = type_override {
-        let new_type = match type_str {
-            "human" => AuthorType::Human,
-            "agent" => AuthorType::Agent,
-            other => anyhow::bail!("unknown author type: {other:?}"),
-        };
-        if identity_override.is_none() && config.author_type.as_ref() != Some(&new_type) {
-            anyhow::bail!(
-                "author_type override {type_str:?} does not match resolved type {:?}; \
-                 provide an explicit identity",
-                config.author_type,
-            );
-        }
-        overridden.author_type = Some(new_type);
-    }
-
-    Ok(Some(overridden))
+    config.with_identity_overrides(identity_override, type_override)
 }
 
 /// Get the effective config, applying identity overrides if present.
@@ -721,18 +701,17 @@ fn effective_config<'cfg>(
 }
 
 /// Resolve insertion position from tool parameters.
+///
+/// Shim around [`InsertPosition::from_hints`] (rem-3a2): extracts the
+/// three placement fields from the JSON params map and delegates the
+/// actual precedence rule to core so CLI + MCP cannot disagree on where
+/// a comment lands.
 fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) -> InsertPosition {
-    // Replies always go after their parent — explicit placement is ignored.
-    if let Some(parent_id) = reply_to {
-        return InsertPosition::AfterComment(String::from(parent_id));
-    }
-    if let Some(after_comment) = optional_str(params, "after_comment") {
-        return InsertPosition::AfterComment(String::from(after_comment));
-    }
-    if let Some(after_line) = optional_usize(params, "after_line") {
-        return InsertPosition::AfterLine(after_line);
-    }
-    InsertPosition::Append
+    InsertPosition::from_hints(
+        reply_to,
+        optional_str(params, "after_comment"),
+        optional_usize(params, "after_line"),
+    )
 }
 
 /// Dispatch a tool call to the appropriate library function.
@@ -1357,21 +1336,9 @@ fn build_plan_report_value(
     after: &parser::ParsedDocument,
     cfg: &ResolvedConfig,
 ) -> Value {
-    let identity = build_plan_identity(cfg);
+    let identity = plan_ops::PlanIdentity::from_config(cfg);
     let report = plan_ops::project_report(op_label, before, after, cfg, identity);
     serde_json::to_value(&report).unwrap_or_else(|_| json!({ "error": "serialization failure" }))
-}
-
-/// Build a [`plan_ops::PlanIdentity`] from the active resolved config.
-///
-/// `would_sign` is `true` when a key path is configured. The key is not
-/// loaded here — `plan` stays side-effect-free per rem-bhk.
-fn build_plan_identity(cfg: &ResolvedConfig) -> plan_ops::PlanIdentity {
-    let author_type = cfg.author_type.as_ref().map(|t| match t {
-        AuthorType::Agent => String::from("agent"),
-        AuthorType::Human => String::from("human"),
-    });
-    plan_ops::PlanIdentity::new(cfg.identity.clone(), author_type, cfg.key_path.is_some())
 }
 
 /// Parse the `lines` field of a `plan.write` request into a
@@ -1396,7 +1363,7 @@ fn build_write_plan_value(
     projection: &document::WriteProjection,
     cfg: &ResolvedConfig,
 ) -> Result<Value> {
-    let identity = build_plan_identity(cfg);
+    let identity = plan_ops::PlanIdentity::from_config(cfg);
     let report = match projection {
         document::WriteProjection::Markdown {
             before,
@@ -1768,10 +1735,7 @@ fn handle_write(
 
 /// Serialize a comment to a JSON value for the `comments` tool response.
 fn serialize_comment(cm: &parser::Comment) -> Value {
-    let author_type = match cm.author_type {
-        parser::AuthorType::Human => "human",
-        parser::AuthorType::Agent => "agent",
-    };
+    let author_type = cm.author_type.as_str();
     let mut obj = json!({
         "id": cm.id,
         "author": cm.author,
@@ -1863,10 +1827,7 @@ fn serialize_query_result(r: &query::QueryResult) -> Value {
 
 /// Serialize an [`ExpandedComment`](query::ExpandedComment) to a JSON value.
 fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
-    let author_type = match cm.author_type {
-        parser::AuthorType::Agent => "agent",
-        parser::AuthorType::Human => "human",
-    };
+    let author_type = cm.author_type.as_str();
     json!({
         "id": cm.id,
         "author": cm.author,

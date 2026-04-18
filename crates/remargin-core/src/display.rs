@@ -6,7 +6,7 @@ use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
 
 use crate::operations::query::{ExpandedComment, QueryResult};
-use crate::parser::{AuthorType, Comment};
+use crate::parser::Comment;
 
 const MAX_CONTENT_LINES: usize = 5;
 
@@ -131,10 +131,7 @@ fn render_node(
 
     let _ = writeln!(out, "{file_path}:{}", cm.line);
 
-    let author_type_str = match cm.author_type {
-        AuthorType::Agent => "agent",
-        AuthorType::Human => "human",
-    };
+    let author_type_str = cm.author_type.as_str();
     let ts_short = cm.ts.format("%Y-%m-%d %H:%M");
     let _ = writeln!(
         out,
@@ -248,10 +245,7 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
 
     let _ = writeln!(out, "{file_path}:{}", cm.line);
 
-    let author_type_str = match cm.author_type {
-        AuthorType::Agent => "agent",
-        AuthorType::Human => "human",
-    };
+    let author_type_str = cm.author_type.as_str();
     let ts_short = cm.ts.format("%Y-%m-%d %H:%M");
     let _ = writeln!(
         out,

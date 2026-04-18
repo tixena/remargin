@@ -348,11 +348,7 @@ fn serialize_comment_block(cm: &parser::Comment, out: &mut String) {
     out.push_str("---\n");
     let _ = writeln!(out, "id: {}", cm.id);
     let _ = writeln!(out, "author: {}", cm.author);
-    let type_str = match cm.author_type {
-        parser::AuthorType::Human => "human",
-        parser::AuthorType::Agent => "agent",
-    };
-    let _ = writeln!(out, "type: {type_str}");
+    let _ = writeln!(out, "type: {}", cm.author_type.as_str());
     let _ = writeln!(out, "ts: {}", cm.ts.to_rfc3339());
     let _ = writeln!(out, "checksum: {}", cm.checksum);
     if !cm.to.is_empty() {
