@@ -1036,6 +1036,7 @@ fn write_binary_with_raw_flag() {
         WriteOptions {
             binary: true,
             create: true,
+            lines: None,
             raw: true,
         },
     )
@@ -1606,6 +1607,337 @@ fn rm_rejects_directory() {
             .contains("cannot remove directory"),
         "expected directory error"
     );
+}
+
+// ---------------------------------------------------------------------
+// Partial writes (rem-24p): `--lines START-END` replaces a range of
+// lines in place, leaving every other byte identical. Comment blocks
+// inside the range must be re-included by id, and the post-write verify
+// gate still runs. Tests cover the happy path, preservation rejects,
+// boundary conditions, and incompatibility with create/raw/binary.
+// ---------------------------------------------------------------------
+
+#[test]
+fn splice_lines_replaces_single_line() {
+    // Replacing one line with one line leaves the rest byte-identical.
+    let out = document::splice_lines("A\nB\nC\nD\nE", 3, 3, "X");
+    assert_eq!(out, "A\nB\nX\nD\nE");
+}
+
+#[test]
+fn splice_lines_expanding_range_inserts_lines() {
+    // Replacing one line with three lines grows the file by two lines.
+    let out = document::splice_lines("A\nB\nC\nD\nE", 3, 3, "X\nY\nZ");
+    assert_eq!(out, "A\nB\nX\nY\nZ\nD\nE");
+}
+
+#[test]
+fn splice_lines_shrinking_range_removes_lines() {
+    // Replacing three lines with one drops two lines net.
+    let out = document::splice_lines("A\nB\nC\nD\nE", 2, 4, "Q");
+    assert_eq!(out, "A\nQ\nE");
+}
+
+#[test]
+fn splice_lines_strips_one_trailing_newline() {
+    // `--lines 3-3 "X"` and `--lines 3-3 "X\n"` must behave identically,
+    // so a single trailing newline is stripped before splicing.
+    let out = document::splice_lines("A\nB\nC\nD", 3, 3, "X\n");
+    assert_eq!(out, "A\nB\nX\nD");
+}
+
+#[test]
+fn splice_lines_preserves_trailing_newline_in_existing() {
+    // If the existing file ends with `\n`, the spliced output must too.
+    let out = document::splice_lines("A\nB\nC\n", 2, 2, "Q");
+    assert_eq!(out, "A\nQ\nC\n");
+}
+
+#[test]
+fn splice_lines_clamps_end_past_eof() {
+    // Overshooting end clamps to the real line count rather than erroring.
+    let out = document::splice_lines("A\nB\nC", 2, 99, "Q");
+    assert_eq!(out, "A\nQ");
+}
+
+#[test]
+fn splice_lines_first_line() {
+    // Boundary: line 1 is a legal start.
+    let out = document::splice_lines("A\nB\nC", 1, 1, "X");
+    assert_eq!(out, "X\nB\nC");
+}
+
+#[test]
+fn splice_lines_last_line() {
+    // Boundary: the final line is a legal end.
+    let out = document::splice_lines("A\nB\nC", 3, 3, "X");
+    assert_eq!(out, "A\nB\nX");
+}
+
+#[test]
+fn write_partial_replaces_range_only() {
+    // Acceptance: lines outside [start..=end] are byte-identical after
+    // a partial write. We use a document whose frontmatter already
+    // carries every field `ensure_frontmatter` would otherwise inject,
+    // so the post-parse -> to_markdown round-trip is a no-op.
+    let original = "\
+---
+title: Test
+description: ''
+author: eduardo
+created: 2026-04-18T00:00:00+00:00
+remargin_pending: 0
+remargin_pending_for: []
+remargin_last_activity: null
+---
+
+# Header
+
+line 10
+line 11
+line 12
+
+more content here
+";
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), original.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+
+    // Count lines: the frontmatter occupies lines 1..=9, blank line 10,
+    // `# Header` line 11, blank line 12, `line 10` at line 13.
+    let line_thirteen_original = original.lines().nth(12).unwrap();
+    assert_eq!(line_thirteen_original, "line 10");
+
+    // Replace line 13 only.
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "LINE 10 NEW",
+        &config,
+        WriteOptions::new().lines(Some((13, 13))),
+    )
+    .unwrap();
+
+    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    // Everything outside the range is byte-identical; only the target
+    // line changed.
+    assert!(
+        result.contains("\n\nLINE 10 NEW\nline 11\nline 12\n"),
+        "unexpected slice around line 13: {result}"
+    );
+    // Prefix (frontmatter + header) is untouched.
+    assert!(result.starts_with("---\ntitle: Test\n"));
+    // Suffix is untouched.
+    assert!(result.contains("more content here"));
+}
+
+#[test]
+fn write_partial_rejects_destroyed_comment() {
+    // A partial write whose range overlaps a comment block and DOES NOT
+    // reinclude the comment must fail with a preservation diagnostic
+    // that names the destroyed comment id.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+
+    // Find the line range that covers the first comment block (id=abc).
+    // DOC_WITH_COMMENTS has the block at lines 7..=17 (fence + frontmatter
+    // + body + closing fence). We replace with plain text — no comment.
+    let err = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "plain text replacement",
+        &config,
+        WriteOptions::new().lines(Some((7, 17))),
+    )
+    .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("abc") && msg.contains("preservation"),
+        "expected preservation error naming the destroyed comment, got: {msg}"
+    );
+}
+
+#[test]
+fn write_partial_accepts_reincluded_comment() {
+    // A partial write whose range covers a comment block IS accepted
+    // as long as the replacement reincludes the comment verbatim.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+
+    // Replace the block covering comment abc with the same block back
+    // (verbatim), and nothing else — the fence markers are part of the
+    // replacement so preservation round-trips.
+    let replacement = "\
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+to: [alice]
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
+---
+First comment.
+```";
+
+    // The `abc` block in DOC_WITH_COMMENTS spans lines 7..=17. Replace
+    // that range with the same block — preservation must pass.
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        replacement,
+        &config,
+        WriteOptions::new().lines(Some((7, 17))),
+    )
+    .unwrap();
+
+    // Sanity: both comments still present after the write.
+    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    assert!(result.contains("id: abc"));
+    assert!(result.contains("id: def"));
+}
+
+#[test]
+fn write_partial_rejects_with_create() {
+    // `--lines` and `--create` are mutually exclusive: partial writes
+    // require an existing file to splice into.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+
+    let err = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("new.md"),
+        "hi",
+        &config,
+        WriteOptions::new().create(true).lines(Some((1, 1))),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("--lines is incompatible with --create")
+    );
+}
+
+#[test]
+fn write_partial_rejects_invalid_range() {
+    // Start > end is nonsense; caller must get a specific diagnostic.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"A\nB\nC\n")
+        .unwrap();
+
+    let config = open_config();
+    let err = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "x",
+        &config,
+        WriteOptions::new().lines(Some((5, 3))),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("--lines range is invalid"));
+}
+
+#[test]
+fn write_partial_rejects_with_raw() {
+    // `--lines` and `--raw` are mutually exclusive: partial writes own
+    // the comment-preservation invariant and need to parse the result.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/config.json"), b"{}\n")
+        .unwrap();
+
+    let config = open_config();
+    let err = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("config.json"),
+        "x",
+        &config,
+        WriteOptions::new().raw(true).lines(Some((1, 1))),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("--lines is incompatible with --raw")
+    );
+}
+
+#[test]
+fn write_partial_rejects_start_zero() {
+    // 0-indexed callers are a common mistake; reject explicitly.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"A\nB\nC\n")
+        .unwrap();
+
+    let config = open_config();
+    let err = document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        "x",
+        &config,
+        WriteOptions::new().lines(Some((0, 3))),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("--lines range is invalid"));
+}
+
+#[test]
+fn write_whole_file_unchanged_when_lines_omitted() {
+    // Regression guard: omitting --lines preserves the pre-rem-24p
+    // whole-file write semantics exactly.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+    let modified = DOC_WITH_COMMENTS.replace("# Test", "# Still Test");
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &modified,
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+
+    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    assert!(result.contains("# Still Test"));
+    assert!(result.contains("id: abc"));
+    assert!(result.contains("id: def"));
 }
 
 #[test]

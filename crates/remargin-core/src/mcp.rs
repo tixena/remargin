@@ -465,6 +465,8 @@ fn desc_write() -> ToolDesc {
                 "content": { "type": "string", "description": "File content to write (base64-encoded when binary=true)" },
                 "binary": { "type": "boolean", "description": "Content is base64-encoded binary data. Implies raw mode. Not supported for markdown (.md) files.", "default": false },
                 "create": { "type": "boolean", "description": "Create a new file (parent directory must exist, file must not)", "default": false },
+                "start_line": { "type": "integer", "minimum": 1, "description": "Partial write: first line of the range to replace (1-indexed, inclusive). Must be paired with end_line. Incompatible with create/raw/binary." },
+                "end_line": { "type": "integer", "minimum": 1, "description": "Partial write: last line of the range to replace (1-indexed, inclusive). Must be paired with start_line. Incompatible with create/raw/binary." },
                 "raw": { "type": "boolean", "description": "Write content exactly as provided, skipping frontmatter injection and comment preservation. Not supported for markdown (.md) files.", "default": false }
             },
             "required": ["path", "content"]
@@ -1350,10 +1352,20 @@ fn handle_write(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let raw = params.get("raw").and_then(Value::as_bool).unwrap_or(false);
+    let start_line = optional_usize(params, "start_line");
+    let end_line = optional_usize(params, "end_line");
+    let lines = match (start_line, end_line) {
+        (Some(s), Some(e)) => Some((s, e)),
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => {
+            anyhow::bail!("partial write requires both start_line and end_line")
+        }
+    };
 
     let opts = document::WriteOptions::new()
         .binary(binary)
         .create(create)
+        .lines(lines)
         .raw(raw);
     let target = Path::new(path_str);
     document::write(system, base_dir, target, content, config, opts)?;

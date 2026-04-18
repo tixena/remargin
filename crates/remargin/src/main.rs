@@ -394,6 +394,13 @@ enum Commands {
         /// Create a new file (parent directory must exist, file must not).
         #[arg(long)]
         create: bool,
+        /// Replace only lines `START-END` (1-indexed, inclusive) and leave
+        /// every other line byte-identical. Comment blocks inside the
+        /// range must be reincluded (by id) in the replacement; writes
+        /// that would destroy a comment are rejected. Incompatible with
+        /// --create, --raw, and --binary.
+        #[arg(long, value_name = "START-END")]
+        lines: Option<String>,
         /// Write content exactly as provided, skipping frontmatter and comment
         /// preservation. Not supported for markdown (.md) files.
         #[arg(long)]
@@ -699,6 +706,25 @@ fn truncate_content(content: &str, max_len: usize) -> String {
     } else {
         String::from(first_line)
     }
+}
+
+/// Parse the `--lines START-END` argument used by `remargin write` (rem-24p).
+///
+/// Accepts `START-END` with 1-indexed inclusive bounds, both required.
+/// Returns `(start, end)`; further validation (start <= end, start >= 1)
+/// happens in `document::write` so CLI and MCP callers hit the same
+/// diagnostics.
+fn parse_line_range(raw: &str) -> Result<(usize, usize)> {
+    let (start_str, end_str) = raw
+        .split_once('-')
+        .with_context(|| format!("--lines expects START-END, got {raw:?}"))?;
+    let start: usize = start_str
+        .parse()
+        .with_context(|| format!("--lines: invalid start value {start_str:?}"))?;
+    let end: usize = end_str
+        .parse()
+        .with_context(|| format!("--lines: invalid end value {end_str:?}"))?;
+    Ok((start, end))
 }
 
 fn main() -> ExitCode {
@@ -1021,21 +1047,26 @@ fn dispatch_with_config(
             content,
             binary,
             create,
+            lines,
             raw,
-        } => cmd_write(
-            system,
-            cwd,
-            config,
-            &WriteParams {
-                content: content.as_deref(),
-                json_mode,
-                opts: document::WriteOptions::new()
-                    .binary(*binary)
-                    .create(*create)
-                    .raw(*raw),
-                path,
-            },
-        ),
+        } => {
+            let line_range = lines.as_deref().map(parse_line_range).transpose()?;
+            cmd_write(
+                system,
+                cwd,
+                config,
+                &WriteParams {
+                    content: content.as_deref(),
+                    json_mode,
+                    opts: document::WriteOptions::new()
+                        .binary(*binary)
+                        .create(*create)
+                        .lines(line_range)
+                        .raw(*raw),
+                    path,
+                },
+            )
+        }
         Commands::Version
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
@@ -2183,7 +2214,40 @@ mod tests {
     use remargin_core::config::registry::Registry;
     use serde_json::json;
 
-    use super::{registry_participant_json, registry_participant_pretty, resolve_comment_content};
+    use super::{
+        parse_line_range, registry_participant_json, registry_participant_pretty,
+        resolve_comment_content,
+    };
+
+    #[test]
+    fn parse_line_range_accepts_simple_pair() {
+        let (s, e) = parse_line_range("10-20").unwrap();
+        assert_eq!((s, e), (10, 20));
+    }
+
+    #[test]
+    fn parse_line_range_accepts_single_line_range() {
+        let (s, e) = parse_line_range("7-7").unwrap();
+        assert_eq!((s, e), (7, 7));
+    }
+
+    #[test]
+    fn parse_line_range_rejects_missing_dash() {
+        let err = parse_line_range("100").unwrap_err();
+        assert!(err.to_string().contains("START-END"));
+    }
+
+    #[test]
+    fn parse_line_range_rejects_non_numeric() {
+        let err = parse_line_range("a-b").unwrap_err();
+        assert!(err.to_string().contains("invalid start value"));
+    }
+
+    #[test]
+    fn parse_line_range_rejects_non_numeric_end() {
+        let err = parse_line_range("1-b").unwrap_err();
+        assert!(err.to_string().contains("invalid end value"));
+    }
 
     #[test]
     fn content_from_positional_arg() {

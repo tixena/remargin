@@ -71,6 +71,11 @@ pub struct WriteOptions {
     pub binary: bool,
     /// Parent dir must exist, file must not.
     pub create: bool,
+    /// When set, replace only lines `[start..=end]` (1-indexed, inclusive)
+    /// with the provided content and leave the rest of the file
+    /// byte-identical. Incompatible with `create`, `raw`, and `binary`.
+    /// See rem-24p.
+    pub lines: Option<(usize, usize)>,
     /// Skip frontmatter/comment management.
     pub raw: bool,
 }
@@ -89,10 +94,17 @@ impl WriteOptions {
     }
 
     #[must_use]
+    pub const fn lines(mut self, range: Option<(usize, usize)>) -> Self {
+        self.lines = range;
+        self
+    }
+
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             binary: false,
             create: false,
+            lines: None,
             raw: false,
         }
     }
@@ -317,19 +329,7 @@ pub fn write(
     config: &ResolvedConfig,
     opts: WriteOptions,
 ) -> Result<()> {
-    let is_md = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-    let raw = opts.raw || opts.binary;
-
-    if opts.binary && is_md {
-        bail!("binary mode is not supported for markdown files");
-    }
-
-    if opts.raw && is_md {
-        bail!("raw mode is not supported for markdown files");
-    }
+    validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {
         let target =
@@ -359,47 +359,37 @@ pub fn write(
         return Ok(());
     }
 
-    if raw {
+    if opts.raw {
         system
             .write(&resolved, content.as_bytes())
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(());
     }
 
-    let new_doc = parser::parse(content).context("parsing incoming content")?;
+    // Partial write: splice the replacement content into `[start..=end]`,
+    // then fall through to the same parse + comment-preservation +
+    // verify-gate pipeline whole-file writes use. Everything after this
+    // block treats `content_to_parse` as if the caller had supplied it
+    // as a full-document payload — so the preservation check still
+    // catches any comment block that was clipped or destroyed by the
+    // caller's range, and the verify gate still runs pre-commit.
+    let content_to_parse: String = if let Some((start, end)) = opts.lines {
+        let existing = system
+            .read_to_string(&resolved)
+            .with_context(|| format!("reading {} for partial write", resolved.display()))?;
+        splice_lines(&existing, start, end, content)
+    } else {
+        String::from(content)
+    };
+
+    let new_doc = parser::parse(&content_to_parse).context("parsing incoming content")?;
 
     // Comment preservation: only check when overwriting an existing file.
-    if !opts.create {
-        let existing_content = system.read_to_string(&resolved);
-        if let Ok(old_content) = existing_content {
-            let old_doc = parser::parse(&old_content).context("parsing existing document")?;
-
-            let old_ids: HashSet<&str> = old_doc.comment_ids();
-            let new_ids: HashSet<&str> = new_doc.comment_ids();
-
-            for old_id in &old_ids {
-                if !new_ids.contains(old_id) {
-                    bail!("comment {old_id:?} was removed — preservation check failed");
-                }
-            }
-
-            for new_id in &new_ids {
-                if !old_ids.contains(new_id) {
-                    bail!("unexpected comment {new_id:?} appeared — preservation check failed");
-                }
-            }
-
-            for old_comment in old_doc.comments() {
-                if let Some(new_comment) = new_doc.find_comment(&old_comment.id)
-                    && new_comment.checksum != old_comment.checksum
-                {
-                    bail!(
-                        "comment {:?} checksum was modified — preservation check failed",
-                        old_comment.id
-                    );
-                }
-            }
-        }
+    if !opts.create
+        && let Ok(old_content) = system.read_to_string(&resolved)
+    {
+        let old_doc = parser::parse(&old_content).context("parsing existing document")?;
+        check_comment_preservation(&old_doc, &new_doc)?;
     }
 
     let mut final_doc = new_doc;
@@ -413,6 +403,112 @@ pub fn write(
     })?;
 
     Ok(())
+}
+
+/// Validate mutually-exclusive `WriteOptions` combinations up front so
+/// both CLI and MCP callers surface identical diagnostics (rem-24p).
+fn validate_write_opts(path: &Path, opts: &WriteOptions) -> Result<()> {
+    let is_md = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+
+    if opts.binary && is_md {
+        bail!("binary mode is not supported for markdown files");
+    }
+    if opts.raw && is_md {
+        bail!("raw mode is not supported for markdown files");
+    }
+
+    if let Some((start, end)) = opts.lines {
+        if opts.create {
+            bail!("--lines is incompatible with --create");
+        }
+        if opts.raw {
+            bail!("--lines is incompatible with --raw");
+        }
+        if opts.binary {
+            bail!("--lines is incompatible with --binary");
+        }
+        if start == 0 || start > end {
+            bail!("--lines range is invalid: start={start}, end={end} (require 1 <= start <= end)");
+        }
+    }
+
+    Ok(())
+}
+
+/// Enforce the comment-preservation invariant: every comment in
+/// `old_doc` must still be present (by id and byte-for-byte checksum)
+/// in `new_doc`, and no unexpected ids may have appeared. Factored out
+/// of `write` so the partial-write and whole-file paths share the same
+/// diagnostics.
+fn check_comment_preservation(
+    old_doc: &parser::ParsedDocument,
+    new_doc: &parser::ParsedDocument,
+) -> Result<()> {
+    let old_ids: HashSet<&str> = old_doc.comment_ids();
+    let new_ids: HashSet<&str> = new_doc.comment_ids();
+
+    for old_id in &old_ids {
+        if !new_ids.contains(old_id) {
+            bail!("comment {old_id:?} was removed — preservation check failed");
+        }
+    }
+
+    for new_id in &new_ids {
+        if !old_ids.contains(new_id) {
+            bail!("unexpected comment {new_id:?} appeared — preservation check failed");
+        }
+    }
+
+    for old_comment in old_doc.comments() {
+        if let Some(new_comment) = new_doc.find_comment(&old_comment.id)
+            && new_comment.checksum != old_comment.checksum
+        {
+            bail!(
+                "comment {:?} checksum was modified — preservation check failed",
+                old_comment.id
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Splice `replacement` into `existing` at 1-indexed inclusive range
+/// `[start..=end]`, replacing those lines and leaving every other line
+/// byte-identical. If `end` exceeds the line count of `existing`, the
+/// range is clamped to the actual line count (matching how `get`
+/// treats out-of-bounds ranges — the caller gets what's reasonable
+/// rather than an error).
+///
+/// One trailing `\n` is stripped from `replacement` before splicing so
+/// that `--lines 3-3 "new line"` and `--lines 3-3 "new line\n"` behave
+/// identically — otherwise the trailing newline would introduce a
+/// spurious empty line at the splice boundary.
+pub(crate) fn splice_lines(existing: &str, start: usize, end: usize, replacement: &str) -> String {
+    let existing_lines: Vec<&str> = existing.split('\n').collect();
+    let line_count = existing_lines.len();
+
+    // Clamp to bounds. 1-indexed, so `start..=end` maps to 0-indexed
+    // `start-1..=end-1` in the `Vec`. When `end` overshoots the file,
+    // splice to the end of the buffer; when `start` also overshoots,
+    // the prefix is the whole file and the splice is an append.
+    let start_idx = start.saturating_sub(1).min(line_count);
+    let end_idx = end.min(line_count);
+
+    let trimmed = replacement.strip_suffix('\n').unwrap_or(replacement);
+    let replacement_lines: Vec<&str> = trimmed.split('\n').collect();
+
+    let mut out: Vec<&str> = Vec::with_capacity(line_count + replacement_lines.len());
+    out.extend_from_slice(&existing_lines[..start_idx]);
+    out.extend_from_slice(&replacement_lines);
+    if end_idx < line_count {
+        out.extend_from_slice(&existing_lines[end_idx..]);
+    }
+
+    out.join("\n")
 }
 
 /// # Errors

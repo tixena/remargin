@@ -1641,6 +1641,94 @@ fn mcp_write_binary_rejected_for_md() {
 }
 
 #[test]
+fn mcp_write_partial_params_splice_range() {
+    // rem-24p: MCP `write` accepts start_line/end_line and splices the
+    // provided content into that range, mirroring CLI --lines semantics.
+    let base = Path::new("/docs");
+    let original = "\
+---
+title: Test
+description: ''
+author: eduardo
+created: 2026-04-18T00:00:00+00:00
+remargin_pending: 0
+remargin_pending_for: []
+remargin_last_activity: null
+---
+
+body A
+body B
+body C
+";
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/doc.md"), original.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    // Lines 11/12/13 are `body A`, `body B`, `body C` — replace line 12.
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "doc.md",
+                    "content": "BODY B NEW",
+                    "start_line": 12_i32,
+                    "end_line": 12_i32
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["written"].as_str().unwrap(), "doc.md");
+
+    let on_disk = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
+    assert!(
+        on_disk.contains("body A\nBODY B NEW\nbody C"),
+        "partial write did not splice correctly: {on_disk}"
+    );
+}
+
+#[test]
+fn mcp_write_partial_rejects_missing_end_line() {
+    // Both start_line and end_line must be provided together — a lone
+    // start_line is a nonsense request.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/doc.md"), b"A\nB\nC\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": "doc.md",
+                    "content": "x",
+                    "start_line": 1_i32
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+#[test]
 fn mcp_reply_prepends_parent_author_to_list() {
     // Parity test for rem-kja: the MCP `comment` tool inherits the
     // "parent author always first in `to:`" invariant from operations.
