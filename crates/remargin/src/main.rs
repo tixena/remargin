@@ -58,9 +58,12 @@ struct Cli {
 }
 
 #[derive(clap::Args)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "CLI flags are naturally boolean; struct_excessive_bools is not relevant here"
+#[cfg_attr(
+    feature = "unrestricted",
+    expect(
+        clippy::struct_excessive_bools,
+        reason = "CLI flags are naturally boolean; struct_excessive_bools is not relevant here"
+    )
 )]
 struct GlobalFlags {
     /// Path to assets directory.
@@ -90,11 +93,6 @@ struct GlobalFlags {
     /// Enforcement mode: open, registered, or strict.
     #[arg(long, value_name = "open|registered|strict")]
     mode: Option<String>,
-
-    /// Suppress the trailing `elapsed: Xms` line on stderr. `--json`
-    /// mode is unaffected (the field is carried inside the payload).
-    #[arg(long)]
-    quiet: bool,
 
     /// Author type: human or agent.
     #[arg(long, value_name = "human|agent")]
@@ -772,15 +770,9 @@ fn main() -> ExitCode {
         }
     };
 
-    // In JSON mode the elapsed value is already embedded in the payload;
-    // printing a stray `elapsed: Xms` line here would corrupt consumers that
-    // merge stdout and stderr. In non-JSON mode the line goes to stderr so
-    // stdout stays byte-clean for pipes / redirects, and `--quiet`
-    // suppresses it entirely for scripted callers that want clean
-    // stderr too (rem-1jy).
-    if !cli.global.json && !cli.global.quiet {
-        eprintln!("elapsed: {}ms", elapsed_ms());
-    }
+    // Non-JSON mode does not emit a timing footer on any stream (rem-26w):
+    // stdout stays pure command output and stderr stays clean. The timing
+    // value survives as `elapsed_ms` inside the JSON payload (rem-4ay).
 
     exit
 }
