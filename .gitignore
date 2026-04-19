@@ -14,3 +14,4 @@ node_modules/
 
 # Claude Code user settings (local-only)
 .claude/settings.json
+.claude/scheduled_tasks.lock
