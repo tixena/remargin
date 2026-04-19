@@ -206,7 +206,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       inboxContent={
         <InboxSection
           onOpenAtLine={handleOpenAtLine}
-          onMutation={bumpRefresh}
           refreshKey={refreshKey}
           viewMode={inboxView}
         />

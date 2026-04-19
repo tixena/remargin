@@ -1,23 +1,8 @@
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  FileText,
-  Folder,
-  MoreHorizontal,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, FileText, Folder } from "lucide-react";
 import { useState } from "react";
 import { deriveLeafState } from "@/components/sidebar/inboxLeafState";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import type { ExpandedComment } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
 import { authorLabel } from "@/lib/authorLabel";
@@ -36,7 +21,6 @@ interface InboxTreeProps {
    */
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
 interface CommentLeafProps {
@@ -44,7 +28,6 @@ interface CommentLeafProps {
   depth: number;
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
 function formatRelativeTime(ts?: string): string {
@@ -63,13 +46,13 @@ function formatRelativeTime(ts?: string): string {
   }
 }
 
-function CommentLeaf({ item, depth, me, onOpenAtLine, onAck }: CommentLeafProps) {
+function CommentLeaf({ item, depth, me, onOpenAtLine }: CommentLeafProps) {
   const { resolveDisplayName } = useParticipants();
   const { label: authorDisplay, title: authorTitle } = authorLabel(
     item.comment.author,
     resolveDisplayName
   );
-  const { visual, ackedByMe } = deriveLeafState(item.comment, me);
+  const { visual } = deriveLeafState(item.comment, me);
   const visualCls =
     visual === "me-directed-unacked"
       ? "border-l-2 border-l-purple-500 bg-purple-500/5 hover:bg-purple-500/10"
@@ -106,47 +89,6 @@ function CommentLeaf({ item, depth, me, onOpenAtLine, onAck }: CommentLeafProps)
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {visual === "me-directed-unacked" && item.comment.id && onAck && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-5 px-2 text-[10px] gap-1"
-              aria-label="Ack this comment"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAck(item.file, item.comment.id, false);
-              }}
-            >
-              <Check className="w-2.5 h-2.5" />
-              Ack
-            </Button>
-          )}
-          {ackedByMe && item.comment.id && onAck && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 w-5 p-0 text-text-faint"
-                  aria-label="Inbox row actions"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MoreHorizontal className="w-2.5 h-2.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAck(item.file, item.comment.id, true);
-                  }}
-                >
-                  Unack
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
           <Clock className="w-3 h-3 text-text-faint" />
           <span className="text-[10px] text-text-faint whitespace-nowrap">
             {formatRelativeTime(item.comment.ts)}
@@ -167,18 +109,9 @@ interface FileNodeProps {
   isActive: boolean;
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
-function InboxFileNode({
-  filePath,
-  comments,
-  depth,
-  isActive,
-  me,
-  onOpenAtLine,
-  onAck,
-}: FileNodeProps) {
+function InboxFileNode({ filePath, comments, depth, isActive, me, onOpenAtLine }: FileNodeProps) {
   const [expanded, setExpanded] = useState(true);
   const pendingCount = comments.filter((i) => i.comment.ack?.length === 0).length;
 
@@ -216,7 +149,6 @@ function InboxFileNode({
             depth={depth + 1}
             me={me}
             onOpenAtLine={onOpenAtLine}
-            onAck={onAck}
           />
         ))}
     </>
@@ -230,18 +162,9 @@ interface DirNodeProps {
   activeFile?: string;
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
-function InboxDirNode({
-  node,
-  depth,
-  itemsByFile,
-  activeFile,
-  me,
-  onOpenAtLine,
-  onAck,
-}: DirNodeProps) {
+function InboxDirNode({ node, depth, itemsByFile, activeFile, me, onOpenAtLine }: DirNodeProps) {
   const [expanded, setExpanded] = useState(true);
 
   // Count pending comments under this directory
@@ -279,7 +202,6 @@ function InboxDirNode({
             activeFile={activeFile}
             me={me}
             onOpenAtLine={onOpenAtLine}
-            onAck={onAck}
           />
         ))}
     </>
@@ -303,7 +225,6 @@ interface InboxTreeNodeProps {
   activeFile?: string;
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
 function InboxTreeNode({
@@ -313,7 +234,6 @@ function InboxTreeNode({
   activeFile,
   me,
   onOpenAtLine,
-  onAck,
 }: InboxTreeNodeProps) {
   if (node.isDir) {
     return (
@@ -324,7 +244,6 @@ function InboxTreeNode({
         activeFile={activeFile}
         me={me}
         onOpenAtLine={onOpenAtLine}
-        onAck={onAck}
       />
     );
   }
@@ -337,7 +256,6 @@ function InboxTreeNode({
       isActive={activeFile === node.fullPath}
       me={me}
       onOpenAtLine={onOpenAtLine}
-      onAck={onAck}
     />
   );
 }
@@ -346,7 +264,7 @@ function InboxTreeNode({
  * Three-level tree view for the Inbox section.
  * Groups comments by: directory -> file -> comment leaf.
  */
-export function InboxTree({ items, me, onOpenAtLine, onAck }: InboxTreeProps) {
+export function InboxTree({ items, me, onOpenAtLine }: InboxTreeProps) {
   // Build a map from file path to sorted comments
   const itemsByFile = new Map<string, InboxItem[]>();
   for (const item of items) {
@@ -375,7 +293,6 @@ export function InboxTree({ items, me, onOpenAtLine, onAck }: InboxTreeProps) {
           itemsByFile={itemsByFile}
           me={me}
           onOpenAtLine={onOpenAtLine}
-          onAck={onAck}
         />
       ))}
     </div>

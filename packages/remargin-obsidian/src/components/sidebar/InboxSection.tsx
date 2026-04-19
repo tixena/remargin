@@ -1,5 +1,5 @@
 import { toRegex } from "diacritic-regex";
-import { Check, ChevronDown, Clock, FileText, MoreHorizontal, Search, X } from "lucide-react";
+import { ChevronDown, Clock, FileText, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxTree } from "@/components/sidebar/InboxTree";
 import { deriveLeafState } from "@/components/sidebar/inboxLeafState";
@@ -52,7 +52,6 @@ interface InboxItem {
 
 interface InboxSectionProps {
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onMutation?: () => void;
   refreshKey?: number;
   /** View mode owned by RemarginSidebar (persisted in plugin settings). */
   viewMode?: ViewMode;
@@ -70,7 +69,6 @@ function errorMessage(err: unknown): string {
 
 export function InboxSection({
   onOpenAtLine,
-  onMutation,
   refreshKey,
   viewMode = "tree",
 }: InboxSectionProps = {}) {
@@ -157,31 +155,6 @@ export function InboxSection({
       cancelled = true;
     };
   }, [backend]);
-
-  const handleAck = useCallback(
-    async (file: string, id: string, remove: boolean) => {
-      try {
-        await backend.ack(file, [id], remove);
-        // Acking stages the file in the user's sandbox so the
-        // interaction is visible in the next Submit-to-Claude cycle.
-        // Unacking does NOT stage — that would contradict the "I've
-        // reviewed this" signal the sandbox entry represents.
-        if (!remove) {
-          try {
-            await backend.sandboxAdd([file]);
-          } catch {
-            // Best-effort: ack succeeded, don't fail the whole operation.
-          }
-        }
-        await refresh();
-        onMutation?.();
-      } catch (err) {
-        console.error("InboxSection.ack failed:", err);
-        setError(errorMessage(err));
-      }
-    },
-    [backend, refresh, onMutation]
-  );
 
   const filterLabel = useMemo(
     () => INBOX_FILTER_OPTIONS.find((o) => o.value === filter)?.label ?? filter,
@@ -276,7 +249,7 @@ export function InboxSection({
                 : "No comments found."}
           </div>
         ) : viewMode === "tree" ? (
-          <InboxTree items={items} me={me} onOpenAtLine={onOpenAtLine} onAck={handleAck} />
+          <InboxTree items={items} me={me} onOpenAtLine={onOpenAtLine} />
         ) : (
           <div className="flex flex-col min-w-0">
             {items.map((item) => (
@@ -285,7 +258,6 @@ export function InboxSection({
                 item={item}
                 me={me}
                 onOpenAtLine={onOpenAtLine}
-                onAck={handleAck}
               />
             ))}
           </div>
@@ -299,7 +271,6 @@ interface InboxFlatRowProps {
   item: InboxItem;
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
-  onAck?: (file: string, id: string, remove: boolean) => void;
 }
 
 /**
@@ -308,16 +279,19 @@ interface InboxFlatRowProps {
  * cannot run inside a `.map` callback.
  *
  * Renders one of three visuals derived from `deriveLeafState`:
- * `me-directed-unacked` (purple accent + Ack button), `acked-by-me`
- * (dimmed + ellipsis-menu Unack), or `neutral` (default styling).
+ * `me-directed-unacked` (purple accent), `acked-by-me` (dimmed), or
+ * `neutral` (default styling). Ack/Unack is intentionally NOT offered
+ * here — acking from an inbox card would ack without context. The user
+ * clicks the row to open the comment in its file, where the comment
+ * card exposes the canonical Ack affordance.
  */
-function InboxFlatRow({ item, me, onOpenAtLine, onAck }: InboxFlatRowProps) {
+function InboxFlatRow({ item, me, onOpenAtLine }: InboxFlatRowProps) {
   const { resolveDisplayName } = useParticipants();
   const { label: authorDisplay, title: authorTitle } = authorLabel(
     item.comment.author,
     resolveDisplayName
   );
-  const { visual, ackedByMe } = deriveLeafState(item.comment, me);
+  const { visual } = deriveLeafState(item.comment, me);
   const visualCls =
     visual === "me-directed-unacked"
       ? "border-l-2 border-l-purple-500 bg-purple-500/5 hover:bg-purple-500/10"
@@ -358,47 +332,6 @@ function InboxFlatRow({ item, me, onOpenAtLine, onAck }: InboxFlatRowProps) {
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {visual === "me-directed-unacked" && item.comment.id && onAck && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-5 px-2 text-[10px] gap-1"
-              aria-label="Ack this comment"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAck(item.file, item.comment.id, false);
-              }}
-            >
-              <Check className="w-2.5 h-2.5" />
-              Ack
-            </Button>
-          )}
-          {ackedByMe && item.comment.id && onAck && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 w-5 p-0 text-text-faint"
-                  aria-label="Inbox row actions"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MoreHorizontal className="w-2.5 h-2.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAck(item.file, item.comment.id, true);
-                  }}
-                >
-                  Unack
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
           <Clock className="w-3 h-3 text-text-faint" />
           <span className="text-[10px] text-text-faint whitespace-nowrap">
             {formatRelativeTime(item.comment.ts)}
