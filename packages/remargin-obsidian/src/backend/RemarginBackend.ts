@@ -15,6 +15,7 @@ import {
 import { expandPath } from "@/lib/expandPath";
 import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
+import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
 import type {
   BatchCommentOp,
@@ -28,6 +29,23 @@ import type {
   SearchOpts,
   WriteOpts,
 } from "./types";
+
+const IDENTITY_ACCEPTING_SUBCOMMANDS = new Set([
+  "ack",
+  "batch",
+  "comment",
+  "delete",
+  "edit",
+  "migrate",
+  "plan",
+  "purge",
+  "react",
+  "rm",
+  "sandbox",
+  "sign",
+  "verify",
+  "write",
+]);
 
 /**
  * The CLI wraps its payload in an object that also contains timing metadata
@@ -364,10 +382,16 @@ export class RemarginBackend {
     const timeout = opts?.timeout ?? 30000;
     const useJson = opts?.useJson ?? true;
     const skipIdentity = opts?.skipIdentity ?? false;
-    const identityArgs = skipIdentity ? [] : this.buildIdentityArgs();
-    // The CLI parses global flags before the subcommand, so identity/JSON
-    // flags must come first.
-    const fullArgs = [...identityArgs, ...(useJson ? ["--json"] : []), ...args];
+    const subcommand = args[0];
+    const identityAccepted =
+      subcommand !== undefined && IDENTITY_ACCEPTING_SUBCOMMANDS.has(subcommand);
+    const fullArgs = assembleExecArgs({
+      args,
+      identityArgs: this.buildIdentityArgs(),
+      useJson,
+      identityAccepted,
+      skipIdentity,
+    });
 
     return new Promise<string>((resolve, reject) => {
       const child = spawn(binary, fullArgs, { cwd });
