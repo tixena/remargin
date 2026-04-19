@@ -230,8 +230,6 @@ pub fn project_ack(
         .as_deref()
         .context("identity is required to ack")?;
 
-    config.can_post(identity)?;
-
     let (before, mut after) = parse_file_twice(system, path)?;
 
     let now = Utc::now().fixed_offset();
@@ -295,8 +293,6 @@ pub fn project_batch(
         .identity
         .as_deref()
         .context("identity is required to create comments")?;
-
-    config.can_post(identity)?;
 
     let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
 
@@ -429,8 +425,6 @@ pub fn project_comment(
         .identity
         .as_deref()
         .context("identity is required to create a comment")?;
-
-    config.can_post(identity)?;
 
     if params.auto_ack && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
@@ -752,8 +746,6 @@ pub fn project_react(
         .identity
         .as_deref()
         .context("identity is required to react")?;
-
-    config.can_post(identity)?;
 
     let (before, mut after) = parse_file_twice(system, path)?;
 

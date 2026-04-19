@@ -126,9 +126,10 @@ pub struct SignResult {
 /// Returns an error if:
 /// - The config has no resolved identity (a signature needs an
 ///   author).
-/// - The config has no resolvable signing key (delegated to
-///   [`ResolvedConfig::resolve_signing_key`]; matches the fail-fast
-///   error surface from rem-dyz).
+/// - The config has no resolvable signing key. Note: for strict mode
+///   this was already enforced by the resolver (rem-xc8x); `sign`
+///   additionally refuses to run in open / registered mode when no
+///   key is configured, because its job is to attach one.
 /// - The file cannot be read or parsed.
 /// - An `--ids` entry does not exist in the document.
 /// - An `--ids` entry is authored by someone other than the caller
@@ -148,11 +149,11 @@ pub fn sign_comments(
         .context("identity is required to sign comments")?;
 
     // Sign is stricter than create / edit: those ops route through
-    // `resolve_signing_key`, which returns `Ok(None)` in open /
-    // registered mode (signing is optional, so a missing key is fine).
-    // `sign` has no reason to exist without a key — its job is to
-    // attach one. So resolve from `key_path` directly, and bail when
-    // unset regardless of mode.
+    // `resolve_signing_key`, which returns `None` in open / registered
+    // mode (signing is optional, so a missing key is fine). `sign` has
+    // no reason to exist without a key — its job is to attach one. So
+    // resolve from `key_path` directly, and bail when unset regardless
+    // of mode.
     let key_path = match &config.key_path {
         Some(configured) => configured.clone(),
         None => bail!(

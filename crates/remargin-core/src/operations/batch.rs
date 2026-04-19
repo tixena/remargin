@@ -152,12 +152,9 @@ pub fn batch_comment(
         .as_deref()
         .context("identity is required to create comments")?;
 
-    config.can_post(identity)?;
-
-    // Fail-fast in strict mode if the identity must sign but no signing
-    // key is resolvable. Checked BEFORE parsing / copying attachments so
-    // a failed batch leaves disk byte-identical (rem-dyz).
-    let signing_key = config.resolve_signing_key(identity)?;
+    // Registry + strict-mode key presence are validated at resolve time
+    // (rem-xc8x); this just fetches the signing key when the op needs one.
+    let signing_key = config.resolve_signing_key(identity);
 
     let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
 

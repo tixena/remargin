@@ -445,15 +445,18 @@ fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
 }
 
 #[test]
-fn comment_op_registered_mode_rejects_unregistered_author_at_can_post() {
-    // The `can_post` pre-check in `create_comment` rejects this before
-    // the post-write gate ever runs, and also before any bytes hit disk.
-    // The net observable behaviour (file byte-identical) is what the
-    // spec guarantees.
+fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
+    // Post-xc8x the primary gate is at resolve time (see
+    // `config::tests::resolve_bails_when_revoked_identity_in_strict_mode`
+    // for the resolver-level test). This test covers the belt-and-braces
+    // case: if a caller somehow hands `create_comment` a hand-built
+    // config whose identity is not in the registry, the post-write
+    // verify gate still catches the bad artifact and the file stays
+    // byte-identical.
     let before = alice_doc_content();
     let system = mock_with_doc(&before);
     let mut bad_cfg = registered_cfg_with_alice();
-    // Override identity to a non-registered author to trigger rejection.
+    // Override identity to a non-registered author.
     bad_cfg.identity = Some(String::from("charlie"));
 
     let pos = InsertPosition::Append;
@@ -562,10 +565,16 @@ fn strict_cfg_with_alice_no_key() -> ResolvedConfig {
 }
 
 #[test]
-fn create_comment_strict_registered_active_no_key_fails_fast() {
+fn create_comment_strict_registered_active_no_key_file_byte_identical() {
     // The headline rem-dyz scenario: strict + registered active + no key
-    // configured must bail BEFORE any byte hits disk. Previously the
-    // comment was written unsigned and the next op's verify gate blew up.
+    // configured must never corrupt disk.
+    //
+    // Post-xc8x the primary gate is at resolve time (the paired test
+    // `config::tests::resolve_bails_when_strict_identity_has_no_key`
+    // asserts the resolver error surface). Here we exercise the
+    // belt-and-braces path: a hand-built invalid config reaches
+    // `create_comment`, the post-write verify gate catches the unsigned
+    // artifact, and the file stays byte-identical.
     let before = alice_doc_content();
     let system = mock_with_doc(&before);
     let cfg = strict_cfg_with_alice_no_key();
@@ -586,21 +595,12 @@ fn create_comment_strict_registered_active_no_key_fails_fast() {
         },
     );
 
-    let err = result.unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("alice"),
-        "error must name the identity, got: {msg}"
-    );
-    assert!(
-        msg.contains("no signing key"),
-        "error must say a signing key is missing, got: {msg}"
-    );
+    result.unwrap_err();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
     assert_eq!(
         after, before,
-        "file must be byte-identical after fail-fast rejection"
+        "file must be byte-identical when the verify gate trips",
     );
     assert!(
         !after.contains("unsigned attempt"),
@@ -609,9 +609,12 @@ fn create_comment_strict_registered_active_no_key_fails_fast() {
 }
 
 #[test]
-fn create_comment_strict_unregistered_author_rejected_before_signing_check() {
-    // Strict + unregistered author: can_post bails first with the
-    // "not registered" message. resolve_signing_key is not reached.
+fn create_comment_strict_unregistered_author_file_byte_identical() {
+    // Strict + unregistered author via a hand-built config (bypassing
+    // the resolver). The resolver-level rejection is the primary gate
+    // (see `config::tests::resolve_bails_when_revoked_identity_in_strict_mode`);
+    // this test confirms that even if an invalid config reaches the op,
+    // the verify gate still refuses to write a bad artifact.
     let before = alice_doc_content();
     let system = mock_with_doc(&before);
     let mut cfg = strict_cfg_with_alice_no_key();
@@ -633,12 +636,7 @@ fn create_comment_strict_unregistered_author_rejected_before_signing_check() {
         },
     );
 
-    let err = result.unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("not registered"),
-        "unregistered identity must trip can_post, got: {msg}"
-    );
+    result.unwrap_err();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
     assert_eq!(after, before, "file must be byte-identical");
@@ -692,21 +690,12 @@ fn edit_comment_strict_registered_active_no_key_fails_fast() {
         "new content that must not land",
     );
 
-    let err = result.unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("alice"),
-        "error must name the identity, got: {msg}"
-    );
-    assert!(
-        msg.contains("no signing key"),
-        "error must say a signing key is missing, got: {msg}"
-    );
+    result.unwrap_err();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
     assert_eq!(
         after, before,
-        "file must be byte-identical after fail-fast edit rejection"
+        "file must be byte-identical when the verify gate trips on an edit",
     );
     assert!(
         !after.contains("new content that must not land"),
@@ -715,10 +704,11 @@ fn edit_comment_strict_registered_active_no_key_fails_fast() {
 }
 
 #[test]
-fn batch_comment_strict_registered_active_no_key_fails_fast() {
-    // batch_comment composes multiple creates atomically. The fail-fast
-    // check runs once before the loop so the whole batch is rejected
-    // before any op modifies the in-memory doc.
+fn batch_comment_strict_registered_active_no_key_file_byte_identical() {
+    // Pre-xc8x the op had its own fail-fast. After xc8x the resolver
+    // rejects this combination at construction; if a hand-built config
+    // sneaks past, the post-write verify gate catches the unsigned
+    // batch before any byte reaches disk.
     let before = alice_doc_content();
     let system = mock_with_doc(&before);
     let cfg = strict_cfg_with_alice_no_key();
@@ -729,21 +719,12 @@ fn batch_comment_strict_registered_active_no_key_fails_fast() {
     ];
 
     let result = batch_comment(&system, Path::new("/d/a.md"), &cfg, &ops);
-    let err = result.unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("alice"),
-        "error must name the identity, got: {msg}"
-    );
-    assert!(
-        msg.contains("no signing key"),
-        "error must say a signing key is missing, got: {msg}"
-    );
+    result.unwrap_err();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
     assert_eq!(
         after, before,
-        "file must be byte-identical after fail-fast batch rejection"
+        "file must be byte-identical when the verify gate trips on a batch",
     );
 }
 

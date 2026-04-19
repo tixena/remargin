@@ -233,9 +233,10 @@ fn resolve_signature(cm: &Comment, registry: Option<&Registry>) -> SignatureStat
     }
 
     // Only active pubkeys count. Revoked participants were rejected at
-    // `can_post` on the way in; but historical signed comments from a
-    // now-revoked participant should still resolve as `UnknownAuthor`
-    // because none of their keys are active anymore.
+    // identity-resolve time (rem-xc8x) before the op even ran; but
+    // historical signed comments from a now-revoked participant should
+    // still resolve as `UnknownAuthor` because none of their keys are
+    // active anymore.
     if participant.status != RegistryParticipantStatus::Active {
         return SignatureStatus::UnknownAuthor;
     }

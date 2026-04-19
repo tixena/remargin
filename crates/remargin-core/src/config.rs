@@ -93,11 +93,16 @@ pub struct ResolvedConfig {
 impl ResolvedConfig {
     /// Check if a participant is allowed to post (mode + registry enforcement).
     ///
+    /// Kept as a crate-private helper used by [`Self::resolve`] and
+    /// [`Self::with_identity_overrides`] so every construction path runs
+    /// the same registry gate. Op handlers do NOT call this directly
+    /// (rem-xc8x); they consume a pre-validated [`ResolvedConfig`].
+    ///
     /// # Errors
     ///
     /// Returns an error if the participant is not allowed to post in the current
     /// mode (e.g. unregistered in registered/strict mode, or revoked).
-    pub fn can_post(&self, author: &str) -> Result<()> {
+    pub(crate) fn can_post(&self, author: &str) -> Result<()> {
         match self.mode {
             Mode::Open => Ok(()),
             Mode::Registered | Mode::Strict => {
@@ -188,7 +193,7 @@ impl ResolvedConfig {
 
         let assets_dir = cli.assets_dir.map(String::from).unwrap_or(base.assets_dir);
 
-        Ok(Self {
+        let resolved = Self {
             assets_dir,
             author_type,
             identity,
@@ -197,42 +202,72 @@ impl ResolvedConfig {
             mode,
             registry: reg,
             unrestricted: false,
-        })
+        };
+
+        // Validate the resolved identity at construction time (rem-xc8x).
+        // Op handlers can assume the config they receive has already
+        // passed registry + key-presence enforcement for its active mode.
+        resolved.validate_identity()?;
+
+        Ok(resolved)
     }
 
-    /// Enforce the "can we sign this right now?" pre-condition before a
-    /// mutating op touches disk.
+    /// Return the signing key for `author` when the active mode requires
+    /// signing, otherwise `None`.
     ///
-    /// Returns `Ok(Some(key_path))` when the op must sign and a key is
-    /// resolvable — the caller should use that key to produce the
-    /// signature. Returns `Ok(None)` when no signature is required (open /
-    /// registered mode, or unregistered author in strict mode where
-    /// [`Self::can_post`] will or has already rejected). Returns an error
-    /// with an actionable message when a signature IS required but no
-    /// signing key is resolvable; the caller must propagate the error
-    /// instead of silently writing an unsigned artifact (which would then
-    /// be rejected by the post-write verify gate on the next mutation and
-    /// lock the file — see rem-dyz).
+    /// This is a trivial accessor: the key-presence fail-fast that used
+    /// to live here has moved into [`Self::validate_identity`] (rem-xc8x),
+    /// so every caller-visible [`ResolvedConfig`] has already been
+    /// verified to carry a key path when strict mode requires one.
+    /// Unregistered authors in strict mode return `None` here because
+    /// they never reach op handlers — the resolver rejects them up
+    /// front.
+    #[must_use]
+    pub fn resolve_signing_key(&self, author: &str) -> Option<&Path> {
+        if !self.requires_signature(author) {
+            return None;
+        }
+        self.key_path.as_deref()
+    }
+
+    /// Enforce mode-level invariants on the current identity: registry
+    /// membership (registered / strict) and a resolvable signing key
+    /// (strict).
+    ///
+    /// Invoked automatically by [`Self::resolve`] and
+    /// [`Self::with_identity_overrides`] so every surface that produces a
+    /// [`ResolvedConfig`] runs the same gate (rem-xc8x). Absent identity
+    /// is not an error here — some read-only commands intentionally
+    /// resolve without one; op handlers check for the identity they need
+    /// separately.
     ///
     /// # Errors
     ///
-    /// Returns an error when the active mode requires signing for
-    /// `author` but [`Self::key_path`] is `None`. The message names the
-    /// identity and lists the places the caller should check to supply a
-    /// key.
-    pub fn resolve_signing_key(&self, author: &str) -> Result<Option<&Path>> {
-        if !self.requires_signature(author) {
-            return Ok(None);
+    /// Returns an error when the active mode is registered/strict and
+    /// the declared identity is not an active registry participant, or
+    /// when strict mode is active but no signing key is resolvable for
+    /// the registered identity.
+    fn validate_identity(&self) -> Result<()> {
+        let Some(identity) = self.identity.as_deref() else {
+            return Ok(());
+        };
+
+        self.can_post(identity)?;
+
+        // Strict + registered active identity but no key path: fail-fast
+        // (rem-dyz). We use `requires_signature` so unregistered authors
+        // in strict (already rejected by can_post above) do not reach
+        // this branch.
+        if self.mode == Mode::Strict && self.requires_signature(identity) && self.key_path.is_none()
+        {
+            bail!(
+                "strict mode: no signing key resolved for {identity:?} \
+                 (checked: --key flag, config `.remargin.yaml` key field). \
+                 Fix your config or pass --key explicitly."
+            );
         }
-        match &self.key_path {
-            Some(path) => Ok(Some(path.as_path())),
-            None => bail!(
-                "strict mode: cannot produce a signed artifact as {author:?} \
-                 — no signing key resolved (checked: --key flag, config \
-                 `.remargin.yaml` key field). Fix your config or pass --key \
-                 explicitly."
-            ),
-        }
+
+        Ok(())
     }
 
     /// Apply per-call identity overrides to an already-resolved config
@@ -282,6 +317,12 @@ impl ResolvedConfig {
             }
             overridden.author_type = Some(new_type);
         }
+
+        // Re-run the registry + key-presence gate now that the identity
+        // / author_type fields have been swapped (rem-xc8x). Without this
+        // the MCP per-call override path would sidestep the resolver's
+        // validation.
+        overridden.validate_identity()?;
 
         Ok(Some(overridden))
     }

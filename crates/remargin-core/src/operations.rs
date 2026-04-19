@@ -90,12 +90,10 @@ pub fn create_comment(
         .as_deref()
         .context("identity is required to create a comment")?;
 
-    config.can_post(identity)?;
-
-    // Fail-fast in strict mode if the identity must sign but no signing
-    // key is resolvable. Checked BEFORE parsing / copying attachments so
-    // the filesystem is untouched (rem-dyz).
-    let signing_key = config.resolve_signing_key(identity)?;
+    // Registry membership and strict-mode key presence are validated at
+    // `ResolvedConfig::resolve` time (rem-xc8x); the op just reads the
+    // signing key it needs.
+    let signing_key = config.resolve_signing_key(identity);
 
     if params.auto_ack && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
@@ -240,8 +238,6 @@ pub fn ack_comments(
         .as_deref()
         .context("identity is required to ack")?;
 
-    config.can_post(identity)?;
-
     let mut doc = parser::parse_file(system, path)?;
     let now = Utc::now().fixed_offset();
 
@@ -302,8 +298,6 @@ pub fn react(
         .identity
         .as_deref()
         .context("identity is required to react")?;
-
-    config.can_post(identity)?;
 
     let mut doc = parser::parse_file(system, path)?;
 
@@ -427,13 +421,9 @@ pub fn edit_comment(
     writer::ensure_not_forbidden_target(path)?;
     let identity = config.identity.as_deref();
 
-    // Fail-fast in strict mode if the identity must sign but no signing
-    // key is resolvable. Checked BEFORE parsing the file so a failed
-    // edit never touches disk (rem-dyz).
-    let signing_key = match identity {
-        Some(author) => config.resolve_signing_key(author)?,
-        None => None,
-    };
+    // Strict-mode key presence is validated at resolve time (rem-xc8x);
+    // the op just reads the key when it needs one.
+    let signing_key = identity.and_then(|author| config.resolve_signing_key(author));
 
     let mut doc = parser::parse_file(system, path)?;
 

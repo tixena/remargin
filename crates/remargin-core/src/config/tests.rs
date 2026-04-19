@@ -677,16 +677,17 @@ fn resolve_signing_key_returns_none_in_open_mode() {
     let system = MockSystem::new();
     let resolved = ResolvedConfig::resolve(&system, None, None, &CliOverrides::default()).unwrap();
 
-    assert!(resolved.resolve_signing_key("eduardo").unwrap().is_none());
+    assert!(resolved.resolve_signing_key("eduardo").is_none());
 }
 
 #[test]
 fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
-    // Strict + unregistered author: requires_signature is false (because
-    // the author is not registered active). can_post will have already
-    // rejected this before create_comment calls resolve_signing_key; the
-    // helper itself must not bail so the more-specific can_post message
-    // reaches the user.
+    // Strict + unregistered author: `requires_signature` is false
+    // (author not registered active), so the helper short-circuits with
+    // `None`. The resolver itself would reject an unregistered identity
+    // (rem-xc8x), so in practice this code path is only reached for
+    // arbitrary author names the op layer looks up (e.g. verifying
+    // siblings authored by someone else).
     let system = MockSystem::new()
         .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
         .unwrap()
@@ -701,7 +702,7 @@ fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
     let resolved =
         ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
 
-    assert!(resolved.resolve_signing_key("stranger").unwrap().is_none());
+    assert!(resolved.resolve_signing_key("stranger").is_none());
 }
 
 #[test]
@@ -727,7 +728,7 @@ fn resolve_signing_key_returns_key_when_present() {
     };
     let resolved = ResolvedConfig::resolve(&system, config, registry, &cli).unwrap();
 
-    let key = resolved.resolve_signing_key("eduardo").unwrap().unwrap();
+    let key = resolved.resolve_signing_key("eduardo").unwrap();
     assert!(
         key.ends_with("id_ed25519"),
         "key must resolve through ~/.ssh; got {}",
@@ -736,15 +737,17 @@ fn resolve_signing_key_returns_key_when_present() {
 }
 
 #[test]
-fn resolve_signing_key_bails_when_registered_active_has_no_key() {
-    // Strict + registered active + NO key_path: this is the fail-fast
-    // case. The helper must bail with a message naming the identity and
-    // the config surfaces to check (--key flag, config file `key:`
-    // field). Previously create_comment silently wrote an unsigned
-    // artifact here and the post-write gate tripped on the NEXT mutation
-    // (rem-dyz).
+fn resolve_bails_when_strict_identity_has_no_key() {
+    // Strict + registered active identity + NO key_path: the resolver
+    // itself now fails fast (rem-xc8x). Previously `create_comment`
+    // silently wrote an unsigned artifact here and the post-write gate
+    // tripped on the NEXT mutation (rem-dyz). After rem-xc8x the gate
+    // moves to construction time so ops never see an invalid config.
     let system = MockSystem::new()
-        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            b"identity: eduardo\nmode: strict\n",
+        )
         .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
@@ -754,10 +757,8 @@ fn resolve_signing_key_bails_when_registered_active_has_no_key() {
 
     let config = load_config(&system, Path::new("/project")).unwrap();
     let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let resolved =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
-
-    let err = resolved.resolve_signing_key("eduardo").unwrap_err();
+    let err =
+        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap_err();
     let msg = format!("{err}");
     assert!(
         msg.contains("eduardo"),
@@ -774,5 +775,39 @@ fn resolve_signing_key_bails_when_registered_active_has_no_key() {
     assert!(
         msg.contains(".remargin.yaml"),
         "error must point at config file key field, got: {msg}"
+    );
+}
+
+#[test]
+fn resolve_bails_when_revoked_identity_in_strict_mode() {
+    // rem-xc8x acceptance: a revoked participant in strict mode causes
+    // `ResolvedConfig::resolve` to error, not the op handler. This
+    // replaces the equivalent op-level `can_post` check.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/eduardo")
+        .unwrap()
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            b"identity: revoked_user\nmode: strict\nkey: id_ed25519\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/project/.remargin-registry.yaml"),
+            registry_yaml().as_bytes(),
+        )
+        .unwrap();
+
+    let config = load_config(&system, Path::new("/project")).unwrap();
+    let registry = load_registry(&system, Path::new("/project")).unwrap();
+    let err =
+        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("revoked_user"),
+        "error must name the identity, got: {msg}"
+    );
+    assert!(
+        msg.contains("revoked"),
+        "error must surface the revocation, got: {msg}"
     );
 }
