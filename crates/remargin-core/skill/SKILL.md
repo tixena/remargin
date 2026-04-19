@@ -10,11 +10,19 @@ Remargin is a **document access layer** and **structured commenting system** for
 
 ## When to use remargin
 
-Use remargin when:
+### Scope: a remargin realm covers every `.md` under it
 
-- Reading or writing markdown documents under review or discussion.
-- Adding comments, replies, reactions, or acknowledgments to documents.
-- Searching across documents for pending comments or activity.
+A **remargin realm** is any directory tree containing a `.remargin.yaml` (discovered by walking upward from the current directory, like `.git`). **Every `.md` file inside a realm is a remargin-managed document.** There is no per-file opt-in, no "tracked" vs "untracked" for markdown. If it ends in `.md` and lives inside a realm, remargin owns its read and write paths.
+
+This includes notes, drafts, scratch files, READMEs, and any other `.md` — not just the ones that currently contain remargin-fenced comment blocks. A file that has never had a comment is still managed: remargin's frontmatter, comment-preservation invariants, and access-layer guarantees all apply the moment you touch it.
+
+Non-`.md` files inside a realm are accessed via remargin's document-access layer (`get`, `write`, `ls`, etc.) when the agent is already routing through remargin, but they are not subject to the markdown-specific preservation rules.
+
+### Use remargin for
+
+- Any read, write, or inspection of a `.md` file inside a realm — remargin replaces `Read` / `Edit` / `Write` for managed markdown.
+- Adding comments, replies, reactions, or acknowledgments.
+- Searching across documents for pending comments, activity, or text matches.
 - Working in a project where the remargin MCP server is configured or the `remargin` CLI is on `$PATH`.
 
 **Trigger phrases**: "remargin that", "remargin this", "let's discuss", "let's review", "review this document", "discuss this document", "comment on", "what comments are pending", "acknowledge", "react to", "check the document", "start a discussion", "leave a comment", "any pending comments".
@@ -33,7 +41,7 @@ The CLI has a small admin surface that has no MCP equivalent (`keygen`, `mcp`, `
 
 ## Critical rule: never operate on managed files directly
 
-**NEVER use `Read`, `Edit`, `Write`, or `Bash` (`awk`, `sed`, `cat`, `grep`) to read, modify, or inspect markdown documents remargin manages.** Always go through the remargin tools.
+**NEVER use `Read`, `Edit`, `Write`, or `Bash` (`awk`, `sed`, `cat`, `grep`, `cp`, `mv`, `tee`, shell redirection) to read, modify, or inspect any `.md` file inside a remargin realm.** Every `.md` in a realm is managed — there is no per-file opt-out and no "this one is just a note" exception. Always go through the remargin tools.
 
 - Use `remargin get` to read file contents (with `start_line`/`end_line` for ranges, `line_numbers=true` to prefix each line).
 - Use `remargin search` to find text across files and get line numbers.

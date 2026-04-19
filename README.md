@@ -16,6 +16,12 @@ Remargin fixes this with:
 
 Documents remain valid markdown. Comments are human-readable. No proprietary formats, no databases, no lock-in.
 
+## Scope: what remargin manages
+
+A **remargin realm** is any directory tree that contains a `.remargin.yaml` (discovered by walking upward from the current directory, like `.git`). **Every `.md` file inside a realm is a remargin-managed document**, full stop — there is no per-file opt-in, no "this file has comments so it is tracked and that one isn't." Once the config file is present, every markdown file under that tree is accessed through `remargin` (CLI or MCP), not through raw filesystem edits.
+
+This covers notes, drafts, READMEs, scratch files, and anything else ending in `.md`. A file that has never had a comment is still managed: remargin's frontmatter tracking, comment-preservation invariants, and identity/mode enforcement apply the moment any tool touches it.
+
 ## Features
 
 - **Threaded comments** with reply chains, acknowledgments, and emoji reactions
@@ -214,7 +220,7 @@ You don't write this format by hand -- the CLI and MCP tools produce it.
 
 ## Configuration
 
-Remargin uses two config files, discovered by walking up from the current directory (like `.git`):
+Remargin uses two config files, discovered by walking up from the current directory (like `.git`). The presence of `.remargin.yaml` anywhere up the tree is what defines a **remargin realm** — every markdown file under that tree is managed from that point on (see "Scope" above).
 
 ### `.remargin.yaml` -- Project Settings
 
