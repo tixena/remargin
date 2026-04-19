@@ -69,8 +69,10 @@ struct GlobalFlags {
     #[arg(long)]
     assets_dir: Option<String>,
 
-    /// Path to the config file.
-    #[arg(long)]
+    /// Path to the config file. Declares a complete identity on its
+    /// own — conflicts with --identity, --type, and --key so a caller
+    /// cannot mix "config file" and "manual declaration" halves.
+    #[arg(long, conflicts_with_all = ["identity", "type", "key"])]
     config: Option<PathBuf>,
 
     /// Identity (author name) for this operation.

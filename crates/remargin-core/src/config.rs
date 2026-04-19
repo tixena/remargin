@@ -1,5 +1,6 @@
 //! Configuration loader: `.remargin.yaml` walk-up resolution.
 
+pub mod identity;
 pub mod registry;
 
 #[cfg(test)]
