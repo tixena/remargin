@@ -19,6 +19,12 @@ const CONFIG_FILENAME: &str = ".remargin.yaml";
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
 
 /// CLI overrides that take precedence over config file values.
+///
+/// Note: `mode` is intentionally absent. Mode is a property of the
+/// directory tree (resolved by walking upward for the nearest
+/// `.remargin.yaml`) and is not caller-overridable — allowing a flag
+/// like `--mode open` would let an agent silently weaken enforcement on
+/// a strict vault (rem-wws).
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct CliOverrides<'cli> {
@@ -26,7 +32,6 @@ pub struct CliOverrides<'cli> {
     pub author_type: Option<&'cli str>,
     pub identity: Option<&'cli str>,
     pub key: Option<&'cli str>,
-    pub mode: Option<&'cli str>,
 }
 
 /// Parsed contents of a `.remargin.yaml` file.
@@ -132,7 +137,7 @@ impl ResolvedConfig {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - An unknown author type or mode string is provided
+    /// - An unknown author type string is provided
     /// - Key path resolution fails
     pub fn resolve(
         system: &dyn System,
@@ -171,11 +176,9 @@ impl ResolvedConfig {
             .map(|type_val| parse_author_type(&type_val))
             .transpose()?;
 
-        let mode = if let Some(mode_str) = cli.mode {
-            parse_mode(mode_str)?
-        } else {
-            base.mode
-        };
+        // Mode is no longer a CLI-overridable value (rem-wws): it comes
+        // from the config file's `mode:` field and nothing else.
+        let mode = base.mode;
 
         let key_str = cli.key.map(String::from).or(base.key);
         let key_path = key_str
@@ -474,18 +477,6 @@ pub fn parse_author_type(type_str: &str) -> Result<AuthorType> {
         "human" => Ok(AuthorType::Human),
         "agent" => Ok(AuthorType::Agent),
         other => bail!("unknown author type: {other:?}"),
-    }
-}
-
-/// # Errors
-///
-/// Returns an error for unknown mode strings.
-fn parse_mode(mode_str: &str) -> Result<Mode> {
-    match mode_str {
-        "open" => Ok(Mode::Open),
-        "registered" => Ok(Mode::Registered),
-        "strict" => Ok(Mode::Strict),
-        other => bail!("unknown mode: {other:?}"),
     }
 }
 

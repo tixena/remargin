@@ -224,7 +224,6 @@ fn cli_override_identity() {
     let cli = CliOverrides {
         identity: Some("cli_user"),
         author_type: Some("agent"),
-        mode: Some("strict"),
         key: Some("~/.remargin/mykey"),
         assets_dir: Some("my_assets"),
     };
@@ -232,7 +231,9 @@ fn cli_override_identity() {
 
     assert_eq!(resolved.identity.as_deref(), Some("cli_user"));
     assert_eq!(resolved.author_type, Some(AuthorType::Agent));
-    assert_eq!(resolved.mode, Mode::Strict);
+    // Mode is sourced from the config file only (rem-wws). The config
+    // declares `mode: open`, so CLI cannot escalate it to strict.
+    assert_eq!(resolved.mode, Mode::Open);
     assert_eq!(
         resolved.key_path,
         Some(Path::new("/home/user/.remargin/mykey").to_path_buf())
@@ -251,18 +252,18 @@ fn open_mode_any_author() {
 #[test]
 fn strict_mode_unregistered() {
     let system = MockSystem::new()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
             registry_yaml().as_bytes(),
         )
         .unwrap();
 
+    let config = load_config(&system, Path::new("/project")).unwrap();
     let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let cli = CliOverrides {
-        mode: Some("strict"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+    let resolved =
+        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
 
     let err = resolved.can_post("stranger").unwrap_err();
     assert!(
@@ -274,18 +275,18 @@ fn strict_mode_unregistered() {
 #[test]
 fn strict_mode_requires_signature() {
     let system = MockSystem::new()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
             registry_yaml().as_bytes(),
         )
         .unwrap();
 
+    let config = load_config(&system, Path::new("/project")).unwrap();
     let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let cli = CliOverrides {
-        mode: Some("strict"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+    let resolved =
+        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
 
     resolved.can_post("eduardo").unwrap();
 
@@ -296,12 +297,12 @@ fn strict_mode_requires_signature() {
 
 #[test]
 fn registered_mode_no_registry() {
-    let system = MockSystem::new();
-    let cli = CliOverrides {
-        mode: Some("registered"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, None, None, &cli).unwrap();
+    let system = MockSystem::new()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: registered\n")
+        .unwrap();
+    let config = load_config(&system, Path::new("/project")).unwrap();
+    let resolved =
+        ResolvedConfig::resolve(&system, config, None, &CliOverrides::default()).unwrap();
 
     let err = resolved.can_post("anyone").unwrap_err();
     assert!(
@@ -670,12 +671,11 @@ fn resolve_signing_key_returns_none_in_open_mode() {
     // Open mode: even registered authors with a key resolved on the
     // config do not "require" a signature from the op's perspective. The
     // helper must return Ok(None) so create_comment skips signing.
+    //
+    // Mode is sourced from the config file (rem-wws). No config → default
+    // mode is Open.
     let system = MockSystem::new();
-    let cli = CliOverrides {
-        mode: Some("open"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, None, None, &cli).unwrap();
+    let resolved = ResolvedConfig::resolve(&system, None, None, &CliOverrides::default()).unwrap();
 
     assert!(resolved.resolve_signing_key("eduardo").unwrap().is_none());
 }
@@ -688,18 +688,18 @@ fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
     // helper itself must not bail so the more-specific can_post message
     // reaches the user.
     let system = MockSystem::new()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
             registry_yaml().as_bytes(),
         )
         .unwrap();
 
+    let config = load_config(&system, Path::new("/project")).unwrap();
     let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let cli = CliOverrides {
-        mode: Some("strict"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+    let resolved =
+        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
 
     assert!(resolved.resolve_signing_key("stranger").unwrap().is_none());
 }
@@ -711,19 +711,21 @@ fn resolve_signing_key_returns_key_when_present() {
     let system = MockSystem::new()
         .with_env("HOME", "/home/eduardo")
         .unwrap()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
             registry_yaml().as_bytes(),
         )
         .unwrap();
 
+    let config = load_config(&system, Path::new("/project")).unwrap();
     let registry = load_registry(&system, Path::new("/project")).unwrap();
     let cli = CliOverrides {
         key: Some("id_ed25519"),
-        mode: Some("strict"),
         ..CliOverrides::default()
     };
-    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+    let resolved = ResolvedConfig::resolve(&system, config, registry, &cli).unwrap();
 
     let key = resolved.resolve_signing_key("eduardo").unwrap().unwrap();
     assert!(
@@ -742,18 +744,18 @@ fn resolve_signing_key_bails_when_registered_active_has_no_key() {
     // artifact here and the post-write gate tripped on the NEXT mutation
     // (rem-dyz).
     let system = MockSystem::new()
+        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
             registry_yaml().as_bytes(),
         )
         .unwrap();
 
+    let config = load_config(&system, Path::new("/project")).unwrap();
     let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let cli = CliOverrides {
-        mode: Some("strict"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, None, registry, &cli).unwrap();
+    let resolved =
+        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
 
     let err = resolved.resolve_signing_key("eduardo").unwrap_err();
     let msg = format!("{err}");

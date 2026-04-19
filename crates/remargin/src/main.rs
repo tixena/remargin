@@ -85,10 +85,6 @@ struct GlobalFlags {
     #[arg(long)]
     key: Option<String>,
 
-    /// Enforcement mode: open, registered, or strict.
-    #[arg(long, value_name = "open|registered|strict")]
-    mode: Option<String>,
-
     /// Author type: human or agent.
     #[arg(long, value_name = "human|agent")]
     r#type: Option<String>,
@@ -1044,7 +1040,6 @@ fn build_overrides<'cli>(
     overrides.author_type = global.r#type.as_deref();
     overrides.identity = global.identity.as_deref();
     overrides.key = scratch.key.as_deref();
-    overrides.mode = global.mode.as_deref();
     Ok(overrides)
 }
 
