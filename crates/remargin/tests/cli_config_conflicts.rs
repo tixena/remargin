@@ -1,8 +1,11 @@
-//! rem-11u: `--config` must clap-conflict with `--identity`, `--type`,
-//! and `--key`. Mixing "pass a config file" with "override pieces of
-//! that file" silently misattributes comments (the class of bug that
-//! produced rem-ce4). Clap rejects the combination at parse time
-//! rather than letting the three-branch resolver see it.
+//! rem-11u / rem-zlx3: `--config` must clap-conflict with `--identity`,
+//! `--type`, and `--key`. Mixing "pass a config file" with "override
+//! pieces of that file" silently misattributes comments (the class of
+//! bug that produced rem-ce4). Clap rejects the combination at parse
+//! time rather than letting the three-branch resolver see it.
+//!
+//! Post-rem-zlx3 the identity group is per-subcommand (not global), so
+//! the flags go AFTER the subcommand name.
 
 #[cfg(test)]
 mod tests {
@@ -23,13 +26,13 @@ mod tests {
     #[test]
     fn config_conflicts_with_identity() {
         let (code, stderr) = run(&[
+            "comment",
+            "a.md",
+            "hi",
             "--config",
             "/x.yaml",
             "--identity",
             "alice",
-            "comment",
-            "a.md",
-            "hi",
         ]);
         assert_eq!(code, Some(2_i32));
         assert!(
@@ -41,7 +44,7 @@ mod tests {
     #[test]
     fn config_conflicts_with_type() {
         let (code, stderr) = run(&[
-            "--config", "/x.yaml", "--type", "human", "comment", "a.md", "hi",
+            "comment", "a.md", "hi", "--config", "/x.yaml", "--type", "human",
         ]);
         assert_eq!(code, Some(2_i32));
         assert!(
@@ -53,7 +56,7 @@ mod tests {
     #[test]
     fn config_conflicts_with_key() {
         let (code, stderr) = run(&[
-            "--config", "/x.yaml", "--key", "id", "comment", "a.md", "hi",
+            "comment", "a.md", "hi", "--config", "/x.yaml", "--key", "id",
         ]);
         assert_eq!(code, Some(2_i32));
         assert!(

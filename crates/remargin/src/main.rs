@@ -58,17 +58,17 @@ static START_TIME: OnceLock<Instant> = OnceLock::new();
 struct Cli {
     #[command(subcommand)]
     command: Commands,
-
-    #[command(flatten)]
-    global: GlobalFlags,
 }
 
-#[derive(clap::Args)]
-struct GlobalFlags {
-    /// Path to assets directory.
-    #[arg(long)]
-    assets_dir: Option<String>,
-
+/// Per-subcommand identity group (rem-zlx3).
+///
+/// Flattened only into subcommands that resolve an author identity
+/// (comment, edit, ack, react, sign, write, delete, batch, purge,
+/// migrate, plan, verify, sandbox, mcp). Read-only / utility
+/// subcommands do not flatten this group so clap rejects any attempt
+/// to pass `--config` / `--identity` / `--type` / `--key` to them.
+#[derive(clap::Args, Default)]
+struct IdentityArgs {
     /// Path to the config file. Declares a complete identity on its
     /// own — conflicts with --identity, --type, and --key so a caller
     /// cannot mix "config file" and "manual declaration" halves.
@@ -79,10 +79,6 @@ struct GlobalFlags {
     #[arg(long)]
     identity: Option<String>,
 
-    /// Output as JSON.
-    #[arg(long)]
-    json: bool,
-
     /// Path to signing key.
     #[arg(long)]
     key: Option<String>,
@@ -90,15 +86,71 @@ struct GlobalFlags {
     /// Author type: human or agent.
     #[arg(long, value_name = "human|agent")]
     r#type: Option<String>,
+}
 
-    /// Bypass path sandbox checks (requires compile-time feature).
-    #[cfg(feature = "unrestricted")]
+/// Per-subcommand output group (rem-zlx3).
+///
+/// Controls how the subcommand renders its result. Flattened into
+/// every subcommand that emits a payload. Unlike the old
+/// `GlobalFlags`, these flags are scoped to the subcommand — this
+/// matches the "per-concern, per-subcommand" structure the rest of
+/// the refactor establishes. Invocations that pre-rem-zlx3 placed
+/// `--json` before the subcommand must now place it after.
+#[derive(clap::Args, Default)]
+struct OutputArgs {
+    /// Output as JSON.
     #[arg(long)]
-    unrestricted: bool,
+    json: bool,
 
     /// Enable verbose/tracing output.
     #[arg(long)]
     verbose: bool,
+}
+
+/// Per-subcommand assets-dir override (rem-zlx3).
+///
+/// Flattened ONLY into subcommands that write attachments: comment,
+/// edit, batch. Everything else errors at parse time.
+#[derive(clap::Args, Default)]
+struct AssetsArgs {
+    /// Path to assets directory.
+    #[arg(long)]
+    assets_dir: Option<String>,
+}
+
+/// Per-subcommand unrestricted escape hatch (rem-zlx3).
+///
+/// Compile-gated behind the `unrestricted` feature; flattened into the
+/// ops that touch arbitrary filesystem paths (get, ls, metadata, rm,
+/// write).
+#[cfg(feature = "unrestricted")]
+#[derive(clap::Args, Default)]
+struct UnrestrictedArgs {
+    /// Bypass path sandbox checks (requires compile-time feature).
+    #[arg(long)]
+    unrestricted: bool,
+}
+
+#[cfg(not(feature = "unrestricted"))]
+#[derive(clap::Args, Default)]
+struct UnrestrictedArgs;
+
+#[cfg(not(feature = "unrestricted"))]
+impl UnrestrictedArgs {
+    #[expect(
+        clippy::unused_self,
+        reason = "sibling unrestricted-feature impl reads self.unrestricted; keep the signature uniform"
+    )]
+    const fn unrestricted(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(feature = "unrestricted")]
+impl UnrestrictedArgs {
+    const fn unrestricted(&self) -> bool {
+        self.unrestricted
+    }
 }
 
 /// Available subcommands.
@@ -118,6 +170,10 @@ enum Commands {
         /// Remove this identity's ack instead of adding one.
         #[arg(long)]
         remove: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Create multiple comments atomically (JSON ops via --ops).
     Batch {
@@ -126,6 +182,12 @@ enum Commands {
         /// JSON array of operations.
         #[arg(long)]
         ops: String,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        assets_args: AssetsArgs,
     },
     /// Create a comment in a document.
     Comment {
@@ -157,6 +219,12 @@ enum Commands {
         /// Addressees of the comment.
         #[arg(long)]
         to: Vec<String>,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        assets_args: AssetsArgs,
     },
     /// List comments in a document.
     Comments {
@@ -165,6 +233,8 @@ enum Commands {
         /// Pretty-print comments as a threaded tree.
         #[arg(long)]
         pretty: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Delete one or more comments.
     Delete {
@@ -173,6 +243,10 @@ enum Commands {
         /// Comment IDs to delete.
         #[arg(required = true)]
         ids: Vec<String>,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Edit a comment (cascading ack clear).
     Edit {
@@ -182,6 +256,12 @@ enum Commands {
         id: String,
         /// New comment body.
         content: String,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        assets_args: AssetsArgs,
     },
     /// Read a file's contents. Add `--binary` to fetch non-markdown files as
     /// bytes (base64 in `--json` mode, raw bytes to stdout otherwise, or
@@ -208,6 +288,10 @@ enum Commands {
         /// Start line (1-indexed). Text mode only.
         #[arg(long)]
         start: Option<usize>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// Resolve and print the identity config for a given type.
     ///
@@ -219,34 +303,52 @@ enum Commands {
         /// Author type filter: `human`, `agent`, etc. If omitted, returns the first config found.
         #[arg(long = "type")]
         author_type: Option<String>,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Generate a new Ed25519 signing key pair.
     Keygen {
         /// Output path for the private key (public key gets .pub suffix).
         #[arg(default_value = "remargin_key")]
         output: PathBuf,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Run structural lint checks.
     Lint {
         /// Path to the document (use - for stdin).
         file: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// List files and directories.
     Ls {
         /// Directory path to list.
         #[arg(default_value = ".")]
         path: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// MCP server management and execution.
     Mcp {
         /// Subcommand: run, install, uninstall, test.
         #[command(subcommand)]
         action: Option<McpAction>,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Get document metadata.
     Metadata {
         /// Path to the document.
         path: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// Convert old-format comments to remargin format.
     Migrate {
@@ -255,12 +357,18 @@ enum Commands {
         /// Create a .bak backup before modifying.
         #[arg(long)]
         backup: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Install or uninstall the embedded Obsidian plugin in a vault.
     #[cfg(feature = "obsidian")]
     Obsidian {
         #[command(subcommand)]
         action: ObsidianAction,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Structured pre-commit prediction for a mutating op (rem-bhk).
     ///
@@ -268,15 +376,26 @@ enum Commands {
     /// of each mutating op. This crate ships the shared shape +
     /// subcommand tree (rem-2qr); individual op wiring lands in
     /// rem-imc, rem-3uo, rem-qll.
+    ///
+    /// Identity is flattened on the parent so every projection inherits
+    /// the same `--identity` / `--type` / `--config` / `--key`. Output
+    /// flags, by contrast, belong on each sub-action so `remargin plan
+    /// <op> … --json` parses cleanly (rem-zlx3).
     Plan {
         /// Which mutating op to plan.
         #[command(subcommand)]
         action: PlanAction,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
     },
     /// Strip all comments from a document.
     Purge {
         /// Path to the document.
         file: String,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Search across documents for comments.
     Query {
@@ -313,6 +432,8 @@ enum Commands {
         /// Return only counts/summary, suppress comment data.
         #[arg(long)]
         summary: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Add or remove an emoji reaction.
     React {
@@ -325,12 +446,18 @@ enum Commands {
         /// Remove instead of add.
         #[arg(long)]
         remove: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Manage the registry file.
     Registry {
         /// Subcommand: show.
         #[command(subcommand)]
         action: RegistryAction,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Resolve the effective enforcement mode for a directory.
     ///
@@ -346,17 +473,29 @@ enum Commands {
         /// current directory.
         #[arg(long)]
         cwd: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Remove a file from the managed document tree.
     Rm {
         /// Path to the file.
         file: String,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// Manage per-identity sandbox staging for markdown files.
     Sandbox {
         /// Subcommand: add, list, or remove.
         #[command(subcommand)]
         action: SandboxAction,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Search across documents for text matches.
     Search {
@@ -377,6 +516,8 @@ enum Commands {
         /// Case-insensitive matching.
         #[arg(long, short = 'i')]
         ignore_case: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Back-sign missing-signature comments authored by the current
     /// identity (rem-1ec).
@@ -401,12 +542,18 @@ enum Commands {
         /// identity. Mutually exclusive with `--ids`.
         #[arg(long)]
         all_mine: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Manage the Claude Code skill.
     Skill {
         /// Subcommand: install, uninstall, test.
         #[command(subcommand)]
         action: SkillAction,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Verify comment integrity (checksums and signatures) against the
     /// participant registry.
@@ -418,6 +565,10 @@ enum Commands {
     Verify {
         /// Path to the document.
         file: String,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Print version information.
     Version,
@@ -445,6 +596,12 @@ enum Commands {
         /// preservation. Not supported for markdown (.md) files.
         #[arg(long)]
         raw: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
 }
 
@@ -463,6 +620,8 @@ enum PlanAction {
         /// Remove the current identity's ack from each comment.
         #[arg(long)]
         remove: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `batch` op (rem-qll).
     ///
@@ -475,6 +634,8 @@ enum PlanAction {
         path: String,
         /// JSON file containing the `ops` array. Use `-` for stdin.
         ops_file: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `comment` creation op (rem-3fp).
     Comment {
@@ -506,6 +667,8 @@ enum PlanAction {
         /// Addressees of the comment.
         #[arg(long)]
         to: Vec<String>,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `delete` op (rem-3uo).
     Delete {
@@ -514,6 +677,8 @@ enum PlanAction {
         /// Comment IDs to delete.
         #[arg(required = true)]
         ids: Vec<String>,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project an `edit` op (rem-3fp).
     Edit {
@@ -523,16 +688,22 @@ enum PlanAction {
         id: String,
         /// New comment body.
         content: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `migrate` op (rem-qll).
     Migrate {
         /// Path to the document.
         path: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `purge` op (rem-qll).
     Purge {
         /// Path to the document.
         path: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `react` op (rem-3uo).
     React {
@@ -545,16 +716,22 @@ enum PlanAction {
         /// Remove the current identity's reaction with this emoji.
         #[arg(long)]
         remove: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `sandbox add` op (rem-qll).
     SandboxAdd {
         /// Path to the document.
         path: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `sandbox remove` op (rem-qll).
     SandboxRemove {
         /// Path to the document.
         path: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `sign` op (rem-7y3).
     Sign {
@@ -567,6 +744,8 @@ enum PlanAction {
         /// identity. Mutually exclusive with `--ids`.
         #[arg(long)]
         all_mine: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
     /// Project a `write` op (rem-imc).
     Write {
@@ -593,6 +772,8 @@ enum PlanAction {
         /// carry a `reject_reason`.
         #[arg(long)]
         raw: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
     },
 }
 
@@ -939,6 +1120,66 @@ fn parse_line_range(raw: &str) -> Result<(usize, usize)> {
     Ok((start, end))
 }
 
+/// Pull the subcommand's [`OutputArgs`] reference for the top-level
+/// harness (main + error rendering).
+///
+/// Returns `None` for subcommands that do not flatten [`OutputArgs`] —
+/// currently only `Version`. Callers treat `None` as "no `--json`, no
+/// `--verbose`" (the all-defaults case).
+const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
+    match cmd {
+        Commands::Ack { output_args, .. }
+        | Commands::Batch { output_args, .. }
+        | Commands::Comment { output_args, .. }
+        | Commands::Comments { output_args, .. }
+        | Commands::Delete { output_args, .. }
+        | Commands::Edit { output_args, .. }
+        | Commands::Get { output_args, .. }
+        | Commands::Identity { output_args, .. }
+        | Commands::Keygen { output_args, .. }
+        | Commands::Lint { output_args, .. }
+        | Commands::Ls { output_args, .. }
+        | Commands::Mcp { output_args, .. }
+        | Commands::Metadata { output_args, .. }
+        | Commands::Migrate { output_args, .. }
+        | Commands::Purge { output_args, .. }
+        | Commands::Query { output_args, .. }
+        | Commands::React { output_args, .. }
+        | Commands::Registry { output_args, .. }
+        | Commands::ResolveMode { output_args, .. }
+        | Commands::Rm { output_args, .. }
+        | Commands::Sandbox { output_args, .. }
+        | Commands::Search { output_args, .. }
+        | Commands::Sign { output_args, .. }
+        | Commands::Skill { output_args, .. }
+        | Commands::Verify { output_args, .. }
+        | Commands::Write { output_args, .. } => Some(output_args),
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { output_args, .. } => Some(output_args),
+        Commands::Plan { action, .. } => Some(plan_action_output(action)),
+        Commands::Version => None,
+    }
+}
+
+/// Pull the per-action [`OutputArgs`] from a [`PlanAction`] variant.
+/// Every plan sub-action flattens an `OutputArgs` (rem-zlx3).
+const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
+    match action {
+        PlanAction::Ack { output_args, .. }
+        | PlanAction::Batch { output_args, .. }
+        | PlanAction::Comment { output_args, .. }
+        | PlanAction::Delete { output_args, .. }
+        | PlanAction::Edit { output_args, .. }
+        | PlanAction::Migrate { output_args, .. }
+        | PlanAction::Purge { output_args, .. }
+        | PlanAction::React { output_args, .. }
+        | PlanAction::SandboxAdd { output_args, .. }
+        | PlanAction::SandboxRemove { output_args, .. }
+        | PlanAction::Sign { output_args, .. }
+        | PlanAction::Write { output_args, .. } => output_args,
+    }
+}
+
 fn main() -> ExitCode {
     // Capture the start time before parsing so `elapsed_ms` includes clap's
     // argument-parsing overhead.
@@ -946,7 +1187,11 @@ fn main() -> ExitCode {
 
     let cli = Cli::parse();
 
-    if cli.global.verbose {
+    let output = subcommand_output(&cli.command);
+    let verbose = output.is_some_and(|o| o.verbose);
+    let json_mode = output.is_some_and(|o| o.json);
+
+    if verbose {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::from_default_env()
@@ -969,7 +1214,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             let exit_code = classify_error(&err);
-            if cli.global.json {
+            if json_mode {
                 let error_json = inject_elapsed_ms(&json!({ "error": format!("{err:#}") }));
                 eprintln!(
                     "{}",
@@ -1010,20 +1255,25 @@ fn classify_error(err: &anyhow::Error) -> u8 {
     }
 }
 
+/// Build a [`CliOverrides`] from per-subcommand arg groups. Earlier code
+/// (pre rem-zlx3) pulled these off a shared `GlobalFlags`; each subcommand
+/// now declares its own [`IdentityArgs`] and (where applicable)
+/// [`AssetsArgs`], so the builder accepts them directly.
 fn build_overrides<'cli>(
     system: &dyn System,
-    global: &'cli GlobalFlags,
+    identity_args: &'cli IdentityArgs,
+    assets_args: Option<&'cli AssetsArgs>,
     scratch: &'cli mut OverrideScratch,
 ) -> Result<CliOverrides<'cli>> {
     // Expand path-shaped overrides (`--assets-dir`, `--key`) once at the
     // adapter boundary so downstream callers never see an unexpanded `~`
     // or `$VAR`. The `scratch` buffer owns the expanded strings for the
     // lifetime of the returned overrides.
-    scratch.assets_dir = match global.assets_dir.as_deref() {
+    scratch.assets_dir = match assets_args.and_then(|a| a.assets_dir.as_deref()) {
         Some(raw) => Some(expand_cli_path(system, raw)?.to_string_lossy().into_owned()),
         None => None,
     };
-    scratch.key = match global.key.as_deref() {
+    scratch.key = match identity_args.key.as_deref() {
         Some(raw) => {
             // `--key` accepts a bare name shorthand (e.g. `mykey` → `~/.ssh/mykey`).
             // Expand only when the raw value contains a path sigil — bare
@@ -1039,45 +1289,24 @@ fn build_overrides<'cli>(
 
     let mut overrides = CliOverrides::default();
     overrides.assets_dir = scratch.assets_dir.as_deref();
-    overrides.author_type = global.r#type.as_deref();
-    overrides.identity = global.identity.as_deref();
+    overrides.author_type = identity_args.r#type.as_deref();
+    overrides.identity = identity_args.identity.as_deref();
     overrides.key = scratch.key.as_deref();
     Ok(overrides)
 }
 
-fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
-    let mut scratch = OverrideScratch::default();
-    let overrides = build_overrides(system, &cli.global, &mut scratch)?;
-
-    // Commands that do not need config.
-    match &cli.command {
-        Commands::Version => {
-            eprintln!("remargin {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
-        }
-        Commands::Mcp { action } => {
-            return cmd_mcp(system, cwd, &overrides, action.as_ref(), cli.global.json);
-        }
-        Commands::Identity { author_type } => {
-            return cmd_identity(system, cwd, author_type.as_deref(), cli.global.json);
-        }
-        Commands::ResolveMode { cwd: override_cwd } => {
-            let override_expanded = override_cwd
-                .as_deref()
-                .map(|c| expand_cli_pathbuf(system, c))
-                .transpose()?;
-            let start_dir = override_expanded.as_deref().unwrap_or(cwd);
-            return cmd_resolve_mode(system, start_dir, cli.global.json);
-        }
-        Commands::Keygen { output } => {
-            let expanded_output = expand_cli_pathbuf(system, output)?;
-            return cmd_keygen(system, &expanded_output);
-        }
+/// A handful of subcommands run entirely without a [`ResolvedConfig`]
+/// (`Version`, `Identity`, `ResolveMode`, `Keygen`, `Skill`, `Obsidian`).
+/// Returning `true` here short-circuits the config load in [`run`].
+const fn subcommand_is_config_free(cmd: &Commands) -> bool {
+    match cmd {
+        Commands::Version
+        | Commands::Identity { .. }
+        | Commands::ResolveMode { .. }
+        | Commands::Keygen { .. }
+        | Commands::Skill { .. } => true,
         #[cfg(feature = "obsidian")]
-        Commands::Obsidian { action } => {
-            return cmd_obsidian(system, cwd, action, cli.global.json);
-        }
-        Commands::Skill { action } => return cmd_skill(system, action, cli.global.json),
+        Commands::Obsidian { .. } => true,
         Commands::Ack { .. }
         | Commands::Batch { .. }
         | Commands::Comment { .. }
@@ -1087,6 +1316,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::Get { .. }
         | Commands::Lint { .. }
         | Commands::Ls { .. }
+        | Commands::Mcp { .. }
         | Commands::Metadata { .. }
         | Commands::Migrate { .. }
         | Commands::Plan { .. }
@@ -1099,14 +1329,214 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         | Commands::Search { .. }
         | Commands::Sign { .. }
         | Commands::Verify { .. }
-        | Commands::Write { .. } => {}
+        | Commands::Write { .. } => false,
+    }
+}
+
+/// Fetch the [`IdentityArgs`] flatten for subcommands that declare one.
+///
+/// Subcommands that do not resolve identity (lint, query, search, ls,
+/// get, metadata, registry, comments, version, keygen, identity,
+/// resolve-mode, skill, obsidian) return `None`; callers use the
+/// [`IdentityArgs::default`] to build an empty [`CliOverrides`].
+const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
+    match cmd {
+        Commands::Ack { identity_args, .. }
+        | Commands::Batch { identity_args, .. }
+        | Commands::Comment { identity_args, .. }
+        | Commands::Delete { identity_args, .. }
+        | Commands::Edit { identity_args, .. }
+        | Commands::Mcp { identity_args, .. }
+        | Commands::Migrate { identity_args, .. }
+        | Commands::Plan { identity_args, .. }
+        | Commands::Purge { identity_args, .. }
+        | Commands::React { identity_args, .. }
+        | Commands::Rm { identity_args, .. }
+        | Commands::Sandbox { identity_args, .. }
+        | Commands::Sign { identity_args, .. }
+        | Commands::Verify { identity_args, .. }
+        | Commands::Write { identity_args, .. } => Some(identity_args),
+        Commands::Comments { .. }
+        | Commands::Get { .. }
+        | Commands::Identity { .. }
+        | Commands::Keygen { .. }
+        | Commands::Lint { .. }
+        | Commands::Ls { .. }
+        | Commands::Metadata { .. }
+        | Commands::Query { .. }
+        | Commands::Registry { .. }
+        | Commands::ResolveMode { .. }
+        | Commands::Search { .. }
+        | Commands::Skill { .. }
+        | Commands::Version => None,
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { .. } => None,
+    }
+}
+
+/// Fetch the [`AssetsArgs`] flatten for subcommands that write
+/// attachments.
+const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
+    match cmd {
+        Commands::Batch { assets_args, .. }
+        | Commands::Comment { assets_args, .. }
+        | Commands::Edit { assets_args, .. } => Some(assets_args),
+        Commands::Ack { .. }
+        | Commands::Comments { .. }
+        | Commands::Delete { .. }
+        | Commands::Get { .. }
+        | Commands::Identity { .. }
+        | Commands::Keygen { .. }
+        | Commands::Lint { .. }
+        | Commands::Ls { .. }
+        | Commands::Mcp { .. }
+        | Commands::Metadata { .. }
+        | Commands::Migrate { .. }
+        | Commands::Plan { .. }
+        | Commands::Purge { .. }
+        | Commands::Query { .. }
+        | Commands::React { .. }
+        | Commands::Registry { .. }
+        | Commands::ResolveMode { .. }
+        | Commands::Rm { .. }
+        | Commands::Sandbox { .. }
+        | Commands::Search { .. }
+        | Commands::Sign { .. }
+        | Commands::Skill { .. }
+        | Commands::Verify { .. }
+        | Commands::Version
+        | Commands::Write { .. } => None,
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { .. } => None,
+    }
+}
+
+/// Fetch the [`UnrestrictedArgs`] flatten for subcommands that touch
+/// arbitrary filesystem paths.
+const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
+    match cmd {
+        Commands::Get {
+            unrestricted_args, ..
+        }
+        | Commands::Ls {
+            unrestricted_args, ..
+        }
+        | Commands::Metadata {
+            unrestricted_args, ..
+        }
+        | Commands::Rm {
+            unrestricted_args, ..
+        }
+        | Commands::Write {
+            unrestricted_args, ..
+        } => Some(unrestricted_args),
+        Commands::Ack { .. }
+        | Commands::Batch { .. }
+        | Commands::Comment { .. }
+        | Commands::Comments { .. }
+        | Commands::Delete { .. }
+        | Commands::Edit { .. }
+        | Commands::Identity { .. }
+        | Commands::Keygen { .. }
+        | Commands::Lint { .. }
+        | Commands::Mcp { .. }
+        | Commands::Migrate { .. }
+        | Commands::Plan { .. }
+        | Commands::Purge { .. }
+        | Commands::Query { .. }
+        | Commands::React { .. }
+        | Commands::Registry { .. }
+        | Commands::ResolveMode { .. }
+        | Commands::Sandbox { .. }
+        | Commands::Search { .. }
+        | Commands::Sign { .. }
+        | Commands::Skill { .. }
+        | Commands::Verify { .. }
+        | Commands::Version => None,
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { .. } => None,
+    }
+}
+
+fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
+    let output = subcommand_output(&cli.command);
+    let json_mode = output.is_some_and(|o| o.json);
+
+    // Config-free subcommands short-circuit the config resolution path.
+    match &cli.command {
+        Commands::Version => {
+            eprintln!("remargin {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Commands::Identity {
+            author_type,
+            output_args,
+        } => {
+            return cmd_identity(system, cwd, author_type.as_deref(), output_args.json);
+        }
+        Commands::ResolveMode {
+            cwd: override_cwd,
+            output_args,
+        } => {
+            let override_expanded = override_cwd
+                .as_deref()
+                .map(|c| expand_cli_pathbuf(system, c))
+                .transpose()?;
+            let start_dir = override_expanded.as_deref().unwrap_or(cwd);
+            return cmd_resolve_mode(system, start_dir, output_args.json);
+        }
+        Commands::Keygen {
+            output: keygen_output,
+            ..
+        } => {
+            let expanded_output = expand_cli_pathbuf(system, keygen_output)?;
+            return cmd_keygen(system, &expanded_output);
+        }
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian {
+            action,
+            output_args,
+        } => {
+            return cmd_obsidian(system, cwd, action, output_args.json);
+        }
+        Commands::Skill {
+            action,
+            output_args,
+        } => return cmd_skill(system, action, output_args.json),
+        _ => {
+            debug_assert!(
+                !subcommand_is_config_free(&cli.command),
+                "config-free subcommand fell through short-circuit"
+            );
+        }
+    }
+
+    let default_identity = IdentityArgs::default();
+    // Feature-gated: with `unrestricted`, this is a derived `Default` on a
+    // regular struct; without it, a unit struct. Both spell as `UnrestrictedArgs::default()`
+    // but clippy flags the unit-struct case as `default_constructed_unit_structs`.
+    #[cfg(feature = "unrestricted")]
+    let default_unrestricted = UnrestrictedArgs::default();
+    #[cfg(not(feature = "unrestricted"))]
+    let default_unrestricted = UnrestrictedArgs;
+    let identity_args = subcommand_identity(&cli.command).unwrap_or(&default_identity);
+    let assets_args = subcommand_assets(&cli.command);
+    let unrestricted_args = subcommand_unrestricted(&cli.command).unwrap_or(&default_unrestricted);
+
+    let mut scratch = OverrideScratch::default();
+    let overrides = build_overrides(system, identity_args, assets_args, &mut scratch)?;
+
+    // The Mcp subcommand receives overrides directly (it forwards to
+    // `mcp::run`), bypassing config load. Branch out early.
+    if let Commands::Mcp { action, .. } = &cli.command {
+        return cmd_mcp(system, cwd, &overrides, action.as_ref(), json_mode);
     }
 
     // Load config and registry.
     // When --type is given without --identity, use it as a config selector:
     // walk up skips .remargin.yaml files whose type does not match.
-    let type_filter = if cli.global.identity.is_none() {
-        cli.global.r#type.as_deref()
+    let type_filter = if identity_args.identity.is_none() {
+        identity_args.r#type.as_deref()
     } else {
         None
     };
@@ -1120,15 +1550,8 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         );
     }
     let registry = config::load_registry(system, cwd)?;
-    #[cfg(not(feature = "unrestricted"))]
-    let final_config = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
-
-    #[cfg(feature = "unrestricted")]
-    let final_config = {
-        let mut c = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
-        c.unrestricted = cli.global.unrestricted;
-        c
-    };
+    let mut final_config = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
+    final_config.unrestricted = unrestricted_args.unrestricted();
 
     dispatch_with_config(cli, system, cwd, &final_config)
 }
@@ -1143,25 +1566,30 @@ fn dispatch_with_config(
     cwd: &Path,
     config: &ResolvedConfig,
 ) -> Result<()> {
-    let json_mode = cli.global.json;
-
     match &cli.command {
         Commands::Ack {
             file,
             ids,
             path,
             remove,
+            output_args,
+            ..
         } => {
             let ap = AckParams {
                 file: file.as_deref(),
                 ids,
-                json_mode,
+                json_mode: output_args.json,
                 remove: *remove,
                 search_path: path,
             };
             cmd_ack(system, cwd, config, &ap)
         }
-        Commands::Batch { file, ops } => cmd_batch(system, cwd, config, file, ops, json_mode),
+        Commands::Batch {
+            file,
+            ops,
+            output_args,
+            ..
+        } => cmd_batch(system, cwd, config, file, ops, output_args.json),
         Commands::Comment {
             file,
             content,
@@ -1173,6 +1601,8 @@ fn dispatch_with_config(
             reply_to,
             sandbox,
             to,
+            output_args,
+            ..
         } => {
             let resolved_content =
                 resolve_comment_content(system, cwd, content.as_ref(), comment_file.as_ref())?;
@@ -1183,18 +1613,31 @@ fn dispatch_with_config(
                 auto_ack: *auto_ack,
                 content: &resolved_content,
                 file,
-                json_mode,
+                json_mode: output_args.json,
                 reply_to: reply_to.as_deref(),
                 sandbox: *sandbox,
                 to,
             };
             cmd_comment(system, cwd, config, &cp)
         }
-        Commands::Comments { file, pretty } => cmd_comments(system, cwd, file, json_mode, *pretty),
-        Commands::Delete { file, ids } => cmd_delete(system, cwd, config, file, ids, json_mode),
-        Commands::Edit { file, id, content } => {
-            cmd_edit(system, cwd, config, file, id, content, json_mode)
-        }
+        Commands::Comments {
+            file,
+            pretty,
+            output_args,
+        } => cmd_comments(system, cwd, file, output_args.json, *pretty),
+        Commands::Delete {
+            file,
+            ids,
+            output_args,
+            ..
+        } => cmd_delete(system, cwd, config, file, ids, output_args.json),
+        Commands::Edit {
+            file,
+            id,
+            content,
+            output_args,
+            ..
+        } => cmd_edit(system, cwd, config, file, id, content, output_args.json),
         Commands::Get {
             path,
             binary,
@@ -1202,11 +1645,13 @@ fn dispatch_with_config(
             end,
             line_numbers,
             out,
+            output_args,
+            ..
         } => {
             let gp = GetParams {
                 binary: *binary,
                 end: *end,
-                json_mode,
+                json_mode: output_args.json,
                 line_numbers: *line_numbers,
                 out: out.as_deref(),
                 path,
@@ -1214,14 +1659,25 @@ fn dispatch_with_config(
             };
             cmd_get(system, cwd, config, &gp)
         }
-        Commands::Lint { file } => cmd_lint(system, cwd, file, json_mode),
-        Commands::Ls { path } => cmd_ls(system, cwd, config, path, json_mode),
-        Commands::Metadata { path } => cmd_metadata(system, cwd, config, path, json_mode),
-        Commands::Migrate { file, backup } => {
-            cmd_migrate(system, cwd, config, file, *backup, json_mode)
+        Commands::Lint { file, output_args } => cmd_lint(system, cwd, file, output_args.json),
+        Commands::Ls {
+            path, output_args, ..
+        } => cmd_ls(system, cwd, config, path, output_args.json),
+        Commands::Metadata {
+            path, output_args, ..
+        } => cmd_metadata(system, cwd, config, path, output_args.json),
+        Commands::Migrate {
+            file,
+            backup,
+            output_args,
+            ..
+        } => cmd_migrate(system, cwd, config, file, *backup, output_args.json),
+        Commands::Plan { action, .. } => {
+            cmd_plan(system, cwd, config, action, plan_action_output(action).json)
         }
-        Commands::Plan { action } => cmd_plan(system, cwd, config, action, json_mode),
-        Commands::Purge { file } => cmd_purge(system, cwd, config, file, json_mode),
+        Commands::Purge {
+            file, output_args, ..
+        } => cmd_purge(system, cwd, config, file, output_args.json),
         Commands::Query {
             path,
             author,
@@ -1234,6 +1690,7 @@ fn dispatch_with_config(
             pretty,
             since,
             summary,
+            output_args,
         } => {
             let q = QueryParams {
                 author: author.as_deref(),
@@ -1241,7 +1698,7 @@ fn dispatch_with_config(
                 content_regex: content_regex.as_deref(),
                 expanded: *expanded,
                 ignore_case: *ignore_case,
-                json_mode,
+                json_mode: output_args.json,
                 path: path.as_str(),
                 pending: *pending,
                 pending_for: pending_for.as_deref(),
@@ -1256,19 +1713,30 @@ fn dispatch_with_config(
             id,
             emoji,
             remove,
+            output_args,
+            ..
         } => {
             let r = ReactParams {
                 emoji: emoji.as_str(),
                 file: file.as_str(),
                 id: id.as_str(),
-                json_mode,
+                json_mode: output_args.json,
                 remove: *remove,
             };
             cmd_react(system, cwd, config, &r)
         }
-        Commands::Registry { action } => cmd_registry(system, cwd, action, json_mode),
-        Commands::Rm { file } => cmd_rm(system, cwd, config, file, json_mode),
-        Commands::Sandbox { action } => cmd_sandbox(system, cwd, config, action, json_mode),
+        Commands::Registry {
+            action,
+            output_args,
+        } => cmd_registry(system, cwd, action, output_args.json),
+        Commands::Rm {
+            file, output_args, ..
+        } => cmd_rm(system, cwd, config, file, output_args.json),
+        Commands::Sandbox {
+            action,
+            output_args,
+            ..
+        } => cmd_sandbox(system, cwd, config, action, output_args.json),
         Commands::Search {
             pattern,
             path,
@@ -1276,11 +1744,12 @@ fn dispatch_with_config(
             scope,
             context,
             ignore_case,
+            output_args,
         } => {
             let s = SearchParams {
                 context: *context,
                 ignore_case: *ignore_case,
-                json_mode,
+                json_mode: output_args.json,
                 path: path.as_str(),
                 pattern: pattern.as_str(),
                 regex: *regex,
@@ -1292,16 +1761,20 @@ fn dispatch_with_config(
             file,
             ids,
             all_mine,
+            output_args,
+            ..
         } => {
             let sp = SignParams {
                 all_mine: *all_mine,
                 file,
                 ids,
-                json_mode,
+                json_mode: output_args.json,
             };
             cmd_sign(system, cwd, config, &sp)
         }
-        Commands::Verify { file } => cmd_verify(system, cwd, file, config, json_mode),
+        Commands::Verify {
+            file, output_args, ..
+        } => cmd_verify(system, cwd, file, config, output_args.json),
         Commands::Write {
             path,
             content,
@@ -1309,6 +1782,8 @@ fn dispatch_with_config(
             create,
             lines,
             raw,
+            output_args,
+            ..
         } => {
             let line_range = lines.as_deref().map(parse_line_range).transpose()?;
             cmd_write(
@@ -1317,7 +1792,7 @@ fn dispatch_with_config(
                 config,
                 &WriteParams {
                     content: content.as_deref(),
-                    json_mode,
+                    json_mode: output_args.json,
                     opts: document::WriteOptions::new()
                         .binary(*binary)
                         .create(*create)
@@ -1862,12 +2337,14 @@ fn cmd_plan(
     let position;
 
     let request = match action {
-        PlanAction::Ack { path, ids, remove } => plan_ops::PlanRequest::Ack {
+        PlanAction::Ack {
+            path, ids, remove, ..
+        } => plan_ops::PlanRequest::Ack {
             path: resolve_doc_path(system, cwd, path)?,
             ids: ids.clone(),
             remove: *remove,
         },
-        PlanAction::Batch { path, ops_file } => plan_ops::PlanRequest::Batch {
+        PlanAction::Batch { path, ops_file, .. } => plan_ops::PlanRequest::Batch {
             path: resolve_doc_path(system, cwd, path)?,
             ops: read_plan_batch_ops(ops_file)?,
         },
@@ -1881,6 +2358,7 @@ fn cmd_plan(
             reply_to,
             sandbox,
             to,
+            ..
         } => {
             let doc_path = resolve_doc_path(system, cwd, path)?;
             comment_body = match content {
@@ -1904,19 +2382,21 @@ fn cmd_plan(
                 params,
             }
         }
-        PlanAction::Delete { path, ids } => plan_ops::PlanRequest::Delete {
+        PlanAction::Delete { path, ids, .. } => plan_ops::PlanRequest::Delete {
             path: resolve_doc_path(system, cwd, path)?,
             ids: ids.clone(),
         },
-        PlanAction::Edit { path, id, content } => plan_ops::PlanRequest::Edit {
+        PlanAction::Edit {
+            path, id, content, ..
+        } => plan_ops::PlanRequest::Edit {
             path: resolve_doc_path(system, cwd, path)?,
             id,
             content,
         },
-        PlanAction::Migrate { path } => plan_ops::PlanRequest::Migrate {
+        PlanAction::Migrate { path, .. } => plan_ops::PlanRequest::Migrate {
             path: resolve_doc_path(system, cwd, path)?,
         },
-        PlanAction::Purge { path } => plan_ops::PlanRequest::Purge {
+        PlanAction::Purge { path, .. } => plan_ops::PlanRequest::Purge {
             path: resolve_doc_path(system, cwd, path)?,
         },
         PlanAction::React {
@@ -1924,22 +2404,24 @@ fn cmd_plan(
             id,
             emoji,
             remove,
+            ..
         } => plan_ops::PlanRequest::React {
             path: resolve_doc_path(system, cwd, path)?,
             id,
             emoji,
             remove: *remove,
         },
-        PlanAction::SandboxAdd { path } => plan_ops::PlanRequest::SandboxAdd {
+        PlanAction::SandboxAdd { path, .. } => plan_ops::PlanRequest::SandboxAdd {
             path: resolve_doc_path(system, cwd, path)?,
         },
-        PlanAction::SandboxRemove { path } => plan_ops::PlanRequest::SandboxRemove {
+        PlanAction::SandboxRemove { path, .. } => plan_ops::PlanRequest::SandboxRemove {
             path: resolve_doc_path(system, cwd, path)?,
         },
         PlanAction::Sign {
             path,
             ids,
             all_mine,
+            ..
         } => plan_ops::PlanRequest::Sign {
             path: resolve_doc_path(system, cwd, path)?,
             selection: build_sign_selection(*all_mine, ids)?,
@@ -1951,6 +2433,7 @@ fn cmd_plan(
             create,
             lines,
             raw,
+            ..
         } => {
             write_body = match content {
                 Some(s) => s.clone(),

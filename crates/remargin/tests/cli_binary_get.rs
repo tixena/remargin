@@ -47,7 +47,7 @@ mod tests {
         let output = Command::cargo_bin("remargin")
             .unwrap()
             .current_dir(tmp.path())
-            .args(["--json", "get", "--binary", "pic.png"])
+            .args(["get", "--binary", "pic.png", "--json"])
             .output()
             .unwrap();
 
@@ -71,12 +71,12 @@ mod tests {
             .unwrap()
             .current_dir(tmp.path())
             .args([
-                "--json",
                 "get",
                 "--binary",
                 "--out",
                 out.to_str().unwrap(),
                 "pic.png",
+                "--json",
             ])
             .output()
             .unwrap();

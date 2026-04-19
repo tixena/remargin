@@ -44,8 +44,8 @@ mod tests {
     fn json_mode_carries_elapsed_in_payload_only() {
         let output = Command::cargo_bin("remargin")
             .unwrap()
-            .arg("--json")
             .arg("resolve-mode")
+            .arg("--json")
             .output()
             .unwrap();
 

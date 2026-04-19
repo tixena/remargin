@@ -92,9 +92,9 @@ mod tests {
             .unwrap()
             .current_dir(tmp.path())
             .env("HOME", tmp.path())
-            .arg("--json")
             .arg("get")
             .arg("~/note.md")
+            .arg("--json")
             .output()
             .unwrap();
 

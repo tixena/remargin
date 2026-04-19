@@ -73,7 +73,7 @@ mod tests {
         // match itself is low-density mapping code (rem-oqv, rem-9ey).
         m.insert(
             "cmd_plan",
-            (130_usize, "consolidated PlanAction -> PlanRequest match"),
+            (140_usize, "consolidated PlanAction -> PlanRequest match"),
         );
         // CLI: sandbox top-level command dispatches across four
         // SandboxAction variants; each sub-branch is adapter glue

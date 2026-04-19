@@ -92,10 +92,14 @@ Body paragraph two.
     /// arguments. Returns the parsed JSON stdout. If `stdin` is non-empty
     /// it is piped in as the command's stdin (used when the content would
     /// look like a flag to clap).
+    ///
+    /// Post-rem-zlx3 `--json` is per-subcommand, not a top-level flag, so
+    /// append it at the end where every subcommand accepts trailing
+    /// options.
     #[expect(clippy::panic, reason = "integration test assertion helper")]
     fn run_cli(cwd: &Path, args: &[&str], stdin: &str) -> Value {
         let mut cmd = Command::cargo_bin("remargin").unwrap();
-        cmd.current_dir(cwd).arg("--json").args(args);
+        cmd.current_dir(cwd).args(args).arg("--json");
         if !stdin.is_empty() {
             cmd.write_stdin(stdin);
         }
