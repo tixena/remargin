@@ -26,6 +26,7 @@ use crate::config::ResolvedConfig;
 use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser;
+use crate::writer::ensure_not_forbidden_target;
 
 /// Bytes + mime + size for a binary file read.
 ///
@@ -440,7 +441,9 @@ pub fn rm(
     path: &Path,
     config: &ResolvedConfig,
 ) -> Result<RmResult> {
+    ensure_not_forbidden_target(path)?;
     let resolved = allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?;
+    ensure_not_forbidden_target(&resolved)?;
 
     if system.is_dir(&resolved).unwrap_or(false) {
         bail!("cannot remove directory: {}", path.display());
@@ -489,6 +492,7 @@ pub fn write(
     config: &ResolvedConfig,
     opts: WriteOptions,
 ) -> Result<WriteOutcome> {
+    ensure_not_forbidden_target(path)?;
     validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {
@@ -504,6 +508,7 @@ pub fn write(
     } else {
         allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?
     };
+    ensure_not_forbidden_target(&resolved)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());
@@ -606,6 +611,7 @@ pub fn project_write(
     config: &ResolvedConfig,
     opts: WriteOptions,
 ) -> Result<WriteProjection> {
+    ensure_not_forbidden_target(path)?;
     validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {
@@ -621,6 +627,7 @@ pub fn project_write(
     } else {
         allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?
     };
+    ensure_not_forbidden_target(&resolved)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());

@@ -11,6 +11,7 @@ use os_shim::mock::MockSystem;
 use crate::config::{Mode, ResolvedConfig};
 use crate::document::{self, WriteOptions, WriteProjection, allowlist};
 use crate::parser::AuthorType;
+use crate::writer::FORBIDDEN_TARGETS;
 
 /// A markdown document with comments for metadata testing.
 const DOC_WITH_COMMENTS: &str = "\
@@ -2614,4 +2615,186 @@ fn project_write_missing_comment_rejected_like_real_write() {
         before_bytes, after_bytes,
         "project_write rejection must not mutate disk"
     );
+}
+
+// ---------------------------------------------------------------------
+// Writer ban (rem-is4z): remargin must refuse to modify its own config
+// and participant registry under any circumstances. The ban is on exact
+// basenames — `.remargin.yaml` and `.remargin-registry.yaml` — and
+// fires before any bytes hit disk on every mutating entry point. The
+// authoritative basename list lives at [`crate::writer::FORBIDDEN_TARGETS`];
+// tests iterate over that same slice so adding a new forbidden file in
+// one place automatically extends coverage.
+// ---------------------------------------------------------------------
+
+fn assert_forbidden_error(err: &anyhow::Error, basename: &str) {
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("refusing to modify") && msg.contains(basename),
+        "expected refusing-to-modify error for {basename}, got: {msg}"
+    );
+}
+
+#[test]
+fn write_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let path = format!("/project/{basename}");
+        let system = MockSystem::new()
+            .with_current_dir("/project")
+            .unwrap()
+            .with_file(Path::new(&path), b"existing: true\n")
+            .unwrap();
+
+        let config = open_config();
+        let before = read_bytes(&system, Path::new(&path));
+
+        let err = document::write(
+            &system,
+            Path::new("/project"),
+            Path::new(basename),
+            "mutated: true\n",
+            &config,
+            WriteOptions::default(),
+        )
+        .unwrap_err();
+
+        assert_forbidden_error(&err, basename);
+
+        let after = read_bytes(&system, Path::new(&path));
+        assert_eq!(before, after, "disk must be untouched after refusal");
+    }
+}
+
+#[test]
+fn write_refuses_forbidden_targets_nested() {
+    // Exact-basename match fires regardless of directory depth: an agent
+    // cannot smuggle a write by nesting the file under another folder.
+    for basename in FORBIDDEN_TARGETS {
+        let nested = format!("/project/nested/{basename}");
+        let system = MockSystem::new()
+            .with_current_dir("/project")
+            .unwrap()
+            .with_dir(Path::new("/project/nested"))
+            .unwrap()
+            .with_file(Path::new(&nested), b"existing: true\n")
+            .unwrap();
+
+        let config = open_config();
+        let requested = format!("nested/{basename}");
+
+        let err = document::write(
+            &system,
+            Path::new("/project"),
+            Path::new(&requested),
+            "mutated: true\n",
+            &config,
+            WriteOptions::default(),
+        )
+        .unwrap_err();
+
+        assert_forbidden_error(&err, basename);
+    }
+}
+
+#[test]
+fn write_allows_differently_named_yaml() {
+    // Files with different basenames (e.g. backup.remargin.yaml) are NOT
+    // subject to the ban.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/backup.remargin.yaml"), b"kept: true\n")
+        .unwrap();
+
+    let config = open_config();
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("backup.remargin.yaml"),
+        "kept: true\nadded: true\n",
+        &config,
+        WriteOptions::default(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn write_create_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let system = MockSystem::new()
+            .with_current_dir("/project")
+            .unwrap()
+            .with_dir(Path::new("/project"))
+            .unwrap();
+
+        let config = open_config();
+        let err = document::write(
+            &system,
+            Path::new("/project"),
+            Path::new(basename),
+            "fresh: true\n",
+            &config,
+            WriteOptions {
+                create: true,
+                ..WriteOptions::default()
+            },
+        )
+        .unwrap_err();
+
+        assert_forbidden_error(&err, basename);
+
+        // File must not have been created.
+        assert!(
+            system
+                .read_to_string(&Path::new("/project").join(basename))
+                .is_err(),
+            "file must not be created after refusal",
+        );
+    }
+}
+
+#[test]
+fn rm_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let path = format!("/project/{basename}");
+        let system = MockSystem::new()
+            .with_current_dir("/project")
+            .unwrap()
+            .with_file(Path::new(&path), b"existing: true\n")
+            .unwrap();
+
+        let config = open_config();
+        let err =
+            document::rm(&system, Path::new("/project"), Path::new(basename), &config).unwrap_err();
+
+        assert_forbidden_error(&err, basename);
+
+        // File must still exist.
+        system.read_to_string(Path::new(&path)).unwrap();
+    }
+}
+
+#[test]
+fn project_write_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let path = format!("/project/{basename}");
+        let system = MockSystem::new()
+            .with_current_dir("/project")
+            .unwrap()
+            .with_file(Path::new(&path), b"existing: true\n")
+            .unwrap();
+
+        let config = open_config();
+        let err = document::project_write(
+            &system,
+            Path::new("/project"),
+            Path::new(basename),
+            "mutated: true\n",
+            &config,
+            WriteOptions::default(),
+        )
+        .unwrap_err();
+
+        assert_forbidden_error(&err, basename);
+    }
 }

@@ -83,6 +83,8 @@ pub fn create_comment(
     config: &ResolvedConfig,
     params: &CreateCommentParams<'_>,
 ) -> Result<String> {
+    writer::ensure_not_forbidden_target(path)?;
+
     let identity = config
         .identity
         .as_deref()
@@ -231,6 +233,8 @@ pub fn ack_comments(
     comment_ids: &[&str],
     remove: bool,
 ) -> Result<()> {
+    writer::ensure_not_forbidden_target(path)?;
+
     let identity = config
         .identity
         .as_deref()
@@ -292,6 +296,8 @@ pub fn react(
     emoji: &str,
     remove: bool,
 ) -> Result<()> {
+    writer::ensure_not_forbidden_target(path)?;
+
     let identity = config
         .identity
         .as_deref()
@@ -346,6 +352,7 @@ pub fn delete_comments(
     config: &ResolvedConfig,
     comment_ids: &[&str],
 ) -> Result<()> {
+    writer::ensure_not_forbidden_target(path)?;
     let mut doc = parser::parse_file(system, path)?;
 
     let deleted_attachments: Vec<String> = comment_ids
@@ -417,6 +424,7 @@ pub fn edit_comment(
     comment_id: &str,
     new_content: &str,
 ) -> Result<()> {
+    writer::ensure_not_forbidden_target(path)?;
     let identity = config.identity.as_deref();
 
     // Fail-fast in strict mode if the identity must sign but no signing

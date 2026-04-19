@@ -37,6 +37,7 @@ use crate::document::allowlist;
 use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, SandboxEntry};
+use crate::writer::ensure_not_forbidden_target;
 
 /// Outcome of a bulk `sandbox add` or `sandbox remove` invocation.
 #[derive(Debug, Default)]
@@ -256,6 +257,7 @@ fn add_one(
     now: DateTime<FixedOffset>,
     config: &ResolvedConfig,
 ) -> Result<bool> {
+    ensure_not_forbidden_target(file)?;
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
     let mut entries = frontmatter::read_sandbox_entries(&doc)?;
@@ -281,6 +283,7 @@ fn remove_one(
     identity: &str,
     config: &ResolvedConfig,
 ) -> Result<bool> {
+    ensure_not_forbidden_target(file)?;
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
     let mut entries = frontmatter::read_sandbox_entries(&doc)?;

@@ -145,6 +145,8 @@ pub fn batch_comment(
     config: &ResolvedConfig,
     operations: &[BatchCommentOp],
 ) -> Result<Vec<String>> {
+    writer::ensure_not_forbidden_target(path)?;
+
     let identity = config
         .identity
         .as_deref()

@@ -17,6 +17,17 @@ use os_shim::System;
 
 use crate::parser::{self, Comment, ParsedDocument, Segment, required_fence_depth};
 
+/// Filenames the writer refuses to modify under any circumstances.
+///
+/// Remargin (particularly agents driving the CLI) must never mutate its
+/// own configuration or participant registry through the document access
+/// layer. Doing so would let a caller silently grant itself registry
+/// access, rotate keys, flip modes, or revoke other participants.
+///
+/// Match is by exact basename only — `backup.remargin.yaml`,
+/// `old.remargin-registry.yaml`, etc. are not affected.
+pub const FORBIDDEN_TARGETS: &[&str] = &[".remargin.yaml", ".remargin-registry.yaml"];
+
 /// Where to insert a new comment in a document.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -53,6 +64,26 @@ impl InsertPosition {
         }
         after_line.map_or(Self::Append, Self::AfterLine)
     }
+}
+
+/// Return an error if `path`'s basename matches [`FORBIDDEN_TARGETS`].
+///
+/// Every mutating op (write, comment, edit, delete, ack, react, batch,
+/// sign, purge, migrate, rm, sandbox) funnels through this guard before
+/// any bytes reach disk.
+///
+/// # Errors
+///
+/// Returns an error whose message is
+/// `refusing to modify <basename>: remargin does not modify its own configuration files`
+/// when the path's basename matches a forbidden target.
+pub fn ensure_not_forbidden_target(path: &Path) -> Result<()> {
+    if let Some(name) = path.file_name().and_then(|n| n.to_str())
+        && FORBIDDEN_TARGETS.contains(&name)
+    {
+        bail!("refusing to modify {name}: remargin does not modify its own configuration files");
+    }
+    Ok(())
 }
 
 /// Serialize a `Comment` into a remargin fenced code block string.
@@ -287,6 +318,8 @@ pub fn write_document(
     expected_added: &HashSet<String>,
     expected_removed: &HashSet<String>,
 ) -> Result<()> {
+    ensure_not_forbidden_target(path)?;
+
     let before_ids: HashSet<String> = doc.comment_ids().into_iter().map(String::from).collect();
 
     let markdown = doc.to_markdown();

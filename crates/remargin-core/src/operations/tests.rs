@@ -1,5 +1,6 @@
 //! Tests for comment operations.
 
+use core::slice::from_ref;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
@@ -11,7 +12,7 @@ use crate::operations::{
     react, sandbox as sandbox_ops, sign,
 };
 use crate::parser::{self, AuthorType};
-use crate::writer::InsertPosition;
+use crate::writer::{FORBIDDEN_TARGETS, InsertPosition};
 
 /// A minimal valid remargin document for testing.
 const MINIMAL_DOC: &str = "\
@@ -2572,4 +2573,229 @@ fn project_sign_already_signed_stays_preserved() {
         first_sig, second_sig,
         "already-signed comment must keep its signature under re-sign"
     );
+}
+
+// ---------------------------------------------------------------------
+// Writer ban (rem-is4z): every mutating operation must refuse to touch
+// `.remargin.yaml` / `.remargin-registry.yaml` — the canonical config
+// and participant registry files. Each subcommand is exercised here
+// against both forbidden basenames; the resulting error message must
+// include "refusing to modify" and the basename, and the file contents
+// must stay byte-identical on refusal.
+// ---------------------------------------------------------------------
+
+// The authoritative basename list lives at [`crate::writer::FORBIDDEN_TARGETS`].
+// Tests below iterate over that same slice so adding a new forbidden
+// file in one place automatically extends coverage here.
+
+fn assert_forbidden_ops_error(err: &anyhow::Error, basename: &str) {
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("refusing to modify") && msg.contains(basename),
+        "expected refusing-to-modify error for {basename}, got: {msg}"
+    );
+}
+
+fn system_with_forbidden(basename: &str, contents: &[u8]) -> (MockSystem, PathBuf) {
+    let path = PathBuf::from(format!("/docs/{basename}"));
+    let system = MockSystem::new().with_file(&path, contents).unwrap();
+    (system, path)
+}
+
+#[test]
+fn comment_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let position = InsertPosition::Append;
+        let err = create_comment(
+            &system,
+            &path,
+            &config,
+            &CreateCommentParams::new("hello", &position),
+        )
+        .unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn edit_comment_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let err = edit_comment(&system, &path, &config, "abc", "new body").unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn delete_comments_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let err = delete_comments(&system, &path, &config, &["abc"]).unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn ack_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let err = ack_comments(&system, &path, &config, &["abc"], false).unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn react_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let err = react(&system, &path, &config, "abc", "thumbsup", false).unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn batch_refuses_forbidden_targets() {
+    use crate::operations::batch::{BatchCommentOp, batch_comment};
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let ops = vec![BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("one"),
+            reply_to: None,
+            to: Vec::new(),
+        }];
+        let err = batch_comment(&system, &path, &config, &ops).unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn sign_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = sign_config();
+
+        let err = sign::sign_comments(&system, &path, &config, &sign::SignSelection::AllMine)
+            .unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn purge_refuses_forbidden_targets() {
+    use crate::operations::purge::purge;
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let err = purge(&system, &path, &config).unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn migrate_refuses_forbidden_targets() {
+    use crate::operations::migrate::migrate;
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let err = migrate(&system, &path, &config, false).unwrap_err();
+
+        assert_forbidden_ops_error(&err, basename);
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn sandbox_add_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let result =
+            sandbox_ops::add_to_files(&system, from_ref(&path), "eduardo", &config).unwrap();
+
+        assert_eq!(result.changed.len(), 0);
+        assert_eq!(result.failed.len(), 1);
+        assert!(
+            result.failed[0].reason.contains("refusing to modify")
+                && result.failed[0].reason.contains(*basename),
+            "expected refusing-to-modify in per-file failure, got: {}",
+            result.failed[0].reason
+        );
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+#[test]
+fn sandbox_remove_refuses_forbidden_targets() {
+    for basename in FORBIDDEN_TARGETS {
+        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
+        let before = read_file(&system, &path);
+        let config = open_config();
+
+        let result =
+            sandbox_ops::remove_from_files(&system, from_ref(&path), "eduardo", &config).unwrap();
+
+        assert_eq!(result.changed.len(), 0);
+        assert_eq!(result.failed.len(), 1);
+        assert!(
+            result.failed[0].reason.contains("refusing to modify")
+                && result.failed[0].reason.contains(*basename),
+            "expected refusing-to-modify in per-file failure, got: {}",
+            result.failed[0].reason
+        );
+        assert_eq!(before, read_file(&system, &path));
+    }
+}
+
+fn read_file(system: &MockSystem, path: &Path) -> Vec<u8> {
+    use std::io::Read as _;
+    let mut reader = system.open(path).unwrap();
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).unwrap();
+    buf
 }

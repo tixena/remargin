@@ -53,6 +53,7 @@ pub fn migrate(
     config: &ResolvedConfig,
     backup: bool,
 ) -> Result<Vec<MigratedComment>> {
+    writer::ensure_not_forbidden_target(path)?;
     let mut doc = parser::parse_file(system, path)?;
 
     let legacy_count = doc.legacy_comments().len();

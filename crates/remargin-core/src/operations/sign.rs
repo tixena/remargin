@@ -140,6 +140,8 @@ pub fn sign_comments(
     config: &ResolvedConfig,
     selection: &SignSelection,
 ) -> Result<SignResult> {
+    writer::ensure_not_forbidden_target(path)?;
+
     let identity = config
         .identity
         .as_deref()
