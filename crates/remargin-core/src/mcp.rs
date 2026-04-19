@@ -16,7 +16,8 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 use serde_json::{Map, Value, json};
 
-use crate::config::{CliOverrides, ResolvedConfig, load_config, load_registry};
+use crate::config::identity::{IdentityFlags, resolve_identity};
+use crate::config::{CliOverrides, ResolvedConfig, load_config, load_registry, parse_author_type};
 use crate::display;
 use crate::document;
 use crate::linter;
@@ -53,7 +54,11 @@ const SERVER_NAME: &str = "remargin";
 /// handler so `~` / `$VAR` behave identically to the CLI side. The list is
 /// deliberately narrow — adding a new path-shaped field to an MCP schema is
 /// a deliberate act, and it belongs here.
-const SCALAR_PATH_FIELDS: &[&str] = &["file", "path"];
+///
+/// `config_path` and `key` are the per-tool identity-override fields (rem-x2bw
+/// / rem-zlx3): they are pre-expanded here so the identity resolver sees the
+/// same already-canonical paths the CLI feeds to [`resolve_identity`].
+const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "file", "key", "path"];
 
 /// Array-valued path fields — each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
@@ -68,12 +73,75 @@ struct ToolDesc {
     schema: Value,
 }
 
+/// Merge the identity-overrides schema fragment into a per-tool schema. The tool's
+/// own `properties` map gets the four identity fields; its top-level
+/// constraints get the exclusivity clause. Today no tool declares a
+/// top-level `not` of its own; if that changes, the merge needs to
+/// compose clauses rather than overwrite.
+fn with_identity_overrides_schema(mut base: Value) -> Value {
+    let Some(base_obj) = base.as_object_mut() else {
+        return base;
+    };
+
+    let base_props = base_obj
+        .entry(String::from("properties"))
+        .or_insert_with(|| json!({}));
+    if let (Some(props_map), Value::Object(overlay_props)) = (
+        base_props.as_object_mut(),
+        json!({
+            "config_path": {
+                "type": "string",
+                "description": "Path to a .remargin.yaml that declares a complete identity. Mutually exclusive with identity / type / key."
+            },
+            "identity": {
+                "type": "string",
+                "description": "Override identity for this operation. Use together with type (and key in strict mode), or alone to filter the identity walk."
+            },
+            "key": {
+                "type": "string",
+                "description": "Signing key path (strict mode). Shorthand: a bare name resolves to ~/.ssh/<name>."
+            },
+            "type": {
+                "type": "string",
+                "enum": ["human", "agent"],
+                "description": "Author type for the overridden identity: human or agent."
+            }
+        }),
+    ) {
+        for (k, v) in overlay_props {
+            props_map.insert(k, v);
+        }
+    }
+
+    debug_assert!(
+        base_obj.get("not").is_none(),
+        "with_identity_overrides_schema would overwrite an existing top-level `not` clause"
+    );
+    base_obj.insert(
+        String::from("not"),
+        json!({
+            "allOf": [
+                { "required": ["config_path"] },
+                {
+                    "anyOf": [
+                        { "required": ["identity"] },
+                        { "required": ["type"] },
+                        { "required": ["key"] }
+                    ]
+                }
+            ]
+        }),
+    );
+
+    base
+}
+
 /// Build the ack tool descriptor.
 fn desc_ack() -> ToolDesc {
     ToolDesc {
         name: "ack",
         description: "Acknowledge one or more comments (or remove this identity's ack with remove=true). Omit file to resolve by ID across the folder tree.",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document (omit to resolve by ID across the folder tree)" },
@@ -83,12 +151,10 @@ fn desc_ack() -> ToolDesc {
                     "description": "Comment IDs to acknowledge"
                 },
                 "path": { "type": "string", "description": "Base directory to search when resolving by ID (default: .)", "default": "." },
-                "remove": { "type": "boolean", "description": "Remove this identity's ack instead of adding one", "default": false },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "remove": { "type": "boolean", "description": "Remove this identity's ack instead of adding one", "default": false }
             },
             "required": ["ids"]
-        }),
+        })),
     }
 }
 
@@ -97,7 +163,7 @@ fn desc_batch() -> ToolDesc {
     ToolDesc {
         name: "batch",
         description: "Create multiple comments atomically",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -117,12 +183,10 @@ fn desc_batch() -> ToolDesc {
                         "required": ["content"]
                     },
                     "description": "List of comment operations"
-                },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                }
             },
             "required": ["file", "operations"]
-        }),
+        })),
     }
 }
 
@@ -131,7 +195,7 @@ fn desc_comment() -> ToolDesc {
     ToolDesc {
         name: "comment",
         description: "Create a comment in a document",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -152,12 +216,10 @@ fn desc_comment() -> ToolDesc {
                 },
                 "after_line": { "type": "integer", "description": "Insert after this line number (1-indexed)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID" },
-                "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false }
             },
             "required": ["file", "content"]
-        }),
+        })),
     }
 }
 
@@ -182,7 +244,7 @@ fn desc_delete() -> ToolDesc {
     ToolDesc {
         name: "delete",
         description: "Delete one or more comments",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -190,12 +252,10 @@ fn desc_delete() -> ToolDesc {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Comment IDs to delete"
-                },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                }
             },
             "required": ["file", "ids"]
-        }),
+        })),
     }
 }
 
@@ -204,17 +264,15 @@ fn desc_edit() -> ToolDesc {
     ToolDesc {
         name: "edit",
         description: "Edit a comment (cascading ack clear)",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
                 "id": { "type": "string", "description": "Comment ID to edit" },
-                "content": { "type": "string", "description": "New comment body" },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "content": { "type": "string", "description": "New comment body" }
             },
             "required": ["file", "id", "content"]
-        }),
+        })),
     }
 }
 
@@ -295,14 +353,14 @@ fn desc_migrate() -> ToolDesc {
     ToolDesc {
         name: "migrate",
         description: "Convert old-format comments to remargin format. To preview without writing, use `plan` with op=\"migrate\".",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
                 "backup": { "type": "boolean", "description": "Create .bak backup", "default": false }
             },
             "required": ["file"]
-        }),
+        })),
     }
 }
 
@@ -311,7 +369,7 @@ fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
         description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. All ops are wired: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write.",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | sandbox-add | sandbox-remove | sign | write" },
@@ -341,8 +399,6 @@ fn desc_plan() -> ToolDesc {
                 "sandbox": { "type": "boolean", "description": "For comment: atomically project a sandbox entry", "default": false },
                 "emoji": { "type": "string", "description": "Emoji for react op" },
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
-                "identity": { "type": "string", "description": "Override identity for this projection" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" },
                 "ops": {
                     "type": "array",
                     "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_line, attach_names, auto_ack, to.",
@@ -366,7 +422,7 @@ fn desc_plan() -> ToolDesc {
                 "raw": { "type": "boolean", "description": "For write: treat content as raw bytes; plan returns a non-Markdown reject_reason", "default": false }
             },
             "required": ["op"]
-        }),
+        })),
     }
 }
 
@@ -375,13 +431,13 @@ fn desc_purge() -> ToolDesc {
     ToolDesc {
         name: "purge",
         description: "Strip all comments from a document. To preview without writing, use `plan` with op=\"purge\".",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" }
             },
             "required": ["file"]
-        }),
+        })),
     }
 }
 
@@ -415,18 +471,16 @@ fn desc_react() -> ToolDesc {
     ToolDesc {
         name: "react",
         description: "Add or remove an emoji reaction",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
                 "id": { "type": "string", "description": "Comment ID" },
                 "emoji": { "type": "string", "description": "Emoji to add/remove" },
-                "remove": { "type": "boolean", "description": "Remove instead of add", "default": false },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "remove": { "type": "boolean", "description": "Remove instead of add", "default": false }
             },
             "required": ["file", "id", "emoji"]
-        }),
+        })),
     }
 }
 
@@ -474,7 +528,7 @@ fn desc_sign() -> ToolDesc {
              Already-signed comments listed under `ids` are reported as skipped; \
              `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`. \
              To preview without writing, use `plan` with op=\"sign\".",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -483,12 +537,10 @@ fn desc_sign() -> ToolDesc {
                     "items": { "type": "string" },
                     "description": "Comment ids to sign. Mutually exclusive with all_mine."
                 },
-                "all_mine": { "type": "boolean", "description": "Sign every unsigned comment authored by the current identity.", "default": false },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "all_mine": { "type": "boolean", "description": "Sign every unsigned comment authored by the current identity.", "default": false }
             },
             "required": ["file"]
-        }),
+        })),
     }
 }
 
@@ -513,19 +565,17 @@ fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
         name: "sandbox_add",
         description: "Stage one or more markdown files in the caller's sandbox. Idempotent per identity.",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "files": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Paths to markdown files to stage"
-                },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                }
             },
             "required": ["files"]
-        }),
+        })),
     }
 }
 
@@ -534,19 +584,17 @@ fn desc_sandbox_remove() -> ToolDesc {
     ToolDesc {
         name: "sandbox_remove",
         description: "Remove the caller's sandbox entry from one or more markdown files. Idempotent per identity.",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "files": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Paths to markdown files to unstage"
-                },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                }
             },
             "required": ["files"]
-        }),
+        })),
     }
 }
 
@@ -555,14 +603,12 @@ fn desc_sandbox_list() -> ToolDesc {
     ToolDesc {
         name: "sandbox_list",
         description: "Return all markdown files in the given path that are staged for the caller's identity.",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Base directory to walk (default: .)", "default": "." },
-                "identity": { "type": "string", "description": "Override identity for this operation" },
-                "author_type": { "type": "string", "description": "Override author type: human or agent" }
+                "path": { "type": "string", "description": "Base directory to walk (default: .)", "default": "." }
             }
-        }),
+        })),
     }
 }
 
@@ -571,7 +617,7 @@ fn desc_write() -> ToolDesc {
     ToolDesc {
         name: "write",
         description: "Write document contents (comment-preserving)",
-        schema: json!({
+        schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Path to the file" },
@@ -583,7 +629,7 @@ fn desc_write() -> ToolDesc {
                 "raw": { "type": "boolean", "description": "Write content exactly as provided, skipping frontmatter injection and comment preservation. Not supported for markdown (.md) files.", "default": false }
             },
             "required": ["path", "content"]
-        }),
+        })),
     }
 }
 
@@ -748,24 +794,81 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Apply `identity` and `author_type` overrides from tool parameters to a config.
+/// Build the CLI-equivalent [`IdentityFlags`] from a tool params map
+/// (rem-x2bw). Returns `None` when no identity-override field is present,
+/// so handlers can fast-path the "use the base config as-is" case.
 ///
-/// Returns a cloned config with overrides applied if either `identity` or
-/// `author_type` is present in params. Returns `None` if no overrides.
-/// Parse the MCP `identity` / `author_type` override params and fold them
-/// onto the active [`ResolvedConfig`].
+/// Enforces the same exclusivity rule clap enforces on the CLI: when
+/// `config_path` is supplied, none of `identity`, `type`, `key` may be.
+/// This duplicates the schema-level `not/allOf` clause on purpose —
+/// JSON-Schema enforcement varies by MCP client, and the handler is
+/// the last defensible checkpoint before `resolve_identity` sees the
+/// flags.
+fn identity_flags_from_params(params: &Map<String, Value>) -> Result<Option<IdentityFlags>> {
+    let config_path = optional_str(params, "config_path");
+    let identity = optional_str(params, "identity");
+    let type_str = optional_str(params, "type");
+    let key = optional_str(params, "key");
+
+    if config_path.is_none() && identity.is_none() && type_str.is_none() && key.is_none() {
+        return Ok(None);
+    }
+
+    if config_path.is_some() && (identity.is_some() || type_str.is_some() || key.is_some()) {
+        bail!(
+            "config_path conflicts with identity / type / key: \
+             pass one complete identity declaration, not a mix"
+        );
+    }
+
+    let author_type = type_str.map(parse_author_type).transpose()?;
+
+    Ok(Some(IdentityFlags {
+        author_type,
+        config_path: config_path.map(PathBuf::from),
+        identity: identity.map(String::from),
+        key: key.map(String::from),
+    }))
+}
+
+/// Apply the four-field identity overrides from tool parameters to the
+/// active [`ResolvedConfig`] (rem-x2bw).
 ///
-/// Delegates to [`ResolvedConfig::with_identity_overrides`] so the
-/// validation rules stay identical across every surface (rem-3a2). This
-/// function is the adapter-side shim: it extracts the two string fields
-/// from the JSON params map; the actual override semantics live in core.
+/// Extracts `{config_path | identity, type, key}` via
+/// [`identity_flags_from_params`] and — when any field is present —
+/// hands them to [`resolve_identity`], the same three-branch resolver the
+/// CLI uses. The resolved identity then replaces the `identity`,
+/// `author_type`, and (when present) `key_path` fields on a cloned
+/// config; mode, registry, and the rest are preserved from the walk-up
+/// resolution that served the MCP request. The returned config is
+/// revalidated via the same registry + strict-key gate that fires on
+/// construction so no branch can skip enforcement.
 fn apply_identity_overrides(
+    system: &dyn System,
+    base_dir: &Path,
     config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Option<ResolvedConfig>> {
-    let identity_override = optional_str(params, "identity");
-    let type_override = optional_str(params, "author_type");
-    config.with_identity_overrides(identity_override, type_override)
+    let Some(flags) = identity_flags_from_params(params)? else {
+        return Ok(None);
+    };
+
+    let resolved = resolve_identity(
+        system,
+        base_dir,
+        &config.mode,
+        &flags,
+        config.registry.as_ref(),
+    )?;
+
+    let mut overridden = config.clone();
+    overridden.identity = Some(resolved.identity);
+    overridden.author_type = Some(resolved.author_type);
+    if let Some(key_path) = resolved.key_path {
+        overridden.key_path = Some(key_path);
+    }
+
+    Ok(Some(overridden))
 }
 
 /// Get the effective config, applying identity overrides if present.
@@ -859,7 +962,7 @@ fn handle_ack(
 ) -> Result<Value> {
     let ids = string_array(params, "ids");
     let remove = optional_bool(params, "remove");
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     if let Some(file) = optional_str(params, "file") {
@@ -909,7 +1012,7 @@ fn handle_batch(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
     let ops_value = params
         .get("operations")
@@ -945,7 +1048,7 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     let position = resolve_insert_position(params, reply_to.as_deref());
@@ -1001,7 +1104,7 @@ fn handle_delete(
     let file = required_str(params, "file")?;
     let ids = string_array(params, "ids");
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
@@ -1020,7 +1123,7 @@ fn handle_edit(
     let file = required_str(params, "file")?;
     let comment_id = required_str(params, "id")?;
     let new_content = required_str(params, "content")?;
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
@@ -1178,9 +1281,11 @@ fn handle_migrate(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let backup = optional_bool(params, "backup");
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    let migrated = migrate::migrate(system, &path, config, backup)?;
+    let migrated = migrate::migrate(system, &path, cfg, backup)?;
 
     let results: Vec<Value> = migrated
         .iter()
@@ -1206,7 +1311,7 @@ fn handle_plan(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let op = required_str(params, "op")?;
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     // `comment` needs an owned `InsertPosition` + attach refs that outlive
@@ -1349,9 +1454,11 @@ fn handle_purge(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
-    let result = purge::purge(system, &path, config)?;
+    let result = purge::purge(system, &path, cfg)?;
 
     Ok(json!({
         "comments_removed": result.comments_removed,
@@ -1416,7 +1523,7 @@ fn handle_react(
     let comment_id = required_str(params, "id")?;
     let emoji = required_str(params, "emoji")?;
     let remove = optional_bool(params, "remove");
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
@@ -1453,7 +1560,7 @@ fn handle_sandbox_add(
     let file_strs = string_array(params, "files");
     let files: Vec<PathBuf> = file_strs.iter().map(|f| base_dir.join(f)).collect();
 
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
     let identity = cfg
         .identity
@@ -1474,7 +1581,7 @@ fn handle_sandbox_remove(
     let file_strs = string_array(params, "files");
     let files: Vec<PathBuf> = file_strs.iter().map(|f| base_dir.join(f)).collect();
 
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
     let identity = cfg
         .identity
@@ -1494,7 +1601,7 @@ fn handle_sandbox_list(
 ) -> Result<Value> {
     let root = base_dir.join(optional_str(params, "path").unwrap_or("."));
 
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
     let identity = cfg
         .identity
@@ -1609,7 +1716,7 @@ fn handle_sign(
     let file = required_str(params, "file")?;
     let selection = build_sign_selection(params, "sign")?;
 
-    let overridden = apply_identity_overrides(config, params)?;
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
     let path = base_dir.join(file);
@@ -1688,13 +1795,16 @@ fn handle_write(
         }
     };
 
+    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
+    let cfg = effective_config(config, overridden.as_ref());
+
     let opts = document::WriteOptions::new()
         .binary(binary)
         .create(create)
         .lines(lines)
         .raw(raw);
     let target = Path::new(path_str);
-    let outcome = document::write(system, base_dir, target, content, config, opts)?;
+    let outcome = document::write(system, base_dir, target, content, cfg, opts)?;
 
     Ok(outcome.to_json(path_str, binary, raw))
 }

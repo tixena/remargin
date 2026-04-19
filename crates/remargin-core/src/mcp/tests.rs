@@ -1928,7 +1928,7 @@ fn mcp_plan_ack_returns_report_without_touching_disk() {
                     "file": "doc.md",
                     "ids": [id],
                     "identity": "bob",
-                    "author_type": "human"
+                    "type": "human"
                 }
             }
         }),
@@ -2528,5 +2528,274 @@ fn mcp_plan_rejects_unknown_op() {
     assert!(
         msg.contains("unknown op"),
         "expected unknown-op message, got: {msg}"
+    );
+}
+
+// ---------- rem-x2bw: identity-overrides schema parity ----------
+
+/// Every mutating tool that accepts identity overrides must advertise the
+/// four-field contract (`config_path`, `identity`, `type`, `key`) and the
+/// top-level `not/allOf` exclusivity clause. Read-only tools MUST NOT.
+#[test]
+fn identity_overrides_schema_present_on_mutating_tools() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+
+    let tools = response["result"]["tools"].as_array().unwrap();
+    let mutating = [
+        "ack",
+        "batch",
+        "comment",
+        "delete",
+        "edit",
+        "migrate",
+        "plan",
+        "purge",
+        "react",
+        "sandbox_add",
+        "sandbox_list",
+        "sandbox_remove",
+        "sign",
+        "write",
+    ];
+    for name in mutating {
+        let maybe_tool = tools.iter().find(|t| t["name"] == name);
+        assert!(maybe_tool.is_some(), "missing tool {name}");
+        let tool = maybe_tool.unwrap();
+        let props = &tool["inputSchema"]["properties"];
+        for field in ["config_path", "identity", "key", "type"] {
+            assert!(
+                props[field].is_object(),
+                "tool {name} missing identity-override field {field}"
+            );
+        }
+        let not = &tool["inputSchema"]["not"];
+        assert!(
+            not.is_object(),
+            "tool {name} missing top-level `not` exclusivity clause"
+        );
+        let required = not["allOf"][0]["required"].as_array().unwrap();
+        assert!(
+            required.iter().any(|v| v == "config_path"),
+            "tool {name} exclusivity clause missing config_path"
+        );
+    }
+
+    let read_only = [
+        "comments", "get", "lint", "ls", "metadata", "query", "search",
+    ];
+    for name in read_only {
+        let maybe_tool = tools.iter().find(|t| t["name"] == name);
+        assert!(maybe_tool.is_some(), "missing tool {name}");
+        let tool = maybe_tool.unwrap();
+        let props = &tool["inputSchema"]["properties"];
+        for field in ["config_path", "identity", "key", "type"] {
+            assert!(
+                props.get(field).is_none_or(Value::is_null),
+                "read-only tool {name} must not advertise identity-override field {field}"
+            );
+        }
+    }
+}
+
+/// No MCP tool schema may surface a `mode` or `dry_run` field. Mode is a
+/// tree property (rem-wws) and `dry_run` migrated to `plan` (rem-0ry).
+#[test]
+fn no_mode_or_dry_run_in_any_schema() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+
+    let tools = response["result"]["tools"].as_array().unwrap();
+    for tool in tools {
+        let name = tool["name"].as_str().unwrap();
+        let schema_str = serde_json::to_string(&tool["inputSchema"]).unwrap();
+        assert!(
+            !schema_str.contains("\"mode\""),
+            "tool {name} schema still carries a `mode` field: {schema_str}"
+        );
+        assert!(
+            !schema_str.contains("\"dry_run\""),
+            "tool {name} schema still carries a `dry_run` field: {schema_str}"
+        );
+    }
+}
+
+/// Passing both `config_path` and `identity` to the same call must be
+/// rejected — schema-level `not/allOf` says so, and the handler re-checks.
+#[test]
+fn comment_rejects_config_path_with_identity_override() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "hi",
+                    "config_path": "/does/not/matter.yaml",
+                    "identity": "bob"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("config_path conflicts with identity"),
+        "expected exclusivity diagnostic, got: {msg}"
+    );
+}
+
+/// `config_path` alone loads the target file and adopts its identity for
+/// this call without touching any other caller field.
+#[test]
+fn comment_with_config_path_loads_alternate_identity() {
+    let base = Path::new("/docs");
+    let config_yaml =
+        b"identity: alt-alice\ntype: human\nassets_dir: assets\nmode: open\n" as &[u8];
+    let system = MockSystem::new()
+        .with_file(base.join("doc.md"), b"# Hello\n\nBody.\n")
+        .unwrap()
+        .with_file(Path::new("/other/.remargin.yaml"), config_yaml)
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "via config_path",
+                    "config_path": "/other/.remargin.yaml"
+                }
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "got error: {response}");
+    let created_id = String::from(extract_tool_text(&response)["id"].as_str().unwrap());
+
+    // Verify the comment was authored by the config-declared identity.
+    let doc_text = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_text).unwrap();
+    let comment = doc.find_comment(&created_id).unwrap();
+    assert_eq!(comment.author, "alt-alice");
+    assert_eq!(comment.author_type, AuthorType::Human);
+}
+
+/// Manual `{identity, type}` override (open mode; no key required) is the
+/// branch-2 happy path — identity and type are both adopted.
+#[test]
+fn comment_with_manual_identity_type_override_writes_as_new_identity() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody.\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "manual override",
+                    "identity": "manual-bob",
+                    "type": "agent"
+                }
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "got error: {response}");
+    let created_id = String::from(extract_tool_text(&response)["id"].as_str().unwrap());
+
+    let doc_text = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_text).unwrap();
+    let comment = doc.find_comment(&created_id).unwrap();
+    assert_eq!(comment.author, "manual-bob");
+    assert_eq!(comment.author_type, AuthorType::Agent);
+}
+
+/// Unknown author-type strings surface a diagnostic rather than silently
+/// falling through — matches the CLI's `parse_author_type` behavior.
+#[test]
+fn comment_rejects_unknown_type_value() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "x",
+                    "identity": "bob",
+                    "type": "martian"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("unknown author type"),
+        "expected author-type diagnostic, got: {msg}"
     );
 }

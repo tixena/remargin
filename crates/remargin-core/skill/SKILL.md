@@ -52,16 +52,16 @@ Use `Grep` and `Glob` only for discovery (finding files across the repo), not fo
 
 ## The identity rule — read this before posting anything
 
-**Never pass `identity`, `author_type`, `--identity`, or `--type` overrides unless the user has explicitly asked you to act as someone else.** Your identity is resolved from the configured registry and signing key. Overriding = impersonation. This rule surfaced directly from a real incident (2026-04-16) where an agent posted comments under the wrong identity because the override path was taken without justification.
+**Never pass `identity`, `type`, `config_path`, `--identity`, `--type`, or `--config` overrides unless the user has explicitly asked you to act as someone else.** Your identity is resolved from the configured registry and signing key. Overriding = impersonation. This rule surfaced directly from a real incident (2026-04-16) where an agent posted comments under the wrong identity because the override path was taken without justification.
 
-- ❌ `remargin comment file=doc.md content="..." identity="eduardo" author_type="human"` — agent is impersonating a human.
-- ❌ `mcp__remargin__comment { file, content, identity: "someone-else" }` — same impersonation via MCP.
+- ❌ `remargin comment file=doc.md content="..." --identity eduardo --type human` — agent is impersonating a human.
+- ❌ `mcp__remargin__comment { file, content, identity: "someone-else", type: "human" }` — same impersonation via MCP.
 - ✅ `remargin comment file=doc.md content="..."` — uses the configured identity (yours).
 - ✅ `mcp__remargin__comment { file, content }` — same, via MCP.
 
 If the user tells you "post this as the release bot" or similar, the override is warranted — keep the original request in context so you can show it if questioned.
 
-`identity` and `author_type` are accepted by every mutating tool (`comment`, `batch`, `edit`, `delete`, `ack`, `react`, `sandbox_add`, `sandbox_remove`, `plan`) for the rare case you need to set them. Treat every one of those sites as an impersonation risk.
+Every mutating tool (`comment`, `batch`, `edit`, `delete`, `ack`, `react`, `sandbox_add`, `sandbox_remove`, `plan`, `write`, `migrate`, `purge`, `sign`) accepts the identity-override quartet `{config_path, identity, type, key}` (with `config_path` mutually exclusive with the other three). Treat every one of those sites as an impersonation risk.
 
 ## Permissions setup
 
