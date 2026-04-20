@@ -459,7 +459,7 @@ enum SkillAction {
     },
 }
 
-/// Agent target for skill installation.
+/// AI agent identity — controls config file selection and skill directory.
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum AgentArg {
     /// Claude Code.

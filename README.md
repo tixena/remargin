@@ -326,15 +326,16 @@ remargin [OPTIONS] <COMMAND>
 | `mcp uninstall` | Remove MCP server registration |
 | `mcp test` | Check MCP registration status |
 | `mcp run` | Start the MCP server (stdio transport) |
-| `skill install [--agent <agent>] [--global]` | Install the skill (default agent: claude) |
-| `skill uninstall [--agent <agent>]` | Remove the skill |
-| `skill test [--agent <agent>]` | Check skill installation status |
+| `[--agent <agent>] skill install [--global]` | Install the skill (default agent: claude) |
+| `[--agent <agent>] skill uninstall` | Remove the skill |
+| `[--agent <agent>] skill test` | Check skill installation status |
 | `registry show` | Display the participant registry |
 
 ### Global Options
 
 | Flag | Description |
 |------|-------------|
+| `--agent <claude\|gemini>` | Agent identity for config selection and skill operations (default: claude) |
 | `--config <PATH>` | Path to config file |
 | `--identity <NAME>` | Author name for this operation |
 | `--type <human\|agent>` | Author type |
@@ -374,16 +375,17 @@ The skill teaches agents *when* and *how* to use the MCP tools -- trigger phrase
 # Install at project scope (defaults to --agent claude)
 remargin skill install
 
-# Install for a specific agent
-remargin skill install --agent claude
-remargin skill install --agent gemini
+# Install for a specific agent (--agent is a global flag, before the subcommand)
+remargin --agent claude skill install
+remargin --agent gemini skill install
 
 # Or install globally
 remargin skill install --global
+remargin --agent gemini skill install --global
 
 # Verify installation
 remargin skill test
-remargin skill test --agent gemini
+remargin --agent gemini skill test
 ```
 
 ### Permissions
@@ -407,7 +409,8 @@ For a project using remargin with Claude Code:
 ```bash
 # Install both MCP server and skill
 remargin mcp install
-remargin skill install  # installs for Claude Code by default
+remargin skill install           # installs for Claude Code by default
+remargin --agent gemini skill install  # also install for Gemini CLI
 
 # Add permissions (optional, avoids confirmation prompts)
 # Edit .claude/settings.local.json and add mcp__remargin__* to allow list
