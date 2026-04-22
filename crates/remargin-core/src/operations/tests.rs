@@ -2194,10 +2194,16 @@ fn project_purge_strips_every_comment_without_writing_disk() {
 
 #[test]
 fn project_migrate_no_op_when_no_legacy_comments() {
+    use crate::operations::migrate::MigrateIdentities;
     let (system, config, _first) = seed_with_comment();
 
-    let (before, after) =
-        projections::project_migrate(&system, Path::new("/docs/test.md"), &config).unwrap();
+    let (before, after) = projections::project_migrate(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &MigrateIdentities::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         before.to_markdown(),
@@ -2208,6 +2214,7 @@ fn project_migrate_no_op_when_no_legacy_comments() {
 
 #[test]
 fn project_migrate_converts_legacy_markers_to_comments() {
+    use crate::operations::migrate::MigrateIdentities;
     let content = "\
 # Test
 
@@ -2218,8 +2225,13 @@ Agent response from the before-times.
     let system = system_with_doc(content);
     let config = open_config();
 
-    let (before, after) =
-        projections::project_migrate(&system, Path::new("/docs/test.md"), &config).unwrap();
+    let (before, after) = projections::project_migrate(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &MigrateIdentities::default(),
+    )
+    .unwrap();
 
     assert!(
         !before.legacy_comments().is_empty(),
@@ -2735,13 +2747,20 @@ fn purge_refuses_forbidden_targets() {
 
 #[test]
 fn migrate_refuses_forbidden_targets() {
-    use crate::operations::migrate::migrate;
+    use crate::operations::migrate::{MigrateIdentities, migrate};
     for basename in FORBIDDEN_TARGETS {
         let (system, path) = system_with_forbidden(basename, b"anything: true\n");
         let before = read_file(&system, &path);
         let config = open_config();
 
-        let err = migrate(&system, &path, &config, false).unwrap_err();
+        let err = migrate(
+            &system,
+            &path,
+            &config,
+            &MigrateIdentities::default(),
+            false,
+        )
+        .unwrap_err();
 
         assert_forbidden_ops_error(&err, basename);
         assert_eq!(before, read_file(&system, &path));

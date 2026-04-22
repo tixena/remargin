@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone as _, Utc};
+use chrono::Utc;
 use os_shim::System;
 use serde_yaml::Value;
 
@@ -30,13 +30,12 @@ use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
 use crate::linter;
+use crate::operations::migrate::{self, MigrateIdentities};
 use crate::operations::sign;
 use crate::operations::{
     collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
 };
-use crate::parser::{
-    self, Acknowledgment, AuthorType, Comment, LegacyRole, ParsedDocument, Segment,
-};
+use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::writer::{self, InsertPosition};
 
 /// One sub-op inside a [`project_batch`] request: same shape as
@@ -601,11 +600,12 @@ pub fn project_edit(
 
 /// Projection sibling of [`crate::operations::migrate::migrate`].
 ///
-/// Walks the document, converting every `LegacyComment` segment into a
-/// `Comment` with a freshly generated id, the derived content checksum,
-/// and — when the legacy marker carried a `[done:DATE]` — a single
-/// `Acknowledgment` row. The real op also writes a `.md.bak` when
-/// `backup` is set; the projection never copies bytes.
+/// Delegates the per-segment building to
+/// [`crate::operations::migrate::build_migrated_segments`] so the
+/// projection and the real op produce byte-identical comments
+/// (threading, identities, signatures, ack timestamps). The real op
+/// additionally writes a `.md.bak` when `backup` is set; the projection
+/// never copies bytes.
 ///
 /// `after` is byte-identical to `before` when there are no legacy
 /// comments, giving a clean `noop` verdict.
@@ -613,11 +613,13 @@ pub fn project_edit(
 /// # Errors
 ///
 /// Surfaces the same diagnostics `migrate` would on its pre-commit path:
-/// frontmatter issues.
+/// frontmatter issues, or signing failures when `identities` carries a
+/// key path that cannot be read.
 pub fn project_migrate(
     system: &dyn System,
     path: &Path,
     config: &ResolvedConfig,
+    identities: &MigrateIdentities,
 ) -> Result<(ParsedDocument, ParsedDocument)> {
     let (before, mut after) = parse_file_twice(system, path)?;
 
@@ -627,66 +629,8 @@ pub fn project_migrate(
     }
 
     let now = Utc::now().fixed_offset();
-    let mut new_segments: Vec<Segment> = Vec::new();
-
-    for seg in &after.segments {
-        match seg {
-            Segment::LegacyComment(lc) => {
-                let existing_ids: HashSet<&str> = new_segments
-                    .iter()
-                    .filter_map(|s| match s {
-                        Segment::Comment(cm) => Some(cm.id.as_str()),
-                        Segment::Body(_) | Segment::LegacyComment(_) => None,
-                    })
-                    .collect();
-                let new_id = id::generate(&existing_ids);
-
-                let (author, author_type) = match lc.role {
-                    LegacyRole::User => (String::from("legacy-user"), AuthorType::Human),
-                    LegacyRole::Agent => (String::from("legacy-agent"), AuthorType::Agent),
-                };
-
-                let ack = lc
-                    .done_date
-                    .as_ref()
-                    .and_then(|date_str| parse_legacy_done_date(date_str))
-                    .map(|ts| {
-                        let ack_author = match lc.role {
-                            LegacyRole::User => "legacy-agent",
-                            LegacyRole::Agent => "legacy-user",
-                        };
-                        vec![Acknowledgment {
-                            author: String::from(ack_author),
-                            ts,
-                        }]
-                    })
-                    .unwrap_or_default();
-
-                let checksum = compute_checksum(&lc.content);
-
-                let comment = Comment {
-                    ack,
-                    attachments: Vec::new(),
-                    author,
-                    author_type,
-                    checksum,
-                    content: lc.content.clone(),
-                    id: new_id,
-                    line: 0,
-                    reactions: BTreeMap::default(),
-                    reply_to: None,
-                    signature: None,
-                    thread: None,
-                    to: Vec::new(),
-                    ts: now,
-                };
-                new_segments.push(Segment::Comment(Box::new(comment)));
-            }
-            Segment::Body(text) => new_segments.push(Segment::Body(text.clone())),
-            Segment::Comment(cm) => new_segments.push(Segment::Comment(cm.clone())),
-        }
-    }
-
+    let (new_segments, _results) =
+        migrate::build_migrated_segments(system, &after.segments, identities, now)?;
     after.segments = new_segments;
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
@@ -997,14 +941,6 @@ fn ensure_markdown_path(path: &Path) -> Result<()> {
         bail!("not a markdown file");
     }
     Ok(())
-}
-
-/// Parse a `[done:DATE]` date string into a `FixedOffset` timestamp.
-/// Mirrors the private helper in `migrate.rs`.
-fn parse_legacy_done_date(date_str: &str) -> Option<DateTime<FixedOffset>> {
-    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()?;
-    let naive_dt = date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
-    Some(Utc.from_utc_datetime(&naive_dt).fixed_offset())
 }
 
 /// Resolve the insertion position for a batch sub-op, adjusting any

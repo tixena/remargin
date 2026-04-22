@@ -56,6 +56,23 @@ pub struct IdentityFlags {
 }
 
 impl IdentityFlags {
+    /// Construct a flags struct that names only `--config <path>`.
+    ///
+    /// Convenience for adapters (CLI / MCP) that already have a path
+    /// they want to push through branch 1 of the resolver and don't
+    /// need the full default-and-mutate dance — the struct is
+    /// `#[non_exhaustive]` so out-of-crate callers can't build it via
+    /// the literal expression syntax.
+    #[must_use]
+    pub const fn for_config_path(config_path: PathBuf) -> Self {
+        Self {
+            author_type: None,
+            config_path: Some(config_path),
+            identity: None,
+            key: None,
+        }
+    }
+
     /// True when every field is `None` — the resolver takes branch 3
     /// (plain walk, no filters).
     #[must_use]

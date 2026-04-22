@@ -352,12 +352,14 @@ fn desc_metadata() -> ToolDesc {
 fn desc_migrate() -> ToolDesc {
     ToolDesc {
         name: "migrate",
-        description: "Convert old-format comments to remargin format. To preview without writing, use `plan` with op=\"migrate\".",
+        description: "Convert old-format comments to remargin format. Optional `human_config` / `agent_config` point at .remargin.yaml files used to attribute and sign migrated comments per legacy role (required for strict mode). To preview without writing, use `plan` with op=\"migrate\" (same fields).",
         schema: with_identity_overrides_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
-                "backup": { "type": "boolean", "description": "Create .bak backup", "default": false }
+                "backup": { "type": "boolean", "description": "Create .bak backup", "default": false },
+                "human_config": { "type": "string", "description": "Path to .remargin.yaml whose identity attributes/signs migrated user comments" },
+                "agent_config": { "type": "string", "description": "Path to .remargin.yaml whose identity attributes/signs migrated agent comments" }
             },
             "required": ["file"]
         })),
@@ -1284,8 +1286,9 @@ fn handle_migrate(
     let overridden = apply_identity_overrides(system, base_dir, config, params)?;
     let cfg = effective_config(config, overridden.as_ref());
 
+    let identities = migrate_identities_from_params(system, base_dir, cfg, params)?;
     let path = base_dir.join(file);
-    let migrated = migrate::migrate(system, &path, cfg, backup)?;
+    let migrated = migrate::migrate(system, &path, cfg, &identities, backup)?;
 
     let results: Vec<Value> = migrated
         .iter()
@@ -1298,6 +1301,74 @@ fn handle_migrate(
         .collect();
 
     Ok(json!({ "migrated": results }))
+}
+
+/// Resolve the per-role identity flags out of an MCP params map.
+///
+/// Mirrors the CLI's `resolve_migrate_identities` helper but reads
+/// JSON: `human_config` / `agent_config` are optional string paths,
+/// each interpreted as branch 1 of `config::identity::resolve_identity`.
+/// The resolved `author_type` must match the role; a mismatch is a hard
+/// error.
+fn migrate_identities_from_params(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<migrate::MigrateIdentities> {
+    let human = match optional_str(params, "human_config") {
+        None => None,
+        Some(s) => Some(resolve_role_identity_for_mcp(
+            system,
+            base_dir,
+            cfg,
+            Path::new(s),
+            &parser::AuthorType::Human,
+            "human_config",
+        )?),
+    };
+    let agent = match optional_str(params, "agent_config") {
+        None => None,
+        Some(s) => Some(resolve_role_identity_for_mcp(
+            system,
+            base_dir,
+            cfg,
+            Path::new(s),
+            &parser::AuthorType::Agent,
+            "agent_config",
+        )?),
+    };
+    Ok(migrate::MigrateIdentities::new(human, agent))
+}
+
+fn resolve_role_identity_for_mcp(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    config_path: &Path,
+    expected_type: &parser::AuthorType,
+    field_name: &str,
+) -> Result<migrate::MigrateRoleIdentity> {
+    let resolved_path = if config_path.is_absolute() {
+        config_path.to_path_buf()
+    } else {
+        base_dir.join(config_path)
+    };
+    let flags = IdentityFlags::for_config_path(resolved_path.clone());
+    let resolved = resolve_identity(system, base_dir, &cfg.mode, &flags, cfg.registry.as_ref())
+        .with_context(|| format!("resolving {field_name} {}", resolved_path.display()))?;
+    if &resolved.author_type != expected_type {
+        bail!(
+            "{field_name} resolved {:?} as type {:?}, but the field requires type {:?}",
+            resolved.identity,
+            resolved.author_type,
+            expected_type,
+        );
+    }
+    Ok(migrate::MigrateRoleIdentity::new(
+        resolved.identity,
+        resolved.key_path,
+    ))
 }
 
 /// Handle the `plan` tool: parse the request shape, build a
@@ -1367,9 +1438,13 @@ fn handle_plan(
             path: base_dir.join(required_str(params, "file")?),
             ops: parse_plan_batch_ops(params)?,
         },
-        "migrate" => plan_ops::PlanRequest::Migrate {
-            path: base_dir.join(required_str(params, "file")?),
-        },
+        "migrate" => {
+            let identities = migrate_identities_from_params(system, base_dir, cfg, params)?;
+            plan_ops::PlanRequest::Migrate {
+                path: base_dir.join(required_str(params, "file")?),
+                identities,
+            }
+        }
         "purge" => plan_ops::PlanRequest::Purge {
             path: base_dir.join(required_str(params, "file")?),
         },

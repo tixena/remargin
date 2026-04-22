@@ -33,6 +33,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::config::ResolvedConfig;
 use crate::document::{self, WriteOptions, WriteProjection};
+use crate::operations::migrate::MigrateIdentities;
 use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
 use crate::operations::sign::SignSelection;
 use crate::operations::verify::{VerifyReport, verify_document};
@@ -232,7 +233,14 @@ pub enum PlanRequest<'req> {
         content: &'req str,
     },
     /// `plan migrate` — projects conversion of legacy comments.
-    Migrate { path: PathBuf },
+    Migrate {
+        path: PathBuf,
+        /// Per-role identities (and signing keys) used by both the
+        /// projection and the real op. Pass
+        /// `MigrateIdentities::default()` to keep the historical
+        /// `legacy-user` / `legacy-agent` placeholder behaviour.
+        identities: MigrateIdentities,
+    },
     /// `plan purge` — projects removal of all comments.
     Purge { path: PathBuf },
     /// `plan react` — projects add/remove of an emoji reaction.
@@ -392,8 +400,8 @@ pub fn dispatch(
             let (before, after) = projections::project_edit(system, path, cfg, id, content)?;
             Ok(project_report(label, &before, &after, cfg, identity))
         }
-        PlanRequest::Migrate { path } => {
-            let (before, after) = projections::project_migrate(system, path, cfg)?;
+        PlanRequest::Migrate { path, identities } => {
+            let (before, after) = projections::project_migrate(system, path, cfg, identities)?;
             Ok(project_report(label, &before, &after, cfg, identity))
         }
         PlanRequest::Purge { path } => {

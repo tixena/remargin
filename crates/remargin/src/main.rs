@@ -351,12 +351,28 @@ enum Commands {
         unrestricted_args: UnrestrictedArgs,
     },
     /// Convert old-format comments to remargin format.
+    ///
+    /// Two optional per-role identity flags let strict-mode docs migrate
+    /// successfully: each `--*-config` points at a `.remargin.yaml`
+    /// declaring a complete identity (author + signing key) used to
+    /// attribute and sign migrated comments of the matching legacy
+    /// role. Without them, migrated comments fall back to the historical
+    /// `legacy-user` / `legacy-agent` placeholder with no signature —
+    /// fine in open mode, rejected by the verify gate in strict mode.
     Migrate {
         /// Path to the document.
         file: String,
         /// Create a .bak backup before modifying.
         #[arg(long)]
         backup: bool,
+        /// Path to a `.remargin.yaml` whose identity is used for
+        /// migrated `user comments` blocks (author + signing key).
+        #[arg(long)]
+        human_config: Option<PathBuf>,
+        /// Path to a `.remargin.yaml` whose identity is used for
+        /// migrated `agent comments` blocks (author + signing key).
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
         #[command(flatten)]
         identity_args: IdentityArgs,
         #[command(flatten)]
@@ -695,6 +711,14 @@ enum PlanAction {
     Migrate {
         /// Path to the document.
         path: String,
+        /// Path to a `.remargin.yaml` whose identity is used for
+        /// migrated `user comments` blocks (author + signing key).
+        #[arg(long)]
+        human_config: Option<PathBuf>,
+        /// Path to a `.remargin.yaml` whose identity is used for
+        /// migrated `agent comments` blocks (author + signing key).
+        #[arg(long)]
+        agent_config: Option<PathBuf>,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1669,9 +1693,28 @@ fn dispatch_with_config(
         Commands::Migrate {
             file,
             backup,
+            human_config,
+            agent_config,
             output_args,
             ..
-        } => cmd_migrate(system, cwd, config, file, *backup, output_args.json),
+        } => {
+            let identities = resolve_migrate_identities(
+                system,
+                cwd,
+                config,
+                human_config.as_deref(),
+                agent_config.as_deref(),
+            )?;
+            cmd_migrate(
+                system,
+                cwd,
+                config,
+                file,
+                *backup,
+                &identities,
+                output_args.json,
+            )
+        }
         Commands::Plan { action, .. } => {
             cmd_plan(system, cwd, config, action, plan_action_output(action).json)
         }
@@ -2289,10 +2332,11 @@ fn cmd_migrate(
     config: &ResolvedConfig,
     file: &str,
     backup: bool,
+    identities: &migrate::MigrateIdentities,
     json_mode: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
-    let migrated = migrate::migrate(system, &path, config, backup)?;
+    let migrated = migrate::migrate(system, &path, config, identities, backup)?;
 
     if json_mode {
         let results: Vec<Value> = migrated
@@ -2309,6 +2353,79 @@ fn cmd_migrate(
         }
         Ok(())
     }
+}
+
+/// Build the `MigrateIdentities` for a `migrate` (or `plan migrate`)
+/// invocation.
+///
+/// Each `--*-config <path>` is interpreted as a complete identity
+/// declaration via branch 1 of [`config::identity::resolve_identity`] —
+/// the same path the operator's own identity takes when they pass
+/// `--config`. The resolved `author_type` must match the role the flag
+/// is wired to (a human config for `--human-config`, an agent config
+/// for `--agent-config`); a mismatch is an error before any byte hits
+/// disk.
+fn resolve_migrate_identities(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    human_config: Option<&Path>,
+    agent_config: Option<&Path>,
+) -> Result<migrate::MigrateIdentities> {
+    let human = match human_config {
+        None => None,
+        Some(path) => Some(resolve_role_identity(
+            system,
+            cwd,
+            config,
+            path,
+            &parser::AuthorType::Human,
+            "--human-config",
+        )?),
+    };
+    let agent = match agent_config {
+        None => None,
+        Some(path) => Some(resolve_role_identity(
+            system,
+            cwd,
+            config,
+            path,
+            &parser::AuthorType::Agent,
+            "--agent-config",
+        )?),
+    };
+    Ok(migrate::MigrateIdentities::new(human, agent))
+}
+
+fn resolve_role_identity(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    config_path: &Path,
+    expected_type: &parser::AuthorType,
+    flag_name: &str,
+) -> Result<migrate::MigrateRoleIdentity> {
+    let flags = config::identity::IdentityFlags::for_config_path(config_path.to_path_buf());
+    let resolved = config::identity::resolve_identity(
+        system,
+        cwd,
+        &config.mode,
+        &flags,
+        config.registry.as_ref(),
+    )
+    .with_context(|| format!("resolving {flag_name} {}", config_path.display()))?;
+    if &resolved.author_type != expected_type {
+        bail!(
+            "{flag_name} resolved {:?} as type {:?}, but the flag requires type {:?}",
+            resolved.identity,
+            resolved.author_type,
+            expected_type,
+        );
+    }
+    Ok(migrate::MigrateRoleIdentity::new(
+        resolved.identity,
+        resolved.key_path,
+    ))
 }
 
 /// Route a `plan` subcommand to the correct per-op projection.
@@ -2393,9 +2510,24 @@ fn cmd_plan(
             id,
             content,
         },
-        PlanAction::Migrate { path, .. } => plan_ops::PlanRequest::Migrate {
-            path: resolve_doc_path(system, cwd, path)?,
-        },
+        PlanAction::Migrate {
+            path,
+            human_config,
+            agent_config,
+            ..
+        } => {
+            let identities = resolve_migrate_identities(
+                system,
+                cwd,
+                config,
+                human_config.as_deref(),
+                agent_config.as_deref(),
+            )?;
+            plan_ops::PlanRequest::Migrate {
+                path: resolve_doc_path(system, cwd, path)?,
+                identities,
+            }
+        }
         PlanAction::Purge { path, .. } => plan_ops::PlanRequest::Purge {
             path: resolve_doc_path(system, cwd, path)?,
         },

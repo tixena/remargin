@@ -73,7 +73,10 @@ mod tests {
         // match itself is low-density mapping code (rem-oqv, rem-9ey).
         m.insert(
             "cmd_plan",
-            (140_usize, "consolidated PlanAction -> PlanRequest match"),
+            (
+                155_usize,
+                "consolidated PlanAction -> PlanRequest match (plan migrate resolves two per-role configs inline)",
+            ),
         );
         // CLI: sandbox top-level command dispatches across four
         // SandboxAction variants; each sub-branch is adapter glue
@@ -102,7 +105,13 @@ mod tests {
         // MCP: plan dispatcher mirrors the CLI shape above; same
         // rationale. Shrinks when the adapter-layer PlanRequest builder
         // grows helpers in core (follow-on work).
-        m.insert("handle_plan", (101, "mirrors cmd_plan PlanAction dispatch"));
+        m.insert(
+            "handle_plan",
+            (
+                110,
+                "mirrors cmd_plan PlanAction dispatch (plan migrate resolves two per-role configs inline)",
+            ),
+        );
         // MCP: search handler extracts eight optional filter fields.
         m.insert(
             "handle_search",
