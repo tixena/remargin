@@ -60,16 +60,16 @@ Use `Grep` and `Glob` only for discovery (finding files across the repo), not fo
 
 ## The identity rule — read this before posting anything
 
-**Never pass `identity`, `type`, `config_path`, `--identity`, `--type`, or `--config` overrides unless the user has explicitly asked you to act as someone else.** Your identity is resolved from the configured registry and signing key. Overriding = impersonation. This rule surfaced directly from a real incident (2026-04-16) where an agent posted comments under the wrong identity because the override path was taken without justification.
+**Never pass `identity`, `type`, `config_path`, `--identity`, `--type`, or `--config` to declare a different identity unless the user has explicitly asked you to act as someone else.** Your identity is resolved from the configured registry and signing key. Declaring a different one on a per-call basis = impersonation. This rule surfaced directly from a real incident (2026-04-16) where an agent posted comments under the wrong identity because a per-call declaration was made without justification.
 
 - ❌ `remargin comment file=doc.md content="..." --identity eduardo --type human` — agent is impersonating a human.
 - ❌ `mcp__remargin__comment { file, content, identity: "someone-else", type: "human" }` — same impersonation via MCP.
 - ✅ `remargin comment file=doc.md content="..."` — uses the configured identity (yours).
 - ✅ `mcp__remargin__comment { file, content }` — same, via MCP.
 
-If the user tells you "post this as the release bot" or similar, the override is warranted — keep the original request in context so you can show it if questioned.
+If the user tells you "post this as the release bot" or similar, the per-call declaration is warranted — keep the original request in context so you can show it if questioned.
 
-Every mutating tool (`comment`, `batch`, `edit`, `delete`, `ack`, `react`, `sandbox_add`, `sandbox_remove`, `plan`, `write`, `migrate`, `purge`, `sign`) accepts the identity-override quartet `{config_path, identity, type, key}` (with `config_path` mutually exclusive with the other three). Treat every one of those sites as an impersonation risk.
+Every mutating tool (`comment`, `batch`, `edit`, `delete`, `ack`, `react`, `sandbox_add`, `sandbox_remove`, `plan`, `write`, `migrate`, `purge`, `sign`) accepts the identity-declaration quartet `{config_path, identity, type, key}` (with `config_path` mutually exclusive with the other three). Treat every one of those sites as an impersonation risk.
 
 ## Permissions setup
 
@@ -159,9 +159,9 @@ These are user-facing setup tools and do not appear as MCP tools:
 
 Each rule below states a clear "don't" with paired ✅/❌ examples. They compound: a single violation can break multiple rules at once.
 
-### Identity override
+### Identity declaration
 
-Already covered above; it is rule number one. Don't override `identity` / `author_type` without explicit user instruction.
+Already covered above; it is rule number one. Don't declare a different `identity` / `author_type` on a per-call basis without explicit user instruction.
 
 ### Reply threading
 

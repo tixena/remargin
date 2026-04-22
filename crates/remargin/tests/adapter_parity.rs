@@ -30,7 +30,8 @@ mod tests {
 
     use assert_cmd::Command;
     use os_shim::real::RealSystem;
-    use remargin_core::config::{self, CliOverrides, ResolvedConfig};
+    use remargin_core::config::ResolvedConfig;
+    use remargin_core::config::identity::IdentityFlags;
     use remargin_core::mcp;
     use serde_json::{Value, json};
     use tempfile::TempDir;
@@ -83,9 +84,7 @@ Body paragraph two.
     /// surfaces operate on byte-identical config — any difference in the
     /// resulting plan report is adapter drift, not config drift.
     fn parity_config(system: RealSystem, cwd: &Path) -> ResolvedConfig {
-        let cfg = config::load_config(&system, cwd).unwrap();
-        let registry = config::load_registry(&system, cwd).unwrap();
-        ResolvedConfig::resolve(&system, cfg, registry, &CliOverrides::default()).unwrap()
+        ResolvedConfig::resolve(&system, cwd, &IdentityFlags::default(), None).unwrap()
     }
 
     /// Run the CLI binary in `--json` mode with the given subcommand

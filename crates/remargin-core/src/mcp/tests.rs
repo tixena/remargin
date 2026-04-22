@@ -2531,13 +2531,14 @@ fn mcp_plan_rejects_unknown_op() {
     );
 }
 
-// ---------- rem-x2bw: identity-overrides schema parity ----------
+// ---------- rem-x2bw: identity-declaration schema parity ----------
 
-/// Every mutating tool that accepts identity overrides must advertise the
-/// four-field contract (`config_path`, `identity`, `type`, `key`) and the
-/// top-level `not/allOf` exclusivity clause. Read-only tools MUST NOT.
+/// Every mutating tool that accepts a per-tool identity declaration must
+/// advertise the four-field contract (`config_path`, `identity`, `type`,
+/// `key`) and the top-level `not/allOf` exclusivity clause. Read-only
+/// tools MUST NOT.
 #[test]
-fn identity_overrides_schema_present_on_mutating_tools() {
+fn identity_declaration_schema_present_on_mutating_tools() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -2579,7 +2580,7 @@ fn identity_overrides_schema_present_on_mutating_tools() {
         for field in ["config_path", "identity", "key", "type"] {
             assert!(
                 props[field].is_object(),
-                "tool {name} missing identity-override field {field}"
+                "tool {name} missing identity-declaration field {field}"
             );
         }
         let not = &tool["inputSchema"]["not"];
@@ -2605,7 +2606,7 @@ fn identity_overrides_schema_present_on_mutating_tools() {
         for field in ["config_path", "identity", "key", "type"] {
             assert!(
                 props.get(field).is_none_or(Value::is_null),
-                "read-only tool {name} must not advertise identity-override field {field}"
+                "read-only tool {name} must not advertise identity-declaration field {field}"
             );
         }
     }
@@ -2649,7 +2650,7 @@ fn no_mode_or_dry_run_in_any_schema() {
 /// Passing both `config_path` and `identity` to the same call must be
 /// rejected — schema-level `not/allOf` says so, and the handler re-checks.
 #[test]
-fn comment_rejects_config_path_with_identity_override() {
+fn comment_rejects_config_path_with_identity_declaration() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Hello\n");
     let config = test_config();
@@ -2726,10 +2727,10 @@ fn comment_with_config_path_loads_alternate_identity() {
     assert_eq!(comment.author_type, AuthorType::Human);
 }
 
-/// Manual `{identity, type}` override (open mode; no key required) is the
+/// Manual `{identity, type}` declaration (open mode; no key required) is the
 /// branch-2 happy path — identity and type are both adopted.
 #[test]
-fn comment_with_manual_identity_type_override_writes_as_new_identity() {
+fn comment_with_manual_identity_type_declaration_writes_as_new_identity() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Hello\n\nBody.\n");
     let config = test_config();
@@ -2746,7 +2747,7 @@ fn comment_with_manual_identity_type_override_writes_as_new_identity() {
                 "name": "comment",
                 "arguments": {
                     "file": "doc.md",
-                    "content": "manual override",
+                    "content": "manual declaration",
                     "identity": "manual-bob",
                     "type": "agent"
                 }

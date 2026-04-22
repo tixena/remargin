@@ -23,7 +23,8 @@ mod tests {
     use assert_cmd::Command;
     use os_shim::System as _;
     use os_shim::mock::MockSystem;
-    use remargin_core::config::{self, CliOverrides, ResolvedConfig};
+    use remargin_core::config::ResolvedConfig;
+    use remargin_core::config::identity::IdentityFlags;
     use remargin_core::mcp;
     use remargin_core::path::{ExpandPathError, expand_path};
     use serde_json::{Value, json};
@@ -128,10 +129,7 @@ mod tests {
     // --- MCP surface ----------------------------------------------------
 
     fn mcp_test_config(system: &MockSystem, base: &Path) -> ResolvedConfig {
-        let overrides = CliOverrides::default();
-        let cfg = config::load_config(system, base).unwrap();
-        let registry = config::load_registry(system, base).unwrap();
-        ResolvedConfig::resolve(system, cfg, registry, &overrides).unwrap()
+        ResolvedConfig::resolve(system, base, &IdentityFlags::default(), None).unwrap()
     }
 
     /// MCP `get` expands `~` before dispatching so a tool caller passing

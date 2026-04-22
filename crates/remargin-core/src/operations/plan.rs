@@ -115,11 +115,12 @@ pub struct CommentDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanIdentity {
-    /// Author type (`human` / `agent`) as resolved from the active config
-    /// and any CLI / MCP override.
+    /// Author type (`human` / `agent`) as resolved for the active op —
+    /// whichever branch of `identity::resolve_identity` the CLI / MCP
+    /// flags selected.
     pub author_type: Option<String>,
-    /// Author identity as resolved from the active config and any CLI /
-    /// MCP override.
+    /// Author identity as resolved for the active op — whichever branch
+    /// of `identity::resolve_identity` the CLI / MCP flags selected.
     pub name: Option<String>,
     /// Whether the configured private key would load and sign successfully
     /// for this op. `false` means the op would still commit under the

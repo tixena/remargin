@@ -19,22 +19,6 @@ use crate::path::expand_path;
 const CONFIG_FILENAME: &str = ".remargin.yaml";
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
 
-/// CLI overrides that take precedence over config file values.
-///
-/// Note: `mode` is intentionally absent. Mode is a property of the
-/// directory tree (resolved by walking upward for the nearest
-/// `.remargin.yaml`) and is not caller-overridable — allowing a flag
-/// like `--mode open` would let an agent silently weaken enforcement on
-/// a strict vault (rem-wws).
-#[derive(Debug, Default)]
-#[non_exhaustive]
-pub struct CliOverrides<'cli> {
-    pub assets_dir: Option<&'cli str>,
-    pub author_type: Option<&'cli str>,
-    pub identity: Option<&'cli str>,
-    pub key: Option<&'cli str>,
-}
-
 /// Parsed contents of a `.remargin.yaml` file.
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
@@ -74,8 +58,14 @@ impl Mode {
     }
 }
 
-/// The final resolved configuration after merging the config file, registry,
-/// and CLI overrides.
+/// Final resolved configuration.
+///
+/// Carries mode, identity, registry, assets dir, and ignore list, as
+/// determined by one trip through the three-branch resolver
+/// ([`identity::resolve_identity`]) plus a walk for mode and registry.
+/// Identity fields are never inherited from one `.remargin.yaml` and
+/// half-replaced by flags — the resolver picks one branch and the
+/// identity comes whole from that branch.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ResolvedConfig {
@@ -93,9 +83,8 @@ pub struct ResolvedConfig {
 impl ResolvedConfig {
     /// Check if a participant is allowed to post (mode + registry enforcement).
     ///
-    /// Kept as a crate-private helper used by [`Self::resolve`] and
-    /// [`Self::with_identity_overrides`] so every construction path runs
-    /// the same registry gate. Op handlers do NOT call this directly
+    /// Kept as a crate-private helper used by [`Self::resolve`] as a
+    /// belt-and-braces final gate. Op handlers do NOT call this directly
     /// (rem-xc8x); they consume a pre-validated [`ResolvedConfig`].
     ///
     /// # Errors
@@ -137,76 +126,84 @@ impl ResolvedConfig {
             .is_some_and(|participant| participant.status == RegistryParticipantStatus::Active)
     }
 
-    /// Build from config file, registry, and CLI overrides.
-    /// CLI flags take precedence over config file values.
+    /// Build the effective configuration for `cwd` from a set of CLI
+    /// identity flags plus an optional `--assets-dir` value.
+    ///
+    /// This is the single entry point used by the CLI, MCP, and every
+    /// other adapter. Identity resolution goes through
+    /// [`identity::resolve_identity`], which picks exactly one branch
+    /// (declared via `--config`, declared manually via
+    /// `--identity`/`--type`/`--key`, or walk-up with strict-equality
+    /// filters) and never mixes fields from different files.
+    ///
+    /// Registry lookup anchors on the directory that declared the
+    /// identity when a `--config` path was supplied (so cross-realm
+    /// declarations find the right `.remargin-registry.yaml`); otherwise
+    /// it walks from `cwd`. Mode is a property of the directory tree
+    /// rooted at `cwd` (see [`resolve_mode`]) and is not caller-chosen.
+    ///
+    /// When `flags.is_empty()`, a missing or identity-less config file is
+    /// tolerated — the resulting `ResolvedConfig` carries `identity:
+    /// None`, and op handlers that require one surface their own error.
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - An unknown author type string is provided
-    /// - Key path resolution fails
+    /// Returns an error when:
+    /// - Any branch of identity resolution fails (see
+    ///   [`identity::resolve_identity`] for the per-branch error list).
+    /// - The configured assets dir value is malformed.
+    /// - The resolved identity fails the strict-mode or registry gate in
+    ///   [`Self::validate_identity`].
     pub fn resolve(
         system: &dyn System,
-        config: Option<Config>,
-        reg: Option<Registry>,
-        cli: &CliOverrides<'_>,
+        cwd: &Path,
+        flags: &identity::IdentityFlags,
+        assets_dir_flag: Option<&str>,
     ) -> Result<Self> {
-        let base = config.unwrap_or_else(|| Config {
-            assets_dir: default_assets_dir(),
-            author_type: None,
-            identity: None,
-            ignore: Vec::new(),
-            key: None,
-            mode: default_mode(),
-        });
+        let ResolvedMode { mode, .. } = resolve_mode(system, cwd)?;
 
-        // If CLI overrides author_type to a different type than the config's,
-        // an explicit identity must also be provided — otherwise the config's
-        // identity (which belongs to a different role) would be silently
-        // inherited.
-        if let Some(cli_type) = cli.author_type
-            && let Some(config_type) = &base.author_type
-            && cli_type != config_type
-            && cli.identity.is_none()
-        {
-            bail!(
-                "author type override {cli_type:?} does not match config type \
-                 {config_type:?}; provide an explicit --identity for the {cli_type} role",
-            );
-        }
+        let registry_anchor = flags
+            .config_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
+        let registry = load_registry(system, &registry_anchor)?;
 
-        let identity = cli.identity.map(String::from).or(base.identity);
+        let fields = if flags.is_empty() {
+            resolve_fields_from_walk(system, cwd)?
+        } else {
+            let resolved =
+                identity::resolve_identity(system, cwd, &mode, flags, registry.as_ref())?;
+            WalkedIdentityFields {
+                author_type: Some(resolved.author_type),
+                identity: Some(resolved.identity),
+                key_path: resolved.key_path,
+                source_config: resolved.source_config,
+            }
+        };
 
-        let author_type_str = cli.author_type.map(String::from).or(base.author_type);
-        let author_type = author_type_str
-            .map(|type_val| parse_author_type(&type_val))
-            .transpose()?;
+        let assets_dir = assets_dir_flag
+            .map(String::from)
+            .or_else(|| fields.source_config.as_ref().map(|c| c.assets_dir.clone()))
+            .unwrap_or_else(default_assets_dir);
 
-        // Mode is no longer a CLI-overridable value (rem-wws): it comes
-        // from the config file's `mode:` field and nothing else.
-        let mode = base.mode;
-
-        let key_str = cli.key.map(String::from).or(base.key);
-        let key_path = key_str
-            .map(|key_val| resolve_key_path(system, &key_val))
-            .transpose()?;
-
-        let assets_dir = cli.assets_dir.map(String::from).unwrap_or(base.assets_dir);
+        let ignore = fields
+            .source_config
+            .as_ref()
+            .map(|c| c.ignore.clone())
+            .unwrap_or_default();
 
         let resolved = Self {
             assets_dir,
-            author_type,
-            identity,
-            ignore: base.ignore,
-            key_path,
+            author_type: fields.author_type,
+            identity: fields.identity,
+            ignore,
+            key_path: fields.key_path,
             mode,
-            registry: reg,
+            registry,
             unrestricted: false,
         };
 
-        // Validate the resolved identity at construction time (rem-xc8x).
-        // Op handlers can assume the config they receive has already
-        // passed registry + key-presence enforcement for its active mode.
         resolved.validate_identity()?;
 
         Ok(resolved)
@@ -234,12 +231,11 @@ impl ResolvedConfig {
     /// membership (registered / strict) and a resolvable signing key
     /// (strict).
     ///
-    /// Invoked automatically by [`Self::resolve`] and
-    /// [`Self::with_identity_overrides`] so every surface that produces a
-    /// [`ResolvedConfig`] runs the same gate (rem-xc8x). Absent identity
-    /// is not an error here — some read-only commands intentionally
-    /// resolve without one; op handlers check for the identity they need
-    /// separately.
+    /// Invoked automatically by [`Self::resolve`] so every surface that
+    /// produces a [`ResolvedConfig`] runs the same gate (rem-xc8x).
+    /// Absent identity is not an error here — some read-only commands
+    /// intentionally resolve without one; op handlers check for the
+    /// identity they need separately.
     ///
     /// # Errors
     ///
@@ -269,63 +265,6 @@ impl ResolvedConfig {
 
         Ok(())
     }
-
-    /// Apply per-call identity overrides to an already-resolved config
-    /// (rem-3a2).
-    ///
-    /// Returns `Ok(None)` when both overrides are absent (the caller
-    /// continues to use the base config). Returns `Ok(Some(cfg))` with a
-    /// cloned and overridden config otherwise. Canonicalizes the
-    /// override-validation rules so CLI / MCP / future surfaces cannot
-    /// drift on the same knob:
-    ///
-    /// - `identity_override` replaces `identity`.
-    /// - `type_override` replaces `author_type`. When it is the only
-    ///   override supplied and disagrees with the base `author_type`, the
-    ///   call bails with the same message the config resolver emits for
-    ///   the equivalent CLI flag combination — you cannot swap roles
-    ///   without also declaring whose identity should be used.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `type_override` is an unknown author type
-    /// string, or when it disagrees with the base config without an
-    /// accompanying `identity_override`.
-    pub fn with_identity_overrides(
-        &self,
-        identity_override: Option<&str>,
-        type_override: Option<&str>,
-    ) -> Result<Option<Self>> {
-        if identity_override.is_none() && type_override.is_none() {
-            return Ok(None);
-        }
-
-        let mut overridden = self.clone();
-
-        if let Some(id) = identity_override {
-            overridden.identity = Some(String::from(id));
-        }
-
-        if let Some(type_str) = type_override {
-            let new_type = parse_author_type(type_str)?;
-            if identity_override.is_none() && self.author_type.as_ref() != Some(&new_type) {
-                bail!(
-                    "author_type override {type_str:?} does not match resolved type {:?}; \
-                     provide an explicit identity",
-                    self.author_type,
-                );
-            }
-            overridden.author_type = Some(new_type);
-        }
-
-        // Re-run the registry + key-presence gate now that the identity
-        // / author_type fields have been swapped (rem-xc8x). Without this
-        // the MCP per-call override path would sidestep the resolver's
-        // validation.
-        overridden.validate_identity()?;
-
-        Ok(Some(overridden))
-    }
 }
 
 /// Resolved mode with provenance, produced by [`resolve_mode`].
@@ -345,12 +284,57 @@ pub struct ResolvedMode {
     pub source: Option<PathBuf>,
 }
 
+/// Fields extracted from a walked `.remargin.yaml` when no identity
+/// flags were supplied. Populated by [`resolve_fields_from_walk`] and
+/// consumed by [`ResolvedConfig::resolve`].
+#[derive(Default)]
+struct WalkedIdentityFields {
+    author_type: Option<AuthorType>,
+    identity: Option<String>,
+    key_path: Option<PathBuf>,
+    source_config: Option<Config>,
+}
+
 fn default_assets_dir() -> String {
     String::from("assets")
 }
 
 const fn default_mode() -> Mode {
     Mode::Open
+}
+
+/// Walk-based fallback used by [`ResolvedConfig::resolve`] when no
+/// identity flags were supplied. The three-branch resolver requires an
+/// `identity:` field in every file it considers — it is a signing-oriented
+/// function. Some read-only CLI invocations run with an empty flag set in
+/// directories whose `.remargin.yaml` legitimately lacks identity (pure
+/// mode declarations, for example), and we tolerate that: the resulting
+/// [`ResolvedConfig`] simply carries `identity: None`, and the final
+/// [`ResolvedConfig::validate_identity`] early-returns `Ok(())`.
+fn resolve_fields_from_walk(system: &dyn System, cwd: &Path) -> Result<WalkedIdentityFields> {
+    let Some((path, config)) = load_config_filtered_with_path(system, cwd, None)? else {
+        return Ok(WalkedIdentityFields::default());
+    };
+
+    let identity = config.identity.clone();
+    let author_type = match config.author_type.as_deref() {
+        Some(raw) => Some(parse_author_type(raw)?),
+        None => None,
+    };
+    let key_path = match config.key.as_deref() {
+        Some(raw) => {
+            let expanded = resolve_key_path(system, raw)?;
+            Some(identity::anchor_key_path_to_config_dir(expanded, &path))
+        }
+        None => None,
+    };
+
+    Ok(WalkedIdentityFields {
+        author_type,
+        identity,
+        key_path,
+        source_config: Some(config),
+    })
 }
 
 /// Walk up from `start_dir` looking for a file with the given name.

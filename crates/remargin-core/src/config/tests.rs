@@ -6,10 +6,11 @@ use os_shim::mock::MockSystem;
 
 use crate::parser::AuthorType;
 
+use super::identity::IdentityFlags;
 use super::registry::RegistryParticipantStatus;
 use super::{
-    CliOverrides, Mode, ResolvedConfig, load_config, load_config_filtered, load_registry,
-    resolve_key_path, resolve_mode,
+    Mode, ResolvedConfig, load_config, load_config_filtered, load_registry, resolve_key_path,
+    resolve_mode,
 };
 
 fn minimal_config_yaml(identity: &str) -> String {
@@ -155,10 +156,13 @@ fn registry_revoked_participant() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let resolved =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     resolved.can_post("eduardo").unwrap();
 
@@ -210,7 +214,13 @@ fn key_path_literal_absolute() {
 }
 
 #[test]
-fn cli_override_identity() {
+fn manual_identity_declaration_supersedes_walked_config() {
+    // Branch 2 of the resolver: --identity + --type + --key is a complete
+    // manual declaration. It does not read any .remargin.yaml to fill in
+    // identity fields — the walked config's `identity: config_user` is
+    // irrelevant. Mode still comes from the walked config (mode is a
+    // property of the directory tree, not of the identity declaration)
+    // and assets_dir still honors the CLI flag when set.
     let system = MockSystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -220,19 +230,18 @@ fn cli_override_identity() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let cli = CliOverrides {
-        identity: Some("cli_user"),
-        author_type: Some("agent"),
-        key: Some("~/.remargin/mykey"),
-        assets_dir: Some("my_assets"),
+    let flags = IdentityFlags {
+        author_type: Some(AuthorType::Agent),
+        identity: Some(String::from("cli_user")),
+        key: Some(String::from("~/.remargin/mykey")),
+        ..IdentityFlags::default()
     };
-    let resolved = ResolvedConfig::resolve(&system, config, None, &cli).unwrap();
+
+    let resolved =
+        ResolvedConfig::resolve(&system, Path::new("/project"), &flags, Some("my_assets")).unwrap();
 
     assert_eq!(resolved.identity.as_deref(), Some("cli_user"));
     assert_eq!(resolved.author_type, Some(AuthorType::Agent));
-    // Mode is sourced from the config file only (rem-wws). The config
-    // declares `mode: open`, so CLI cannot escalate it to strict.
     assert_eq!(resolved.mode, Mode::Open);
     assert_eq!(
         resolved.key_path,
@@ -244,7 +253,13 @@ fn cli_override_identity() {
 #[test]
 fn open_mode_any_author() {
     let system = MockSystem::new();
-    let resolved = ResolvedConfig::resolve(&system, None, None, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/empty"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     resolved.can_post("unknown_user").unwrap();
 }
@@ -260,10 +275,13 @@ fn strict_mode_unregistered() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let resolved =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     let err = resolved.can_post("stranger").unwrap_err();
     assert!(
@@ -283,10 +301,13 @@ fn strict_mode_requires_signature() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let resolved =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     resolved.can_post("eduardo").unwrap();
 
@@ -300,9 +321,13 @@ fn registered_mode_no_registry() {
     let system = MockSystem::new()
         .with_file(Path::new("/project/.remargin.yaml"), b"mode: registered\n")
         .unwrap();
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let resolved =
-        ResolvedConfig::resolve(&system, config, None, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     let err = resolved.can_post("anyone").unwrap_err();
     assert!(
@@ -585,14 +610,16 @@ fn mode_as_str_roundtrip() {
 }
 
 #[test]
-fn agent_override_rejects_inherited_human_identity() {
+fn agent_type_filter_does_not_inherit_human_identity() {
     // Scenario: user has ~/.remargin.yaml with type: human and an identity.
-    // Workspace has no config. An agent operation walks up and finds the
-    // human config, then overrides author_type to "agent".
+    // Workspace has no config. An agent operation passes --type agent;
+    // the resolver walks up with `type == agent` as a strict-equality
+    // filter and finds only the human file, which fails the filter.
     //
-    // Expected: error — the identity belongs to a human config; using it
-    // with agent type is a type mismatch. The agent should have its own
-    // identity configured, not silently borrow the human's.
+    // Expected: the walk exhausts with no match. The resolver does NOT
+    // silently borrow the human identity with a swapped author_type —
+    // the three-branch design (rem-11u) makes this a hard error instead
+    // of a silent misattribution.
     let system = MockSystem::new()
         .with_dir(Path::new("/home/user/project/src"))
         .unwrap()
@@ -608,18 +635,24 @@ fn agent_override_rejects_inherited_human_identity() {
     assert_eq!(config.author_type.as_deref(), Some("human"));
     assert_eq!(config.identity.as_deref(), Some("eduardo"));
 
-    let cli = CliOverrides {
-        author_type: Some("agent"),
-        ..CliOverrides::default()
+    let flags = IdentityFlags {
+        author_type: Some(AuthorType::Agent),
+        ..IdentityFlags::default()
     };
 
-    let result = ResolvedConfig::resolve(&system, Some(config), None, &cli);
+    let result =
+        ResolvedConfig::resolve(&system, Path::new("/home/user/project/src"), &flags, None);
     assert!(
         result.is_err(),
-        "expected error when agent type overrides human config identity, \
+        "expected walk-exhaust error when --type agent cannot match the human config, \
          but got identity={:?} author_type={:?}",
         result.as_ref().ok().and_then(|r| r.identity.clone()),
         result.as_ref().ok().map(|r| r.author_type.clone()),
+    );
+    let msg = format!("{}", result.unwrap_err());
+    assert!(
+        msg.contains("no identity resolved") || msg.contains("no .remargin.yaml matched"),
+        "expected walk-exhaust error message, got: {msg}"
     );
 }
 
@@ -675,7 +708,13 @@ fn resolve_signing_key_returns_none_in_open_mode() {
     // Mode is sourced from the config file (rem-wws). No config → default
     // mode is Open.
     let system = MockSystem::new();
-    let resolved = ResolvedConfig::resolve(&system, None, None, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/empty"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     assert!(resolved.resolve_signing_key("eduardo").is_none());
 }
@@ -697,10 +736,13 @@ fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let resolved =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     assert!(resolved.resolve_signing_key("stranger").is_none());
 }
@@ -709,10 +751,19 @@ fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
 fn resolve_signing_key_returns_key_when_present() {
     // Strict + registered active + key_path set: the helper hands back a
     // reference to the resolved key path so the caller signs with it.
+    //
+    // The `.remargin.yaml` declares the complete identity (eduardo /
+    // human / id_ed25519) directly — under the three-branch resolver
+    // key is paired with identity inside the same file (branch 3 walk)
+    // or inside a manual --identity/--type/--key declaration (branch 2).
+    // Supplying `--key` alone is not a valid shape.
     let system = MockSystem::new()
         .with_env("HOME", "/home/eduardo")
         .unwrap()
-        .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
+        .with_file(
+            Path::new("/project/.remargin.yaml"),
+            b"identity: eduardo\ntype: human\nmode: strict\nkey: id_ed25519\n",
+        )
         .unwrap()
         .with_file(
             Path::new("/project/.remargin-registry.yaml"),
@@ -720,13 +771,13 @@ fn resolve_signing_key_returns_key_when_present() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let cli = CliOverrides {
-        key: Some("id_ed25519"),
-        ..CliOverrides::default()
-    };
-    let resolved = ResolvedConfig::resolve(&system, config, registry, &cli).unwrap();
+    let resolved = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
 
     let key = resolved.resolve_signing_key("eduardo").unwrap();
     assert!(
@@ -755,10 +806,13 @@ fn resolve_bails_when_strict_identity_has_no_key() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let err =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap_err();
+    let err = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap_err();
     let msg = format!("{err}");
     assert!(
         msg.contains("eduardo"),
@@ -797,10 +851,13 @@ fn resolve_bails_when_revoked_identity_in_strict_mode() {
         )
         .unwrap();
 
-    let config = load_config(&system, Path::new("/project")).unwrap();
-    let registry = load_registry(&system, Path::new("/project")).unwrap();
-    let err =
-        ResolvedConfig::resolve(&system, config, registry, &CliOverrides::default()).unwrap_err();
+    let err = ResolvedConfig::resolve(
+        &system,
+        Path::new("/project"),
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap_err();
     let msg = format!("{err}");
     assert!(
         msg.contains("revoked_user"),

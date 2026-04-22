@@ -17,7 +17,7 @@ use os_shim::System;
 use serde_json::{Map, Value, json};
 
 use crate::config::identity::{IdentityFlags, resolve_identity};
-use crate::config::{CliOverrides, ResolvedConfig, load_config, load_registry, parse_author_type};
+use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
 use crate::document;
 use crate::linter;
@@ -55,8 +55,8 @@ const SERVER_NAME: &str = "remargin";
 /// deliberately narrow — adding a new path-shaped field to an MCP schema is
 /// a deliberate act, and it belongs here.
 ///
-/// `config_path` and `key` are the per-tool identity-override fields (rem-x2bw
-/// / rem-zlx3): they are pre-expanded here so the identity resolver sees the
+/// `config_path` and `key` are the per-tool identity-declaration fields
+/// (rem-x2bw / rem-zlx3): they are pre-expanded here so the identity resolver sees the
 /// same already-canonical paths the CLI feeds to [`resolve_identity`].
 const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "file", "key", "path"];
 
@@ -73,12 +73,12 @@ struct ToolDesc {
     schema: Value,
 }
 
-/// Merge the identity-overrides schema fragment into a per-tool schema. The tool's
+/// Merge the identity-flag schema fragment into a per-tool schema. The tool's
 /// own `properties` map gets the four identity fields; its top-level
 /// constraints get the exclusivity clause. Today no tool declares a
 /// top-level `not` of its own; if that changes, the merge needs to
 /// compose clauses rather than overwrite.
-fn with_identity_overrides_schema(mut base: Value) -> Value {
+fn with_identity_flag_schema(mut base: Value) -> Value {
     let Some(base_obj) = base.as_object_mut() else {
         return base;
     };
@@ -95,7 +95,7 @@ fn with_identity_overrides_schema(mut base: Value) -> Value {
             },
             "identity": {
                 "type": "string",
-                "description": "Override identity for this operation. Use together with type (and key in strict mode), or alone to filter the identity walk."
+                "description": "Declare the identity for this operation. Use together with type (and key in strict mode), or alone to filter the identity walk."
             },
             "key": {
                 "type": "string",
@@ -104,7 +104,7 @@ fn with_identity_overrides_schema(mut base: Value) -> Value {
             "type": {
                 "type": "string",
                 "enum": ["human", "agent"],
-                "description": "Author type for the overridden identity: human or agent."
+                "description": "Author type for the declared identity: human or agent."
             }
         }),
     ) {
@@ -115,7 +115,7 @@ fn with_identity_overrides_schema(mut base: Value) -> Value {
 
     debug_assert!(
         base_obj.get("not").is_none(),
-        "with_identity_overrides_schema would overwrite an existing top-level `not` clause"
+        "with_identity_flag_schema would overwrite an existing top-level `not` clause"
     );
     base_obj.insert(
         String::from("not"),
@@ -141,7 +141,7 @@ fn desc_ack() -> ToolDesc {
     ToolDesc {
         name: "ack",
         description: "Acknowledge one or more comments (or remove this identity's ack with remove=true). Omit file to resolve by ID across the folder tree.",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document (omit to resolve by ID across the folder tree)" },
@@ -163,7 +163,7 @@ fn desc_batch() -> ToolDesc {
     ToolDesc {
         name: "batch",
         description: "Create multiple comments atomically",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -195,7 +195,7 @@ fn desc_comment() -> ToolDesc {
     ToolDesc {
         name: "comment",
         description: "Create a comment in a document",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -244,7 +244,7 @@ fn desc_delete() -> ToolDesc {
     ToolDesc {
         name: "delete",
         description: "Delete one or more comments",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -264,7 +264,7 @@ fn desc_edit() -> ToolDesc {
     ToolDesc {
         name: "edit",
         description: "Edit a comment (cascading ack clear)",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -353,7 +353,7 @@ fn desc_migrate() -> ToolDesc {
     ToolDesc {
         name: "migrate",
         description: "Convert old-format comments to remargin format. Optional `human_config` / `agent_config` point at .remargin.yaml files used to attribute and sign migrated comments per legacy role (required for strict mode). To preview without writing, use `plan` with op=\"migrate\" (same fields).",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -371,7 +371,7 @@ fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
         description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. All ops are wired: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write.",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | sandbox-add | sandbox-remove | sign | write" },
@@ -433,7 +433,7 @@ fn desc_purge() -> ToolDesc {
     ToolDesc {
         name: "purge",
         description: "Strip all comments from a document. To preview without writing, use `plan` with op=\"purge\".",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" }
@@ -473,7 +473,7 @@ fn desc_react() -> ToolDesc {
     ToolDesc {
         name: "react",
         description: "Add or remove an emoji reaction",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -530,7 +530,7 @@ fn desc_sign() -> ToolDesc {
              Already-signed comments listed under `ids` are reported as skipped; \
              `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`. \
              To preview without writing, use `plan` with op=\"sign\".",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
@@ -567,7 +567,7 @@ fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
         name: "sandbox_add",
         description: "Stage one or more markdown files in the caller's sandbox. Idempotent per identity.",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "files": {
@@ -586,7 +586,7 @@ fn desc_sandbox_remove() -> ToolDesc {
     ToolDesc {
         name: "sandbox_remove",
         description: "Remove the caller's sandbox entry from one or more markdown files. Idempotent per identity.",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "files": {
@@ -605,7 +605,7 @@ fn desc_sandbox_list() -> ToolDesc {
     ToolDesc {
         name: "sandbox_list",
         description: "Return all markdown files in the given path that are staged for the caller's identity.",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Base directory to walk (default: .)", "default": "." }
@@ -619,7 +619,7 @@ fn desc_write() -> ToolDesc {
     ToolDesc {
         name: "write",
         description: "Write document contents (comment-preserving)",
-        schema: with_identity_overrides_schema(json!({
+        schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Path to the file" },
@@ -797,8 +797,9 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
 }
 
 /// Build the CLI-equivalent [`IdentityFlags`] from a tool params map
-/// (rem-x2bw). Returns `None` when no identity-override field is present,
-/// so handlers can fast-path the "use the base config as-is" case.
+/// (rem-x2bw). Returns `None` when no identity-declaration field is
+/// present, so handlers can fast-path the "use the base config as-is"
+/// case.
 ///
 /// Enforces the same exclusivity rule clap enforces on the CLI: when
 /// `config_path` is supplied, none of `identity`, `type`, `key` may be.
@@ -833,8 +834,9 @@ fn identity_flags_from_params(params: &Map<String, Value>) -> Result<Option<Iden
     }))
 }
 
-/// Apply the four-field identity overrides from tool parameters to the
-/// active [`ResolvedConfig`] (rem-x2bw).
+/// Resolve a per-tool identity declaration from tool parameters and
+/// replace the identity fields on a cloned base [`ResolvedConfig`]
+/// (rem-x2bw).
 ///
 /// Extracts `{config_path | identity, type, key}` via
 /// [`identity_flags_from_params`] and — when any field is present —
@@ -845,7 +847,7 @@ fn identity_flags_from_params(params: &Map<String, Value>) -> Result<Option<Iden
 /// resolution that served the MCP request. The returned config is
 /// revalidated via the same registry + strict-key gate that fires on
 /// construction so no branch can skip enforcement.
-fn apply_identity_overrides(
+fn resolve_identity_from_params(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
@@ -863,22 +865,24 @@ fn apply_identity_overrides(
         config.registry.as_ref(),
     )?;
 
-    let mut overridden = config.clone();
-    overridden.identity = Some(resolved.identity);
-    overridden.author_type = Some(resolved.author_type);
+    let mut declared = config.clone();
+    declared.identity = Some(resolved.identity);
+    declared.author_type = Some(resolved.author_type);
     if let Some(key_path) = resolved.key_path {
-        overridden.key_path = Some(key_path);
+        declared.key_path = Some(key_path);
     }
 
-    Ok(Some(overridden))
+    Ok(Some(declared))
 }
 
-/// Get the effective config, applying identity overrides if present.
+/// Pick the per-tool declared identity when present, otherwise the
+/// server-level default. Used everywhere the handler needs "the config
+/// this specific call runs under".
 fn effective_config<'cfg>(
     config: &'cfg ResolvedConfig,
-    overridden: Option<&'cfg ResolvedConfig>,
+    declared: Option<&'cfg ResolvedConfig>,
 ) -> &'cfg ResolvedConfig {
-    overridden.unwrap_or(config)
+    declared.unwrap_or(config)
 }
 
 /// Resolve insertion position from tool parameters.
@@ -964,8 +968,8 @@ fn handle_ack(
 ) -> Result<Value> {
     let ids = string_array(params, "ids");
     let remove = optional_bool(params, "remove");
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     if let Some(file) = optional_str(params, "file") {
         // Direct file path provided.
@@ -1014,8 +1018,8 @@ fn handle_batch(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
     let ops_value = params
         .get("operations")
         .and_then(Value::as_array)
@@ -1050,8 +1054,8 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let position = resolve_insert_position(params, reply_to.as_deref());
 
@@ -1106,8 +1110,8 @@ fn handle_delete(
     let file = required_str(params, "file")?;
     let ids = string_array(params, "ids");
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
     operations::delete_comments(system, &path, cfg, &id_refs)?;
@@ -1125,8 +1129,8 @@ fn handle_edit(
     let file = required_str(params, "file")?;
     let comment_id = required_str(params, "id")?;
     let new_content = required_str(params, "content")?;
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
     operations::edit_comment(system, &path, cfg, comment_id, new_content)?;
@@ -1283,8 +1287,8 @@ fn handle_migrate(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let backup = optional_bool(params, "backup");
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let identities = migrate_identities_from_params(system, base_dir, cfg, params)?;
     let path = base_dir.join(file);
@@ -1382,8 +1386,8 @@ fn handle_plan(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let op = required_str(params, "op")?;
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     // `comment` needs an owned `InsertPosition` + attach refs that outlive
     // the `ProjectCommentParams` it feeds into — we stage them here so the
@@ -1529,8 +1533,8 @@ fn handle_purge(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
     let result = purge::purge(system, &path, cfg)?;
@@ -1598,8 +1602,8 @@ fn handle_react(
     let comment_id = required_str(params, "id")?;
     let emoji = required_str(params, "emoji")?;
     let remove = optional_bool(params, "remove");
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
     operations::react(system, &path, cfg, comment_id, emoji, remove)?;
@@ -1635,8 +1639,8 @@ fn handle_sandbox_add(
     let file_strs = string_array(params, "files");
     let files: Vec<PathBuf> = file_strs.iter().map(|f| base_dir.join(f)).collect();
 
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
     let identity = cfg
         .identity
         .as_deref()
@@ -1656,8 +1660,8 @@ fn handle_sandbox_remove(
     let file_strs = string_array(params, "files");
     let files: Vec<PathBuf> = file_strs.iter().map(|f| base_dir.join(f)).collect();
 
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
     let identity = cfg
         .identity
         .as_deref()
@@ -1676,8 +1680,8 @@ fn handle_sandbox_list(
 ) -> Result<Value> {
     let root = base_dir.join(optional_str(params, "path").unwrap_or("."));
 
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
     let identity = cfg
         .identity
         .as_deref()
@@ -1791,8 +1795,8 @@ fn handle_sign(
     let file = required_str(params, "file")?;
     let selection = build_sign_selection(params, "sign")?;
 
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
     let result = operations::sign::sign_comments(system, &path, cfg, &selection)?;
@@ -1870,8 +1874,8 @@ fn handle_write(
         }
     };
 
-    let overridden = apply_identity_overrides(system, base_dir, config, params)?;
-    let cfg = effective_config(config, overridden.as_ref());
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
 
     let opts = document::WriteOptions::new()
         .binary(binary)
@@ -2097,12 +2101,26 @@ fn process_message(
 ///
 /// The server runs until stdin is closed (EOF).
 ///
+/// `startup_flags` and `startup_assets_dir` carry the identity
+/// declaration and assets-dir value supplied on the `remargin mcp`
+/// command line. They are re-applied to every request so clients that
+/// don't pass per-tool identity fields inherit the server's declared
+/// default (instead of silently falling back to the walk-up's nearest
+/// `.remargin.yaml`). Per-tool identity declarations supplied in a
+/// tool-call's params supersede this default via
+/// [`resolve_identity_from_params`].
+///
 /// # Errors
 ///
 /// Returns an error if:
 /// - Config or registry loading fails
 /// - stdin/stdout I/O fails
-pub fn run(system: &dyn System, base_dir: &Path, overrides: &CliOverrides<'_>) -> Result<()> {
+pub fn run(
+    system: &dyn System,
+    base_dir: &Path,
+    startup_flags: &IdentityFlags,
+    startup_assets_dir: Option<&str>,
+) -> Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let reader = stdin.lock();
@@ -2126,11 +2144,9 @@ pub fn run(system: &dyn System, base_dir: &Path, overrides: &CliOverrides<'_>) -
             }
         };
 
-        // Reload config on every request so changes to .remargin.yaml
-        // are picked up without restarting the MCP server.
-        let config_data = load_config(system, base_dir)?;
-        let registry = load_registry(system, base_dir)?;
-        let config = ResolvedConfig::resolve(system, config_data, registry, overrides)?;
+        // Re-resolve on every request so changes to .remargin.yaml are
+        // picked up without restarting the MCP server.
+        let config = ResolvedConfig::resolve(system, base_dir, startup_flags, startup_assets_dir)?;
 
         if let Some(response) = process_message(system, base_dir, &config, &message) {
             writeln!(writer, "{response}").context("writing to stdout")?;

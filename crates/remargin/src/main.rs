@@ -19,7 +19,8 @@ use os_shim::System;
 use os_shim::real::RealSystem;
 use serde_json::{Value, json};
 
-use remargin_core::config::{self, CliOverrides, ResolvedConfig};
+use remargin_core::config::identity::IdentityFlags;
+use remargin_core::config::{self, ResolvedConfig};
 use remargin_core::display;
 use remargin_core::document;
 use remargin_core::linter;
@@ -107,10 +108,12 @@ struct OutputArgs {
     verbose: bool,
 }
 
-/// Per-subcommand assets-dir override (rem-zlx3).
+/// Per-subcommand `--assets-dir` flag (rem-zlx3).
 ///
 /// Flattened ONLY into subcommands that write attachments: comment,
-/// edit, batch. Everything else errors at parse time.
+/// edit, batch. Everything else errors at parse time. Supplied as the
+/// `assets_dir_flag` argument to
+/// [`remargin_core::config::ResolvedConfig::resolve`] when set.
 #[derive(clap::Args, Default)]
 struct AssetsArgs {
     /// Path to assets directory.
@@ -973,14 +976,6 @@ struct WriteParams<'cmd> {
     path: &'cmd str,
 }
 
-/// Owning buffer for overrides that need post-expansion copies. The CLI
-/// holds one on the stack for the lifetime of `run`.
-#[derive(Default)]
-struct OverrideScratch {
-    assets_dir: Option<String>,
-    key: Option<String>,
-}
-
 fn out(msg: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{msg}").context("writing to stdout")
@@ -1279,29 +1274,35 @@ fn classify_error(err: &anyhow::Error) -> u8 {
     }
 }
 
-/// Build a [`CliOverrides`] from per-subcommand arg groups. Earlier code
-/// (pre rem-zlx3) pulled these off a shared `GlobalFlags`; each subcommand
-/// now declares its own [`IdentityArgs`] and (where applicable)
-/// [`AssetsArgs`], so the builder accepts them directly.
-fn build_overrides<'cli>(
+/// Build an [`IdentityFlags`] plus an optional `--assets-dir` value from
+/// per-subcommand arg groups. The adapter boundary is where `~` /
+/// `$VAR` get expanded, so the core never sees unexpanded path sigils.
+///
+/// The returned flags are consumed by
+/// [`config::ResolvedConfig::resolve`], which picks the appropriate
+/// branch of [`config::identity::resolve_identity`] — a single whole
+/// identity comes out, never a mixture of fields from different files.
+fn build_identity_flags(
     system: &dyn System,
-    identity_args: &'cli IdentityArgs,
-    assets_args: Option<&'cli AssetsArgs>,
-    scratch: &'cli mut OverrideScratch,
-) -> Result<CliOverrides<'cli>> {
-    // Expand path-shaped overrides (`--assets-dir`, `--key`) once at the
-    // adapter boundary so downstream callers never see an unexpanded `~`
-    // or `$VAR`. The `scratch` buffer owns the expanded strings for the
-    // lifetime of the returned overrides.
-    scratch.assets_dir = match assets_args.and_then(|a| a.assets_dir.as_deref()) {
+    identity_args: &IdentityArgs,
+    assets_args: Option<&AssetsArgs>,
+) -> Result<(IdentityFlags, Option<String>)> {
+    let assets_dir = match assets_args.and_then(|a| a.assets_dir.as_deref()) {
         Some(raw) => Some(expand_cli_path(system, raw)?.to_string_lossy().into_owned()),
         None => None,
     };
-    scratch.key = match identity_args.key.as_deref() {
+
+    let config_path = match identity_args.config.as_deref() {
+        Some(raw) => Some(expand_cli_path(system, &raw.to_string_lossy())?),
+        None => None,
+    };
+
+    let key = match identity_args.key.as_deref() {
         Some(raw) => {
-            // `--key` accepts a bare name shorthand (e.g. `mykey` → `~/.ssh/mykey`).
-            // Expand only when the raw value contains a path sigil — bare
-            // names are resolved later by `resolve_key_path`.
+            // `--key` accepts a bare name shorthand (e.g. `mykey` →
+            // `~/.ssh/mykey`). Expand only when the raw value contains
+            // a path sigil — bare names are resolved later by
+            // `resolve_key_path`.
             if raw.starts_with('~') || raw.contains('$') {
                 Some(expand_cli_path(system, raw)?.to_string_lossy().into_owned())
             } else {
@@ -1311,12 +1312,18 @@ fn build_overrides<'cli>(
         None => None,
     };
 
-    let mut overrides = CliOverrides::default();
-    overrides.assets_dir = scratch.assets_dir.as_deref();
-    overrides.author_type = identity_args.r#type.as_deref();
-    overrides.identity = identity_args.identity.as_deref();
-    overrides.key = scratch.key.as_deref();
-    Ok(overrides)
+    let author_type = match identity_args.r#type.as_deref() {
+        Some(raw) => Some(config::parse_author_type(raw)?),
+        None => None,
+    };
+
+    let mut flags = IdentityFlags::default();
+    flags.author_type = author_type;
+    flags.config_path = config_path;
+    flags.identity.clone_from(&identity_args.identity);
+    flags.key = key;
+
+    Ok((flags, assets_dir))
 }
 
 /// A handful of subcommands run entirely without a [`ResolvedConfig`]
@@ -1362,7 +1369,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
 /// Subcommands that do not resolve identity (lint, query, search, ls,
 /// get, metadata, registry, comments, version, keygen, identity,
 /// resolve-mode, skill, obsidian) return `None`; callers use the
-/// [`IdentityArgs::default`] to build an empty [`CliOverrides`].
+/// [`IdentityArgs::default`] to build an empty [`IdentityFlags`].
 const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
     match cmd {
         Commands::Ack { identity_args, .. }
@@ -1499,14 +1506,14 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             return cmd_identity(system, cwd, author_type.as_deref(), output_args.json);
         }
         Commands::ResolveMode {
-            cwd: override_cwd,
+            cwd: cwd_arg,
             output_args,
         } => {
-            let override_expanded = override_cwd
+            let cwd_expanded = cwd_arg
                 .as_deref()
                 .map(|c| expand_cli_pathbuf(system, c))
                 .transpose()?;
-            let start_dir = override_expanded.as_deref().unwrap_or(cwd);
+            let start_dir = cwd_expanded.as_deref().unwrap_or(cwd);
             return cmd_resolve_mode(system, start_dir, output_args.json);
         }
         Commands::Keygen {
@@ -1547,34 +1554,23 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     let assets_args = subcommand_assets(&cli.command);
     let unrestricted_args = subcommand_unrestricted(&cli.command).unwrap_or(&default_unrestricted);
 
-    let mut scratch = OverrideScratch::default();
-    let overrides = build_overrides(system, identity_args, assets_args, &mut scratch)?;
+    let (flags, assets_dir) = build_identity_flags(system, identity_args, assets_args)?;
 
-    // The Mcp subcommand receives overrides directly (it forwards to
-    // `mcp::run`), bypassing config load. Branch out early.
+    // The Mcp subcommand forwards its flags directly to `mcp::run` so
+    // per-tool identity fields can still be declared on each request.
+    // Branch out early.
     if let Commands::Mcp { action, .. } = &cli.command {
-        return cmd_mcp(system, cwd, &overrides, action.as_ref(), json_mode);
-    }
-
-    // Load config and registry.
-    // When --type is given without --identity, use it as a config selector:
-    // walk up skips .remargin.yaml files whose type does not match.
-    let type_filter = if identity_args.identity.is_none() {
-        identity_args.r#type.as_deref()
-    } else {
-        None
-    };
-    let cfg = config::load_config_filtered(system, cwd, type_filter)?;
-    if let Some(filter) = type_filter
-        && cfg.is_none()
-    {
-        anyhow::bail!(
-            "no .remargin.yaml with type {filter:?} found (searched from {} to /)",
-            cwd.display()
+        return cmd_mcp(
+            system,
+            cwd,
+            &flags,
+            assets_dir.as_deref(),
+            action.as_ref(),
+            json_mode,
         );
     }
-    let registry = config::load_registry(system, cwd)?;
-    let mut final_config = ResolvedConfig::resolve(system, cfg, registry, &overrides)?;
+
+    let mut final_config = ResolvedConfig::resolve(system, cwd, &flags, assets_dir.as_deref())?;
     final_config.unrestricted = unrestricted_args.unrestricted();
 
     dispatch_with_config(cli, system, cwd, &final_config)
@@ -3158,7 +3154,8 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
 fn cmd_mcp(
     system: &dyn System,
     cwd: &Path,
-    overrides: &config::CliOverrides<'_>,
+    startup_flags: &IdentityFlags,
+    startup_assets_dir: Option<&str>,
     mcp_action: Option<&McpAction>,
     json_mode: bool,
 ) -> Result<()> {
@@ -3166,7 +3163,7 @@ fn cmd_mcp(
 
     // Default to Run when no subcommand given (bare `remargin mcp`).
     match mcp_action {
-        None | Some(McpAction::Run) => mcp::run(system, cwd, overrides),
+        None | Some(McpAction::Run) => mcp::run(system, cwd, startup_flags, startup_assets_dir),
         Some(McpAction::Install { user }) => {
             let bin = env::current_exe().context("resolving remargin binary path")?;
             let bin_str = bin.display().to_string();

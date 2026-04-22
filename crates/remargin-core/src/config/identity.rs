@@ -1,8 +1,7 @@
 //! Three-branch identity resolver (rem-11u).
 //!
-//! Replaces the old "walk + field-by-field CLI overlay" resolver with a
-//! strict, disjoint flow that cannot produce a partially-inherited
-//! identity. CLI args are not overrides — they are either:
+//! A strict, disjoint flow that cannot produce a partially-inherited
+//! identity. CLI args declare identity — they are either:
 //!
 //! 1. A complete identity declaration via `--config <path>` (branch 1).
 //! 2. A complete manual declaration via `--identity` + `--type` (+ `--key`
@@ -12,8 +11,9 @@
 //!    candidate `.remargin.yaml`'s corresponding field; missing field in
 //!    the file never matches a concrete value in the flag.
 //!
-//! This removes the "inherited-part-from-walk, overrode-part-from-flag"
-//! class of silent misattribution that produced rem-ce4.
+//! Replaces the earlier field-by-field CLI overlay onto a walked config,
+//! which let rem-ce4 silently misattribute by mixing halves of two
+//! different identities.
 
 use core::fmt;
 use std::path::{Path, PathBuf};
@@ -91,6 +91,13 @@ impl IdentityFlags {
 /// The `source` field records which branch produced the result, and
 /// (for branches 1 and 3) the path of the file that declared the
 /// identity. Adapters use this for diagnostics and tests.
+///
+/// The `source_config` field carries the parsed [`Config`] for branches 1
+/// and 3 (the two branches that read a `.remargin.yaml`). It is `None`
+/// for branch 2 (manual) because no file was consulted. Callers that
+/// build a full [`crate::config::ResolvedConfig`] use this to pick up
+/// `assets_dir`, `ignore`, and `mode` from the same file the identity
+/// came from — without re-reading and re-parsing.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ResolvedIdentity {
@@ -98,6 +105,7 @@ pub struct ResolvedIdentity {
     pub identity: String,
     pub key_path: Option<PathBuf>,
     pub source: IdentitySource,
+    pub source_config: Option<Config>,
 }
 
 /// Provenance of a [`ResolvedIdentity`].
@@ -211,6 +219,7 @@ fn resolve_from_config_flag(
         identity,
         key_path,
         source: IdentitySource::ConfigFlag(config_path.to_path_buf()),
+        source_config: Some(config),
     })
 }
 
@@ -249,6 +258,7 @@ fn resolve_from_manual(
         identity,
         key_path,
         source: IdentitySource::Manual,
+        source_config: None,
     })
 }
 
@@ -278,6 +288,7 @@ fn resolve_from_walk(
                     identity,
                     key_path,
                     source: IdentitySource::Walk(candidate),
+                    source_config: Some(config),
                 });
             }
         }
@@ -352,7 +363,7 @@ fn validate_declared_identity(
 /// path is still relative. Absolute paths (and paths that started with
 /// `~` / `$` and were already expanded to absolute) pass through
 /// unchanged.
-fn anchor_key_path_to_config_dir(key_path: PathBuf, source_path: &Path) -> PathBuf {
+pub(crate) fn anchor_key_path_to_config_dir(key_path: PathBuf, source_path: &Path) -> PathBuf {
     if key_path.is_absolute() {
         return key_path;
     }

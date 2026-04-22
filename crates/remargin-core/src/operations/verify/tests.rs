@@ -456,7 +456,7 @@ fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
     let before = alice_doc_content();
     let system = mock_with_doc(&before);
     let mut bad_cfg = registered_cfg_with_alice();
-    // Override identity to a non-registered author.
+    // Force-swap identity to a non-registered author.
     bad_cfg.identity = Some(String::from("charlie"));
 
     let pos = InsertPosition::Append;
