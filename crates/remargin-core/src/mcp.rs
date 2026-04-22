@@ -529,7 +529,11 @@ fn desc_sign() -> ToolDesc {
              Refuses to sign comments authored by anyone else (forgery guard). \
              Already-signed comments listed under `ids` are reported as skipped; \
              `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`. \
-             To preview without writing, use `plan` with op=\"sign\".",
+             Pass `repair_checksum: true` to recompute the target comment's \
+             checksum from its current bytes before signing (useful when the \
+             content was edited out-of-band and the signer wants to re-vouch \
+             for the updated content). To preview without writing, use `plan` \
+             with op=\"sign\".",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
@@ -539,7 +543,8 @@ fn desc_sign() -> ToolDesc {
                     "items": { "type": "string" },
                     "description": "Comment ids to sign. Mutually exclusive with all_mine."
                 },
-                "all_mine": { "type": "boolean", "description": "Sign every unsigned comment authored by the current identity.", "default": false }
+                "all_mine": { "type": "boolean", "description": "Sign every unsigned comment authored by the current identity.", "default": false },
+                "repair_checksum": { "type": "boolean", "description": "Recompute each target comment's checksum from its current content before signing. Scoped by the forgery guard: only the caller's own comments can be repaired.", "default": false }
             },
             "required": ["file"]
         })),
@@ -1794,12 +1799,14 @@ fn handle_sign(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let selection = build_sign_selection(params, "sign")?;
+    let repair_checksum = optional_bool(params, "repair_checksum");
 
     let declared = resolve_identity_from_params(system, base_dir, config, params)?;
     let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
-    let result = operations::sign::sign_comments(system, &path, cfg, &selection)?;
+    let options = operations::sign::SignOptions { repair_checksum };
+    let result = operations::sign::sign_comments(system, &path, cfg, &selection, options)?;
 
     let signed: Vec<Value> = result
         .signed
@@ -1811,8 +1818,20 @@ fn handle_sign(
         .iter()
         .map(|e| json!({ "id": e.id, "reason": e.reason }))
         .collect();
+    let repaired: Vec<Value> = result
+        .repaired
+        .iter()
+        .map(|e| {
+            json!({
+                "id": e.id,
+                "old_checksum": e.old_checksum,
+                "new_checksum": e.new_checksum,
+            })
+        })
+        .collect();
 
     Ok(json!({
+        "repaired": repaired,
         "signed": signed,
         "skipped": skipped,
     }))

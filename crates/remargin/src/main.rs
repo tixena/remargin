@@ -561,6 +561,13 @@ enum Commands {
         /// identity. Mutually exclusive with `--ids`.
         #[arg(long)]
         all_mine: bool,
+        /// Recompute each target comment's stored checksum from its
+        /// current content before signing. The forgery guard still
+        /// applies — you can only repair comments you authored.
+        /// Without this flag a stale checksum fails the verify gate
+        /// and the op refuses to sign.
+        #[arg(long)]
+        repair_checksum: bool,
         #[command(flatten)]
         identity_args: IdentityArgs,
         #[command(flatten)]
@@ -951,6 +958,7 @@ struct SignParams<'cmd> {
     file: &'cmd str,
     ids: &'cmd [String],
     json_mode: bool,
+    repair_checksum: bool,
 }
 
 struct AckParams<'cmd> {
@@ -1800,6 +1808,7 @@ fn dispatch_with_config(
             file,
             ids,
             all_mine,
+            repair_checksum,
             output_args,
             ..
         } => {
@@ -1808,6 +1817,7 @@ fn dispatch_with_config(
                 file,
                 ids,
                 json_mode: output_args.json,
+                repair_checksum: *repair_checksum,
             };
             cmd_sign(system, cwd, config, &sp)
         }
@@ -3064,10 +3074,13 @@ fn cmd_sign(
         file,
         ids,
         json_mode,
+        repair_checksum,
     } = *params;
     let selection = build_sign_selection(all_mine, ids)?;
     let path = resolve_doc_path(system, cwd, file)?;
-    let result = operations::sign::sign_comments(system, &path, config, &selection)?;
+    let mut options = operations::sign::SignOptions::default();
+    options.repair_checksum = repair_checksum;
+    let result = operations::sign::sign_comments(system, &path, config, &selection, options)?;
     if json_mode {
         print_output(true, &sign_result_json(&result))
     } else {
@@ -3097,17 +3110,34 @@ fn sign_result_json(result: &operations::sign::SignResult) -> Value {
         .iter()
         .map(|entry| json!({ "id": entry.id, "reason": entry.reason }))
         .collect();
-    json!({ "signed": signed, "skipped": skipped })
+    let repaired: Vec<Value> = result
+        .repaired
+        .iter()
+        .map(|entry| {
+            json!({
+                "id": entry.id,
+                "old_checksum": entry.old_checksum,
+                "new_checksum": entry.new_checksum,
+            })
+        })
+        .collect();
+    json!({ "repaired": repaired, "signed": signed, "skipped": skipped })
 }
 
 fn render_sign_result_text(result: &operations::sign::SignResult) -> Result<()> {
+    for entry in &result.repaired {
+        out(&format!(
+            "repaired checksum: {} ({} -> {})",
+            entry.id, entry.old_checksum, entry.new_checksum
+        ))?;
+    }
     for entry in &result.signed {
         out(&format!("signed: {} (ts={})", entry.id, entry.ts))?;
     }
     for entry in &result.skipped {
         out(&format!("skipped: {} ({})", entry.id, entry.reason))?;
     }
-    if result.signed.is_empty() && result.skipped.is_empty() {
+    if result.signed.is_empty() && result.skipped.is_empty() && result.repaired.is_empty() {
         out("no candidates")?;
     }
     Ok(())

@@ -46,7 +46,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
 use crate::config::ResolvedConfig;
-use crate::crypto::compute_signature;
+use crate::crypto::{compute_checksum, compute_signature};
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Comment, Segment};
 use crate::writer;
@@ -104,10 +104,47 @@ pub struct SkippedEntry {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct SignResult {
+    /// Comments whose stored checksum was recomputed from current
+    /// content before signing. Populated only when
+    /// [`SignOptions::repair_checksum`] is set and the comment's
+    /// stored checksum disagreed with the freshly computed value.
+    pub repaired: Vec<RepairedChecksumEntry>,
     /// Comments the op signed.
     pub signed: Vec<SignedEntry>,
     /// Comments the op skipped with per-id reason.
     pub skipped: Vec<SkippedEntry>,
+}
+
+/// One entry in [`SignResult::repaired`] — a comment whose stored
+/// checksum the op recomputed from the current content because the
+/// caller passed `--repair-checksum`.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct RepairedChecksumEntry {
+    /// Comment id.
+    pub id: String,
+    /// The freshly computed value that replaced the stale checksum.
+    pub new_checksum: String,
+    /// The stale value that was stored on disk before the repair.
+    pub old_checksum: String,
+}
+
+/// Flags that modify [`sign_comments`] behavior.
+///
+/// Kept in a struct (instead of loose parameters) because this is the
+/// second caller-facing knob beyond [`SignSelection`]; future flags plug
+/// in without churning every call site.
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub struct SignOptions {
+    /// When `true`, the op recomputes `checksum` from the current
+    /// comment content before attaching the signature. The forgery
+    /// guard still applies — the caller can only repair a comment they
+    /// authored. Intended for the legitimate case where an author
+    /// edited a comment's bytes out-of-band and wants to re-vouch for
+    /// them; by default the op refuses (the verify gate treats a stale
+    /// checksum as tampering).
+    pub repair_checksum: bool,
 }
 
 /// Back-sign missing-signature comments authored by the current
@@ -140,6 +177,7 @@ pub fn sign_comments(
     path: &Path,
     config: &ResolvedConfig,
     selection: &SignSelection,
+    options: SignOptions,
 ) -> Result<SignResult> {
     writer::ensure_not_forbidden_target(path)?;
 
@@ -169,18 +207,46 @@ pub fn sign_comments(
     // Validate `--ids` up front before touching any comment. Collects
     // the id → kind decision so the write loop is a pure projection
     // of the candidate set.
-    let (targets, skipped_for_ids) = classify_candidates(&doc, identity, selection)?;
+    //
+    // `--repair-checksum` changes the "already signed" rule under
+    // `--ids`: the caller is explicitly asking the op to re-vouch for
+    // the listed comments, so any stale signature that was already
+    // attached is slated for overwrite instead of being reported as
+    // skipped. The forgery guard still fires first.
+    let (targets, skipped_for_ids) =
+        classify_candidates(&doc, identity, selection, options.repair_checksum)?;
 
     // Sign each target in the parsed document. Because signature_payload
     // excludes ack / reactions / checksum, and `compute_signature` is a
     // pure function of the comment's other fields, the order and
     // grouping of signings is irrelevant.
+    //
+    // When `options.repair_checksum` is set we recompute the checksum
+    // from the current `content` first. The signature payload includes
+    // the same (whitespace-normalized) content, so a comment whose
+    // bytes were edited out-of-band ends up with a coherent pair:
+    // signature attesting to the current content plus a checksum that
+    // matches it. The forgery guard above already limited targets to
+    // the caller's own comments, so the repair is scoped to comments
+    // the caller has authority over.
     let target_ids: HashSet<String> = targets.iter().map(|(id, _)| id.clone()).collect();
     let mut signed = Vec::new();
+    let mut repaired = Vec::new();
     for seg in &mut doc.segments {
         if let Segment::Comment(cm) = seg
             && target_ids.contains(&cm.id)
         {
+            if options.repair_checksum {
+                let fresh = compute_checksum(&cm.content);
+                if fresh != cm.checksum {
+                    repaired.push(RepairedChecksumEntry {
+                        id: cm.id.clone(),
+                        old_checksum: cm.checksum.clone(),
+                        new_checksum: fresh.clone(),
+                    });
+                    cm.checksum = fresh;
+                }
+            }
             let sig = compute_signature(cm, &key_path, system)
                 .with_context(|| format!("signing comment {:?}", cm.id))?;
             cm.signature = Some(sig);
@@ -201,6 +267,7 @@ pub fn sign_comments(
     })?;
 
     Ok(SignResult {
+        repaired,
         signed,
         skipped: skipped_for_ids,
     })
@@ -211,12 +278,22 @@ pub fn sign_comments(
 /// error when an `--ids` entry does not exist or is authored by someone
 /// else — forgery guard refusals fire here.
 ///
+/// `repair_checksum` changes the already-signed rule for
+/// [`SignSelection::Ids`]: when `true`, an already-signed target is
+/// still slated for processing so the op overwrites both the stale
+/// checksum and the now-stale signature. Callers that leave it `false`
+/// see the historical behavior — already-signed ids become skip
+/// entries. [`SignSelection::AllMine`] is untouched: it is a filter,
+/// and a filter that sweeps up every one of the caller's comments
+/// would re-sign every existing valid signature on every run.
+///
 /// Shared between [`sign_comments`] and the `plan sign` projection
 /// (rem-7y3) so both surfaces reject and skip under identical rules.
 pub(crate) fn classify_candidates(
     doc: &parser::ParsedDocument,
     identity: &str,
     selection: &SignSelection,
+    repair_checksum: bool,
 ) -> Result<Classification> {
     let by_id: BTreeMap<&str, &Comment> = doc
         .comments()
@@ -249,7 +326,7 @@ pub(crate) fn classify_candidates(
                         identity,
                     );
                 }
-                if cm.signature.is_some() {
+                if cm.signature.is_some() && !repair_checksum {
                     skipped.push(SkippedEntry {
                         id: id.clone(),
                         reason: String::from("already_signed"),

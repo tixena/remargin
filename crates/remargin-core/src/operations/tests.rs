@@ -2722,8 +2722,14 @@ fn sign_refuses_forbidden_targets() {
         let before = read_file(&system, &path);
         let config = sign_config();
 
-        let err = sign::sign_comments(&system, &path, &config, &sign::SignSelection::AllMine)
-            .unwrap_err();
+        let err = sign::sign_comments(
+            &system,
+            &path,
+            &config,
+            &sign::SignSelection::AllMine,
+            sign::SignOptions::default(),
+        )
+        .unwrap_err();
 
         assert_forbidden_ops_error(&err, basename);
         assert_eq!(before, read_file(&system, &path));

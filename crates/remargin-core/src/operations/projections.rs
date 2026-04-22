@@ -775,7 +775,11 @@ pub fn project_sign(
     // Validate `--ids` up front (forgery guard + unknown-id rejection)
     // before touching any comment. The returned skip list is discarded
     // here — plan surfaces already-signed ids via `comments.preserved`.
-    let (targets, _skipped) = sign::classify_candidates(&after, identity, selection)?;
+    // The plan projection treats already-signed ids under `--ids` as
+    // skipped regardless of the actual op's `--repair-checksum` flag:
+    // this projection does not yet surface a "would re-sign" signal
+    // (tracked under rem-7y3).
+    let (targets, _skipped) = sign::classify_candidates(&after, identity, selection, false)?;
     let target_ids: HashSet<String> = targets.iter().map(|(id, _)| id.clone()).collect();
 
     for seg in &mut after.segments {
