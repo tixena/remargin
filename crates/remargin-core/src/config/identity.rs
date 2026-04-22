@@ -327,11 +327,39 @@ fn validate_declared_identity(
             "{}: strict mode requires `key:` field",
             source_path.display(),
         ),
-        (_, Some(key)) => Some(resolve_key_path(system, key)?),
+        (_, Some(key)) => Some(anchor_key_path_to_config_dir(
+            resolve_key_path(system, key)?,
+            source_path,
+        )),
         (_, None) => None,
     };
 
     Ok((identity, author_type, key_path))
+}
+
+/// Anchor a `key:` value to the config file's directory when it would
+/// otherwise resolve against CWD.
+///
+/// `resolve_key_path` only handles `~` / `$VAR` expansion; relative
+/// paths like `.remargin/agent_key` pass through unchanged and are
+/// later resolved by the OS against the process's CWD. That works by
+/// accident when the operator's own config is found by walking up from
+/// CWD (config dir == CWD), but fails for any config loaded by absolute
+/// path (e.g. `--config /elsewhere/.remargin.yaml`) where the relative
+/// `key:` path is meant to be relative to the config file, not the CWD.
+///
+/// This helper prepends `source_path.parent()` when the resolved key
+/// path is still relative. Absolute paths (and paths that started with
+/// `~` / `$` and were already expanded to absolute) pass through
+/// unchanged.
+fn anchor_key_path_to_config_dir(key_path: PathBuf, source_path: &Path) -> PathBuf {
+    if key_path.is_absolute() {
+        return key_path;
+    }
+    match source_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(key_path),
+        _ => key_path,
+    }
 }
 
 /// Strict-equality filter match for branch 3.

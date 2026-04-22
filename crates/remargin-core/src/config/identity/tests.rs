@@ -535,3 +535,199 @@ fn config_flag_plus_manual_flags_bails() {
         "got: {err:#}"
     );
 }
+
+// ---------- Relative `key:` anchoring (config-dir, not CWD) ----------
+//
+// Pre-existing bug surfaced by the per-role-config migrate flags: a
+// relative `key:` value in a `.remargin.yaml` was passed straight to
+// the OS, which resolves it against the process's CWD. That happens to
+// work when the config is found by walking up from CWD (config dir ==
+// CWD) but breaks when the config is loaded by absolute path from a
+// different CWD. The fix anchors relative key paths to the config
+// file's parent directory.
+
+#[test]
+fn branch1_relative_key_anchors_to_config_dir_not_cwd() {
+    // Config at /vault/.remargin.yaml says `key: keys/agent_key`.
+    // The actual key file lives at /vault/keys/agent_key. The CWD is
+    // /elsewhere — completely unrelated. Resolution must end up with
+    // /vault/keys/agent_key, not /elsewhere/keys/agent_key.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin.yaml"),
+            b"identity: alice\ntype: human\nkey: keys/agent_key\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/vault/keys/agent_key"), b"SSH_KEY")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/vault/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+    let resolved =
+        resolve_identity(&system, Path::new("/elsewhere"), &Mode::Open, &flags, None).unwrap();
+
+    assert_eq!(
+        resolved.key_path.as_deref(),
+        Some(Path::new("/vault/keys/agent_key")),
+        "relative `key:` must anchor to the config's directory, not CWD",
+    );
+}
+
+#[test]
+fn branch1_dotted_relative_key_anchors_to_config_dir() {
+    // The exact shape that tripped the user in the wild: `.remargin/agent_key`
+    // next to a `.remargin.yaml` in some other folder, run from a
+    // separate working directory.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(
+            Path::new("/notes/.remargin.yaml"),
+            b"identity: bot\ntype: agent\nkey: .remargin/agent_key\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/notes/.remargin/agent_key"), b"SSH_KEY")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/notes/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+    let resolved = resolve_identity(
+        &system,
+        Path::new("/repos/some-other-project"),
+        &Mode::Open,
+        &flags,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        resolved.key_path.as_deref(),
+        Some(Path::new("/notes/.remargin/agent_key")),
+    );
+}
+
+#[test]
+fn branch1_absolute_key_passes_through_unchanged() {
+    // Absolute `key:` paths must NOT be re-anchored under the config's
+    // parent — they are already where the user pointed.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(
+            Path::new("/cfg/.remargin.yaml"),
+            b"identity: alice\ntype: human\nkey: /opt/keys/shared_key\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/opt/keys/shared_key"), b"SSH_KEY")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/cfg/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+    let resolved =
+        resolve_identity(&system, Path::new("/elsewhere"), &Mode::Open, &flags, None).unwrap();
+
+    assert_eq!(
+        resolved.key_path.as_deref(),
+        Some(Path::new("/opt/keys/shared_key")),
+    );
+}
+
+#[test]
+fn branch1_tilde_key_expands_to_home_not_config_dir() {
+    // `~`-prefixed keys must continue to expand to $HOME (existing
+    // behaviour). The anchor step only fires for paths that are still
+    // relative *after* `resolve_key_path` has done its work.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(
+            Path::new("/cfg/.remargin.yaml"),
+            b"identity: alice\ntype: human\nkey: ~/.ssh/custom_key\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/home/user/.ssh/custom_key"), b"SSH_KEY")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/cfg/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+    let resolved =
+        resolve_identity(&system, Path::new("/elsewhere"), &Mode::Open, &flags, None).unwrap();
+
+    assert_eq!(
+        resolved.key_path.as_deref(),
+        Some(Path::new("/home/user/.ssh/custom_key")),
+    );
+}
+
+#[test]
+fn branch1_plain_name_key_still_resolves_to_ssh_dir() {
+    // The "plain name" branch (no `/`, `~`, or `$`) maps to
+    // `~/.ssh/<name>`. After `resolve_key_path` produces an absolute
+    // path under $HOME, the anchor step must leave it alone.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(
+            Path::new("/cfg/.remargin.yaml"),
+            b"identity: alice\ntype: human\nkey: id_ed25519\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/home/user/.ssh/id_ed25519"), b"SSH_KEY")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/cfg/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+    let resolved =
+        resolve_identity(&system, Path::new("/elsewhere"), &Mode::Open, &flags, None).unwrap();
+
+    assert_eq!(
+        resolved.key_path.as_deref(),
+        Some(Path::new("/home/user/.ssh/id_ed25519")),
+    );
+}
+
+#[test]
+fn branch3_walk_relative_key_anchors_to_walked_config_dir() {
+    // The walk picks up `/notes/.remargin.yaml` because CWD is under it.
+    // Even when CWD is a deeper subdirectory than the config's dir, the
+    // relative key path must still anchor to the config's parent — not
+    // CWD — so a deeper subdirectory of the config tree resolves the
+    // key correctly.
+    let system = MockSystem::new()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(
+            Path::new("/notes/.remargin.yaml"),
+            b"identity: bot\ntype: agent\nkey: .remargin/agent_key\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/notes/.remargin/agent_key"), b"SSH_KEY")
+        .unwrap();
+
+    let resolved = resolve_identity(
+        &system,
+        Path::new("/notes/sub/deeper"),
+        &Mode::Open,
+        &IdentityFlags::default(),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        resolved.key_path.as_deref(),
+        Some(Path::new("/notes/.remargin/agent_key")),
+        "walked config's relative key must anchor to the config's dir",
+    );
+}
