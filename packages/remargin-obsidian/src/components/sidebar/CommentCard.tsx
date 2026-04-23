@@ -15,7 +15,7 @@ import {
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import type { Comment } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
-import { ackStateFor } from "@/lib/ack-state";
+import { ackAffordanceFor } from "@/lib/ack-state";
 import { authorLabel } from "@/lib/authorLabel";
 
 interface CommentCardProps {
@@ -73,11 +73,11 @@ export function CommentCard({
   const isClickable = comment.line > 0 && !!onGoToLine;
   const ackAuthors: string[] = (comment.ack ?? []).map((a) => a.author);
   const { resolveDisplayName } = useParticipants();
-  // Drives two conditional branches: show the non-interactive AckToggle
-  // label (me-acked) vs the interactive AckButton (unacked/others-acked),
-  // and gate the ellipsis-menu `Unack` item on whether the viewer has an
-  // ack to remove in the first place.
-  const viewerAcked = ackStateFor(ackAuthors, me) === "me-acked";
+  // Full ack-affordance decision in one place (see `ackAffordanceFor`):
+  // pill kind (label / button) plus kebab item (ack / unack / none).
+  // Rules are documented on the helper; the card is a pure render of
+  // its output.
+  const affordance = ackAffordanceFor(comment.author, ackAuthors, me);
   // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
   // back to the parent comment's author for replies that did not set `to`.
   // Root comments with neither stay bare (no chip).
@@ -127,7 +127,7 @@ export function CommentCard({
       <div className="flex items-center justify-between gap-2 w-full">
         <div className="flex items-center gap-1.5 flex-wrap">
           {comment.id &&
-            (viewerAcked ? (
+            (affordance.kind === "label" ? (
               <AckToggle ack={ackAuthors} me={me} toTargets={toTargets} />
             ) : (
               <AckButton
@@ -184,7 +184,7 @@ export function CommentCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {viewerAcked && (
+              {affordance.kebab === "unack" && (
                 <>
                   <DropdownMenuItem
                     onClick={(e) => {
@@ -194,6 +194,20 @@ export function CommentCard({
                   >
                     <ObsidianIcon icon="check" size={12} className="mr-1.5" />
                     Unack
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {affordance.kebab === "ack" && (
+                <>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (comment.id) onAck(comment.id, false);
+                    }}
+                  >
+                    <ObsidianIcon icon="check" size={12} className="mr-1.5" />
+                    Ack
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                 </>
