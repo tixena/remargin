@@ -14,6 +14,15 @@ interface SidebarShellProps {
   sandboxCount?: number;
   inboxCount?: number;
   threadPending?: number;
+  /**
+   * Monotonic refresh signal — bumped by the sidebar on any
+   * mutation. Forwarded to children that cache per-file state
+   * (currently the `Initialize` detection in `FilePathHeader`,
+   * rem-rvk6).
+   */
+  refreshKey?: number;
+  /** Called by the `Initialize` flow after `remargin write` succeeds. */
+  onInitialized?: () => void;
   /** Handler for the header `+` button. */
   onPlusClick?: () => void;
   /**
@@ -43,6 +52,8 @@ export function SidebarShell({
   sandboxCount = 0,
   inboxCount = 0,
   threadPending = 0,
+  refreshKey,
+  onInitialized,
   onPlusClick,
   onRefreshClick,
   promptContent,
@@ -165,7 +176,13 @@ export function SidebarShell({
           </Collapsible>
 
           <Collapsible open={threadOpen} onOpenChange={setThreadOpen}>
-            <FilePathHeader plugin={plugin} filePath={activeFile} pendingCount={threadPending} />
+            <FilePathHeader
+              plugin={plugin}
+              filePath={activeFile}
+              pendingCount={threadPending}
+              refreshKey={refreshKey}
+              onInitialized={onInitialized}
+            />
             <CollapsibleContent>
               {threadInlineEditor}
               {threadContent ?? (

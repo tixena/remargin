@@ -190,6 +190,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     <SidebarShell
       plugin={plugin}
       activeFile={activeFile}
+      refreshKey={refreshKey}
+      onInitialized={bumpRefresh}
       onPlusClick={handlePlusClick}
       onRefreshClick={bumpRefresh}
       promptContent={<PromptSection file={activeFile} />}
