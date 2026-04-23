@@ -206,7 +206,7 @@ export function ThreadedComments({
   const visibleComments = useMemo(() => {
     const active = kindFilter ?? [];
     if (active.length === 0) return comments;
-    return comments.filter((c) => matchesKindFilter(c.remargin_kind, active));
+    return comments.filter((c) => matchesKindFilter(c.remargin_kind ?? [], active));
   }, [comments, kindFilter]);
 
   const threads = useMemo(() => buildThreadTree(visibleComments), [visibleComments]);

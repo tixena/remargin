@@ -37,7 +37,7 @@ fn make_comment(content: &str) -> Comment {
         id: String::from("abc"),
         line: 0,
         reactions: BTreeMap::new(),
-        remargin_kind: Vec::new(),
+        remargin_kind: None,
         reply_to: None,
         signature: None,
         thread: None,
@@ -138,9 +138,9 @@ fn reaction_checksum_changes_on_add() {
 #[test]
 fn reaction_does_not_affect_content_checksum() {
     let comment = make_comment("Test content");
-    let checksum_before = compute_checksum(&comment.content, &comment.remargin_kind);
+    let checksum_before = compute_checksum(&comment.content, comment.kinds());
 
-    let checksum_after = compute_checksum(&comment.content, &comment.remargin_kind);
+    let checksum_after = compute_checksum(&comment.content, comment.kinds());
     assert_eq!(checksum_before, checksum_after);
 }
 
@@ -160,10 +160,10 @@ fn reaction_checksum_deterministic_order() {
 #[test]
 fn ack_does_not_affect_content_checksum() {
     let comment = make_comment("Test content");
-    let checksum = compute_checksum(&comment.content, &comment.remargin_kind);
+    let checksum = compute_checksum(&comment.content, comment.kinds());
     assert_eq!(
         checksum,
-        compute_checksum(&comment.content, &comment.remargin_kind)
+        compute_checksum(&comment.content, comment.kinds())
     );
 }
 
@@ -285,11 +285,11 @@ fn signature_tamper_kind() {
     let system = system_with_key();
 
     let mut comment = make_comment("Body");
-    comment.remargin_kind = vec![String::from("question")];
+    comment.remargin_kind = Some(vec![String::from("question")]);
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
-    comment.remargin_kind = vec![String::from("action-item")];
+    comment.remargin_kind = Some(vec![String::from("action-item")]);
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(!result, "verification should fail after kind tampering");
 }
@@ -302,8 +302,8 @@ fn signature_back_compat_with_empty_kinds() {
     let system = system_with_key();
 
     let mut comment = make_comment("Body");
-    // Sign exactly as the pre-field code path would.
-    assert!(comment.remargin_kind.is_empty());
+    // Sign exactly as the pre-field code path would: field absent.
+    assert!(comment.remargin_kind.is_none());
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
@@ -312,4 +312,55 @@ fn signature_back_compat_with_empty_kinds() {
     // verifiable after rem-n4x7 lands.
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(result, "signature with empty kinds should verify");
+}
+
+/// Checksum back-compat: two calls with the same content and no
+/// kinds must be byte-identical — and adding a kind must change the
+/// hash. Without this equivalence every pre-rem-n4x7 comment on disk
+/// would fail `verify_checksum` after the field landed.
+#[test]
+fn compute_checksum_with_empty_kinds_ignores_the_suffix() {
+    let content = "hello world";
+    let with_empty = compute_checksum(content, &[]);
+
+    // The no-kinds branch is stable across calls — same input, same hash.
+    assert_eq!(
+        with_empty,
+        compute_checksum(content, &[]),
+        "compute_checksum with &[] must be deterministic"
+    );
+
+    // Adding a kind must shift the hash; the empty-kinds branch is NOT
+    // silently folding a suffix in.
+    let with_kind = compute_checksum(content, &[String::from("question")]);
+    assert_ne!(
+        with_empty, with_kind,
+        "adding a kind must change the hash; otherwise the no-kinds \
+         back-compat branch would not be isolating the suffix"
+    );
+}
+
+/// A comment whose `remargin_kind` is `None` must produce the same
+/// checksum as one with `Some(Vec::new())` and the same as passing
+/// `&[]` directly. This is the surface `verify_checksum` relies on
+/// when it reads back a comment via `cm.kinds()`.
+#[test]
+fn verify_checksum_equivalent_for_none_and_empty_vec() {
+    let mut comment = make_comment("Hello, world.");
+    // Baseline: make_comment wired the checksum for the None case.
+    assert!(verify_checksum(&comment), "baseline None case must verify");
+
+    // Explicit Some(empty) must also verify — same hash input.
+    comment.remargin_kind = Some(Vec::new());
+    assert!(
+        verify_checksum(&comment),
+        "Some(empty vec) must hash the same as None for back-compat"
+    );
+
+    // And a kinds-carrying version doesn't accidentally match.
+    comment.remargin_kind = Some(vec![String::from("question")]);
+    assert!(
+        !verify_checksum(&comment),
+        "adding kinds must shift the hash (stored checksum was for empty)"
+    );
 }

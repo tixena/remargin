@@ -80,17 +80,20 @@ pub struct Comment {
     /// Zero means "not yet placed" (e.g. newly created, before write).
     pub line: usize,
     pub reactions: BTreeMap<String, Vec<String>>,
-    /// Comment classification tags. Empty by default; each entry is a
+    /// Comment classification tags. Absent by default; each entry is a
     /// short lowercase-friendly label (e.g. `question`, `action item`)
     /// matching [`crate::kind::VALID_KIND_REGEX`] and bounded by
     /// [`crate::kind::MAX_KINDS_PER_COMMENT`].
     ///
     /// The field is additive: comments created before the `remargin_kind`
     /// field existed continue to round-trip, verify, and serialize
-    /// identically because an empty vector contributes no bytes to the
+    /// identically because `None` contributes no bytes to the
     /// checksum or the signature payload (see [`crate::crypto`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub remargin_kind: Vec<String>,
+    /// Prefer [`Comment::kinds`] for reads — it returns `&[]` when the
+    /// field is absent so call sites do not have to branch on the
+    /// Option.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remargin_kind: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +102,19 @@ pub struct Comment {
     pub thread: Option<String>,
     pub to: Vec<String>,
     pub ts: DateTime<FixedOffset>,
+}
+
+impl Comment {
+    /// Borrow the comment's classification tags as a slice. Returns
+    /// `&[]` when the field is absent, so callers that do not care
+    /// about the `Some(empty)` vs `None` distinction can iterate,
+    /// check emptiness, or pass through to helpers like
+    /// [`crate::crypto::compute_checksum`] without unwrapping the
+    /// `Option` at each site.
+    #[must_use]
+    pub fn kinds(&self) -> &[String] {
+        self.remargin_kind.as_deref().unwrap_or(&[])
+    }
 }
 
 /// A legacy inline comment block (`user comments` / `agent comments`).
@@ -327,12 +343,14 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
     if !cm.attachments.is_empty() {
         let _ = writeln!(out, "attachments: [{}]", cm.attachments.join(", "));
     }
-    if !cm.remargin_kind.is_empty() {
+    if let Some(kinds) = cm.remargin_kind.as_deref()
+        && !kinds.is_empty()
+    {
         // Emit as flow-style sequence for readability and to mirror
         // `to:` / `attachments:`. Kinds never contain commas or colons
         // (enforced by `crate::kind::validate_kinds`), so the flow form
         // is safe without quoting.
-        let _ = writeln!(out, "remargin_kind: [{}]", cm.remargin_kind.join(", "));
+        let _ = writeln!(out, "remargin_kind: [{}]", kinds.join(", "));
     }
     if !cm.reactions.is_empty() {
         out.push_str("reactions:\n");
@@ -548,6 +566,21 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
 
     validate_kinds(&header.remargin_kind)
         .with_context(|| format!("invalid remargin_kind in block starting near line {line}"))?;
+    // `RawYamlHeader.remargin_kind` is still `Vec<String>` via
+    // `#[serde(default)]` so validate sees an empty slice when the
+    // field is absent.
+
+    // Preserve the bare-file round-trip: a pre-`remargin_kind` comment
+    // has no `remargin_kind:` line, so the parser must not fabricate an
+    // empty-but-present list on its way out. `None` → no line; an
+    // explicit `[]` on disk parses into `None` too, which is fine — the
+    // next serialize stays absent, and the kinds-less checksum
+    // equivalence in [`crate::crypto::compute_checksum`] is maintained.
+    let remargin_kind = if header.remargin_kind.is_empty() {
+        None
+    } else {
+        Some(header.remargin_kind)
+    };
 
     Ok(Comment {
         ack: ack_list,
@@ -559,7 +592,7 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         id: header.id,
         line,
         reactions: header.reactions,
-        remargin_kind: header.remargin_kind,
+        remargin_kind,
         reply_to: header.reply_to,
         signature: header.signature,
         thread: header.thread,

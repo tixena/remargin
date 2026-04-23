@@ -55,7 +55,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
         id: String::from(id),
         line: 0,
         reactions: BTreeMap::new(),
-        remargin_kind: Vec::new(),
+        remargin_kind: None,
         reply_to: None,
         signature: None,
         thread: None,

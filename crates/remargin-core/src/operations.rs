@@ -119,9 +119,16 @@ pub fn create_comment(
 
     // rem-49w0: accept `remargin_kind` from params. Validate before
     // doing any work so a malformed tag never touches the document.
+    // An empty slice becomes `None` on the comment so the YAML writer
+    // emits no `remargin_kind:` line — preserving pre-kind comments
+    // byte-for-byte.
     validate_kinds(params.remargin_kind).context("invalid remargin_kind")?;
-    let remargin_kind: Vec<String> = params.remargin_kind.to_vec();
-    let checksum = compute_checksum(params.content, &remargin_kind);
+    let remargin_kind: Option<Vec<String>> = if params.remargin_kind.is_empty() {
+        None
+    } else {
+        Some(params.remargin_kind.to_vec())
+    };
+    let checksum = compute_checksum(params.content, params.remargin_kind);
 
     let thread = params
         .reply_to
@@ -457,12 +464,18 @@ pub fn edit_comment(
 
     cm.content = String::from(new_content);
     if let Some(kinds) = new_kinds {
-        cm.remargin_kind = kinds.to_vec();
+        cm.remargin_kind = if kinds.is_empty() {
+            None
+        } else {
+            Some(kinds.to_vec())
+        };
     }
     // rem-n4x7: rehash against the (possibly replaced, possibly
     // preserved) kinds so the fresh checksum stays consistent with
-    // the persisted YAML.
-    cm.checksum = compute_checksum(new_content, &cm.remargin_kind);
+    // the persisted YAML. `kinds()` returns `&[]` when the field is
+    // absent, matching the pre-kind back-compat hinge in
+    // [`compute_checksum`].
+    cm.checksum = compute_checksum(new_content, cm.kinds());
 
     cm.ack.clear();
 

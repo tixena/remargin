@@ -8,6 +8,21 @@ describe("collectKinds", () => {
     assert.deepEqual(collectKinds([{ remargin_kind: [] }]), []);
   });
 
+  // remargin_kind is optional on the wire (the Rust struct emits it as
+  // Option<Vec<String>> with skip_serializing_if). Pre-field comments
+  // and any payload that simply lacks the key must not trip collectKinds.
+  it("tolerates items where remargin_kind is absent (undefined)", () => {
+    assert.deepEqual(collectKinds([{}, {}]), []);
+    assert.deepEqual(collectKinds([{ remargin_kind: undefined }]), []);
+    const items: Array<{ remargin_kind?: string[] }> = [
+      {},
+      { remargin_kind: ["question"] },
+      { remargin_kind: undefined },
+      { remargin_kind: ["action-item"] },
+    ];
+    assert.deepEqual(collectKinds(items), ["action-item", "question"]);
+  });
+
   it("de-duplicates across items", () => {
     const items = [
       { remargin_kind: ["question"] },
@@ -36,6 +51,14 @@ describe("matchesKindFilter", () => {
 
   it("excludes comments with no kinds when the filter is non-empty", () => {
     assert.strictEqual(matchesKindFilter([], ["question"]), false);
+  });
+
+  // A comment with no `remargin_kind` field at all (undefined on the
+  // wire — pre-field comments serialize with the key absent) must
+  // follow the same rules as an explicit empty array.
+  it("treats undefined kinds the same as an empty array", () => {
+    assert.strictEqual(matchesKindFilter(undefined, []), true);
+    assert.strictEqual(matchesKindFilter(undefined, ["question"]), false);
   });
 
   it("matches with OR semantics when the filter has multiple values", () => {

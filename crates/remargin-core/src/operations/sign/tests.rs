@@ -145,7 +145,7 @@ fn pre_signed_doc(system_for_signing: &MockSystem) -> String {
         id: String::from("alc"),
         line: 0,
         reactions: BTreeMap::new(),
-        remargin_kind: Vec::new(),
+        remargin_kind: None,
         reply_to: None,
         signature: None,
         thread: None,

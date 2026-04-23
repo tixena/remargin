@@ -324,9 +324,10 @@ pub fn project_batch(
         let new_id = id::generate(&existing_ids);
         // rem-n4x7: remargin_kind is not yet wired through the batch
         // projection op surface; rem-49w0 adds it to `BatchCommentOp`.
-        // Empty slice preserves the pre-field checksum shape.
-        let remargin_kind: Vec<String> = Vec::new();
-        let checksum = compute_checksum(&op.content, &remargin_kind);
+        // `None` preserves the pre-field checksum shape and leaves the
+        // projected YAML without a `remargin_kind:` line.
+        let remargin_kind: Option<Vec<String>> = None;
+        let checksum = compute_checksum(&op.content, &[]);
 
         let thread = op.reply_to.as_deref().map(|parent_id| {
             after
@@ -452,10 +453,16 @@ pub fn project_comment(
 
     // rem-49w0: thread remargin_kind through the plan projection so
     // the preview matches the real-op output exactly. Validated before
-    // any side-effect work, same as `create_comment`.
+    // any side-effect work, same as `create_comment`. Empty slice
+    // becomes `None` so the projected YAML matches what `create_comment`
+    // would actually write.
     validate_kinds(params.remargin_kind).context("invalid remargin_kind")?;
-    let remargin_kind: Vec<String> = params.remargin_kind.to_vec();
-    let checksum = compute_checksum(params.content, &remargin_kind);
+    let remargin_kind: Option<Vec<String>> = if params.remargin_kind.is_empty() {
+        None
+    } else {
+        Some(params.remargin_kind.to_vec())
+    };
+    let checksum = compute_checksum(params.content, params.remargin_kind);
 
     let thread = params
         .reply_to
@@ -597,7 +604,9 @@ pub fn project_edit(
 
     cm.content = String::from(new_content);
     // Preserve existing remargin_kind on edit, matching `edit_comment`.
-    cm.checksum = compute_checksum(new_content, &cm.remargin_kind);
+    // `kinds()` returns `&[]` when the field is absent so the
+    // pre-kind back-compat checksum branch still fires.
+    cm.checksum = compute_checksum(new_content, cm.kinds());
     cm.ack.clear();
     // Mutating `edit_comment` also wipes the signature when content
     // changes (verify would fail otherwise); mirror that here so the

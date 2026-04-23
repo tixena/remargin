@@ -258,11 +258,13 @@ pub(crate) fn build_migrated_segments(
                 };
 
                 // Legacy migration never produces remargin_kind — those
-                // are a post-migration concept. Empty slice keeps the
+                // are a post-migration concept. `None` keeps the
                 // migrated-comment checksum byte-for-byte identical to
-                // the pre-rem-n4x7 implementation.
-                let remargin_kind: Vec<String> = Vec::new();
-                let checksum = compute_checksum(&lc.content, &remargin_kind);
+                // the pre-rem-n4x7 implementation and leaves the
+                // `remargin_kind:` YAML line absent from the migrated
+                // block.
+                let remargin_kind: Option<Vec<String>> = None;
+                let checksum = compute_checksum(&lc.content, &[]);
                 let mut comment = Comment {
                     ack,
                     attachments: Vec::new(),

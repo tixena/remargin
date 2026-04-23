@@ -203,11 +203,11 @@ pub struct ExpandedComment {
     pub line: usize,
     /// Emoji reactions mapped to lists of author IDs.
     pub reactions: BTreeMap<String, Vec<String>>,
-    /// Comment classification tags (rem-n4x7). Empty vectors are
-    /// omitted from the JSON so pre-field comments round-trip without
-    /// a visible change.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub remargin_kind: Vec<String>,
+    /// Comment classification tags (rem-n4x7). Absent when the
+    /// underlying comment had no `remargin_kind:` line so pre-field
+    /// comments round-trip without a visible change on the JSON wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remargin_kind: Option<Vec<String>>,
     /// ID of the comment this is replying to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
@@ -400,7 +400,7 @@ fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     {
         return false;
     }
-    if !matches_kind_filter(&cm.remargin_kind, &filter.remargin_kind) {
+    if !matches_kind_filter(cm.kinds(), &filter.remargin_kind) {
         return false;
     }
     true

@@ -1174,7 +1174,7 @@ fn handle_comments(
     let comments: Vec<_> = doc
         .comments()
         .into_iter()
-        .filter(|cm| matches_kind_filter(&cm.remargin_kind, &kind_filter))
+        .filter(|cm| matches_kind_filter(cm.kinds(), &kind_filter))
         .collect();
 
     if pretty {

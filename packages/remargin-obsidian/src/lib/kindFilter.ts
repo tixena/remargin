@@ -11,12 +11,13 @@
 /**
  * A structural view over anything the sidebar renders — the real
  * payloads are `Comment` and `ExpandedComment`, both of which declare
- * `remargin_kind: Array<string>`. Narrowed to just the field we read
- * so tests can pass plain object literals without fabricating
+ * `remargin_kind?: Array<string>` (optional on the wire so pre-field
+ * comments round-trip without the key). Narrowed to just the field
+ * we read so tests can pass plain object literals without fabricating
  * identities, timestamps, signatures, etc.
  */
 export interface HasRemarginKind {
-  remargin_kind: string[];
+  remargin_kind?: string[];
 }
 
 /**
@@ -33,7 +34,7 @@ export interface HasRemarginKind {
 export function collectKinds(items: Iterable<HasRemarginKind>): string[] {
   const seen = new Set<string>();
   for (const item of items) {
-    for (const kind of item.remargin_kind) {
+    for (const kind of item.remargin_kind ?? []) {
       if (kind.length > 0) seen.add(kind);
     }
   }
@@ -51,8 +52,12 @@ export function collectKinds(items: Iterable<HasRemarginKind>): string[] {
  * Mirrors `remargin_core::kind::matches_kind_filter` so a future
  * migration to server-side filtering is a no-op from the UI's side.
  */
-export function matchesKindFilter(kinds: string[], filter: string[]): boolean {
+export function matchesKindFilter(
+  kinds: readonly string[] | undefined,
+  filter: readonly string[],
+): boolean {
   if (filter.length === 0) return true;
+  if (!kinds) return false;
   for (const k of kinds) {
     if (filter.includes(k)) return true;
   }

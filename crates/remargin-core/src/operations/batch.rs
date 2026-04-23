@@ -182,11 +182,11 @@ pub fn batch_comment(
         let existing_ids = doc.comment_ids();
         let new_id = id::generate(&existing_ids);
 
-        // rem-n4x7: batch does not yet surface remargin_kind; empty slice
+        // rem-n4x7: batch does not yet surface remargin_kind; `None`
         // keeps the checksum identical to the pre-field implementation.
         // rem-49w0 threads kinds through `BatchCommentOp`.
-        let remargin_kind: Vec<String> = Vec::new();
-        let checksum = compute_checksum(&op.content, &remargin_kind);
+        let remargin_kind: Option<Vec<String>> = None;
+        let checksum = compute_checksum(&op.content, &[]);
 
         // Resolve reply-to (may reference an earlier comment in this batch).
         let reply_to = op.reply_to.as_deref();

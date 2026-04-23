@@ -582,10 +582,63 @@ fn test_author_type_serializes_lowercase() {
 /// Parsing a block without the `remargin_kind` field yields an empty
 /// vector — the field is additive and old blocks must keep round-tripping.
 #[test]
-fn test_remargin_kind_absent_parses_to_empty() {
+fn test_remargin_kind_absent_parses_to_none() {
     let doc = minimal_block("abc");
     let parsed = parse(&doc).unwrap();
-    assert!(parsed.comments()[0].remargin_kind.is_empty());
+    assert!(
+        parsed.comments()[0].remargin_kind.is_none(),
+        "pre-field block must parse with remargin_kind=None so serialization omits the line"
+    );
+    assert!(
+        parsed.comments()[0].kinds().is_empty(),
+        "accessor must still return an empty slice"
+    );
+}
+
+/// An explicit empty list on disk (`remargin_kind: []`) must also parse
+/// to `None` so the writer omits the line on the next serialize —
+/// preserving byte-identical round-trip for any in-flight document
+/// that might land in the empty-list shape during hand-editing.
+#[test]
+fn test_remargin_kind_explicit_empty_list_normalizes_to_none() {
+    let doc = "\
+```remargin
+---
+id: abc
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+checksum: sha256:abc123
+remargin_kind: []
+---
+body
+```
+";
+    let parsed = parse(doc).unwrap();
+    assert!(
+        parsed.comments()[0].remargin_kind.is_none(),
+        "empty-list on disk must normalize to None so serialize omits the line"
+    );
+    let rendered = parsed.to_markdown();
+    assert!(
+        !rendered.contains("remargin_kind:"),
+        "serialize must not emit a remargin_kind: line when kinds are absent; got:\n{rendered}"
+    );
+}
+
+/// Round-trip guarantee: a pre-field block (no `remargin_kind:` line)
+/// serializes back out with no line either. This is the byte-for-byte
+/// back-compat hinge the `#[serde(skip_serializing_if)]` guard depends
+/// on for both the YAML writer and the zod schema consumers.
+#[test]
+fn test_remargin_kind_absent_round_trip_omits_line() {
+    let doc = minimal_block("abc");
+    let parsed = parse(&doc).unwrap();
+    let rendered = parsed.to_markdown();
+    assert!(
+        !rendered.contains("remargin_kind"),
+        "absent → None → absent round-trip must not introduce a remargin_kind line; got:\n{rendered}"
+    );
 }
 
 /// A block that declares `remargin_kind` round-trips through parse +
@@ -609,8 +662,8 @@ body text
     let comments = parsed.comments();
     assert_eq!(comments.len(), 1);
     assert_eq!(
-        comments[0].remargin_kind,
-        vec![String::from("question"), String::from("action item")]
+        comments[0].remargin_kind.as_deref(),
+        Some(&[String::from("question"), String::from("action item")][..])
     );
     let rendered = parsed.to_markdown();
     assert!(

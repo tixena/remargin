@@ -240,7 +240,7 @@ pub fn sign_comments(
                 // Repair uses the comment's current `remargin_kind` so
                 // the re-vouch includes the same payload the signature
                 // will sign over.
-                let fresh = compute_checksum(&cm.content, &cm.remargin_kind);
+                let fresh = compute_checksum(&cm.content, cm.kinds());
                 if fresh != cm.checksum {
                     repaired.push(RepairedChecksumEntry {
                         id: cm.id.clone(),

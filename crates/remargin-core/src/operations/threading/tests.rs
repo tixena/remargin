@@ -20,7 +20,7 @@ fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comme
         id: String::from(id),
         line: 0,
         reactions: BTreeMap::new(),
-        remargin_kind: Vec::new(),
+        remargin_kind: None,
         reply_to: reply_to.map(String::from),
         signature: None,
         thread: thread.map(String::from),

@@ -125,7 +125,7 @@ pub fn compute_signature(
 
 #[must_use]
 pub fn verify_checksum(comment: &Comment) -> bool {
-    compute_checksum(&comment.content, &comment.remargin_kind) == comment.checksum
+    compute_checksum(&comment.content, comment.kinds()) == comment.checksum
 }
 
 /// The `public_key_str` should be an OpenSSH-formatted public key
@@ -197,7 +197,7 @@ fn signature_payload(comment: &Comment) -> String {
     for attachment in &comment.attachments {
         let _ = writeln!(payload, "attachment:{attachment}");
     }
-    for kind in canonical_kinds(&comment.remargin_kind) {
+    for kind in canonical_kinds(comment.kinds()) {
         let _ = writeln!(payload, "remargin_kind:{kind}");
     }
     let _ = write!(
