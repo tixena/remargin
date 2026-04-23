@@ -74,15 +74,17 @@ pub(crate) fn build_comment_tree<'cm>(comments: &[&'cm Comment]) -> Vec<CommentN
         .collect()
 }
 
-/// A comment is pending if it has a non-empty `to` field and at least one
-/// addressee has not acknowledged it.
+/// A comment is pending when the conversation is still open: a
+/// directed comment (`to` non-empty) with at least one recipient who
+/// has not acknowledged, or a broadcast (`to` empty) with no acks at
+/// all (rem-4j91).
 pub(crate) fn count_pending(comments: &[&Comment]) -> usize {
     comments.iter().filter(|cm| is_pending(cm)).count()
 }
 
 pub(crate) fn is_pending(cm: &Comment) -> bool {
     if cm.to.is_empty() {
-        return false;
+        return cm.ack.is_empty();
     }
     let acked_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
     cm.to
@@ -300,7 +302,7 @@ fn count_pending_expanded(comments: &[ExpandedComment]) -> usize {
 
 fn is_pending_expanded(cm: &ExpandedComment) -> bool {
     if cm.to.is_empty() {
-        return false;
+        return cm.ack.is_empty();
     }
     let acked_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
     cm.to

@@ -128,10 +128,29 @@ remargin react docs/design.md abc "👍"
 
 ### Find Pending Comments Across Documents
 
+`--pending` (the broad form) surfaces both directed comments with
+unacked recipients and broadcast comments (no `to:` field) that
+nobody has acked yet. `--pending-for-me` and `--pending-broadcast`
+scope to the caller's identity. All pending flags compose as a
+union — pass more than one for "directed-at-me OR unacked broadcast".
+
 ```bash
+# Everything still open, directed or broadcast.
 remargin query docs/ --pending
+
+# Shortcut: only comments directed at the current identity.
+remargin query . --pending-for-me
+
+# Only broadcast (empty-`to`) comments the current identity hasn't acked.
+remargin query . --pending-broadcast
+
+# Union: directed-to-me OR unacked broadcast.
+remargin query . --pending-for-me --pending-broadcast
+
+# Explicit recipient (any identity).
 remargin query . --pending-for your-name
 remargin query docs/ --pending-for your-name --expanded
+
 remargin query . --comment-id abc
 ```
 
@@ -310,7 +329,7 @@ remargin [OPTIONS] <COMMAND>
 
 | Command | Description |
 |---------|-------------|
-| `query` | Search across documents for comments (filter by `--pending`, `--pending-for`, `--author`, `--since`, `--comment-id`; `--expanded` for inline comment details) |
+| `query` | Search across documents for comments (filter by `--pending` (broad — directed OR broadcast), `--pending-for`, `--pending-for-me`, `--pending-broadcast`, `--author`, `--since`, `--comment-id`; `--expanded` for inline comment details) |
 | `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`) |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
@@ -451,11 +470,14 @@ Every write operation enforces a strict invariant: the set of comment IDs before
 ### Document Review
 
 ```bash
-# Find documents with pending comments for you
-remargin query . --pending-for your-name
+# Find documents with pending comments directed at you.
+remargin query . --pending-for-me
 
-# See expanded details (matching comments grouped by file)
-remargin query . --pending-for your-name --expanded
+# See expanded details (matching comments grouped by file).
+remargin query . --pending-for-me --expanded
+
+# Include broadcast conversations you haven't closed.
+remargin query . --pending-for-me --pending-broadcast
 
 # Read the document
 remargin get docs/proposal.md

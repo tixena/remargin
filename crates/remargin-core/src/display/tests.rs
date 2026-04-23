@@ -391,8 +391,24 @@ fn render_footer() {
         ack: vec![ack],
         ..TestComment::default()
     });
-    let cm4 = make_comment("ddd", 40, "2026-04-06T14:03:00-04:00");
-    let cm5 = make_comment("eee", 50, "2026-04-06T14:04:00-04:00");
+    // Post-rem-4j91: broadcasts count as pending unless acked. Close
+    // these two so the footer still asserts "2 pending" (from cm1/cm2).
+    let ack4 = make_ack("dave", "2026-04-06T15:10:00-04:00");
+    let cm4 = build_comment(TestComment {
+        id: "ddd",
+        line: 40,
+        ts: "2026-04-06T14:03:00-04:00",
+        ack: vec![ack4],
+        ..TestComment::default()
+    });
+    let ack5 = make_ack("eve", "2026-04-06T15:11:00-04:00");
+    let cm5 = build_comment(TestComment {
+        id: "eee",
+        line: 50,
+        ts: "2026-04-06T14:04:00-04:00",
+        ack: vec![ack5],
+        ..TestComment::default()
+    });
     let comments: Vec<&Comment> = vec![&cm1, &cm2, &cm3, &cm4, &cm5];
     let output = format_comments_pretty("file.md", &comments);
 
@@ -418,9 +434,25 @@ fn render_no_pending() {
         ack: vec![ack1],
         ..TestComment::default()
     });
-    // No `to` field, so not pending.
-    let cm2 = make_comment("bbb", 20, "2026-04-06T14:01:00-04:00");
-    let cm3 = make_comment("ccc", 30, "2026-04-06T14:02:00-04:00");
+    // Post-rem-4j91: a broadcast (no `to`) counts as pending unless
+    // somebody has acked it. Close both broadcasts with an ack so the
+    // footer reads "0 pending".
+    let ack2 = make_ack("bob", "2026-04-06T14:10:00-04:00");
+    let cm2 = build_comment(TestComment {
+        id: "bbb",
+        line: 20,
+        ts: "2026-04-06T14:01:00-04:00",
+        ack: vec![ack2],
+        ..TestComment::default()
+    });
+    let ack3 = make_ack("bob", "2026-04-06T14:11:00-04:00");
+    let cm3 = build_comment(TestComment {
+        id: "ccc",
+        line: 30,
+        ts: "2026-04-06T14:02:00-04:00",
+        ack: vec![ack3],
+        ..TestComment::default()
+    });
     let comments: Vec<&Comment> = vec![&cm1, &cm2, &cm3];
     let output = format_comments_pretty("file.md", &comments);
 
@@ -459,8 +491,26 @@ fn render_orphan_mixed_with_roots() {
 }
 
 #[test]
-fn render_comment_no_to_not_pending() {
+fn broadcast_no_ack_is_pending() {
+    // Broadcast (empty `to`) with no acks is pending under the
+    // post-rem-4j91 semantics: a fresh broadcast keeps the
+    // conversation open until somebody acks.
     let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    assert!(is_pending(&cm));
+    assert_eq!(count_pending(&[&cm]), 1);
+}
+
+#[test]
+fn broadcast_with_ack_not_pending() {
+    // Any ack closes a broadcast from the "is this conversation
+    // still open?" perspective used by count_pending.
+    let ack = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let cm = build_comment(TestComment {
+        id: "abc",
+        to: vec![],
+        ack: vec![ack],
+        ..TestComment::default()
+    });
     assert!(!is_pending(&cm));
     assert_eq!(count_pending(&[&cm]), 0);
 }
@@ -523,12 +573,31 @@ fn make_expanded(
 fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult {
     let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
     let last_activity = comments.iter().map(|c| c.ts).max();
+    // Pending count is computed by the pretty-printer from the
+    // comments themselves (expanded mode); the stored
+    // QueryResult.pending_count is unused by format_query_pretty for
+    // the footer, but we keep it consistent for readers that inspect
+    // the struct.
+    let pending_count = u32::try_from(
+        comments
+            .iter()
+            .filter(|c| {
+                if c.to.is_empty() {
+                    c.ack.is_empty()
+                } else {
+                    let acked: Vec<&str> = c.ack.iter().map(|a| a.author.as_str()).collect();
+                    c.to.iter().any(|addr| !acked.contains(&addr.as_str()))
+                }
+            })
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
     QueryResult {
         comment_count,
         comments,
         last_activity,
         path: PathBuf::from(path),
-        pending_count: 0,
+        pending_count,
         pending_for: Vec::new(),
     }
 }
@@ -547,13 +616,15 @@ fn query_pretty_single_file() {
     let result = make_query_result("docs/design.md", vec![cm]);
     let output = format_query_pretty(&[result], None);
 
-    assert!(output.contains("docs/design.md (1 comments, 0 pending)"));
+    // Post-rem-4j91: a broadcast (empty `to`) with no acks counts as
+    // pending, so "1 pending" here (one broadcast, unacked).
+    assert!(output.contains("docs/design.md (1 comments, 1 pending)"));
     assert!(output.contains("docs/design.md:10"));
     assert!(output.contains("abc \u{00b7} eduardo (human) \u{00b7} 2026-04-06 14:00"));
     assert!(output.contains("\u{2502} Fix this bug."));
     // Grand footer.
     assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
-    assert!(output.contains("0 pending across 1 files"));
+    assert!(output.contains("1 pending across 1 files"));
 }
 
 #[test]
@@ -585,7 +656,8 @@ fn query_pretty_multi_file() {
     let pos_a = output.find("src/a.md (1 comments").unwrap();
     let pos_b = output.find("src/b.md (1 comments").unwrap();
     assert!(pos_a < pos_b, "Files should be sorted alphabetically");
-    assert!(output.contains("0 pending across 2 files"));
+    // Post-rem-4j91: broadcasts with no acks count as pending.
+    assert!(output.contains("2 pending across 2 files"));
 }
 
 #[test]
@@ -747,7 +819,8 @@ fn query_pretty_no_filter() {
     let output = format_query_pretty(&[result], None);
 
     // Without filter_name, footer should just say "N pending" not "pending for <name>".
-    assert!(output.contains("0 pending\n"));
+    // Post-rem-4j91: the unacked broadcast contributes one pending.
+    assert!(output.contains("1 pending\n"));
     assert!(!output.contains("pending for"));
 }
 

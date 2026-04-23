@@ -127,7 +127,7 @@ Sandbox staging is a per-identity, per-file marker ("I am working on this") stor
 
 | Op | Purpose |
 |----|---------|
-| `query` | Search across documents for comments. Filters: `pending`, `pending_for`, `author`, `since`, `comment_id`. Use `expanded=true` to include matching comments inline. |
+| `query` | Search across documents for comments. Filters: `pending` (broad — includes broadcasts), `pending_for` (directed to recipient), `pending_for_me` (directed to caller, default agent filter), `pending_broadcast` (unacked broadcasts the caller hasn't closed), `author`, `since`, `comment_id`. Pending filters compose as a union. Use `expanded=true` to include matching comments inline. |
 | `search` | Search across documents for text. Supports `regex`, `scope` (all/body/comments), `context` lines, `ignore_case`. |
 | `lint` | Structural lint checks on a document. |
 | `verify` | Verify comment integrity (checksums and signatures) against the participant registry. |
@@ -332,9 +332,22 @@ remargin react file="docs/design.md" id="abc" emoji="👍" remove=true
 ### Find pending comments across documents
 
 ```
+# Broad — everything still open (directed OR broadcast, unacked).
 remargin query path="docs/" pending=true
+
+# "What's directed at me and unacked?" — the default agent filter.
+remargin query path="." pending_for_me=true
+
+# Surface broadcast conversations the caller hasn't closed.
+remargin query path="." pending_broadcast=true
+
+# Same two flags compose as a union.
+remargin query path="." pending_for_me=true pending_broadcast=true
+
+# Explicit recipient (any identity, not just the caller).
 remargin query path="." pending_for="eduardo"
 remargin query path="." pending_for="eduardo" expanded=true
+
 remargin query path="." comment_id="abc"
 ```
 

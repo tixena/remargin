@@ -666,7 +666,12 @@ fn setup_pending_system() -> MockSystem {
 }
 
 #[test]
-fn no_to_not_pending() {
+fn broadcast_counts_as_pending_after_rem_4j91() {
+    // Regression for rem-4j91. Before the fix, broadcast comments
+    // (empty `to`) were silently excluded from `--pending`. Now they
+    // count as pending when unacked: mixed.md has one broadcast
+    // (bcast, no acks) AND one directed pending (dir1), so
+    // pending_count should be 2.
     let system = setup_pending_system();
     let filter = QueryFilter {
         pending: true,
@@ -679,9 +684,7 @@ fn no_to_not_pending() {
         .find(|r| r.path.to_str().unwrap().contains("mixed.md"))
         .unwrap();
 
-    // mixed.md should appear because dir1 is pending, but pending_count
-    // should be 1 (only dir1), NOT 2 (bcast should not count).
-    assert_eq!(mixed_result.pending_count, 1);
+    assert_eq!(mixed_result.pending_count, 2);
 }
 
 #[test]
@@ -695,7 +698,10 @@ fn to_with_no_ack_is_pending() {
         .find(|r| r.path.to_str().unwrap().contains("mixed.md"))
         .unwrap();
 
-    assert_eq!(mixed.pending_count, 1);
+    // rem-4j91: bcast (broadcast, no acks) + dir1 (directed, no ack
+    // from eduardo) → 2 pending. pending_for only lists directed
+    // recipients; the broadcast has no named recipients.
+    assert_eq!(mixed.pending_count, 2);
     assert!(mixed.pending_for.contains(&String::from("eduardo")));
 }
 
@@ -777,8 +783,10 @@ fn pending_for_excludes_fully_acked() {
 }
 
 #[test]
-fn broadcast_comment_never_pending() {
-    // A single-file system with only a broadcast comment.
+fn unacked_broadcast_counts_as_pending() {
+    // rem-4j91: a fresh broadcast comment (empty `to`, no acks)
+    // must surface under `--pending`. Before the fix the broadcast
+    // was silently excluded.
     let broadcast_only = "\
 ---
 title: Broadcast Only
@@ -804,18 +812,60 @@ No to field at all.
     let filter = QueryFilter::default();
     let results = query(&system, Path::new("/bonly"), &filter).unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].pending_count, 0);
+    // pending_count reflects broadcast-is-pending semantics; pending_for
+    // is still empty because broadcasts have no named recipients.
+    assert_eq!(results[0].pending_count, 1);
     assert!(results[0].pending_for.is_empty());
 
-    // With --pending filter, document should not appear.
+    // With --pending filter, the document now surfaces.
     let pending_filter = QueryFilter {
         pending: true,
         ..QueryFilter::default()
     };
     let pending_results = query(&system, Path::new("/bonly"), &pending_filter).unwrap();
+    assert_eq!(
+        pending_results.len(),
+        1,
+        "fresh broadcast must surface under --pending"
+    );
+}
+
+#[test]
+fn acked_broadcast_not_pending() {
+    // A broadcast with any ack closes the conversation from the
+    // broad `--pending` perspective.
+    let acked_broadcast = "\
+---
+title: Acked Broadcast
+---
+
+```remargin
+---
+id: b2
+author: bot
+type: agent
+ts: 2026-04-06T09:00:00-04:00
+checksum: sha256:b2b2
+ack:
+  - alice@2026-04-06T10:00:00-04:00
+---
+Broadcast, already closed by an ack.
+```
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/bclosed"))
+        .unwrap()
+        .with_file(Path::new("/bclosed/note.md"), acked_broadcast.as_bytes())
+        .unwrap();
+
+    let pending_filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/bclosed"), &pending_filter).unwrap();
     assert!(
-        pending_results.is_empty(),
-        "broadcast-only doc should not appear in --pending results"
+        results.is_empty(),
+        "acked broadcast should not surface under --pending"
     );
 }
 
@@ -1254,4 +1304,252 @@ fn content_regex_no_match_yields_empty_results() {
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     // When no comments match, the whole file is skipped.
     assert!(results.is_empty());
+}
+
+// ===========================================================================
+// pending_for_me + pending_broadcast tests (rem-4j91)
+// ===========================================================================
+
+/// Fixture covering the four pending shapes simultaneously:
+/// - `brd_open`: broadcast, no acks (pending under --pending and --pending-broadcast for anyone).
+/// - `brd_mine`: broadcast, alice acked (pending for others, NOT for alice).
+/// - `dir_alice`: directed to alice, unacked (pending-for-me when me=alice).
+/// - `dir_bob`: directed to bob, unacked (pending-for-me when me=bob; NOT for alice).
+/// - `dir_closed`: directed to alice, acked by alice (not pending at all).
+fn doc_four_shapes() -> &'static str {
+    "\
+---
+title: Four Shapes
+---
+
+```remargin
+---
+id: brd_open
+author: bot
+type: agent
+ts: 2026-04-06T09:00:00-04:00
+checksum: sha256:b0
+---
+Fresh broadcast, zero acks.
+```
+
+```remargin
+---
+id: brd_mine
+author: bot
+type: agent
+ts: 2026-04-06T09:30:00-04:00
+checksum: sha256:b1
+ack:
+  - alice@2026-04-06T10:00:00-04:00
+---
+Broadcast acked by alice.
+```
+
+```remargin
+---
+id: dir_alice
+author: bob
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [alice]
+checksum: sha256:da
+---
+Directed to alice, no ack.
+```
+
+```remargin
+---
+id: dir_bob
+author: alice
+type: human
+ts: 2026-04-06T10:30:00-04:00
+to: [bob]
+checksum: sha256:db
+---
+Directed to bob, no ack.
+```
+
+```remargin
+---
+id: dir_closed
+author: bob
+type: human
+ts: 2026-04-06T11:00:00-04:00
+to: [alice]
+checksum: sha256:dc
+ack:
+  - alice@2026-04-06T12:00:00-04:00
+---
+Directed to alice, acked.
+```
+"
+}
+
+fn setup_four_shapes_system() -> MockSystem {
+    MockSystem::new()
+        .with_dir(Path::new("/four"))
+        .unwrap()
+        .with_file(Path::new("/four/shapes.md"), doc_four_shapes().as_bytes())
+        .unwrap()
+}
+
+#[test]
+fn pending_for_me_surfaces_only_directed_unacked_by_caller() {
+    let system = setup_four_shapes_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending_for_me: Some(String::from("alice")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/four"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    let ids: Vec<&str> = results[0]
+        .comments
+        .iter()
+        .map(|cm| cm.id.as_str())
+        .collect();
+    // Only `dir_alice` is directed to alice and still unacked by her.
+    assert_eq!(ids, vec!["dir_alice"]);
+}
+
+#[test]
+fn pending_for_me_matches_pending_for() {
+    // --pending-for-me is sugar for --pending-for <caller>; the two
+    // filters must produce identical results when given the same name.
+    let system = setup_four_shapes_system();
+    let me = String::from("alice");
+
+    let pending_for_me = QueryFilter {
+        expanded: true,
+        pending_for_me: Some(me.clone()),
+        ..QueryFilter::default()
+    };
+    let pending_for = QueryFilter {
+        expanded: true,
+        pending_for: Some(me),
+        ..QueryFilter::default()
+    };
+
+    let me_results = query(&system, Path::new("/four"), &pending_for_me).unwrap();
+    let for_results = query(&system, Path::new("/four"), &pending_for).unwrap();
+
+    let me_ids: Vec<&str> = me_results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    let for_ids: Vec<&str> = for_results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+
+    assert_eq!(me_ids, for_ids);
+}
+
+#[test]
+fn pending_broadcast_only_surfaces_unacked_broadcasts() {
+    let system = setup_four_shapes_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending_broadcast: Some(String::from("alice")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/four"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    let ids: Vec<&str> = results[0]
+        .comments
+        .iter()
+        .map(|cm| cm.id.as_str())
+        .collect();
+    // brd_open has zero acks (pending for alice).
+    // brd_mine was acked by alice (NOT pending for alice).
+    // Directed comments never match the broadcast filter.
+    assert_eq!(ids, vec!["brd_open"]);
+}
+
+#[test]
+fn pending_broadcast_excludes_directed_even_unacked() {
+    let system = setup_four_shapes_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending_broadcast: Some(String::from("alice")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/four"), &filter).unwrap();
+    let ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    assert!(
+        !ids.contains(&"dir_alice"),
+        "directed comment must not surface under pending_broadcast"
+    );
+    assert!(!ids.contains(&"dir_bob"));
+    assert!(!ids.contains(&"dir_closed"));
+}
+
+#[test]
+fn pending_for_me_and_pending_broadcast_union() {
+    // Passing both flags yields the union: directed-to-alice unacked
+    // PLUS broadcasts alice hasn't acked.
+    let system = setup_four_shapes_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending_broadcast: Some(String::from("alice")),
+        pending_for_me: Some(String::from("alice")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/four"), &filter).unwrap();
+    let mut ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["brd_open", "dir_alice"]);
+}
+
+#[test]
+fn pending_broadcast_respects_callers_ack() {
+    // brd_mine has only alice's ack. From bob's perspective the
+    // broadcast is still unacked, so it surfaces for him.
+    let system = setup_four_shapes_system();
+    let filter = QueryFilter {
+        expanded: true,
+        pending_broadcast: Some(String::from("bob")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/four"), &filter).unwrap();
+    let mut ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    ids.sort_unstable();
+    // Both broadcasts count: brd_open has no acks; brd_mine was only
+    // acked by alice, so bob hasn't closed it personally.
+    assert_eq!(ids, vec!["brd_mine", "brd_open"]);
+}
+
+#[test]
+fn pending_union_composes_with_author_filter() {
+    // --pending-for-me plus --author=bob should intersect: only the
+    // directed comment to alice authored by bob surfaces.
+    let system = setup_four_shapes_system();
+    let filter = QueryFilter {
+        author: Some(String::from("bob")),
+        expanded: true,
+        pending_for_me: Some(String::from("alice")),
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/four"), &filter).unwrap();
+    let ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    assert_eq!(ids, vec!["dir_alice"]);
 }

@@ -50,6 +50,63 @@ Acked comment from bob.
 ```
 ";
 
+/// A four-shape fixture used by the `pending_for_me` / `pending_broadcast`
+/// tests (rem-4j91). Covers: fresh broadcast (no acks), broadcast the
+/// caller already acked, directed-to-caller, and directed-to-someone-else.
+const DOC_FOUR_SHAPES: &str = "\
+---
+title: Four Shapes
+---
+
+```remargin
+---
+id: brd_open
+author: bot
+type: agent
+ts: 2026-04-06T09:00:00-04:00
+checksum: sha256:b0
+---
+Fresh broadcast, zero acks.
+```
+
+```remargin
+---
+id: brd_mine
+author: bot
+type: agent
+ts: 2026-04-06T09:30:00-04:00
+checksum: sha256:b1
+ack:
+  - tester@2026-04-06T10:00:00-04:00
+---
+Broadcast already acked by tester.
+```
+
+```remargin
+---
+id: dir_me
+author: bob
+type: human
+ts: 2026-04-06T10:00:00-04:00
+to: [tester]
+checksum: sha256:dm
+---
+Directed to tester.
+```
+
+```remargin
+---
+id: dir_other
+author: alice
+type: human
+ts: 2026-04-06T10:30:00-04:00
+to: [bob]
+checksum: sha256:do
+---
+Directed to bob.
+```
+";
+
 /// A document with a comment in the middle for reply placement tests.
 const DOC_WITH_COMMENT: &str = "\
 ---
@@ -2799,5 +2856,195 @@ fn comment_rejects_unknown_type_value() {
     assert!(
         msg.contains("unknown author type"),
         "expected author-type diagnostic, got: {msg}"
+    );
+}
+
+// ===========================================================================
+// query.pending_for_me + pending_broadcast MCP tests (rem-4j91)
+// ===========================================================================
+
+#[test]
+fn mcp_query_pending_includes_broadcast_rem_4j91() {
+    // --pending must now surface broadcast comments (the bug fix).
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "expanded": true,
+                    "pending": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let comments = result["results"][0]["comments"].as_array().unwrap();
+    let mut ids: Vec<&str> = comments.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    ids.sort_unstable();
+    // Expected pending: brd_open (broadcast, no acks), dir_me, dir_other.
+    // brd_mine is NOT pending (tester's ack closes the broadcast).
+    assert_eq!(ids, vec!["brd_open", "dir_me", "dir_other"]);
+}
+
+#[test]
+fn mcp_query_pending_for_me_uses_server_identity() {
+    // pending_for_me=true must use the server's configured identity
+    // ("tester" from test_config), surfacing only dir_me.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "expanded": true,
+                    "pending_for_me": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let comments = result["results"][0]["comments"].as_array().unwrap();
+    let ids: Vec<&str> = comments.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, vec!["dir_me"]);
+}
+
+#[test]
+fn mcp_query_pending_broadcast_only_surfaces_unacked_broadcasts() {
+    // pending_broadcast=true with the server identity (tester): only
+    // brd_open surfaces — brd_mine is already acked by tester, and
+    // directed comments never count as broadcast.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "expanded": true,
+                    "pending_broadcast": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let comments = result["results"][0]["comments"].as_array().unwrap();
+    let ids: Vec<&str> = comments.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, vec!["brd_open"]);
+}
+
+#[test]
+fn mcp_query_pending_for_me_and_broadcast_union() {
+    // Union of directed-to-me (dir_me) and unacked broadcasts for me
+    // (brd_open). brd_mine is acked by tester, so excluded.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "expanded": true,
+                    "pending_for_me": true,
+                    "pending_broadcast": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let comments = result["results"][0]["comments"].as_array().unwrap();
+    let mut ids: Vec<&str> = comments.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["brd_open", "dir_me"]);
+}
+
+#[test]
+fn mcp_query_pending_for_me_errors_without_identity() {
+    // A config with no identity must fail loudly when pending_for_me
+    // is requested.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
+        .unwrap();
+    let config = ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type: None,
+        identity: None,
+        ignore: Vec::new(),
+        key_path: None,
+        mode: Mode::Open,
+        registry: None,
+        source_path: None,
+        unrestricted: false,
+    };
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "pending_for_me": true
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("pending_for_me") || msg.contains("identity"),
+        "expected identity diagnostic, got: {msg}"
     );
 }

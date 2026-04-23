@@ -444,12 +444,24 @@ enum Commands {
         /// Case-insensitive match for `--content-regex`.
         #[arg(long, short = 'i')]
         ignore_case: bool,
-        /// Only documents with pending (unacked) comments.
+        /// Only documents with pending (unacked) comments. Matches
+        /// both directed (unacked recipients) and broadcast (no acks
+        /// at all) shapes — fixed in rem-4j91.
         #[arg(long)]
         pending: bool,
+        /// Only surface unacked broadcast (no-`to`) comments the
+        /// current identity has not acknowledged. Resolves the
+        /// identity the same way every other subcommand does.
+        #[arg(long)]
+        pending_broadcast: bool,
         /// Only pending for this recipient.
         #[arg(long)]
         pending_for: Option<String>,
+        /// Sugar for `--pending-for <current-identity>`. Surfaces
+        /// directed comments addressed to the caller that the caller
+        /// has not acked yet.
+        #[arg(long)]
+        pending_for_me: bool,
         /// Pretty-print results grouped by file.
         #[arg(long)]
         pretty: bool,
@@ -459,6 +471,8 @@ enum Commands {
         /// Return only counts/summary, suppress comment data.
         #[arg(long)]
         summary: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -945,7 +959,9 @@ struct QueryParams<'cmd> {
     json_mode: bool,
     path: &'cmd str,
     pending: bool,
+    pending_broadcast: bool,
     pending_for: Option<&'cmd str>,
+    pending_for_me: bool,
     pretty: bool,
     since: Option<&'cmd str>,
     summary: bool,
@@ -1402,6 +1418,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Migrate { identity_args, .. }
         | Commands::Plan { identity_args, .. }
         | Commands::Purge { identity_args, .. }
+        | Commands::Query { identity_args, .. }
         | Commands::React { identity_args, .. }
         | Commands::Rm { identity_args, .. }
         | Commands::Sandbox { identity_args, .. }
@@ -1414,7 +1431,6 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Lint { .. }
         | Commands::Ls { .. }
         | Commands::Metadata { .. }
-        | Commands::Query { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
         | Commands::Search { .. }
@@ -1745,11 +1761,14 @@ fn dispatch_with_config(
             expanded,
             ignore_case,
             pending,
+            pending_broadcast,
             pending_for,
+            pending_for_me,
             pretty,
             since,
             summary,
             output_args,
+            ..
         } => {
             let q = QueryParams {
                 author: author.as_deref(),
@@ -1760,12 +1779,14 @@ fn dispatch_with_config(
                 json_mode: output_args.json,
                 path: path.as_str(),
                 pending: *pending,
+                pending_broadcast: *pending_broadcast,
                 pending_for: pending_for.as_deref(),
+                pending_for_me: *pending_for_me,
                 pretty: *pretty,
                 since: since.as_deref(),
                 summary: *summary,
             };
-            cmd_query(system, cwd, &q)
+            cmd_query(system, cwd, config, &q)
         }
         Commands::React {
             file,
@@ -2703,9 +2724,22 @@ fn cmd_purge(
     )
 }
 
-fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Result<()> {
+fn cmd_query(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    params: &QueryParams<'_>,
+) -> Result<()> {
     let target = cwd.join(expand_cli_path(system, params.path)?);
+    let filter = build_query_filter(config, params)?;
+    let results = query::query(system, &target, &filter)?;
+    render_query_output(&results, params, filter.pending_label())
+}
 
+fn build_query_filter(
+    config: &ResolvedConfig,
+    params: &QueryParams<'_>,
+) -> Result<query::QueryFilter> {
     let since_dt = params
         .since
         .map(|s| {
@@ -2722,47 +2756,58 @@ fn cmd_query(system: &dyn System, cwd: &Path, params: &QueryParams<'_>) -> Resul
     filter.pending_for = params.pending_for.map(String::from);
     filter.since = since_dt;
     filter.summary = params.summary;
+    filter = filter.with_caller_identity(
+        params.pending_for_me,
+        params.pending_broadcast,
+        config.identity.clone(),
+    )?;
     if let Some(pattern) = params.content_regex {
         filter = filter.with_content_regex(pattern, params.ignore_case)?;
     }
+    Ok(filter)
+}
 
-    let results = query::query(system, &target, &filter)?;
-
+fn render_query_output(
+    results: &[query::QueryResult],
+    params: &QueryParams<'_>,
+    pending_label: Option<&str>,
+) -> Result<()> {
     if params.json_mode {
-        print_output(
+        return print_output(
             true,
             &json!({
                 "base_path": format!("{}/", params.path.trim_end_matches('/')),
                 "results": results,
             }),
-        )
-    } else if params.pretty {
-        let filter_name = params.pending_for;
-        let output = display::format_query_pretty(&results, filter_name);
-        out_raw(&output)
-    } else {
-        for r in &results {
-            out(&format!(
-                "{} ({} comments, {} pending)",
-                r.path.display(),
-                r.comment_count,
-                r.pending_count,
-            ))?;
-            for cm in &r.comments {
-                let status = if cm.ack.is_empty() {
-                    "pending"
-                } else {
-                    "acked"
-                };
-                let author_type = cm.author_type.as_str();
-                out(&format!(
-                    "  {} {} ({}) [{}] {}",
-                    cm.id, cm.author, author_type, status, cm.content,
-                ))?;
-            }
-        }
-        Ok(())
+        );
     }
+    if params.pretty {
+        return out_raw(&display::format_query_pretty(results, pending_label));
+    }
+    for r in results {
+        out(&format!(
+            "{} ({} comments, {} pending)",
+            r.path.display(),
+            r.comment_count,
+            r.pending_count,
+        ))?;
+        for cm in &r.comments {
+            let status = if cm.ack.is_empty() {
+                "pending"
+            } else {
+                "acked"
+            };
+            out(&format!(
+                "  {} {} ({}) [{}] {}",
+                cm.id,
+                cm.author,
+                cm.author_type.as_str(),
+                status,
+                cm.content,
+            ))?;
+        }
+    }
+    Ok(())
 }
 
 fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Result<()> {

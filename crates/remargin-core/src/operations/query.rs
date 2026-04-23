@@ -23,6 +23,19 @@ use crate::parser::{self, Acknowledgment, AuthorType};
 use crate::parser::{acknowledgment_schema, author_type_schema};
 
 /// Filter for cross-document queries.
+///
+/// The four pending-flavor fields — `pending`, `pending_for`,
+/// `pending_for_me`, and `pending_broadcast` — compose as a union
+/// (OR): when any are set, a comment is surfaced if it satisfies at
+/// least one. The union is AND-combined with the non-pending filters
+/// (`author`, `comment_id`, `content_regex`, `since`).
+///
+/// `pending` (the broad form) includes BOTH directed comments with
+/// unacked recipients AND broadcast comments (empty `to`) that have
+/// not been acked by anyone. Before rem-4j91 the broad form silently
+/// excluded broadcasts; the bug-fix semantics match the help text
+/// ("Only documents with pending (unacked) comments") without the
+/// implicit directed-only carve-out.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct QueryFilter {
@@ -36,10 +49,20 @@ pub struct QueryFilter {
     pub content_regex: Option<Regex>,
     /// Include individual matching comments in each result.
     pub expanded: bool,
-    /// Only include documents with pending (unacked) comments.
+    /// Only include documents with pending (unacked) comments. Matches
+    /// both directed and broadcast comments (rem-4j91).
     pub pending: bool,
+    /// Surface broadcast (empty-`to`) comments that the given identity
+    /// has not acknowledged yet. Set by the CLI's `--pending-broadcast`
+    /// and the MCP `pending_broadcast: true` flag, which carry the
+    /// caller's identity through.
+    pub pending_broadcast: Option<String>,
     /// Only include documents with pending comments for this recipient.
     pub pending_for: Option<String>,
+    /// Sugar for `pending_for = Some(<caller identity>)`. Kept as a
+    /// distinct field so CLI/MCP surfaces can expose a "pending for me"
+    /// flag without needing the caller to repeat their identity.
+    pub pending_for_me: Option<String>,
     /// Only include documents with activity after this timestamp.
     pub since: Option<DateTime<FixedOffset>>,
     /// Return only counts/summary, suppress comment data.
@@ -47,6 +70,81 @@ pub struct QueryFilter {
 }
 
 impl QueryFilter {
+    /// Any pending-flavor filter is active. When true, comments must
+    /// satisfy at least one of `pending`, `pending_for`,
+    /// `pending_for_me`, or `pending_broadcast`.
+    const fn any_pending_active(&self) -> bool {
+        self.pending
+            || self.pending_broadcast.is_some()
+            || self.pending_for.is_some()
+            || self.pending_for_me.is_some()
+    }
+
+    /// A comment satisfies the pending-flavor union when any of the
+    /// active pending filters matches it.
+    fn matches_pending_union(&self, cm: &parser::Comment) -> bool {
+        if self.pending && is_pending(cm) {
+            return true;
+        }
+        if let Some(target) = &self.pending_for
+            && is_pending_for(cm, target)
+        {
+            return true;
+        }
+        if let Some(me) = &self.pending_for_me
+            && is_pending_for(cm, me)
+        {
+            return true;
+        }
+        if let Some(me) = &self.pending_broadcast
+            && is_pending_broadcast(cm, me)
+        {
+            return true;
+        }
+        false
+    }
+
+    /// Identity-scoped pending-flavor label preferred for pretty-print
+    /// headers. Returns the explicit `--pending-for` name when set,
+    /// falling back to the caller identity attached by
+    /// `--pending-for-me` / `--pending-broadcast` (rem-4j91).
+    #[must_use]
+    pub fn pending_label(&self) -> Option<&str> {
+        self.pending_for
+            .as_deref()
+            .or(self.pending_for_me.as_deref())
+            .or(self.pending_broadcast.as_deref())
+    }
+
+    /// Attach the caller's identity to the identity-scoped pending
+    /// flavors (`pending_for_me`, `pending_broadcast`) when those flags
+    /// were requested. Returns an error when a flag is set but no
+    /// identity was provided (rem-4j91).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `want_for_me` or `want_broadcast` is true
+    /// but `caller_identity` is `None`.
+    pub fn with_caller_identity(
+        mut self,
+        want_for_me: bool,
+        want_broadcast: bool,
+        caller_identity: Option<String>,
+    ) -> Result<Self> {
+        if !want_for_me && !want_broadcast {
+            return Ok(self);
+        }
+        let me = caller_identity
+            .context("pending_for_me / pending_broadcast require a configured identity")?;
+        if want_for_me {
+            self.pending_for_me = Some(me.clone());
+        }
+        if want_broadcast {
+            self.pending_broadcast = Some(me);
+        }
+        Ok(self)
+    }
+
     /// Compile `pattern` with optional case-insensitivity and attach it as the
     /// content regex. Returns a structured error (with the caller-provided
     /// pattern) when compilation fails.
@@ -196,13 +294,12 @@ pub fn query(
 
         let last_activity = comments.iter().map(|cm| cm.ts).max();
 
-        // Apply filters.
-        if filter.pending && pending_count == 0 {
-            continue;
-        }
-
-        if let Some(target) = &filter.pending_for
-            && !pending_for.contains(target)
+        // Apply the pending-flavor union filter at the file level: when
+        // any of `pending`, `pending_for`, `pending_for_me`, or
+        // `pending_broadcast` is set, the document must have at least
+        // one comment that matches the union (rem-4j91).
+        if filter.any_pending_active()
+            && !comments.iter().any(|cm| filter.matches_pending_union(cm))
         {
             continue;
         }
@@ -260,16 +357,14 @@ pub fn query(
 
 /// Test whether a single comment matches all active filters.
 ///
-/// Metadata filters (pending, author, since, comment-id) are evaluated first;
-/// the `content_regex` check runs last so the regex only executes against the
-/// already-filtered subset.
+/// The pending-flavor fields (`pending`, `pending_for`,
+/// `pending_for_me`, `pending_broadcast`) compose as a union: when
+/// any are set the comment must satisfy at least one of them. The
+/// union is AND-combined with author/since/comment-id/content_regex.
+/// The `content_regex` check runs last so the regex only executes
+/// against the already-filtered subset.
 fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
-    if filter.pending && !is_pending(cm) {
-        return false;
-    }
-    if let Some(target) = &filter.pending_for
-        && !is_pending_for(cm, target)
-    {
+    if filter.any_pending_active() && !filter.matches_pending_union(cm) {
         return false;
     }
     if let Some(target_author) = &filter.author
@@ -310,11 +405,17 @@ fn collect_pending_recipients(pending: &[&&parser::Comment]) -> Vec<String> {
     recipients
 }
 
-/// A comment is pending if it has at least one addressee (`to`) who has not
-/// acknowledged it. Broadcast comments (empty `to`) are never pending.
+/// A comment is pending when the conversation is still open.
+///
+/// Directed comments (`to` non-empty) are pending when at least one
+/// named recipient has not acknowledged. Broadcast comments (`to`
+/// empty) are pending when nobody has acknowledged yet — any ack is
+/// enough to close a broadcast conversation. Before rem-4j91 the
+/// broad form silently excluded broadcasts; the current semantics
+/// match the documented "pending (unacked) comments" language.
 fn is_pending(cm: &parser::Comment) -> bool {
     if cm.to.is_empty() {
-        return false;
+        return cm.ack.is_empty();
     }
     let ack_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
     cm.to
@@ -329,6 +430,18 @@ fn is_pending_for(cm: &parser::Comment, target: &str) -> bool {
         return false;
     }
     !cm.ack.iter().any(|a| a.author == target)
+}
+
+/// A broadcast comment is pending for `me` when `to` is empty AND `me`
+/// has not acknowledged yet. The caller's ack "closes" the broadcast
+/// from their personal perspective even when other participants have
+/// not acked (unlike the broad `is_pending`, which considers any ack
+/// enough to close the conversation).
+fn is_pending_broadcast(cm: &parser::Comment, me: &str) -> bool {
+    if !cm.to.is_empty() {
+        return false;
+    }
+    !cm.ack.iter().any(|a| a.author == me)
 }
 
 /// Convert a parsed comment reference into an owned `ExpandedComment`.

@@ -447,7 +447,12 @@ fn desc_purge() -> ToolDesc {
 fn desc_query() -> ToolDesc {
     ToolDesc {
         name: "query",
-        description: "Search across documents for comments",
+        description: "Search across documents for comments. \
+             Pending filters (`pending`, `pending_for`, `pending_for_me`, `pending_broadcast`) \
+             compose as a union when more than one is set. `pending` (broad form) includes \
+             both directed comments with unacked recipients AND broadcast (no-`to`) comments \
+             that nobody has acked. `pending_for_me` and `pending_broadcast` use the MCP \
+             server's configured identity (rem-4j91).",
         schema: json!({
             "type": "object",
             "properties": {
@@ -456,8 +461,10 @@ fn desc_query() -> ToolDesc {
                 "content_regex": { "type": "string", "description": "Regex applied to comment content; composes with metadata filters" },
                 "expanded": { "type": "boolean", "description": "Include individual matching comments in each result (default: true via non-summary mode)", "default": false },
                 "ignore_case": { "type": "boolean", "description": "Case-insensitive match for content_regex", "default": false },
-                "pending": { "type": "boolean", "description": "Only documents with pending comments", "default": false },
+                "pending": { "type": "boolean", "description": "Only documents with pending (unacked) comments. Matches both directed and broadcast shapes (rem-4j91).", "default": false },
+                "pending_broadcast": { "type": "boolean", "description": "Only surface broadcast (no-`to`) comments the server identity has not acked yet.", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
+                "pending_for_me": { "type": "boolean", "description": "Sugar for pending_for=<server identity>. Surfaces directed comments addressed to the caller and not yet acked.", "default": false },
                 "pretty": { "type": "boolean", "description": "Pretty-print results grouped by file with structured display", "default": false },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
                 "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" },
@@ -937,7 +944,7 @@ fn dispatch_tool(
         "migrate" => handle_migrate(system, base_dir, config, p),
         "plan" => handle_plan(system, base_dir, config, p),
         "purge" => handle_purge(system, base_dir, config, p),
-        "query" => handle_query(system, base_dir, p),
+        "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
         "rm" => handle_rm(system, base_dir, config, p),
         "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
@@ -1554,39 +1561,15 @@ fn handle_purge(
 fn handle_query(
     system: &dyn System,
     base_dir: &Path,
+    config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let path_str = optional_str(params, "path").unwrap_or(".");
-    let target = base_dir.join(path_str);
-    let pretty = optional_bool(params, "pretty");
+    let filter = build_query_filter_from_params(params, config.identity.clone())?;
+    let results = query::query(system, &base_dir.join(path_str), &filter)?;
 
-    let since = optional_str(params, "since")
-        .map(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .with_context(|| format!("invalid timestamp: {s}"))
-        })
-        .transpose()?;
-
-    let pending_for_str = optional_str(params, "pending_for").map(String::from);
-
-    let mut filter = QueryFilter {
-        author: optional_str(params, "author").map(String::from),
-        comment_id: optional_str(params, "comment_id").map(String::from),
-        expanded: optional_bool(params, "expanded"),
-        pending: optional_bool(params, "pending"),
-        pending_for: pending_for_str.clone(),
-        since,
-        summary: optional_bool(params, "summary"),
-        ..QueryFilter::default()
-    };
-    if let Some(pattern) = optional_str(params, "content_regex") {
-        filter = filter.with_content_regex(pattern, optional_bool(params, "ignore_case"))?;
-    }
-
-    let results = query::query(system, &target, &filter)?;
-
-    if pretty {
-        let output = display::format_query_pretty(&results, pending_for_str.as_deref());
+    if optional_bool(params, "pretty") {
+        let output = display::format_query_pretty(&results, filter.pending_label());
         Ok(json!({ "text": output }))
     } else {
         let entries: Vec<Value> = results.iter().map(serialize_query_result).collect();
@@ -1594,6 +1577,39 @@ fn handle_query(
             json!({ "base_path": format!("{}/", path_str.trim_end_matches('/')), "results": entries }),
         )
     }
+}
+
+/// Translate `query` tool params into a [`QueryFilter`]. Pulled out so
+/// `handle_query` stays under the adapter LOC cap (rem-wpq).
+fn build_query_filter_from_params(
+    params: &Map<String, Value>,
+    caller_identity: Option<String>,
+) -> Result<QueryFilter> {
+    let since = optional_str(params, "since")
+        .map(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .with_context(|| format!("invalid timestamp: {s}"))
+        })
+        .transpose()?;
+    let mut filter = QueryFilter {
+        author: optional_str(params, "author").map(String::from),
+        comment_id: optional_str(params, "comment_id").map(String::from),
+        expanded: optional_bool(params, "expanded"),
+        pending: optional_bool(params, "pending"),
+        pending_for: optional_str(params, "pending_for").map(String::from),
+        since,
+        summary: optional_bool(params, "summary"),
+        ..QueryFilter::default()
+    };
+    filter = filter.with_caller_identity(
+        optional_bool(params, "pending_for_me"),
+        optional_bool(params, "pending_broadcast"),
+        caller_identity,
+    )?;
+    if let Some(pattern) = optional_str(params, "content_regex") {
+        filter = filter.with_content_regex(pattern, optional_bool(params, "ignore_case"))?;
+    }
+    Ok(filter)
 }
 
 /// Handle the `react` tool: add or remove an emoji reaction.
