@@ -4,6 +4,7 @@ import {
   Notice,
   Plugin,
   PluginSettingTab,
+  requestUrl,
   type WorkspaceLeaf,
 } from "obsidian";
 import { createElement } from "react";
@@ -14,6 +15,7 @@ import { SettingsTab } from "./components/settings/SettingsTab";
 import { BackendContext } from "./hooks/useBackend";
 import { PluginContext } from "./hooks/usePlugin";
 import { PortalContainerContext } from "./hooks/usePortalContainer";
+import { detectNewUpdates, type ReleasesFetcher, type UpdateComponent } from "./lib/githubReleases";
 import { snapAfterCommentBlock } from "./lib/line-snap";
 // import { commentWidgetPlugin } from "./editor/commentWidget";
 // import { remarginPostProcessor } from "./editor/readingModeProcessor";
@@ -21,6 +23,48 @@ import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
 
 export const VIEW_TYPE_REMARGIN = "remargin-sidebar";
+
+/** How long a startup update Notice stays on screen. */
+const UPDATE_NOTICE_MS = 8000;
+
+/**
+ * Human-readable name for each component shown in the Notice. Kept next
+ * to the Notice call site so future copy changes live in one place.
+ */
+const COMPONENT_LABELS: Record<UpdateComponent, string> = {
+  plugin: "plugin",
+  cli: "CLI",
+};
+
+/**
+ * Adapter that turns Obsidian's CORS-free `requestUrl` into the
+ * `ReleasesFetcher` shape the update-check pipeline consumes. Extracted
+ * so tests can inject a pure in-memory stub without touching Obsidian.
+ */
+const obsidianReleasesFetcher: ReleasesFetcher = async (url) => {
+  try {
+    const response = await requestUrl({
+      url,
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "remargin-obsidian",
+      },
+      throw: false,
+    });
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      body: response.text ?? "",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      body: err instanceof Error ? err.message : "requestUrl failed",
+    };
+  }
+};
 
 class RemarginView extends ItemView {
   private root: Root | null = null;
@@ -224,6 +268,59 @@ export default class RemarginPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.activateView();
     });
+
+    // Kick off the version probe after the vault is ready. Runs entirely
+    // in the background: any failure is folded into the check-failed
+    // status and never bubbles up as an error Notice.
+    void this.runUpdateCheck(false);
+  }
+
+  /**
+   * Run the GitHub-releases update check and persist the result. Fires a
+   * single unobtrusive Notice per component that transitioned to
+   * `update-available` since the last cached snapshot.
+   *
+   * Honors the `checkForUpdates` settings toggle: when off, no fetcher
+   * is invoked and no Notice fires. `force=true` bypasses both the cache
+   * TTL and the toggle (used by the Settings "Check now" button — rem-9trw).
+   */
+  async runUpdateCheck(force: boolean): Promise<void> {
+    if (!force && !this.settings.checkForUpdates) return;
+    const installedPlugin = this.manifest.version;
+    const before = this.settings.updateCheck;
+    let after;
+    try {
+      after = await this.backend.checkForUpdates({
+        force,
+        installedPlugin,
+        fetcher: obsidianReleasesFetcher,
+        cache: before,
+      });
+    } catch {
+      // The backend wrapper is supposed to swallow errors, but guard the
+      // call site too so an unexpected bug can't crash `onload`.
+      return;
+    }
+    // Short-circuit: cache was fresh and the wrapper returned it unchanged.
+    if (after === before) return;
+
+    // Persist through saveSettings so the backend's in-memory copy stays
+    // in sync (it reads from the same settings object).
+    await this.saveSettings({ ...this.settings, updateCheck: after });
+
+    // Only fire Notices on the passive (non-forced) path so the Settings
+    // "Check now" button — which renders its own inline status — does
+    // not double-surface.
+    if (force) return;
+    const newlyAvailable = detectNewUpdates(before, after);
+    for (const component of newlyAvailable) {
+      const check = after[component];
+      if (!check.latest) continue;
+      new Notice(
+        `Remargin ${COMPONENT_LABELS[component]} ${check.latest} available — open Settings → Updates`,
+        UPDATE_NOTICE_MS
+      );
+    }
   }
 
   async loadSettings() {

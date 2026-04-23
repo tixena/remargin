@@ -13,11 +13,13 @@ import {
   SearchMatch$Schema,
 } from "@/generated";
 import { expandPath } from "@/lib/expandPath";
+import type { ReleasesFetcher, UpdateCheckState } from "@/lib/githubReleases";
 import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
 import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
 import { IDENTITY_ACCEPTING_SUBCOMMANDS } from "./identityAcceptingSubcommands";
+import { performUpdateCheck } from "./performUpdateCheck";
 import type {
   BatchCommentOp,
   CommentOpts,
@@ -283,6 +285,29 @@ export class RemarginBackend {
       skipIdentity: true,
     });
     return raw.trim();
+  }
+
+  /**
+   * Run a version-check against the remargin GitHub releases feed.
+   *
+   * Thin method wrapper around the standalone `performUpdateCheck`
+   * helper (see `./performUpdateCheck.ts`) so callers working with a
+   * `RemarginBackend` instance do not have to thread the CLI-version
+   * probe themselves. The standalone helper exists because the
+   * test-runner's strip-only TypeScript loader cannot parse this class's
+   * parameter-property constructor, so tests import the helper directly.
+   */
+  async checkForUpdates(args: {
+    force: boolean;
+    installedPlugin: string;
+    fetcher: ReleasesFetcher;
+    cache?: UpdateCheckState;
+    now?: () => Date;
+  }): Promise<UpdateCheckState> {
+    return performUpdateCheck({
+      ...args,
+      cliVersion: () => this.version(),
+    });
   }
 
   /**

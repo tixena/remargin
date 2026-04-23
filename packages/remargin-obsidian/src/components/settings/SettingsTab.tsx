@@ -353,6 +353,35 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
 
         <Separator />
 
+        <SettingsField
+          label="Check for updates"
+          description="Once a day on plugin load, check GitHub for newer Remargin plugin or CLI releases. Surfaces a short Notice when a new version appears. Turn this off to disable all outbound network traffic from the update probe."
+        >
+          <ToggleGroup
+            type="single"
+            value={current.checkForUpdates ? "on" : "off"}
+            onValueChange={(value) => {
+              if (value) update("checkForUpdates", value === "on");
+            }}
+            className="w-full"
+          >
+            <ToggleGroupItem
+              value="on"
+              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
+            >
+              On
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="off"
+              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
+            >
+              Off
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </SettingsField>
+
+        <Separator />
+
         <div className="flex items-center gap-3">
           <Button
             onClick={handleTestCli}
