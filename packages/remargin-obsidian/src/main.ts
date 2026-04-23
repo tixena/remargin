@@ -136,6 +136,10 @@ class RemarginSettingTab extends PluginSettingTab {
           createElement(SettingsTab, {
             settings: this.plugin.settings,
             onSave: (s: RemarginSettings) => this.plugin.saveSettings(s),
+            onCheckUpdates: async () => {
+              await this.plugin.runUpdateCheck(true);
+              return this.plugin.settings;
+            },
           })
         )
       )
@@ -283,6 +287,10 @@ export default class RemarginPlugin extends Plugin {
    * Honors the `checkForUpdates` settings toggle: when off, no fetcher
    * is invoked and no Notice fires. `force=true` bypasses both the cache
    * TTL and the toggle (used by the Settings "Check now" button — rem-9trw).
+   *
+   * Returns nothing — the caller reads `this.settings.updateCheck` for
+   * the freshest snapshot (the SettingsTab re-reads settings through
+   * `onSave` + display re-mount on the next open).
    */
   async runUpdateCheck(force: boolean): Promise<void> {
     if (!force && !this.settings.checkForUpdates) return;

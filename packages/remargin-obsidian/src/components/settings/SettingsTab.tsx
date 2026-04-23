@@ -16,10 +16,19 @@ import { expandPath } from "@/lib/expandPath";
 import { type FilePickerFilter, isFilePickerAvailable, pickFile } from "@/lib/pickFile";
 import type { RemarginSettings } from "@/types";
 import { SettingsField } from "./SettingsField";
+import { UpdatesSection } from "./UpdatesSection";
 
 interface SettingsTabProps {
   settings: RemarginSettings;
   onSave: (settings: RemarginSettings) => void;
+  /**
+   * Force a GitHub-releases update probe and return the fresh settings
+   * snapshot. Delegates to `RemarginPlugin.runUpdateCheck(true)` so cache
+   * invalidation and persistence stay consolidated inside the plugin —
+   * the settings tab only owns the "user clicked Check now" trigger and
+   * re-seeds its local state with the returned settings.
+   */
+  onCheckUpdates: () => Promise<RemarginSettings>;
 }
 
 type TestState = "idle" | "loading" | "success" | "error";
@@ -109,7 +118,7 @@ const MODE_OPTIONS: readonly ModeValue[] = ["open", "registered", "strict"];
 const isModeValue = (value: string): value is ModeValue =>
   (MODE_OPTIONS as readonly string[]).includes(value);
 
-export function SettingsTab({ settings, onSave }: SettingsTabProps) {
+export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabProps) {
   const backend = useBackend();
   const [current, setCurrent] = useState(settings);
   const [testState, setTestState] = useState<TestState>("idle");
@@ -248,6 +257,19 @@ export function SettingsTab({ settings, onSave }: SettingsTabProps) {
             className="font-mono text-sm bg-bg-primary border-bg-border"
           />
         </SettingsField>
+
+        <Separator />
+
+        <UpdatesSection
+          state={current.updateCheck}
+          onCheckNow={async () => {
+            const next = await onCheckUpdates();
+            setCurrent(next);
+          }}
+          onUpdatePlugin={() => backend.installPluginToVault()}
+        />
+
+        <Separator />
 
         <SettingsField
           label="Sidebar side"

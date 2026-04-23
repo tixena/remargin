@@ -288,6 +288,41 @@ export class RemarginBackend {
   }
 
   /**
+   * Trigger the plugin's self-update flow by shelling out to
+   * `remargin obsidian install --vault-path <vault>`.
+   *
+   * The CLI subcommand is responsible for re-staging `main.js`,
+   * `manifest.json`, and `styles.css` into this vault's
+   * `.obsidian/plugins/remargin/` directory. It is idempotent by design
+   * (per rem-3c9p: install commands succeed even if already registered).
+   *
+   * Returns `{ ok: true }` on exit code 0. On non-zero exit (or
+   * missing subcommand during the transition period before rem-s7fc
+   * lands) the stderr tail is surfaced verbatim so the UI Notice can
+   * echo the CLI's own error.
+   *
+   * `--vault-path` resolves identically to `exec`'s `cwd` so the CLI
+   * mutates the same vault the plugin is running in, regardless of the
+   * user's `workingDirectory` setting.
+   */
+  async installPluginToVault(): Promise<{ ok: boolean; stderr: string }> {
+    const cwd = expandPath(this.settings.workingDirectory) || this.vaultPath;
+    try {
+      await this.exec(["obsidian", "install", "--vault-path", cwd], {
+        useJson: false,
+        skipIdentity: true,
+        timeout: 60000,
+      });
+      return { ok: true, stderr: "" };
+    } catch (err) {
+      return {
+        ok: false,
+        stderr: err instanceof Error ? err.message : "plugin install failed",
+      };
+    }
+  }
+
+  /**
    * Run a version-check against the remargin GitHub releases feed.
    *
    * Thin method wrapper around the standalone `performUpdateCheck`
