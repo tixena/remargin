@@ -30,6 +30,7 @@ function fixture(overrides: Partial<Comment>): Comment {
     id: "oi5",
     line: 0,
     reactions: {},
+    remargin_kind: [],
     reply_to: undefined,
     signature: undefined,
     thread: undefined,

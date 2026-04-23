@@ -17,6 +17,7 @@ import type { ExpandedComment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 import { useParticipants } from "@/hooks/useParticipants";
 import { authorLabel } from "@/lib/authorLabel";
+import { collectKinds, matchesKindFilter } from "@/lib/kindFilter";
 import type { ViewMode } from "@/types";
 
 /**
@@ -55,6 +56,20 @@ interface InboxSectionProps {
   refreshKey?: number;
   /** View mode owned by RemarginSidebar (persisted in plugin settings). */
   viewMode?: ViewMode;
+  /**
+   * Session-scoped `remargin_kind` filter lifted to RemarginSidebar so the
+   * same chip row applies across Inbox and Current-file. Empty array means
+   * no filter. Applied client-side after the fetch so the chip set stays
+   * in sync with the unfiltered visible data (see `onKindsDiscovered`).
+   */
+  kindFilter?: string[];
+  /**
+   * Fires whenever the loaded (pre-filter) items change, reporting the
+   * sorted, de-duplicated set of `remargin_kind` values present. The
+   * sidebar unions this with the thread section's set to drive the
+   * filter bar's chip row.
+   */
+  onKindsDiscovered?: (kinds: string[]) => void;
 }
 
 function errorMessage(err: unknown): string {
@@ -71,6 +86,8 @@ export function InboxSection({
   onOpenAtLine,
   refreshKey,
   viewMode = "tree",
+  kindFilter,
+  onKindsDiscovered,
 }: InboxSectionProps = {}) {
   const backend = useBackend();
   const [filter, setFilter] = useState<InboxFilter>("pending");
@@ -161,6 +178,26 @@ export function InboxSection({
     [filter]
   );
 
+  // Report the set of `remargin_kind` values present in the loaded
+  // (pre-filter) items so RemarginSidebar can build the chip row. We
+  // fire this on every `items` change — the parent memoizes the union
+  // across Inbox + Current-file to avoid chip flicker.
+  useEffect(() => {
+    if (!onKindsDiscovered) return;
+    onKindsDiscovered(collectKinds(items.map((i) => i.comment)));
+  }, [items, onKindsDiscovered]);
+
+  // Apply the kind filter client-side. The fetch itself is unfiltered
+  // so switching chips is instant (no CLI round-trip) and the chip
+  // set stays stable — if we filtered on the server and the user
+  // selected `question`, we'd never see the other kinds to offer
+  // chips for.
+  const visibleItems = useMemo(() => {
+    const active = kindFilter ?? [];
+    if (active.length === 0) return items;
+    return items.filter((i) => matchesKindFilter(i.comment.remargin_kind, active));
+  }, [items, kindFilter]);
+
   if (loading) {
     return <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>;
   }
@@ -240,19 +277,21 @@ export function InboxSection({
             <div className="font-semibold mb-1">Failed to load inbox</div>
             <div className="font-mono text-[10px]">{error}</div>
           </div>
-        ) : items.length === 0 ? (
+        ) : visibleItems.length === 0 ? (
           <div className="px-4 py-3 text-xs text-text-faint">
             {isSearching
               ? "No comments match your search."
-              : filter === "pending"
-                ? "No pending comments."
-                : "No comments found."}
+              : (kindFilter?.length ?? 0) > 0
+                ? "No comments match the selected kinds."
+                : filter === "pending"
+                  ? "No pending comments."
+                  : "No comments found."}
           </div>
         ) : viewMode === "tree" ? (
-          <InboxTree items={items} me={me} onOpenAtLine={onOpenAtLine} />
+          <InboxTree items={visibleItems} me={me} onOpenAtLine={onOpenAtLine} />
         ) : (
           <div className="flex flex-col min-w-0">
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <InboxFlatRow
                 key={`${item.file}:${item.comment.id}`}
                 item={item}

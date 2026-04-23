@@ -3,11 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
 import { InlineReplyEditor } from "@/components/sidebar/InlineReplyEditor";
+import { KindFilterBar } from "@/components/sidebar/KindFilterBar";
 import { PromptSection } from "@/components/sidebar/PromptSection";
 import { SandboxSection } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
 import { ViewToggle } from "@/components/sidebar/ViewToggle";
+import { pruneKindFilter } from "@/lib/kindFilter";
 import { openFileAtLine } from "@/lib/openFile";
 import type RemarginPlugin from "@/main";
 import type { ViewMode } from "@/types";
@@ -43,6 +45,14 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sandboxView, setSandboxViewState] = useState<ViewMode>(plugin.settings.sandboxView);
   const [inboxView, setInboxViewState] = useState<ViewMode>(plugin.settings.inboxView);
+  // Session-only remargin_kind filter (rem-u8br). Deliberately NOT
+  // persisted to plugin settings: opening the sidebar in a new session
+  // should always start with every comment visible. The two discovered-
+  // kinds buckets track what each section currently has loaded so the
+  // chip row reflects the union across both.
+  const [kindFilter, setKindFilter] = useState<string[]>([]);
+  const [inboxKinds, setInboxKinds] = useState<string[]>([]);
+  const [threadKinds, setThreadKinds] = useState<string[]>([]);
 
   const bumpRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -63,6 +73,38 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     },
     [plugin]
   );
+
+  // Union of the two sections' discovered kinds, deduped and sorted
+  // case-insensitively. This is what the chip row renders; children
+  // already supply pre-sorted lists so a merge + re-sort is cheap.
+  const availableKinds = useMemo(() => {
+    if (inboxKinds.length === 0) return threadKinds;
+    if (threadKinds.length === 0) return inboxKinds;
+    const merged = new Set<string>();
+    for (const k of inboxKinds) merged.add(k);
+    for (const k of threadKinds) merged.add(k);
+    return Array.from(merged).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+  }, [inboxKinds, threadKinds]);
+
+  // When the visible data shrinks (switching files, inbox toggled from
+  // All to Pending, etc.) drop any selection that is no longer offered.
+  // Otherwise the chip row shows nothing active but the filter keeps
+  // hiding comments — confusing and sticky.
+  useEffect(() => {
+    setKindFilter((prev) => pruneKindFilter(prev, availableKinds));
+  }, [availableKinds]);
+
+  // Switching to a no-file state (or a different file) must clear the
+  // previous file's discovered kinds, otherwise the chip row keeps
+  // advertising tags that the inbox alone cannot back. ThreadedComments
+  // only mounts when `activeFile` is defined, so it can't push a reset
+  // itself — we do it here in the one place that knows about the
+  // transition.
+  useEffect(() => {
+    if (!activeFile) setThreadKinds([]);
+  }, [activeFile]);
 
   // Keep `activeFile` in sync with the workspace so the file-named section and
   // the inline composer always target whichever markdown file the user last
@@ -210,6 +252,15 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
           onOpenAtLine={handleOpenAtLine}
           refreshKey={refreshKey}
           viewMode={inboxView}
+          kindFilter={kindFilter}
+          onKindsDiscovered={setInboxKinds}
+        />
+      }
+      filterBar={
+        <KindFilterBar
+          availableKinds={availableKinds}
+          selected={kindFilter}
+          onChange={setKindFilter}
         />
       }
       threadInlineEditor={composeEditor}
@@ -227,6 +278,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
             }}
             replyTarget={replyTarget}
             replyEditor={replyEditor}
+            kindFilter={kindFilter}
+            onKindsDiscovered={setThreadKinds}
           />
         ) : undefined
       }

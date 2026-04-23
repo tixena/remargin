@@ -4,6 +4,7 @@ import { findRadixScrollViewport } from "@/components/sidebar/scrollViewport";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Comment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
+import { collectKinds, matchesKindFilter } from "@/lib/kindFilter";
 
 interface ThreadedCommentsProps {
   file: string;
@@ -31,6 +32,19 @@ interface ThreadedCommentsProps {
    * thread can slot it in at the right place.
    */
   replyEditor?: React.ReactNode;
+  /**
+   * Session-scoped `remargin_kind` filter owned by RemarginSidebar. Empty
+   * array means no filter. OR semantics: a comment stays visible when at
+   * least one of its kinds is in this list. Orphaned replies (parent
+   * filtered out) float up to root so the user still sees the response.
+   */
+  kindFilter?: string[];
+  /**
+   * Fires whenever the loaded (pre-filter) comments change, reporting the
+   * sorted, de-duplicated set of `remargin_kind` values present. Parent
+   * unions this with the Inbox section's set to drive the chip row.
+   */
+  onKindsDiscovered?: (kinds: string[]) => void;
 }
 
 interface ThreadNode {
@@ -78,6 +92,8 @@ export function ThreadedComments({
   refreshKey,
   replyTarget,
   replyEditor,
+  kindFilter,
+  onKindsDiscovered,
 }: ThreadedCommentsProps) {
   const backend = useBackend();
   const [comments, setComments] = useState<Comment[]>([]);
@@ -175,7 +191,25 @@ export function ThreadedComments({
     };
   }, [backend]);
 
-  const threads = useMemo(() => buildThreadTree(comments), [comments]);
+  // Report the set of `remargin_kind` values present in the loaded
+  // (pre-filter) comments so RemarginSidebar can build the chip row.
+  useEffect(() => {
+    if (!onKindsDiscovered) return;
+    onKindsDiscovered(collectKinds(comments));
+  }, [comments, onKindsDiscovered]);
+
+  // Apply the kind filter client-side. Filtering at the comment level
+  // (not thread level) matches the CLI semantics and lets a reply that
+  // carries the filtered kind stay visible even when its parent does
+  // not. Orphans naturally float up to root via `buildThreadTree`
+  // because it treats a missing `reply_to` parent as "no parent".
+  const visibleComments = useMemo(() => {
+    const active = kindFilter ?? [];
+    if (active.length === 0) return comments;
+    return comments.filter((c) => matchesKindFilter(c.remargin_kind, active));
+  }, [comments, kindFilter]);
+
+  const threads = useMemo(() => buildThreadTree(visibleComments), [visibleComments]);
 
   const handleAck = useCallback(
     async (id: string, remove: boolean) => {
@@ -244,9 +278,10 @@ export function ThreadedComments({
   }
 
   if (threads.length === 0) {
+    const filtered = comments.length > 0 && (kindFilter?.length ?? 0) > 0;
     return (
       <div ref={rootRef} className="px-4 py-3 text-xs text-text-faint">
-        No comments in this file.
+        {filtered ? "No comments match the selected kinds." : "No comments in this file."}
       </div>
     );
   }
