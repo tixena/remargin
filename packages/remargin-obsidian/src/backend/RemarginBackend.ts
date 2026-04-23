@@ -17,6 +17,7 @@ import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
 import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
+import { IDENTITY_ACCEPTING_SUBCOMMANDS } from "./identityAcceptingSubcommands";
 import type {
   BatchCommentOp,
   CommentOpts,
@@ -30,22 +31,10 @@ import type {
   WriteOpts,
 } from "./types";
 
-const IDENTITY_ACCEPTING_SUBCOMMANDS = new Set([
-  "ack",
-  "batch",
-  "comment",
-  "delete",
-  "edit",
-  "migrate",
-  "plan",
-  "purge",
-  "react",
-  "rm",
-  "sandbox",
-  "sign",
-  "verify",
-  "write",
-]);
+// `IDENTITY_ACCEPTING_SUBCOMMANDS` lives in its own file
+// (`identityAcceptingSubcommands.ts`) so tests can import it without
+// pulling in this module, whose TypeScript parameter-property
+// constructor the test runner's strip-only loader cannot parse.
 
 /**
  * The CLI wraps its payload in an object that also contains timing metadata
@@ -343,10 +332,24 @@ export class RemarginBackend {
     return parsed;
   }
 
+  /**
+   * Ask the CLI which identity is active under the plugin's current
+   * settings. Post rem-3dw0 the `identity` subcommand honors the full
+   * `IdentityArgs` group, so forwarding `buildIdentityArgs(settings)`
+   * keeps this read path aligned with every mutating op — without it
+   * the plugin would pick up the nearest walked `.remargin.yaml`
+   * instead of the config file the user pointed settings at, and
+   * `me` would disagree with the identity writes land under. That
+   * mismatch flipped the ack UI (AckToggle vs AckButton) — see
+   * rem-3dw0 for the full trace.
+   *
+   * `type` still narrows the branch-3 walk filter in manual mode
+   * (when the plugin has not been pointed at a config file).
+   */
   async identity(type?: "human" | "agent"): Promise<IdentityInfo> {
     const args: string[] = ["identity"];
     if (type) args.push("--type", type);
-    const raw = await this.exec(args, { skipIdentity: true });
+    const raw = await this.exec(args);
     const parsed = JSON.parse(raw) as IdentityInfo;
     return parsed;
   }

@@ -83,6 +83,7 @@ fn make_config(mode: Mode, identity: &str, key_path: Option<&str>) -> ResolvedCo
         key_path: key_path.map(PathBuf::from),
         mode,
         registry: Some(registry_with_alice_pubkey()),
+        source_path: None,
         unrestricted: false,
     }
 }

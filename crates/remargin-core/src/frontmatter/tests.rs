@@ -24,6 +24,7 @@ fn test_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        source_path: None,
         unrestricted: false,
     }
 }
@@ -229,6 +230,7 @@ fn no_identity_no_author() {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        source_path: None,
         unrestricted: false,
     };
     let mut mapping = Mapping::new();

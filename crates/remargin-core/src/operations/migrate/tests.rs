@@ -54,6 +54,7 @@ fn open_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        source_path: None,
         unrestricted: false,
     }
 }
@@ -86,6 +87,7 @@ fn strict_config() -> ResolvedConfig {
         key_path: Some(PathBuf::from("/keys/ed25519")),
         mode: Mode::Strict,
         registry: Some(registry_with_alice_and_botty()),
+        source_path: None,
         unrestricted: false,
     }
 }
@@ -103,6 +105,7 @@ fn registered_config() -> ResolvedConfig {
         key_path: Some(PathBuf::from("/keys/ed25519")),
         mode: Mode::Registered,
         registry: Some(registry_with_alice_and_botty()),
+        source_path: None,
         unrestricted: false,
     }
 }

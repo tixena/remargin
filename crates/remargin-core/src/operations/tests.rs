@@ -133,6 +133,7 @@ fn open_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        source_path: None,
         unrestricted: false,
     }
 }
@@ -174,6 +175,7 @@ participants:
         key_path: Some(PathBuf::from("/keys/ed25519")),
         mode: Mode::Open,
         registry: Some(registry),
+        source_path: None,
         unrestricted: false,
     }
 }

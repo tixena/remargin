@@ -31,6 +31,7 @@ mod tests {
         ("comment", &["a.md", "hi"]),
         ("delete", &["a.md", "foo"]),
         ("edit", &["a.md", "foo", "content"]),
+        ("identity", &[]),
         ("mcp", &[]),
         ("migrate", &["a.md"]),
         ("plan", &["comment", "a.md", "hi"]),

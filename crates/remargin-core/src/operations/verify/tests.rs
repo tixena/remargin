@@ -83,6 +83,7 @@ fn make_config(mode: Mode, registry: Option<Registry>) -> ResolvedConfig {
         key_path: None,
         mode,
         registry,
+        source_path: None,
         unrestricted: false,
     }
 }

@@ -296,16 +296,24 @@ enum Commands {
         #[command(flatten)]
         unrestricted_args: UnrestrictedArgs,
     },
-    /// Resolve and print the identity config for a given type.
+    /// Resolve and print the effective identity under the supplied
+    /// [`IdentityArgs`].
     ///
-    /// Walks up from the current directory to find the first matching
-    /// `.remargin.yaml`, filtered by `--type` (e.g. `human` or `agent`).
-    /// Prints JSON to stdout. Useful for tooling that wants to detect the
-    /// human's personal config without passing through all CLI flags.
+    /// Routes through the same three-branch resolver every mutating
+    /// subcommand uses (see rem-58d6):
+    ///
+    /// - `--config <path>` → branch 1: read that file.
+    /// - `--identity` + `--type` (+ `--key` when strict) → branch 2: manual.
+    /// - Otherwise → branch 3: walk up from the current directory, with
+    ///   any of `--identity`/`--type`/`--key` that are set acting as a
+    ///   strict-equality filter.
+    ///
+    /// Useful for tooling (and the Obsidian plugin) that wants the CLI
+    /// to tell it which identity is active under the same flag set that
+    /// the next mutating op would run under. Prints JSON to stdout.
     Identity {
-        /// Author type filter: `human`, `agent`, etc. If omitted, returns the first config found.
-        #[arg(long = "type")]
-        author_type: Option<String>,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1336,7 +1344,11 @@ fn build_identity_flags(
 
 /// A handful of subcommands run entirely without a [`ResolvedConfig`]
 /// (`Version`, `Identity`, `ResolveMode`, `Keygen`, `Skill`, `Obsidian`).
-/// Returning `true` here short-circuits the config load in [`run`].
+/// `Identity` is a read-only diagnostic — it calls
+/// [`config::ResolvedConfig::resolve`] inside its own handler so a
+/// branch-3 walk miss surfaces as `{ "found": false }` instead of
+/// bailing the whole process (rem-3dw0). Returning `true` here
+/// short-circuits the config load in [`run`].
 const fn subcommand_is_config_free(cmd: &Commands) -> bool {
     match cmd {
         Commands::Version
@@ -1375,8 +1387,8 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
 /// Fetch the [`IdentityArgs`] flatten for subcommands that declare one.
 ///
 /// Subcommands that do not resolve identity (lint, query, search, ls,
-/// get, metadata, registry, comments, version, keygen, identity,
-/// resolve-mode, skill, obsidian) return `None`; callers use the
+/// get, metadata, registry, comments, version, keygen, resolve-mode,
+/// skill, obsidian) return `None`; callers use the
 /// [`IdentityArgs::default`] to build an empty [`IdentityFlags`].
 const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
     match cmd {
@@ -1385,6 +1397,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Comment { identity_args, .. }
         | Commands::Delete { identity_args, .. }
         | Commands::Edit { identity_args, .. }
+        | Commands::Identity { identity_args, .. }
         | Commands::Mcp { identity_args, .. }
         | Commands::Migrate { identity_args, .. }
         | Commands::Plan { identity_args, .. }
@@ -1397,7 +1410,6 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Write { identity_args, .. } => Some(identity_args),
         Commands::Comments { .. }
         | Commands::Get { .. }
-        | Commands::Identity { .. }
         | Commands::Keygen { .. }
         | Commands::Lint { .. }
         | Commands::Ls { .. }
@@ -1508,10 +1520,10 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             return Ok(());
         }
         Commands::Identity {
-            author_type,
+            identity_args,
             output_args,
         } => {
-            return cmd_identity(system, cwd, author_type.as_deref(), output_args.json);
+            return cmd_identity(system, cwd, identity_args, output_args.json);
         }
         Commands::ResolveMode {
             cwd: cwd_arg,
@@ -2139,44 +2151,96 @@ fn cmd_get_binary(
         .context("writing bytes to stdout")
 }
 
+/// Resolve and print the identity the CLI's active flag set produces.
+///
+/// Routes through the same [`ResolvedConfig::resolve`][config::ResolvedConfig::resolve]
+/// every mutating op uses, so `remargin identity --config <path>` (or
+/// `--identity` + `--type` manual, or a `--type`-filtered walk) returns
+/// the same identity the next write would attribute to (rem-3dw0).
+///
+/// A branch-3 walk that cannot match the supplied filters is treated as
+/// "nothing found" rather than an error: the JSON output collapses to
+/// `{ "found": false }`, preserving the historical read-only-diagnostic
+/// contract and letting the Obsidian plugin call this during startup
+/// without having to special-case transient "no config yet" states.
+/// Other resolver errors (unknown type strings, strict-mode registry
+/// misses, etc.) still propagate.
 fn cmd_identity(
     system: &dyn System,
     cwd: &Path,
-    author_type: Option<&str>,
+    identity_args: &IdentityArgs,
     json_mode: bool,
 ) -> Result<()> {
-    let found = config::load_config_filtered_with_path(system, cwd, author_type)?;
-    let value = match &found {
-        Some((path, cfg)) => json!({
-            "found": true,
-            "path": path.display().to_string(),
-            "identity": cfg.identity,
-            "author_type": cfg.author_type,
-            "key": cfg.key,
-            "mode": format!("{:?}", cfg.mode).to_lowercase(),
-        }),
-        None => json!({ "found": false }),
-    };
-    if json_mode {
-        print_output(true, &value)?;
-    } else {
-        match &found {
-            Some((path, cfg)) => {
-                eprintln!("Found config: {}", path.display());
-                if let Some(id) = &cfg.identity {
-                    eprintln!("Identity:     {id}");
-                }
-                if let Some(t) = &cfg.author_type {
-                    eprintln!("Type:         {t}");
-                }
-                if let Some(k) = &cfg.key {
-                    eprintln!("Key:          {k}");
-                }
-            }
-            None => eprintln!("No identity config found."),
+    let (flags, _assets_dir) = build_identity_flags(system, identity_args, None)?;
+    match ResolvedConfig::resolve(system, cwd, &flags, None) {
+        Ok(cfg) => render_identity(&cfg, json_mode),
+        Err(err) if flags.is_empty() || looks_like_walk_miss(&err) => {
+            // Walk-based "no matching config" is a soft miss on a
+            // read-only diagnostic. Emit `found: false` and exit
+            // cleanly so tooling that polls identity during startup
+            // (the Obsidian plugin, rem-3dw0) does not see a hard
+            // error for the "no config yet" state.
+            render_identity_not_found(json_mode)
         }
+        Err(err) => Err(err),
     }
+}
+
+fn render_identity(config: &ResolvedConfig, json_mode: bool) -> Result<()> {
+    let Some(identity) = config.identity.as_deref() else {
+        return render_identity_not_found(json_mode);
+    };
+    let author_type_str = config
+        .author_type
+        .as_ref()
+        .map(|t| String::from(t.as_str()));
+    let key_display = config.key_path.as_ref().map(|p| p.display().to_string());
+    let path_display = config.source_path.as_ref().map(|p| p.display().to_string());
+
+    if json_mode {
+        return print_output(
+            true,
+            &json!({
+                "found": true,
+                "path": path_display,
+                "identity": identity,
+                "author_type": author_type_str,
+                "key": key_display,
+                "mode": config.mode.as_str(),
+            }),
+        );
+    }
+
+    if let Some(p) = &path_display {
+        eprintln!("Found config: {p}");
+    }
+    eprintln!("Identity:     {identity}");
+    if let Some(t) = &author_type_str {
+        eprintln!("Type:         {t}");
+    }
+    if let Some(k) = &key_display {
+        eprintln!("Key:          {k}");
+    }
+    eprintln!("Mode:         {}", config.mode.as_str());
     Ok(())
+}
+
+fn render_identity_not_found(json_mode: bool) -> Result<()> {
+    if json_mode {
+        return print_output(true, &json!({ "found": false }));
+    }
+    eprintln!("No identity config found.");
+    Ok(())
+}
+
+/// Cheap heuristic for the branch-3 walk-exhaust error message emitted
+/// by `resolve_identity`. Used by `cmd_identity` to distinguish "walk
+/// didn't match" (soft — map to `found: false`) from every other
+/// resolver error (hard — propagate).
+fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
+    let msg = format!("{err:#}");
+    msg.contains("no identity resolved")
+        || msg.contains("no .remargin.yaml matched the supplied filters")
 }
 
 fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<()> {

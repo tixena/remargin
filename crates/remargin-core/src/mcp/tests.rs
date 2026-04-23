@@ -84,6 +84,7 @@ fn test_config() -> ResolvedConfig {
         key_path: None,
         mode: Mode::Open,
         registry: None,
+        source_path: None,
         unrestricted: false,
     }
 }

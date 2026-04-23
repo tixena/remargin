@@ -76,6 +76,15 @@ pub struct ResolvedConfig {
     pub key_path: Option<PathBuf>,
     pub mode: Mode,
     pub registry: Option<Registry>,
+    /// Path to the `.remargin.yaml` that declared the identity. `Some`
+    /// for branch-1 (`--config`) and branch-3 (walk) resolutions;
+    /// `None` for branch-2 (manual declaration via
+    /// `--identity`/`--type`/`--key`) and for the no-config fallback
+    /// used by read-only invocations in directories that lack a config
+    /// file entirely. Exposed so the `remargin identity` JSON output
+    /// (and any tooling that wants to report provenance) can name the
+    /// file without re-walking.
+    pub source_path: Option<PathBuf>,
     /// Only settable via CLI when compiled with `--features unrestricted`.
     pub unrestricted: bool,
 }
@@ -174,11 +183,18 @@ impl ResolvedConfig {
         } else {
             let resolved =
                 identity::resolve_identity(system, cwd, &mode, flags, registry.as_ref())?;
+            let source_path = match &resolved.source {
+                identity::IdentitySource::ConfigFlag(p) | identity::IdentitySource::Walk(p) => {
+                    Some(p.clone())
+                }
+                identity::IdentitySource::Manual => None,
+            };
             WalkedIdentityFields {
                 author_type: Some(resolved.author_type),
                 identity: Some(resolved.identity),
                 key_path: resolved.key_path,
                 source_config: resolved.source_config,
+                source_path,
             }
         };
 
@@ -201,6 +217,7 @@ impl ResolvedConfig {
             key_path: fields.key_path,
             mode,
             registry,
+            source_path: fields.source_path,
             unrestricted: false,
         };
 
@@ -293,6 +310,7 @@ struct WalkedIdentityFields {
     identity: Option<String>,
     key_path: Option<PathBuf>,
     source_config: Option<Config>,
+    source_path: Option<PathBuf>,
 }
 
 fn default_assets_dir() -> String {
@@ -334,6 +352,7 @@ fn resolve_fields_from_walk(system: &dyn System, cwd: &Path) -> Result<WalkedIde
         identity,
         key_path,
         source_config: Some(config),
+        source_path: Some(path),
     })
 }
 

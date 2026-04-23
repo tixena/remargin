@@ -318,6 +318,49 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
         );
     }
 
+    // ---------- identity (read-only diagnostic) ----------
+
+    #[test]
+    fn identity_reports_config_declaration() {
+        // rem-3dw0: `identity --config <path>` must return the identity
+        // declared in that file, not whatever the walk-up finds. This
+        // is the regression the Obsidian plugin hits: its `me` is
+        // driven by `backend.identity()` and must agree with the
+        // identity mutating ops are writing under.
+        let (_tmp, walker, flag_config) = two_realms();
+        let flag_path = String::from(flag_config.to_string_lossy());
+
+        // Walk-up sanity: from inside walker the bare `identity` call
+        // must report walker-agent (the nearer config).
+        let baseline = run_ok(&walker, &["identity", "--json"]);
+        let baseline_json: Value = serde_json::from_str(&baseline).unwrap();
+        assert_eq!(
+            baseline_json["identity"].as_str(),
+            Some("walker-agent"),
+            "walk-up from walker must pick up walker-agent; got: {baseline_json}"
+        );
+
+        // With --config pointing at the flag realm, the same invocation
+        // must now return flag-agent.
+        let via_flag = run_ok(&walker, &["identity", "--config", &flag_path, "--json"]);
+        let via_flag_json: Value = serde_json::from_str(&via_flag).unwrap();
+        assert_eq!(
+            via_flag_json["identity"].as_str(),
+            Some("flag-agent"),
+            "--config must steer identity resolution; got: {via_flag_json}"
+        );
+        assert_eq!(
+            via_flag_json["author_type"].as_str(),
+            Some("agent"),
+            "author_type must follow --config's declaration; got: {via_flag_json}"
+        );
+        assert_eq!(
+            via_flag_json["path"].as_str(),
+            Some(flag_path.as_str()),
+            "path must name the --config file; got: {via_flag_json}"
+        );
+    }
+
     // ---------- verify ----------
 
     #[test]
