@@ -209,6 +209,10 @@ fn initialize_returns_capabilities() {
 }
 
 #[test]
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "roll-call of every registered tool; adding one `names.contains` per tool is the clearest form"
+)]
 fn tools_list_returns_all_tools() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
@@ -227,7 +231,7 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 23_usize);
+    assert_eq!(tools.len(), 24_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -254,6 +258,7 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"sandbox_add"));
     assert!(names.contains(&"sandbox_remove"));
     assert!(names.contains(&"sandbox_list"));
+    assert!(names.contains(&"identity_create"));
 }
 
 #[test]
@@ -3047,4 +3052,169 @@ fn mcp_query_pending_for_me_errors_without_identity() {
         msg.contains("pending_for_me") || msg.contains("identity"),
         "expected identity diagnostic, got: {msg}"
     );
+}
+
+// ===========================================================================
+// identity_create MCP tests (rem-8cnc)
+// ===========================================================================
+
+#[test]
+fn mcp_identity_create_minimal_returns_yaml() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "identity_create",
+                "arguments": {
+                    "identity": "alice",
+                    "type": "human"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["identity"].as_str().unwrap(), "alice");
+    assert_eq!(result["type"].as_str().unwrap(), "human");
+    assert!(result["key"].is_null());
+    assert_eq!(
+        result["yaml"].as_str().unwrap(),
+        "identity: alice\ntype: human\n"
+    );
+}
+
+#[test]
+fn mcp_identity_create_with_key() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "identity_create",
+                "arguments": {
+                    "identity": "bot",
+                    "type": "agent",
+                    "key": "mykey"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["identity"].as_str().unwrap(), "bot");
+    assert_eq!(result["type"].as_str().unwrap(), "agent");
+    assert_eq!(result["key"].as_str().unwrap(), "mykey");
+    assert_eq!(
+        result["yaml"].as_str().unwrap(),
+        "identity: bot\ntype: agent\nkey: mykey\n"
+    );
+}
+
+#[test]
+fn mcp_identity_create_rejects_invalid_type() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "identity_create",
+                "arguments": {
+                    "identity": "alice",
+                    "type": "martian"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let msg = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        msg.contains("martian") || msg.contains("author type"),
+        "expected author-type diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn mcp_identity_create_yaml_never_contains_mode() {
+    // Parity with the CLI: mode is tree-level, never identity-scoped.
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "identity_create",
+                "arguments": {
+                    "identity": "alice",
+                    "type": "human",
+                    "key": "mykey"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let yaml = result["yaml"].as_str().unwrap();
+    assert!(
+        !yaml.contains("mode:"),
+        "identity_create yaml must not emit mode: got {yaml:?}"
+    );
+}
+
+#[test]
+fn mcp_identity_create_missing_identity_errors() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "identity_create",
+                "arguments": {
+                    "type": "human"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
 }

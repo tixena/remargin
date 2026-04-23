@@ -69,13 +69,27 @@ remargin version
 
 ### Initialize a Project
 
-Create a `.remargin.yaml` config file in your project root:
+Create a `.remargin.yaml` config file in your project root. The
+quickest path is `remargin identity create`, which prints a
+ready-to-use YAML block to stdout so you can redirect it into place:
+
+```bash
+remargin identity create --identity your-name --type human > .remargin.yaml
+
+# Or with a signing key for strict-mode realms:
+remargin identity create --identity your-name --type human --key ~/.ssh/remargin_key > .remargin.yaml
+```
+
+Under the hood the file looks like:
 
 ```yaml
 identity: your-name
 type: human
-mode: open
 ```
+
+`mode:` is a tree property — set it at the realm level, not inside
+the identity block. Enforcement modes and the registry file are
+covered in [Configuration](#configuration).
 
 ### Add a Comment to a Document
 
@@ -341,6 +355,8 @@ remargin [OPTIONS] <COMMAND>
 | `migrate` | Convert old-format inline comments to remargin format |
 | `purge` | Strip all comments from a document |
 | `keygen` | Generate a new Ed25519 signing key pair |
+| `identity` | Resolve and print the configured identity (also `identity show`). |
+| `identity create` | Print a ready-to-use identity YAML block to stdout for `.remargin.yaml`. |
 | `version` | Print version information |
 
 ### Integration

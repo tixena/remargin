@@ -123,6 +123,12 @@ Sandbox staging is a per-identity, per-file marker ("I am working on this") stor
 | `sandbox_remove` | Remove the caller's sandbox entry from one or more markdown files. Idempotent. |
 | `sandbox_list` | List markdown files in a directory that are currently staged for the caller's identity. |
 
+### Identity
+
+| Op | Purpose |
+|----|---------|
+| `identity_create` | Render a ready-to-use identity YAML block for `.remargin.yaml`. Returns `{identity, type, key, yaml}`. Caller writes the `yaml` field to disk themselves — rem-is4z bans agents writing to `.remargin.yaml` directly. `mode:` is never emitted (tree-level, not identity-scoped). |
+
 ### Search and quality
 
 | Op | Purpose |
@@ -152,7 +158,7 @@ These are user-facing setup tools and do not appear as MCP tools:
 - `registry` — manage the participant registry file.
 - `resolve-mode` — resolve the effective enforcement mode for a directory.
 - `skill` — manage the Claude Code skill (this file).
-- `identity` — resolve and print the configured identity.
+- `identity` — resolve and print the configured identity (`identity` or `identity show`). `identity create --identity NAME --type human|agent [--key PATH]` prints a ready-to-use identity YAML block to stdout (redirect into `.remargin.yaml`); mirrored as the `identity_create` MCP tool. No `--write` flag — rem-is4z bans writes to `.remargin.yaml`.
 - `version` — print version information.
 
 ## Agent-safety rules

@@ -296,22 +296,29 @@ enum Commands {
         #[command(flatten)]
         unrestricted_args: UnrestrictedArgs,
     },
-    /// Resolve and print the effective identity under the supplied
-    /// [`IdentityArgs`].
+    /// Resolve, print, or materialize an identity.
     ///
-    /// Routes through the same three-branch resolver every mutating
-    /// subcommand uses (see rem-58d6):
+    /// With no subcommand (or `show`), resolves and prints the
+    /// effective identity under the supplied [`IdentityArgs`] — the
+    /// pre-rem-8cnc diagnostic surface that tooling (Obsidian plugin,
+    /// scripts) polls on startup.
     ///
-    /// - `--config <path>` → branch 1: read that file.
-    /// - `--identity` + `--type` (+ `--key` when strict) → branch 2: manual.
-    /// - Otherwise → branch 3: walk up from the current directory, with
-    ///   any of `--identity`/`--type`/`--key` that are set acting as a
-    ///   strict-equality filter.
+    /// With `create`, prints a ready-to-use identity YAML block to
+    /// stdout so users can redirect into `.remargin.yaml`:
     ///
-    /// Useful for tooling (and the Obsidian plugin) that wants the CLI
-    /// to tell it which identity is active under the same flag set that
-    /// the next mutating op would run under. Prints JSON to stdout.
+    /// ```sh
+    /// remargin identity create --identity alice --type human > .remargin.yaml
+    /// ```
+    ///
+    /// Resolution for `show` routes through the same three-branch
+    /// resolver every mutating subcommand uses (see rem-58d6):
+    /// `--config` (branch 1), manual `--identity/--type/--key`
+    /// (branch 2), or walk-up (branch 3).
     Identity {
+        /// Subcommand. Omit to invoke `show` (backward-compatible
+        /// with the pre-rem-8cnc surface).
+        #[command(subcommand)]
+        action: Option<IdentityAction>,
         #[command(flatten)]
         identity_args: IdentityArgs,
         #[command(flatten)]
@@ -837,6 +844,45 @@ enum PlanAction {
 enum RegistryAction {
     /// Show the current registry.
     Show,
+}
+
+/// `remargin identity` subcommands (rem-8cnc). Default action
+/// (no subcommand) is `show` — the pre-rem-8cnc diagnostic surface.
+#[derive(clap::Subcommand)]
+enum IdentityAction {
+    /// Print a ready-to-use identity YAML block to stdout. Users
+    /// redirect to `.remargin.yaml` themselves (no `--write` flag —
+    /// rem-is4z bans writes to `.remargin.yaml`).
+    ///
+    /// `--identity` and `--type` are required; `--key` is optional
+    /// (valid in non-strict modes — pairs with `remargin keygen`).
+    /// `mode:` is never emitted because mode is a tree property
+    /// resolved by walk-up, not an identity-level declaration.
+    Create {
+        /// Identity (author name) to record.
+        #[arg(long)]
+        identity: String,
+        /// Author type (`human` or `agent`).
+        #[arg(long, value_name = "human|agent")]
+        r#type: String,
+        /// Optional path to the signing key. Emitted verbatim into
+        /// the YAML — no existence check (pairs with `remargin
+        /// keygen`). Bare names like `mykey` are fine; `.remargin.yaml`
+        /// resolves them against `~/.ssh/` at load time.
+        #[arg(long)]
+        key: Option<String>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Resolve and print the effective identity (pre-rem-8cnc
+    /// behavior). Kept as an explicit alternative to the bare
+    /// `remargin identity` form.
+    Show {
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
 }
 
 /// Sandbox subcommands.
@@ -1536,10 +1582,17 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             return Ok(());
         }
         Commands::Identity {
+            action,
             identity_args,
             output_args,
         } => {
-            return cmd_identity(system, cwd, identity_args, output_args.json);
+            return cmd_identity(
+                system,
+                cwd,
+                action.as_ref(),
+                identity_args,
+                output_args.json,
+            );
         }
         Commands::ResolveMode {
             cwd: cwd_arg,
@@ -2189,6 +2242,28 @@ fn cmd_get_binary(
 fn cmd_identity(
     system: &dyn System,
     cwd: &Path,
+    action: Option<&IdentityAction>,
+    identity_args: &IdentityArgs,
+    json_mode: bool,
+) -> Result<()> {
+    match action {
+        Some(IdentityAction::Create {
+            identity,
+            r#type,
+            key,
+            output_args,
+        }) => cmd_identity_create(identity, r#type, key.as_deref(), output_args.json),
+        Some(IdentityAction::Show {
+            identity_args: nested,
+            output_args,
+        }) => cmd_identity_show(system, cwd, nested, output_args.json),
+        None => cmd_identity_show(system, cwd, identity_args, json_mode),
+    }
+}
+
+fn cmd_identity_show(
+    system: &dyn System,
+    cwd: &Path,
     identity_args: &IdentityArgs,
     json_mode: bool,
 ) -> Result<()> {
@@ -2205,6 +2280,43 @@ fn cmd_identity(
         }
         Err(err) => Err(err),
     }
+}
+
+/// Print a ready-to-use identity YAML block to stdout (rem-8cnc).
+///
+/// `mode:` is deliberately omitted — mode is a tree property resolved
+/// by walk-up, not an identity-level declaration. `key:` is emitted
+/// verbatim when supplied; an absent key is valid in non-strict modes.
+/// `--json` returns the same fields as a structured payload so tooling
+/// (the Obsidian plugin, scripts) can pick them up without re-parsing
+/// YAML.
+fn cmd_identity_create(
+    identity: &str,
+    author_type: &str,
+    key: Option<&str>,
+    json_mode: bool,
+) -> Result<()> {
+    // Validate the author type early so an invalid value fails before
+    // any output is emitted (stdout stays clean for redirection).
+    config::parse_author_type(author_type)
+        .with_context(|| format!("invalid --type value: {author_type}"))?;
+
+    if json_mode {
+        return print_output(
+            true,
+            &json!({
+                "identity": identity,
+                "type": author_type,
+                "key": key,
+            }),
+        );
+    }
+    let mut out_str = format!("identity: {identity}\ntype: {author_type}\n");
+    if let Some(k) = key {
+        use core::fmt::Write as _;
+        let _ = writeln!(out_str, "key: {k}");
+    }
+    out_raw(&out_str)
 }
 
 fn render_identity(config: &ResolvedConfig, json_mode: bool) -> Result<()> {

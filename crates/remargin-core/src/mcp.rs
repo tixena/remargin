@@ -443,6 +443,30 @@ fn desc_purge() -> ToolDesc {
     }
 }
 
+/// Build the `identity_create` tool descriptor (rem-8cnc).
+///
+/// Mirrors the CLI `remargin identity create` surface: prints a
+/// ready-to-use identity YAML block. `mode:` is deliberately omitted
+/// (tree property, resolved by walk). No `--write` equivalent (rem-is4z
+/// bans MCP writes to `.remargin.yaml`).
+fn desc_identity_create() -> ToolDesc {
+    ToolDesc {
+        name: "identity_create",
+        description: "Render a ready-to-use identity YAML block for `.remargin.yaml`. \
+             Returns the YAML text; the caller writes it themselves. `mode:` \
+             is never emitted (mode is a tree property, not identity-scoped).",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "identity": { "type": "string", "description": "Identity (author name) to record." },
+                "type": { "type": "string", "enum": ["human", "agent"], "description": "Author type." },
+                "key": { "type": "string", "description": "Optional path to the signing key (emitted verbatim; no existence check)." }
+            },
+            "required": ["identity", "type"]
+        }),
+    }
+}
+
 /// Build the query tool descriptor.
 fn desc_query() -> ToolDesc {
     ToolDesc {
@@ -657,6 +681,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_delete(),
         desc_edit(),
         desc_get(),
+        desc_identity_create(),
         desc_lint(),
         desc_ls(),
         desc_metadata(),
@@ -938,6 +963,7 @@ fn dispatch_tool(
         "delete" => handle_delete(system, base_dir, config, p),
         "edit" => handle_edit(system, base_dir, config, p),
         "get" => handle_get(system, base_dir, p),
+        "identity_create" => handle_identity_create(p),
         "lint" => handle_lint(system, base_dir, p),
         "ls" => handle_ls(system, base_dir, config, p),
         "metadata" => handle_metadata(system, base_dir, p),
@@ -1201,6 +1227,32 @@ fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>)
     } else {
         Ok(json!({ "content": content }))
     }
+}
+
+/// Handle the `identity_create` tool (rem-8cnc).
+///
+/// Mirrors the CLI `remargin identity create` surface: validates the
+/// author type and returns both the rendered YAML text and the
+/// structured fields so the caller can either paste the text verbatim
+/// or consume the fields directly.
+fn handle_identity_create(params: &Map<String, Value>) -> Result<Value> {
+    let identity = required_str(params, "identity")?;
+    let author_type = required_str(params, "type")?;
+    parse_author_type(author_type)
+        .with_context(|| format!("invalid `type` value: {author_type}"))?;
+    let key = optional_str(params, "key");
+
+    let mut yaml = format!("identity: {identity}\ntype: {author_type}\n");
+    if let Some(k) = key {
+        use core::fmt::Write as _;
+        let _ = writeln!(yaml, "key: {k}");
+    }
+    Ok(json!({
+        "identity": identity,
+        "type": author_type,
+        "key": key,
+        "yaml": yaml,
+    }))
 }
 
 /// Handle the `lint` tool: run structural lint checks.
