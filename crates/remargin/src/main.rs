@@ -23,6 +23,7 @@ use remargin_core::config::identity::IdentityFlags;
 use remargin_core::config::{self, ResolvedConfig};
 use remargin_core::display;
 use remargin_core::document;
+use remargin_core::kind::matches_kind_filter;
 use remargin_core::linter;
 use remargin_core::mcp;
 use remargin_core::operations;
@@ -213,6 +214,12 @@ enum Commands {
         /// Read comment body from a file (use - for stdin).
         #[arg(long, short = 'F', conflicts_with = "content")]
         comment_file: Option<PathBuf>,
+        /// Classification tag for the new comment. Repeat to attach
+        /// multiple (e.g. `--kind question --kind action-item`). Values
+        /// must match `[A-Za-z0-9_ \-]{1,15}` — see `remargin_kind`
+        /// validation in `remargin-core::kind`.
+        #[arg(long = "kind")]
+        remargin_kind: Vec<String>,
         /// ID of the comment to reply to.
         #[arg(long)]
         reply_to: Option<String>,
@@ -233,6 +240,10 @@ enum Commands {
     Comments {
         /// Path to the document (use - for stdin).
         file: String,
+        /// Repeatable `remargin_kind` filter (OR semantics). Omit to
+        /// return every comment regardless of tag.
+        #[arg(long = "kind")]
+        remargin_kind: Vec<String>,
         /// Pretty-print comments as a threaded tree.
         #[arg(long)]
         pretty: bool,
@@ -259,6 +270,15 @@ enum Commands {
         id: String,
         /// New comment body.
         content: String,
+        /// Replacement classification tag list. Repeat to set multiple
+        /// (e.g. `--kind question --kind action-item`). Omit every
+        /// `--kind` to leave the stored tag list untouched. Pass
+        /// `--kind ""` to clear — validation rejects empty strings so
+        /// a single `--kind ''` errors; the right way to clear today
+        /// is to run `remargin edit` without any `--kind` flags, then
+        /// use the forthcoming rem-u8br tag editor to drop entries.
+        #[arg(long = "kind")]
+        remargin_kind: Vec<String>,
         #[command(flatten)]
         identity_args: IdentityArgs,
         #[command(flatten)]
@@ -472,6 +492,11 @@ enum Commands {
         /// Pretty-print results grouped by file.
         #[arg(long)]
         pretty: bool,
+        /// Repeatable `remargin_kind` filter (OR semantics). Matches any
+        /// comment whose tag list contains at least one of the supplied
+        /// values.
+        #[arg(long = "kind")]
+        remargin_kind: Vec<String>,
         /// Only activity after this ISO 8601 timestamp.
         #[arg(long)]
         since: Option<String>,
@@ -977,6 +1002,7 @@ struct CommentParams<'cmd> {
     content: &'cmd str,
     file: &'cmd str,
     json_mode: bool,
+    remargin_kind: &'cmd [String],
     reply_to: Option<&'cmd str>,
     sandbox: bool,
     to: &'cmd [String],
@@ -1009,6 +1035,7 @@ struct QueryParams<'cmd> {
     pending_for: Option<&'cmd str>,
     pending_for_me: bool,
     pretty: bool,
+    remargin_kind: &'cmd [String],
     since: Option<&'cmd str>,
     summary: bool,
 }
@@ -1707,6 +1734,7 @@ fn dispatch_with_config(
             attach,
             auto_ack,
             comment_file,
+            remargin_kind,
             reply_to,
             sandbox,
             to,
@@ -1723,6 +1751,7 @@ fn dispatch_with_config(
                 content: &resolved_content,
                 file,
                 json_mode: output_args.json,
+                remargin_kind,
                 reply_to: reply_to.as_deref(),
                 sandbox: *sandbox,
                 to,
@@ -1732,8 +1761,9 @@ fn dispatch_with_config(
         Commands::Comments {
             file,
             pretty,
+            remargin_kind,
             output_args,
-        } => cmd_comments(system, cwd, file, output_args.json, *pretty),
+        } => cmd_comments(system, cwd, file, remargin_kind, output_args.json, *pretty),
         Commands::Delete {
             file,
             ids,
@@ -1744,9 +1774,25 @@ fn dispatch_with_config(
             file,
             id,
             content,
+            remargin_kind,
             output_args,
             ..
-        } => cmd_edit(system, cwd, config, file, id, content, output_args.json),
+        } => {
+            // When no --kind flags are provided we preserve the stored
+            // list; any occurrence (even `--kind x` once) replaces the
+            // full list — consistent with how `--to` works.
+            let kind_replacement = (!remargin_kind.is_empty()).then_some(remargin_kind.as_slice());
+            cmd_edit(
+                system,
+                cwd,
+                config,
+                file,
+                id,
+                content,
+                kind_replacement,
+                output_args.json,
+            )
+        }
         Commands::Get {
             path,
             binary,
@@ -1818,6 +1864,7 @@ fn dispatch_with_config(
             pending_for,
             pending_for_me,
             pretty,
+            remargin_kind,
             since,
             summary,
             output_args,
@@ -1836,6 +1883,7 @@ fn dispatch_with_config(
                 pending_for: pending_for.as_deref(),
                 pending_for_me: *pending_for_me,
                 pretty: *pretty,
+                remargin_kind,
                 since: since.as_deref(),
                 summary: *summary,
             };
@@ -2042,6 +2090,7 @@ fn cmd_comment(
     let mut params = operations::CreateCommentParams::new(cp.content, &position);
     params.attachments = cp.attachments;
     params.auto_ack = cp.auto_ack;
+    params.remargin_kind = cp.remargin_kind;
     params.reply_to = cp.reply_to;
     params.sandbox = cp.sandbox;
     params.to = cp.to;
@@ -2061,12 +2110,20 @@ fn cmd_comments(
     system: &dyn System,
     cwd: &Path,
     file: &str,
+    kind_filter: &[String],
     json_mode: bool,
     pretty: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
     let doc = parser::parse_file(system, &path)?;
-    let comments = doc.comments();
+    // Apply the shared kind filter from `remargin-core::kind` so this
+    // surface stays in lockstep with `remargin query` — the rem-49w0
+    // design doc explicitly calls out the previous divergence as a bug.
+    let comments: Vec<_> = doc
+        .comments()
+        .into_iter()
+        .filter(|cm| matches_kind_filter(&cm.remargin_kind, kind_filter))
+        .collect();
 
     if pretty {
         let formatted = display::format_comments_pretty(file, &comments);
@@ -2107,6 +2164,11 @@ fn cmd_delete(
     print_output(json_mode, &json!({ "deleted": ids }))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI adapter: each arg is a direct clap flag and collapsing them \
+              into a struct adds more noise than it removes"
+)]
 fn cmd_edit(
     system: &dyn System,
     cwd: &Path,
@@ -2114,10 +2176,11 @@ fn cmd_edit(
     file: &str,
     id: &str,
     content: &str,
+    remargin_kind: Option<&[String]>,
     json_mode: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
-    operations::edit_comment(system, &path, config, id, content)?;
+    operations::edit_comment(system, &path, config, id, content, remargin_kind)?;
     print_output(json_mode, &json!({ "edited": id }))
 }
 
@@ -2866,6 +2929,7 @@ fn build_query_filter(
     filter.expanded = params.expanded;
     filter.pending = params.pending;
     filter.pending_for = params.pending_for.map(String::from);
+    filter.remargin_kind = params.remargin_kind.to_vec();
     filter.since = since_dt;
     filter.summary = params.summary;
     filter = filter.with_caller_identity(

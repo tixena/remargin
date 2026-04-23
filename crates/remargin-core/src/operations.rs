@@ -29,6 +29,7 @@ use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_reaction_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
+use crate::kind::validate_kinds;
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
@@ -42,6 +43,11 @@ pub struct CreateCommentParams<'params> {
     pub auto_ack: bool,
     pub content: &'params str,
     pub position: &'params InsertPosition,
+    /// Optional classification tags for the new comment. Validated
+    /// against [`crate::kind::validate_kinds`] before the comment is
+    /// written; an invalid entry surfaces as a pre-write error so the
+    /// document is never mutated with a malformed tag.
+    pub remargin_kind: &'params [String],
     pub reply_to: Option<&'params str>,
     /// Atomically stage the file in the caller's sandbox in the same
     /// write cycle as the comment insert. If the caller already has a
@@ -59,6 +65,7 @@ impl<'params> CreateCommentParams<'params> {
             auto_ack: false,
             content,
             position,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -110,11 +117,10 @@ pub fn create_comment(
     let existing_ids = doc.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    // rem-n4x7: `remargin_kind` defaults to empty on comment create; the
-    // CLI/MCP surface that lets callers pass tags lands in rem-49w0.
-    // Passing `&[]` here keeps the checksum byte-for-byte identical to
-    // the pre-field implementation so existing comments still verify.
-    let remargin_kind: Vec<String> = Vec::new();
+    // rem-49w0: accept `remargin_kind` from params. Validate before
+    // doing any work so a malformed tag never touches the document.
+    validate_kinds(params.remargin_kind).context("invalid remargin_kind")?;
+    let remargin_kind: Vec<String> = params.remargin_kind.to_vec();
     let checksum = compute_checksum(params.content, &remargin_kind);
 
     let thread = params
@@ -412,10 +418,16 @@ pub fn delete_comments(
 /// - Clears all ack entries on the edited comment
 /// - Clears all ack entries on all child comments (entire reply chain)
 ///
+/// When `new_kinds` is `Some`, the comment's `remargin_kind` list is
+/// replaced wholesale (validated first). When `None`, the stored kinds
+/// are preserved — this lets content-only edits continue to work without
+/// callers having to round-trip the tag list.
+///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The comment ID does not exist
+/// - `new_kinds` is present but invalid
 /// - Writing fails
 pub fn edit_comment(
     system: &dyn System,
@@ -423,6 +435,7 @@ pub fn edit_comment(
     config: &ResolvedConfig,
     comment_id: &str,
     new_content: &str,
+    new_kinds: Option<&[String]>,
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
     let identity = config.identity.as_deref();
@@ -431,16 +444,24 @@ pub fn edit_comment(
     // the op just reads the key when it needs one.
     let signing_key = identity.and_then(|author| config.resolve_signing_key(author));
 
+    // Validate replacement kinds before any document mutation so the
+    // file stays byte-identical on invalid input.
+    if let Some(kinds) = new_kinds {
+        validate_kinds(kinds).context("invalid remargin_kind")?;
+    }
+
     let mut doc = parser::parse_file(system, path)?;
 
     let cm = find_comment_mut(&mut doc, comment_id)
         .with_context(|| format!("comment {comment_id:?} not found"))?;
 
     cm.content = String::from(new_content);
-    // rem-n4x7: edit preserves `remargin_kind`. The CLI/MCP surface for
-    // rewriting tags lands in rem-49w0; until then a content-only edit
-    // keeps the stored kinds and rehashes against them so the fresh
-    // checksum stays consistent with the persisted YAML.
+    if let Some(kinds) = new_kinds {
+        cm.remargin_kind = kinds.to_vec();
+    }
+    // rem-n4x7: rehash against the (possibly replaced, possibly
+    // preserved) kinds so the fresh checksum stays consistent with
+    // the persisted YAML.
     cm.checksum = compute_checksum(new_content, &cm.remargin_kind);
 
     cm.ack.clear();

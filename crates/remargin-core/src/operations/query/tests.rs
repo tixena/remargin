@@ -1553,3 +1553,119 @@ fn pending_union_composes_with_author_filter() {
         .collect();
     assert_eq!(ids, vec!["dir_alice"]);
 }
+
+// ---------- kind filter (rem-49w0) ----------
+
+/// Build a document that carries two remargin blocks with distinct
+/// `remargin_kind` lists so the OR-semantics filter can be exercised
+/// without any other predicate firing.
+fn kind_doc() -> &'static str {
+    "\
+---
+title: Kind Filter
+---
+
+```remargin
+---
+id: q1
+author: alice
+type: human
+ts: 2026-04-10T12:00:00-04:00
+checksum: sha256:ce6efcb37b2a6f75f1fd85be6ffdd2bbfcc2e8ce4bd56e37f34e7e9a8e12cd19
+remargin_kind: [question]
+---
+what do you think
+```
+
+```remargin
+---
+id: t1
+author: bob
+type: human
+ts: 2026-04-10T13:00:00-04:00
+checksum: sha256:4c7081d5e6c36cf7dbc8cce15d24478b7cafcf2af7dfa2d32ccec3bba5ae0da7
+remargin_kind: [todo, action item]
+---
+follow up with design
+```
+
+```remargin
+---
+id: u1
+author: alice
+type: human
+ts: 2026-04-10T14:00:00-04:00
+checksum: sha256:c3b6fb0c9a83f83f3b4b8a2a8e0b1c2f2b8c92ea52a7fa0de2ed7f5f2d7c8a7f
+---
+no tags at all
+```
+"
+}
+
+fn kind_system() -> MockSystem {
+    MockSystem::new()
+        .with_dir(Path::new("/kinds"))
+        .unwrap()
+        .with_file(Path::new("/kinds/doc.md"), kind_doc().as_bytes())
+        .unwrap()
+}
+
+#[test]
+fn query_kind_filter_single_value() {
+    let system = kind_system();
+    let filter = QueryFilter {
+        expanded: true,
+        remargin_kind: vec![String::from("question")],
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/kinds"), &filter).unwrap();
+    let ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    assert_eq!(ids, vec!["q1"]);
+}
+
+#[test]
+fn query_kind_filter_uses_or_semantics() {
+    let system = kind_system();
+    let filter = QueryFilter {
+        expanded: true,
+        remargin_kind: vec![String::from("question"), String::from("todo")],
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/kinds"), &filter).unwrap();
+    let mut ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["q1", "t1"]);
+}
+
+#[test]
+fn query_kind_filter_empty_returns_everything() {
+    let system = kind_system();
+    let filter = QueryFilter {
+        expanded: true,
+        remargin_kind: Vec::new(),
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/kinds"), &filter).unwrap();
+    let count = results.iter().flat_map(|r| r.comments.iter()).count();
+    assert_eq!(count, 3, "empty filter should return every comment");
+}
+
+#[test]
+fn query_kind_filter_excludes_unmatched_comments() {
+    let system = kind_system();
+    let filter = QueryFilter {
+        expanded: true,
+        remargin_kind: vec![String::from("blocker")],
+        ..QueryFilter::default()
+    };
+    let results = query(&system, Path::new("/kinds"), &filter).unwrap();
+    // No comment carries a `blocker` kind, so the file-level filter
+    // drops the document entirely (no matching comments to include).
+    assert!(results.is_empty());
+}

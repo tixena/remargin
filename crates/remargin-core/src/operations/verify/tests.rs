@@ -431,6 +431,7 @@ fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
             auto_ack: false,
             content: "reply",
             position: &pos,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -471,6 +472,7 @@ fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
             auto_ack: false,
             content: "sneaky",
             position: &pos,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -591,6 +593,7 @@ fn create_comment_strict_registered_active_no_key_file_byte_identical() {
             auto_ack: false,
             content: "unsigned attempt",
             position: &pos,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -632,6 +635,7 @@ fn create_comment_strict_unregistered_author_file_byte_identical() {
             auto_ack: false,
             content: "uninvited",
             position: &pos,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -661,6 +665,7 @@ fn create_comment_open_mode_no_key_still_writes_unsigned() {
             auto_ack: false,
             content: "open mode reply",
             position: &pos,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -690,6 +695,7 @@ fn edit_comment_strict_registered_active_no_key_fails_fast() {
         &cfg,
         "alc",
         "new content that must not land",
+        None,
     );
 
     result.unwrap_err();

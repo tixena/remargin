@@ -19,6 +19,7 @@ use serde::Serialize;
 use tixschema::model_schema;
 
 use crate::document::allowlist;
+use crate::kind::matches_kind_filter;
 use crate::parser::{self, Acknowledgment, AuthorType};
 use crate::parser::{acknowledgment_schema, author_type_schema};
 
@@ -63,6 +64,13 @@ pub struct QueryFilter {
     /// distinct field so CLI/MCP surfaces can expose a "pending for me"
     /// flag without needing the caller to repeat their identity.
     pub pending_for_me: Option<String>,
+    /// OR-semantics filter: include a comment when its `remargin_kind`
+    /// list contains at least one of these values. Empty = no filter.
+    /// Shares a matcher with the `comments` CLI command via
+    /// [`crate::kind::matches_kind_filter`], so both surfaces stay on
+    /// par — divergence between them was explicitly called out in the
+    /// rem-49w0 design.
+    pub remargin_kind: Vec<String>,
     /// Only include documents with activity after this timestamp.
     pub since: Option<DateTime<FixedOffset>>,
     /// Return only counts/summary, suppress comment data.
@@ -195,6 +203,11 @@ pub struct ExpandedComment {
     pub line: usize,
     /// Emoji reactions mapped to lists of author IDs.
     pub reactions: BTreeMap<String, Vec<String>>,
+    /// Comment classification tags (rem-n4x7). Empty vectors are
+    /// omitted from the JSON so pre-field comments round-trip without
+    /// a visible change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remargin_kind: Vec<String>,
     /// ID of the comment this is replying to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
@@ -387,6 +400,9 @@ fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     {
         return false;
     }
+    if !matches_kind_filter(&cm.remargin_kind, &filter.remargin_kind) {
+        return false;
+    }
     true
 }
 
@@ -457,6 +473,7 @@ fn expanded_from_comment(cm: &parser::Comment, file: &Path) -> ExpandedComment {
         id: cm.id.clone(),
         line: cm.line,
         reactions: cm.reactions.clone(),
+        remargin_kind: cm.remargin_kind.clone(),
         reply_to: cm.reply_to.clone(),
         signature: cm.signature.clone(),
         thread: cm.thread.clone(),

@@ -118,6 +118,24 @@ pub fn validate_single(kind: &str) -> Result<()> {
     Ok(())
 }
 
+/// Shared `--kind` filter matcher used by `comments` and `query`.
+///
+/// Returns `true` when `filter` is empty (no filter active) or when
+/// `comment_kinds` contains at least one of the values in `filter`
+/// (OR semantics).
+///
+/// Kept in this module so the `comments` list-a-single-file path and
+/// the `query` walk-the-tree path share a single implementation — the
+/// design doc for rem-49w0 explicitly calls out the previous divergence
+/// between those two surfaces as a bug.
+#[must_use]
+pub fn matches_kind_filter(comment_kinds: &[String], filter: &[String]) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    filter.iter().any(|wanted| comment_kinds.contains(wanted))
+}
+
 /// Return the set of kinds canonicalised for hashing:
 ///
 /// - De-duplicated (validator already enforces this, but the helper
@@ -201,5 +219,33 @@ mod tests {
     fn canonical_kinds_sorts_and_dedups() {
         let input = vec![s("b"), s("a"), s("b"), s("c")];
         assert_eq!(canonical_kinds(&input), vec![s("a"), s("b"), s("c")]);
+    }
+
+    #[test]
+    fn matches_kind_filter_empty_is_always_true() {
+        assert!(matches_kind_filter(&[], &[]));
+        assert!(matches_kind_filter(&[s("question")], &[]));
+    }
+
+    #[test]
+    fn matches_kind_filter_uses_or_semantics() {
+        let kinds = vec![s("question"), s("todo")];
+        let want = vec![s("todo"), s("blocker")];
+        // Matches because `todo` is in both.
+        assert!(matches_kind_filter(&kinds, &want));
+    }
+
+    #[test]
+    fn matches_kind_filter_rejects_disjoint_sets() {
+        let kinds = vec![s("question")];
+        let want = vec![s("todo"), s("blocker")];
+        assert!(!matches_kind_filter(&kinds, &want));
+    }
+
+    #[test]
+    fn matches_kind_filter_no_match_when_comment_has_no_kinds() {
+        let kinds: Vec<String> = Vec::new();
+        let want = vec![s("question")];
+        assert!(!matches_kind_filter(&kinds, &want));
     }
 }

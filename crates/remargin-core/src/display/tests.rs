@@ -563,6 +563,7 @@ fn make_expanded(
         id: String::from(id),
         line,
         reactions: BTreeMap::new(),
+        remargin_kind: Vec::new(),
         reply_to: None,
         signature: None,
         thread: None,

@@ -29,6 +29,7 @@ use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
+use crate::kind::validate_kinds;
 use crate::linter;
 use crate::operations::migrate::{self, MigrateIdentities};
 use crate::operations::sign;
@@ -149,6 +150,10 @@ pub struct ProjectCommentParams<'params> {
     pub auto_ack: bool,
     pub content: &'params str,
     pub position: &'params InsertPosition,
+    /// Optional classification tags (rem-49w0). Validated before the
+    /// projection runs so a malformed tag cannot produce a misleading
+    /// preview.
+    pub remargin_kind: &'params [String],
     pub reply_to: Option<&'params str>,
     /// Atomically project a sandbox entry for the acting identity. Real
     /// op would stage the file; the projection just rewrites the
@@ -168,6 +173,7 @@ impl<'params> ProjectCommentParams<'params> {
             auto_ack: false,
             content,
             position,
+            remargin_kind: &[],
             reply_to: None,
             sandbox: false,
             to: &[],
@@ -444,10 +450,11 @@ pub fn project_comment(
     let existing_ids = after.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    // rem-n4x7: plan projection does not yet accept remargin_kind from
-    // params; rem-49w0 adds the field to `CommentParams`. Empty slice
-    // keeps the planned checksum identical to the real-op path.
-    let remargin_kind: Vec<String> = Vec::new();
+    // rem-49w0: thread remargin_kind through the plan projection so
+    // the preview matches the real-op output exactly. Validated before
+    // any side-effect work, same as `create_comment`.
+    validate_kinds(params.remargin_kind).context("invalid remargin_kind")?;
+    let remargin_kind: Vec<String> = params.remargin_kind.to_vec();
     let checksum = compute_checksum(params.content, &remargin_kind);
 
     let thread = params

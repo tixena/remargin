@@ -3218,3 +3218,211 @@ fn mcp_identity_create_missing_identity_errors() {
 
     assert!(is_tool_error(&response));
 }
+
+// ---------- remargin_kind surface (rem-49w0) ----------
+
+#[test]
+fn mcp_comment_accepts_remargin_kind_and_persists_to_yaml() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "tagged body",
+                    "remargin_kind": ["question", "todo"]
+                }
+            }
+        }),
+    );
+    assert!(!is_tool_error(&response));
+    let id = extract_tool_text(&response)["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert!(raw.contains(&format!("id: {id}")));
+    assert!(
+        raw.contains("remargin_kind: [question, todo]"),
+        "MCP-written kinds should round-trip through YAML: {raw}"
+    );
+}
+
+#[test]
+fn mcp_comments_filters_by_kind() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n");
+    let config = test_config();
+
+    for (content, kinds) in [
+        ("first with question", vec!["question"]),
+        ("todo content", vec!["todo"]),
+    ] {
+        let resp = call(
+            &system,
+            base,
+            &config,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1_i32,
+                "method": "tools/call",
+                "params": {
+                    "name": "comment",
+                    "arguments": {
+                        "file": "doc.md",
+                        "content": content,
+                        "remargin_kind": kinds,
+                    }
+                }
+            }),
+        );
+        assert!(!is_tool_error(&resp));
+    }
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comments",
+                "arguments": {
+                    "file": "doc.md",
+                    "remargin_kind": ["todo"]
+                }
+            }
+        }),
+    );
+    let body = extract_tool_text(&resp);
+    let comments = body["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0]["content"].as_str().unwrap().contains("todo"));
+}
+
+#[test]
+fn mcp_query_kind_filter_or_semantics() {
+    let base = Path::new("/vault");
+    let system = MockSystem::new()
+        .with_file(base.join("a.md").as_path(), b"# a\n")
+        .unwrap()
+        .with_file(base.join("b.md").as_path(), b"# b\n")
+        .unwrap();
+    let config = test_config();
+
+    // Seed comments directly via the core API so we skip MCP boilerplate.
+    let pos = InsertPosition::Append;
+    let kinds_q = vec![String::from("question")];
+    let kinds_t = vec![String::from("todo")];
+    let mut p1 = CreateCommentParams::new("a1", &pos);
+    p1.remargin_kind = &kinds_q;
+    create_comment(&system, &base.join("a.md"), &config, &p1).unwrap();
+    let mut p2 = CreateCommentParams::new("b1", &pos);
+    p2.remargin_kind = &kinds_t;
+    create_comment(&system, &base.join("b.md"), &config, &p2).unwrap();
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 3_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "query",
+                "arguments": {
+                    "path": ".",
+                    "expanded": true,
+                    "remargin_kind": ["question", "todo"]
+                }
+            }
+        }),
+    );
+    let body = extract_tool_text(&resp);
+    let results = body["results"].as_array().unwrap();
+    let mut ids: Vec<&str> = results
+        .iter()
+        .flat_map(|r| {
+            r["comments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["id"].as_str().unwrap())
+        })
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids.len(),
+        2,
+        "OR filter should surface both comments: {ids:?}"
+    );
+}
+
+#[test]
+fn mcp_edit_with_kind_replaces_stored_list() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n");
+    let config = test_config();
+
+    let create = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "body",
+                    "remargin_kind": ["question"]
+                }
+            }
+        }),
+    );
+    let id = extract_tool_text(&create)["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let edit = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "edit",
+                "arguments": {
+                    "file": "doc.md",
+                    "id": id,
+                    "content": "updated body",
+                    "remargin_kind": ["todo"]
+                }
+            }
+        }),
+    );
+    assert!(!is_tool_error(&edit));
+
+    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert!(raw.contains("remargin_kind: [todo]"));
+    assert!(!raw.contains("remargin_kind: [question]"));
+}

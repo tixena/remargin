@@ -20,6 +20,7 @@ use crate::config::identity::{IdentityFlags, resolve_identity};
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
 use crate::document;
+use crate::kind::matches_kind_filter;
 use crate::linter;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
@@ -216,7 +217,13 @@ fn desc_comment() -> ToolDesc {
                 },
                 "after_line": { "type": "integer", "description": "Insert after this line number (1-indexed)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID" },
-                "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false }
+                "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false },
+                "remargin_kind": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Classification tags (rem-n4x7). Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+                    "default": []
+                }
             },
             "required": ["file", "content"]
         })),
@@ -232,7 +239,13 @@ fn desc_comments() -> ToolDesc {
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
-                "pretty": { "type": "boolean", "description": "Return human-readable threaded display instead of JSON", "default": false }
+                "pretty": { "type": "boolean", "description": "Return human-readable threaded display instead of JSON", "default": false },
+                "remargin_kind": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "OR-semantics filter (rem-49w0): only return comments whose remargin_kind contains at least one of these values. Empty = no filter.",
+                    "default": []
+                }
             },
             "required": ["file"]
         }),
@@ -269,7 +282,12 @@ fn desc_edit() -> ToolDesc {
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
                 "id": { "type": "string", "description": "Comment ID to edit" },
-                "content": { "type": "string", "description": "New comment body" }
+                "content": { "type": "string", "description": "New comment body" },
+                "remargin_kind": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Replacement classification tags (rem-49w0). Omit to preserve the stored list; pass [] to clear. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries."
+                }
             },
             "required": ["file", "id", "content"]
         })),
@@ -491,6 +509,12 @@ fn desc_query() -> ToolDesc {
                 "pending_for_me": { "type": "boolean", "description": "Sugar for pending_for=<server identity>. Surfaces directed comments addressed to the caller and not yet acked.", "default": false },
                 "pretty": { "type": "boolean", "description": "Pretty-print results grouped by file with structured display", "default": false },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
+                "remargin_kind": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "OR-semantics filter (rem-49w0): only surface comments whose remargin_kind contains at least one of these values. Empty = no filter.",
+                    "default": []
+                },
                 "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" },
                 "summary": { "type": "boolean", "description": "Return only counts/summary, suppress comment data", "default": false }
             },
@@ -1092,6 +1116,15 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
+    // rem-49w0: MCP parity with the `--kind` CLI flag. Accepts either
+    // `remargin_kind: ["question", "todo"]` or the more natural
+    // `kind: [...]` alias; validation happens inside `create_comment`.
+    let remargin_kind_raw = string_array(params, "remargin_kind");
+    let remargin_kind = if remargin_kind_raw.is_empty() {
+        string_array(params, "kind")
+    } else {
+        remargin_kind_raw
+    };
     let declared = resolve_identity_from_params(system, base_dir, config, params)?;
     let cfg = effective_config(config, declared.as_ref());
 
@@ -1105,6 +1138,7 @@ fn handle_comment(
         auto_ack,
         content,
         position: &position,
+        remargin_kind: &remargin_kind,
         reply_to: reply_to.as_deref(),
         sandbox,
         to: &to,
@@ -1124,10 +1158,24 @@ fn handle_comments(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let pretty = optional_bool(params, "pretty");
+    // rem-49w0: shared kind filter with the CLI path. Accepts either
+    // `remargin_kind` or `kind` as the MCP key.
+    let kind_filter = {
+        let raw = string_array(params, "remargin_kind");
+        if raw.is_empty() {
+            string_array(params, "kind")
+        } else {
+            raw
+        }
+    };
 
     let path = base_dir.join(file);
     let doc = parser::parse_file(system, &path)?;
-    let comments = doc.comments();
+    let comments: Vec<_> = doc
+        .comments()
+        .into_iter()
+        .filter(|cm| matches_kind_filter(&cm.remargin_kind, &kind_filter))
+        .collect();
 
     if pretty {
         let formatted = display::format_comments_pretty(file, &comments);
@@ -1167,11 +1215,31 @@ fn handle_edit(
     let file = required_str(params, "file")?;
     let comment_id = required_str(params, "id")?;
     let new_content = required_str(params, "content")?;
+    // rem-49w0: optional replacement kind list. When the key is absent
+    // we pass `None` so the stored list is preserved; an empty array
+    // explicitly clears (validate_kinds accepts `[]`).
+    let remargin_kind_value = params.get("remargin_kind").or_else(|| params.get("kind"));
+    let new_kinds: Option<Vec<String>> = match remargin_kind_value {
+        Some(Value::Array(arr)) => Some(
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+        ),
+        Some(Value::Null) | None => None,
+        _ => anyhow::bail!("`remargin_kind`/`kind` must be an array of strings"),
+    };
     let declared = resolve_identity_from_params(system, base_dir, config, params)?;
     let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
-    operations::edit_comment(system, &path, cfg, comment_id, new_content)?;
+    operations::edit_comment(
+        system,
+        &path,
+        cfg,
+        comment_id,
+        new_content,
+        new_kinds.as_deref(),
+    )?;
 
     Ok(json!({ "edited": comment_id }))
 }
@@ -1643,12 +1711,21 @@ fn build_query_filter_from_params(
                 .with_context(|| format!("invalid timestamp: {s}"))
         })
         .transpose()?;
+    let kind_filter = {
+        let raw = string_array(params, "remargin_kind");
+        if raw.is_empty() {
+            string_array(params, "kind")
+        } else {
+            raw
+        }
+    };
     let mut filter = QueryFilter {
         author: optional_str(params, "author").map(String::from),
         comment_id: optional_str(params, "comment_id").map(String::from),
         expanded: optional_bool(params, "expanded"),
         pending: optional_bool(params, "pending"),
         pending_for: optional_str(params, "pending_for").map(String::from),
+        remargin_kind: kind_filter,
         since,
         summary: optional_bool(params, "summary"),
         ..QueryFilter::default()
