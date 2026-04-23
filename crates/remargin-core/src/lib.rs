@@ -11,6 +11,7 @@ pub mod display;
 pub mod document;
 pub mod frontmatter;
 pub mod id;
+pub mod kind;
 pub mod linter;
 pub mod mcp;
 pub mod operations;

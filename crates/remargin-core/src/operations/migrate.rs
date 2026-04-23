@@ -257,7 +257,12 @@ pub(crate) fn build_migrated_segments(
                     _ => (None, None),
                 };
 
-                let checksum = compute_checksum(&lc.content);
+                // Legacy migration never produces remargin_kind — those
+                // are a post-migration concept. Empty slice keeps the
+                // migrated-comment checksum byte-for-byte identical to
+                // the pre-rem-n4x7 implementation.
+                let remargin_kind: Vec<String> = Vec::new();
+                let checksum = compute_checksum(&lc.content, &remargin_kind);
                 let mut comment = Comment {
                     ack,
                     attachments: Vec::new(),
@@ -268,6 +273,7 @@ pub(crate) fn build_migrated_segments(
                     id: new_id.clone(),
                     line: 0,
                     reactions: BTreeMap::default(),
+                    remargin_kind,
                     reply_to,
                     signature: None,
                     thread: thread.clone(),

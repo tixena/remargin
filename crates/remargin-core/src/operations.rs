@@ -110,7 +110,12 @@ pub fn create_comment(
     let existing_ids = doc.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    let checksum = compute_checksum(params.content);
+    // rem-n4x7: `remargin_kind` defaults to empty on comment create; the
+    // CLI/MCP surface that lets callers pass tags lands in rem-49w0.
+    // Passing `&[]` here keeps the checksum byte-for-byte identical to
+    // the pre-field implementation so existing comments still verify.
+    let remargin_kind: Vec<String> = Vec::new();
+    let checksum = compute_checksum(params.content, &remargin_kind);
 
     let thread = params
         .reply_to
@@ -152,6 +157,7 @@ pub fn create_comment(
         id: new_id.clone(),
         line: 0, // Placeholder; updated after document write and re-parse.
         reactions: BTreeMap::default(),
+        remargin_kind,
         reply_to: params.reply_to.map(String::from),
         signature: None,
         thread,
@@ -431,7 +437,11 @@ pub fn edit_comment(
         .with_context(|| format!("comment {comment_id:?} not found"))?;
 
     cm.content = String::from(new_content);
-    cm.checksum = compute_checksum(new_content);
+    // rem-n4x7: edit preserves `remargin_kind`. The CLI/MCP surface for
+    // rewriting tags lands in rem-49w0; until then a content-only edit
+    // keeps the stored kinds and rehashes against them so the fresh
+    // checksum stays consistent with the persisted YAML.
+    cm.checksum = compute_checksum(new_content, &cm.remargin_kind);
 
     cm.ack.clear();
 

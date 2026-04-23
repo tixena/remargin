@@ -316,7 +316,11 @@ pub fn project_batch(
     for (idx, op) in operations.iter().enumerate() {
         let existing_ids = after.comment_ids();
         let new_id = id::generate(&existing_ids);
-        let checksum = compute_checksum(&op.content);
+        // rem-n4x7: remargin_kind is not yet wired through the batch
+        // projection op surface; rem-49w0 adds it to `BatchCommentOp`.
+        // Empty slice preserves the pre-field checksum shape.
+        let remargin_kind: Vec<String> = Vec::new();
+        let checksum = compute_checksum(&op.content, &remargin_kind);
 
         let thread = op.reply_to.as_deref().map(|parent_id| {
             after
@@ -350,6 +354,7 @@ pub fn project_batch(
             id: new_id,
             line: 0,
             reactions: BTreeMap::default(),
+            remargin_kind,
             reply_to: op.reply_to.clone(),
             signature: None,
             thread,
@@ -439,7 +444,11 @@ pub fn project_comment(
     let existing_ids = after.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    let checksum = compute_checksum(params.content);
+    // rem-n4x7: plan projection does not yet accept remargin_kind from
+    // params; rem-49w0 adds the field to `CommentParams`. Empty slice
+    // keeps the planned checksum identical to the real-op path.
+    let remargin_kind: Vec<String> = Vec::new();
+    let checksum = compute_checksum(params.content, &remargin_kind);
 
     let thread = params
         .reply_to
@@ -483,6 +492,7 @@ pub fn project_comment(
         id: new_id,
         line: 0,
         reactions: BTreeMap::default(),
+        remargin_kind,
         reply_to: params.reply_to.map(String::from),
         signature: None,
         thread,
@@ -579,7 +589,8 @@ pub fn project_edit(
         .with_context(|| format!("comment {comment_id:?} not found"))?;
 
     cm.content = String::from(new_content);
-    cm.checksum = compute_checksum(new_content);
+    // Preserve existing remargin_kind on edit, matching `edit_comment`.
+    cm.checksum = compute_checksum(new_content, &cm.remargin_kind);
     cm.ack.clear();
     // Mutating `edit_comment` also wipes the signature when content
     // changes (verify would fail otherwise); mirror that here so the

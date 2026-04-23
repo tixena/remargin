@@ -24,6 +24,7 @@ use os_shim::System;
 use sha2::{Digest as _, Sha256};
 use ssh_key::{HashAlg, PrivateKey, PublicKey};
 
+use crate::kind::canonical_kinds;
 use crate::parser::{Comment, Reactions};
 
 /// Namespace used for SSH signature operations (PROTOCOL.sshsig).
@@ -43,12 +44,33 @@ pub fn normalize_whitespace(content: &str) -> String {
     String::from(trimmed)
 }
 
-/// Applies whitespace normalization before hashing. Returns a string
-/// in the format `sha256:<hex>`.
+/// Applies whitespace normalization before hashing; returns `sha256:<hex>`.
+///
+/// When `kinds` is empty, the hash input is exactly
+/// `normalize_whitespace(content)` — byte-for-byte what the
+/// pre-`remargin_kind` implementation produced. That equivalence is the
+/// back-compat hinge for every comment created before the field
+/// existed: they all carry `remargin_kind: []` post-parse, so their
+/// stored checksum keeps matching [`verify_checksum`].
+///
+/// When `kinds` is non-empty, a separator-plus-canonical-list suffix
+/// is appended to the normalised content before hashing. The list is
+/// [`canonical_kinds`] — sorted + de-duplicated — so `[a, b]` and
+/// `[b, a]` produce identical checksums.
 #[must_use]
-pub fn compute_checksum(content: &str) -> String {
-    let normalized = normalize_whitespace(content);
-    let hash = Sha256::digest(normalized.as_bytes());
+pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
+    let mut payload = normalize_whitespace(content);
+    if !kinds.is_empty() {
+        let canonical = canonical_kinds(kinds);
+        // `\x00remargin_kind:` is a structural separator: the NUL byte
+        // cannot appear in `content` (it is not a valid markdown
+        // character and `normalize_whitespace` leaves no zero bytes
+        // either), so a crafted content string cannot forge the same
+        // suffix.
+        payload.push_str("\x00remargin_kind:");
+        payload.push_str(&canonical.join(","));
+    }
+    let hash = Sha256::digest(payload.as_bytes());
     format!("sha256:{}", hex::encode(hash))
 }
 
@@ -103,7 +125,7 @@ pub fn compute_signature(
 
 #[must_use]
 pub fn verify_checksum(comment: &Comment) -> bool {
-    compute_checksum(&comment.content) == comment.checksum
+    compute_checksum(&comment.content, &comment.remargin_kind) == comment.checksum
 }
 
 /// The `public_key_str` should be an OpenSSH-formatted public key
@@ -147,9 +169,16 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
 /// Canonical payload for signing/verification.
 ///
 /// Signed fields (in order): id, author, type, ts, to, reply-to, thread,
-/// attachments, content.
+/// attachments, `remargin_kind`, content.
 ///
 /// Excluded: reactions, ack, checksum (these are mutable after creation).
+///
+/// `remargin_kind` contributes zero bytes when the vector is empty, so
+/// pre-`remargin_kind` comments sign and verify identically to how they
+/// did before the field existed — see the analogous back-compat note on
+/// [`compute_checksum`]. Non-empty lists are emitted in
+/// [`canonical_kinds`] order so rewrites that reorder the stored list
+/// preserve signature validity.
 fn signature_payload(comment: &Comment) -> String {
     let mut payload = String::new();
     let _ = writeln!(payload, "id:{}", comment.id);
@@ -167,6 +196,9 @@ fn signature_payload(comment: &Comment) -> String {
     }
     for attachment in &comment.attachments {
         let _ = writeln!(payload, "attachment:{attachment}");
+    }
+    for kind in canonical_kinds(&comment.remargin_kind) {
+        let _ = writeln!(payload, "remargin_kind:{kind}");
     }
     let _ = write!(
         payload,

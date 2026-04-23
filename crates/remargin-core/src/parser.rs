@@ -14,6 +14,8 @@ use os_shim::System;
 use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
+use crate::kind::validate_kinds;
+
 /// An acknowledgment of a comment by another participant.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
@@ -78,6 +80,17 @@ pub struct Comment {
     /// Zero means "not yet placed" (e.g. newly created, before write).
     pub line: usize,
     pub reactions: BTreeMap<String, Vec<String>>,
+    /// Comment classification tags. Empty by default; each entry is a
+    /// short lowercase-friendly label (e.g. `question`, `action item`)
+    /// matching [`crate::kind::VALID_KIND_REGEX`] and bounded by
+    /// [`crate::kind::MAX_KINDS_PER_COMMENT`].
+    ///
+    /// The field is additive: comments created before the `remargin_kind`
+    /// field existed continue to round-trip, verify, and serialize
+    /// identically because an empty vector contributes no bytes to the
+    /// checksum or the signature payload (see [`crate::crypto`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remargin_kind: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,6 +155,8 @@ struct RawYamlHeader {
     id: String,
     #[serde(default)]
     reactions: BTreeMap<String, Vec<String>>,
+    #[serde(default, rename = "remargin_kind")]
+    remargin_kind: Vec<String>,
     #[serde(rename = "reply-to")]
     reply_to: Option<String>,
     signature: Option<String>,
@@ -311,6 +326,13 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
     }
     if !cm.attachments.is_empty() {
         let _ = writeln!(out, "attachments: [{}]", cm.attachments.join(", "));
+    }
+    if !cm.remargin_kind.is_empty() {
+        // Emit as flow-style sequence for readability and to mirror
+        // `to:` / `attachments:`. Kinds never contain commas or colons
+        // (enforced by `crate::kind::validate_kinds`), so the flow form
+        // is safe without quoting.
+        let _ = writeln!(out, "remargin_kind: [{}]", cm.remargin_kind.join(", "));
     }
     if !cm.reactions.is_empty() {
         out.push_str("reactions:\n");
@@ -524,6 +546,9 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         .unwrap_or(content_str)
         .to_owned();
 
+    validate_kinds(&header.remargin_kind)
+        .with_context(|| format!("invalid remargin_kind in block starting near line {line}"))?;
+
     Ok(Comment {
         ack: ack_list,
         attachments: header.attachments,
@@ -534,6 +559,7 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         id: header.id,
         line,
         reactions: header.reactions,
+        remargin_kind: header.remargin_kind,
         reply_to: header.reply_to,
         signature: header.signature,
         thread: header.thread,

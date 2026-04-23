@@ -32,11 +32,12 @@ fn make_comment(content: &str) -> Comment {
         attachments: Vec::new(),
         author: String::from("eduardo"),
         author_type: AuthorType::Human,
-        checksum: compute_checksum(content),
+        checksum: compute_checksum(content, &[]),
         content: String::from(content),
         id: String::from("abc"),
         line: 0,
         reactions: BTreeMap::new(),
+        remargin_kind: Vec::new(),
         reply_to: None,
         signature: None,
         thread: None,
@@ -79,28 +80,31 @@ fn normalize_combined() {
 
 #[test]
 fn basic_checksum() {
-    let checksum = compute_checksum("Hello world");
+    let checksum = compute_checksum("Hello world", &[]);
     assert!(checksum.starts_with("sha256:"));
-    assert_eq!(checksum, compute_checksum("Hello world"));
+    assert_eq!(checksum, compute_checksum("Hello world", &[]));
 }
 
 #[test]
 fn different_content_different_checksum() {
-    let c1 = compute_checksum("Hello");
-    let c2 = compute_checksum("World");
+    let c1 = compute_checksum("Hello", &[]);
+    let c2 = compute_checksum("World", &[]);
     assert_ne!(c1, c2);
 }
 
 #[test]
 fn crlf_vs_lf_same_checksum() {
-    assert_eq!(compute_checksum("Hello\r\n"), compute_checksum("Hello\n"));
+    assert_eq!(
+        compute_checksum("Hello\r\n", &[]),
+        compute_checksum("Hello\n", &[])
+    );
 }
 
 #[test]
 fn trailing_whitespace_same_checksum() {
     assert_eq!(
-        compute_checksum("line1  \nline2\n"),
-        compute_checksum("line1\nline2\n")
+        compute_checksum("line1  \nline2\n", &[]),
+        compute_checksum("line1\nline2\n", &[])
     );
 }
 
@@ -134,9 +138,9 @@ fn reaction_checksum_changes_on_add() {
 #[test]
 fn reaction_does_not_affect_content_checksum() {
     let comment = make_comment("Test content");
-    let checksum_before = compute_checksum(&comment.content);
+    let checksum_before = compute_checksum(&comment.content, &comment.remargin_kind);
 
-    let checksum_after = compute_checksum(&comment.content);
+    let checksum_after = compute_checksum(&comment.content, &comment.remargin_kind);
     assert_eq!(checksum_before, checksum_after);
 }
 
@@ -156,8 +160,11 @@ fn reaction_checksum_deterministic_order() {
 #[test]
 fn ack_does_not_affect_content_checksum() {
     let comment = make_comment("Test content");
-    let checksum = compute_checksum(&comment.content);
-    assert_eq!(checksum, compute_checksum(&comment.content));
+    let checksum = compute_checksum(&comment.content, &comment.remargin_kind);
+    assert_eq!(
+        checksum,
+        compute_checksum(&comment.content, &comment.remargin_kind)
+    );
 }
 
 #[test]
@@ -237,4 +244,72 @@ fn signature_with_all_fields() {
 
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(result, "full-field signature should verify");
+}
+
+/// Back-compat hinge: with no kinds, [`compute_checksum`] returns the
+/// exact hash that a pre-`remargin_kind` CLI would have produced. This
+/// test pins down that behaviour so any future refactor that accidentally
+/// alters the empty-kinds hash contribution will fail loudly instead of
+/// silently invalidating every comment on disk.
+#[test]
+fn empty_kinds_produce_legacy_checksum() {
+    // Pre-computed on 0.1.6 (pre-rem-n4x7) via the old one-arg API.
+    let expected_hello = "sha256:64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c";
+    assert_eq!(compute_checksum("Hello world", &[]), expected_hello);
+}
+
+/// Non-empty kinds change the checksum — otherwise the field would not
+/// actually protect against tag swaps and the signature would be the
+/// only line of defence.
+#[test]
+fn kinds_affect_checksum() {
+    let without = compute_checksum("same content", &[]);
+    let with = compute_checksum("same content", &[String::from("question")]);
+    assert_ne!(without, with);
+}
+
+/// Canonical ordering: `[a, b]` and `[b, a]` hash identically so that
+/// a rewrite which reorders the stored list does not invalidate
+/// checksums or signatures.
+#[test]
+fn kinds_order_does_not_affect_checksum() {
+    let ab = compute_checksum("body", &[String::from("a"), String::from("b")]);
+    let ba = compute_checksum("body", &[String::from("b"), String::from("a")]);
+    assert_eq!(ab, ba);
+}
+
+/// Signature covers `remargin_kind`: swapping a kind after signing
+/// must break verification. Mirrors the `signature_tamper_*` tests.
+#[test]
+fn signature_tamper_kind() {
+    let system = system_with_key();
+
+    let mut comment = make_comment("Body");
+    comment.remargin_kind = vec![String::from("question")];
+    let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
+    comment.signature = Some(sig);
+
+    comment.remargin_kind = vec![String::from("action-item")];
+    let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
+    assert!(!result, "verification should fail after kind tampering");
+}
+
+/// Back-compat verify: a comment signed before `remargin_kind` existed
+/// continues to verify after the field lands, because an empty list
+/// contributes zero bytes to the signature payload.
+#[test]
+fn signature_back_compat_with_empty_kinds() {
+    let system = system_with_key();
+
+    let mut comment = make_comment("Body");
+    // Sign exactly as the pre-field code path would.
+    assert!(comment.remargin_kind.is_empty());
+    let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
+    comment.signature = Some(sig);
+
+    // The stored signature still verifies against the (still-empty)
+    // kinds list — this is the guarantee that keeps existing comments
+    // verifiable after rem-n4x7 lands.
+    let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
+    assert!(result, "signature with empty kinds should verify");
 }

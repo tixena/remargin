@@ -2358,8 +2358,8 @@ fn two_author_doc_for_sign() -> String {
     use crate::crypto;
     let eduardo_content = "eduardo's note";
     let alice_content = "alice's note";
-    let eduardo_cksum = crypto::compute_checksum(eduardo_content);
-    let alice_cksum = crypto::compute_checksum(alice_content);
+    let eduardo_cksum = crypto::compute_checksum(eduardo_content, &[]);
+    let alice_cksum = crypto::compute_checksum(alice_content, &[]);
     format!(
         "\
 ---

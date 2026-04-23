@@ -55,6 +55,7 @@ fn build_comment(params: TestComment<'_>) -> Comment {
         id: String::from(params.id),
         line: params.line,
         reactions: params.reactions,
+        remargin_kind: Vec::new(),
         reply_to: params.reply_to.map(String::from),
         signature: None,
         thread: None,

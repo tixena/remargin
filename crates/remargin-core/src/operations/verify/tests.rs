@@ -44,7 +44,7 @@ hello
 ";
 
 fn make_comment(id: &str, author: &str, content: &str) -> Comment {
-    let checksum = crypto::compute_checksum(content);
+    let checksum = crypto::compute_checksum(content, &[]);
     Comment {
         ack: Vec::new(),
         attachments: Vec::new(),
@@ -55,6 +55,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
         id: String::from(id),
         line: 0,
         reactions: BTreeMap::new(),
+        remargin_kind: Vec::new(),
         reply_to: None,
         signature: None,
         thread: None,
@@ -371,7 +372,7 @@ fn parse_then_verify_plain_open_mode() {
 fn alice_doc_content() -> String {
     // sha256 of "alice's note" (exact content below).
     let content = "alice's note";
-    let cksum = crypto::compute_checksum(content);
+    let cksum = crypto::compute_checksum(content, &[]);
     format!(
         "\
 ---

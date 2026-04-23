@@ -94,8 +94,8 @@ fn make_config(mode: Mode, identity: &str, key_path: Option<&str>) -> ResolvedCo
 fn two_author_doc() -> String {
     let alice_content = "alice's note";
     let bob_content = "bob's note";
-    let alice_cksum = crypto::compute_checksum(alice_content);
-    let bob_cksum = crypto::compute_checksum(bob_content);
+    let alice_cksum = crypto::compute_checksum(alice_content, &[]);
+    let bob_cksum = crypto::compute_checksum(bob_content, &[]);
     format!(
         "\
 ---
@@ -133,7 +133,7 @@ checksum: {bob_cksum}
 /// Useful for idempotency / skip-already-signed cases.
 fn pre_signed_doc(system_for_signing: &MockSystem) -> String {
     let content = "alice's note";
-    let cksum = crypto::compute_checksum(content);
+    let cksum = crypto::compute_checksum(content, &[]);
 
     let comment = Comment {
         ack: Vec::new(),
@@ -145,6 +145,7 @@ fn pre_signed_doc(system_for_signing: &MockSystem) -> String {
         id: String::from("alc"),
         line: 0,
         reactions: BTreeMap::new(),
+        remargin_kind: Vec::new(),
         reply_to: None,
         signature: None,
         thread: None,
@@ -502,7 +503,7 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
     // Capture the stale checksum for the assertion on the repair entry.
     let pre_sign = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
     let stale_cksum = pre_sign.find_comment("alc").unwrap().checksum.clone();
-    let fresh_cksum = crypto::compute_checksum("alice's NOTE (edited)");
+    let fresh_cksum = crypto::compute_checksum("alice's NOTE (edited)", &[]);
     assert_ne!(
         stale_cksum, fresh_cksum,
         "sanity: tampered content must diverge from the stored checksum"
@@ -653,7 +654,7 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
     assert_eq!(alc.content, "alice's NOTE (edited)");
     assert_eq!(
         alc.checksum,
-        crypto::compute_checksum("alice's NOTE (edited)")
+        crypto::compute_checksum("alice's NOTE (edited)", &[])
     );
     assert!(alc.signature.is_some());
     // The new signature must verify against the registry pubkey

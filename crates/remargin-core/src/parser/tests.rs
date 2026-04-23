@@ -578,3 +578,68 @@ fn test_author_type_serializes_lowercase() {
         serde_json::json!("agent")
     );
 }
+
+/// Parsing a block without the `remargin_kind` field yields an empty
+/// vector — the field is additive and old blocks must keep round-tripping.
+#[test]
+fn test_remargin_kind_absent_parses_to_empty() {
+    let doc = minimal_block("abc");
+    let parsed = parse(&doc).unwrap();
+    assert!(parsed.comments()[0].remargin_kind.is_empty());
+}
+
+/// A block that declares `remargin_kind` round-trips through parse +
+/// `to_markdown` with the same values in the same order.
+#[test]
+fn test_remargin_kind_round_trip() {
+    let doc = "\
+```remargin
+---
+id: abc
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+checksum: sha256:abc123
+remargin_kind: [question, action item]
+---
+body text
+```
+";
+    let parsed = parse(doc).unwrap();
+    let comments = parsed.comments();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(
+        comments[0].remargin_kind,
+        vec![String::from("question"), String::from("action item")]
+    );
+    let rendered = parsed.to_markdown();
+    assert!(
+        rendered.contains("remargin_kind: [question, action item]"),
+        "round-tripped markdown should preserve the kind list:\n{rendered}"
+    );
+}
+
+/// The parser must reject a block with a malformed kind so downstream
+/// code never sees a value that would break signature reproducibility.
+#[test]
+fn test_remargin_kind_invalid_value_rejected() {
+    let doc = "\
+```remargin
+---
+id: abc
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+checksum: sha256:abc123
+remargin_kind: [\"bad!value\"]
+---
+body
+```
+";
+    let err = parse(doc).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("remargin_kind") && msg.contains("invalid character"),
+        "expected kind validation error, got {msg}"
+    );
+}

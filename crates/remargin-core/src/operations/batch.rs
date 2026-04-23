@@ -182,7 +182,11 @@ pub fn batch_comment(
         let existing_ids = doc.comment_ids();
         let new_id = id::generate(&existing_ids);
 
-        let checksum = compute_checksum(&op.content);
+        // rem-n4x7: batch does not yet surface remargin_kind; empty slice
+        // keeps the checksum identical to the pre-field implementation.
+        // rem-49w0 threads kinds through `BatchCommentOp`.
+        let remargin_kind: Vec<String> = Vec::new();
+        let checksum = compute_checksum(&op.content, &remargin_kind);
 
         // Resolve reply-to (may reference an earlier comment in this batch).
         let reply_to = op.reply_to.as_deref();
@@ -219,6 +223,7 @@ pub fn batch_comment(
             id: new_id.clone(),
             line: 0, // Placeholder; updated after document write and re-parse.
             reactions: BTreeMap::default(),
+            remargin_kind,
             reply_to: reply_to.map(String::from),
             signature: None,
             thread,
