@@ -176,6 +176,22 @@ Always set `reply_to` when you are replying. A comment without `reply_to` is a *
 - ❌ `remargin comment file=doc.md content="Good question. I'd add a revoked_keys list." after_comment=abc` — creates a sibling comment, not a reply.
 - ✅ `remargin comment file=doc.md content="Good question. I'd add a revoked_keys list." reply_to=abc` — threaded reply.
 
+### Pending comments are action items
+
+A pending comment addressed to you (or a broadcast pending comment) is a **work item**, not background context. The workflow is:
+
+1. **Read** the comment.
+2. **Act on it immediately** — perform whatever the content asks for (file the bd task, update the doc, run the verification, post the reply).
+3. **Ack only after** the action is complete. Ack is not a read-receipt.
+
+Never surface pending items back to the user as "here's what's waiting for you" when they're waiting for *you*. If the comment asks you to do something you have the tools and information to do, do it and then ack.
+
+- ❌ Listing pending comments back to the user as a status report, implying the user owes action, when the action is yours.
+- ❌ Acking first and then doing the work. The ack signals "done"; doing it in the wrong order makes the ack a lie.
+- ✅ Do the work, confirm the result, then ack. When the reply fully answers the ask, use `auto_ack: true` on the reply so it's a single atomic step.
+
+Exception: a comment whose content is itself an acknowledgment with no actionable payload (e.g. "ok", "got it", "thanks", "noted") — ack it immediately. Same for comments that are purely FYI.
+
 ### Auto-ack discipline
 
 `auto_ack: true` is allowed only when you are replying to a comment that was addressed to you (via the `to` field) and your reply fully addresses it. Auto-acking a comment addressed to someone else is speaking on their behalf.
