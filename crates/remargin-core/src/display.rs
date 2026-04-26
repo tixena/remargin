@@ -164,7 +164,8 @@ fn render_node(
         let _ = writeln!(out, "{indent}\u{2502} ...");
     }
 
-    for (emoji, authors) in &cm.reactions {
+    for (emoji, entries) in cm.reactions.entries_by_emoji() {
+        let authors: Vec<String> = entries.iter().map(|e| e.author.clone()).collect();
         let _ = writeln!(out, "{indent}\u{2502} {emoji} {}", authors.join(", "));
     }
 
@@ -278,7 +279,8 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
         let _ = writeln!(out, "  \u{2502} ...");
     }
 
-    for (emoji, authors) in &cm.reactions {
+    for (emoji, entries) in cm.reactions.entries_by_emoji() {
+        let authors: Vec<String> = entries.iter().map(|e| e.author.clone()).collect();
         let _ = writeln!(out, "  \u{2502} {emoji} {}", authors.join(", "));
     }
 

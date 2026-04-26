@@ -2,8 +2,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
-
 use chrono::DateTime;
 use serde_yaml::{Mapping, Value};
 
@@ -13,6 +11,7 @@ use crate::frontmatter::{
     read_sandbox_entries, update_remargin_fields, write_sandbox_entries,
 };
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::reactions::Reactions;
 
 /// Create a default `ResolvedConfig` for testing.
 fn test_config() -> ResolvedConfig {
@@ -40,7 +39,7 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
         content: String::from("Test content."),
         id: String::from(id),
         line: 0,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: None,
         signature: None,

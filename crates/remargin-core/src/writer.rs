@@ -16,6 +16,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
 use crate::parser::{self, Comment, ParsedDocument, Segment, required_fence_depth};
+use crate::reactions::{format_reaction_entry_block, quote_emoji_key};
 
 /// Filenames the writer refuses to modify under any circumstances.
 ///
@@ -121,8 +122,11 @@ pub fn serialize_comment(comment: &Comment) -> String {
     }
     if !comment.reactions.is_empty() {
         out.push_str("reactions:\n");
-        for (emoji, authors) in &comment.reactions {
-            let _ = writeln!(out, "  {emoji}: [{}]", authors.join(", "));
+        for (emoji, entries) in comment.reactions.entries_by_emoji() {
+            let _ = writeln!(out, "  {}:", quote_emoji_key(&emoji));
+            for entry in &entries {
+                out.push_str(&format_reaction_entry_block("    ", entry));
+            }
         }
     }
     if !comment.ack.is_empty() {

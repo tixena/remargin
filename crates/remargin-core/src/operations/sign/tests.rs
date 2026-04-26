@@ -20,7 +20,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
@@ -32,6 +31,7 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::crypto::{self, compute_signature};
 use crate::operations::sign::{SignOptions, SignSelection, sign_comments};
 use crate::parser::{self, AuthorType, Comment, Segment};
+use crate::reactions::Reactions;
 
 // ---- Test key pair -----------------------------------------------------
 //
@@ -144,7 +144,7 @@ fn pre_signed_doc(system_for_signing: &MockSystem) -> String {
         content: String::from(content),
         id: String::from("alc"),
         line: 0,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: None,
         signature: None,

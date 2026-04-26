@@ -124,8 +124,12 @@ This is the comment body.
     assert_eq!(c.thread.as_deref(), Some("t01"));
     assert_eq!(c.attachments, vec!["diagram.png", "notes.pdf"]);
     assert_eq!(c.reactions.len(), 2);
-    assert_eq!(c.reactions["thumbsup"], vec!["eduardo", "jorge"]);
-    assert_eq!(c.reactions["heart"], vec!["claude"]);
+    let thumbsup_entries = c.reactions.get("thumbsup").unwrap();
+    let thumbsup_authors: Vec<String> = thumbsup_entries.iter().map(|e| e.author.clone()).collect();
+    assert_eq!(thumbsup_authors, vec!["eduardo", "jorge"]);
+    let heart_entries = c.reactions.get("heart").unwrap();
+    let heart_authors: Vec<String> = heart_entries.iter().map(|e| e.author.clone()).collect();
+    assert_eq!(heart_authors, vec!["claude"]);
     assert_eq!(c.ack.len(), 2);
     assert_eq!(c.ack[0].author, "jorge");
     assert_eq!(c.ack[1].author, "claude");
@@ -695,4 +699,78 @@ body
         msg.contains("remargin_kind") && msg.contains("invalid character"),
         "expected kind validation error, got {msg}"
     );
+}
+
+#[test]
+fn legacy_reactions_round_trip_to_new_shape() {
+    // A doc written under the pre-rem-f9qq schema (`reactions: {emoji: [author]}`)
+    // must parse, then serialize back in the new shape with a synthesized
+    // ts taken from the comment's own ts (no matching ack).
+    let doc = "\
+```remargin
+---
+id: legacy
+author: eduardo
+type: human
+ts: 2026-04-26T10:00:00-04:00
+checksum: sha256:abc
+reactions:
+  thumbsup: [eduardo, claude]
+---
+hello
+```
+";
+    let parsed = parse(doc).unwrap();
+    let cm = parsed.comments()[0];
+
+    // Both legacy entries land with the comment's own ts (no ack list).
+    let entries = cm.reactions.get("thumbsup").unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].author, "eduardo");
+    assert_eq!(entries[1].author, "claude");
+    assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
+    assert_eq!(entries[1].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
+
+    // Serialize back. New shape (`- author:` / `  ts:`) must appear; the
+    // legacy `[eduardo, claude]` flow form must NOT.
+    let written = parsed.to_markdown();
+    assert!(
+        written.contains("- author: eduardo"),
+        "serialized form missing new-shape author entry:\n{written}"
+    );
+    assert!(
+        written.contains("ts: 2026-04-26T10:00:00-04:00"),
+        "serialized form missing the synthesized reaction ts:\n{written}"
+    );
+    assert!(
+        !written.contains("[eduardo, claude]"),
+        "serialized form must not retain the legacy flow-list shape:\n{written}"
+    );
+}
+
+#[test]
+fn legacy_reaction_uses_ack_ts_when_author_acked() {
+    // When the comment has an ack from the same author as a legacy
+    // reaction, the synthesized reaction ts comes from the ack.
+    let doc = "\
+```remargin
+---
+id: ackedreact
+author: eduardo
+type: human
+ts: 2026-04-26T10:00:00-04:00
+checksum: sha256:abc
+reactions:
+  thumbsup: [eduardo]
+ack:
+  - eduardo@2026-04-26T11:00:00-04:00
+---
+hi
+```
+";
+    let parsed = parse(doc).unwrap();
+    let cm = parsed.comments()[0];
+    let entries = cm.reactions.get("thumbsup").unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T11:00:00-04:00");
 }

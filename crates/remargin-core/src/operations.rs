@@ -17,7 +17,6 @@ mod tests;
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +32,7 @@ use crate::kind::validate_kinds;
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
 /// Parameters for creating a new comment.
@@ -169,7 +169,7 @@ pub fn create_comment(
         content: String::from(params.content),
         id: new_id.clone(),
         line: 0, // Placeholder; updated after document write and re-parse.
-        reactions: BTreeMap::default(),
+        reactions: Reactions::new(),
         remargin_kind,
         reply_to: params.reply_to.map(String::from),
         signature: None,
@@ -323,21 +323,11 @@ pub fn react(
     let cm = find_comment_mut(&mut doc, comment_id)
         .with_context(|| format!("comment {comment_id:?} not found"))?;
 
+    let now = Utc::now().fixed_offset();
     if remove {
-        if let Some(authors) = cm.reactions.get_mut(emoji) {
-            authors.retain(|author| author != identity);
-            if authors.is_empty() {
-                cm.reactions.remove(emoji);
-            }
-        }
+        let _was_removed = cm.reactions.remove(emoji, identity);
     } else {
-        let authors = cm
-            .reactions
-            .entry(String::from(emoji))
-            .or_insert_with(Vec::new);
-        if !authors.contains(&String::from(identity)) {
-            authors.push(String::from(identity));
-        }
+        let _was_added = cm.reactions.add(emoji, identity, now);
     }
 
     let _reaction_checksum = compute_reaction_checksum(&cm.reactions);

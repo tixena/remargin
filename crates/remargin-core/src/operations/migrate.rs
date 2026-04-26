@@ -37,7 +37,6 @@ mod tests;
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -51,6 +50,7 @@ use crate::frontmatter;
 use crate::id;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, LegacyRole, Segment};
+use crate::reactions::Reactions;
 use crate::writer;
 
 /// Per-role identity used to attribute and sign migrated comments.
@@ -274,7 +274,7 @@ pub(crate) fn build_migrated_segments(
                     content: lc.content.clone(),
                     id: new_id.clone(),
                     line: 0,
-                    reactions: BTreeMap::default(),
+                    reactions: Reactions::new(),
                     remargin_kind,
                     reply_to,
                     signature: None,

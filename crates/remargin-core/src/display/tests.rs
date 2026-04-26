@@ -2,7 +2,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chrono::DateTime;
@@ -12,6 +11,7 @@ use crate::display::{
 };
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{Acknowledgment, AuthorType, Comment};
+use crate::reactions::Reactions;
 
 /// Parameters for building a test comment.
 struct TestComment<'param> {
@@ -21,7 +21,7 @@ struct TestComment<'param> {
     content: &'param str,
     id: &'param str,
     line: usize,
-    reactions: BTreeMap<String, Vec<String>>,
+    reactions: Reactions,
     reply_to: Option<&'param str>,
     to: Vec<&'param str>,
     ts: &'param str,
@@ -36,7 +36,7 @@ impl Default for TestComment<'_> {
             content: "Test content.",
             id: "abc",
             line: 10,
-            reactions: BTreeMap::new(),
+            reactions: Reactions::new(),
             reply_to: None,
             to: Vec::new(),
             ts: "2026-04-06T14:00:00-04:00",
@@ -314,10 +314,16 @@ fn render_multiple_acks() {
 
 #[test]
 fn render_reactions() {
-    let mut reactions = BTreeMap::new();
-    reactions.insert(
-        String::from("\u{1f44d}"),
-        vec![String::from("jorge"), String::from("alice")],
+    let mut reactions = Reactions::new();
+    let _added_jorge = reactions.add(
+        "\u{1f44d}",
+        "jorge",
+        DateTime::parse_from_rfc3339("2026-04-06T14:00:00-04:00").unwrap(),
+    );
+    let _added_alice = reactions.add(
+        "\u{1f44d}",
+        "alice",
+        DateTime::parse_from_rfc3339("2026-04-06T14:01:00-04:00").unwrap(),
     );
     let cm = build_comment(TestComment {
         id: "abc",
@@ -562,7 +568,7 @@ fn make_expanded(
         file: PathBuf::from(file),
         id: String::from(id),
         line,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: None,
         signature: None,
@@ -751,10 +757,16 @@ fn query_pretty_content_truncation() {
 
 #[test]
 fn query_pretty_reactions() {
-    let mut reactions = BTreeMap::new();
-    reactions.insert(
-        String::from("\u{1f44d}"),
-        vec![String::from("alice"), String::from("bob")],
+    let mut reactions = Reactions::new();
+    let _added_alice = reactions.add(
+        "\u{1f44d}",
+        "alice",
+        DateTime::parse_from_rfc3339("2026-04-06T14:00:00-04:00").unwrap(),
+    );
+    let _added_bob = reactions.add(
+        "\u{1f44d}",
+        "bob",
+        DateTime::parse_from_rfc3339("2026-04-06T14:01:00-04:00").unwrap(),
     );
     let mut cm = make_expanded(
         "abc",

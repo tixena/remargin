@@ -413,8 +413,8 @@ fn react_add_emoji() {
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
-    assert!(cm.reactions.contains_key("thumbsup"));
-    assert!(cm.reactions["thumbsup"].contains(&String::from("eduardo")));
+    let entries = cm.reactions.get("thumbsup").unwrap();
+    assert!(entries.iter().any(|e| e.author == "eduardo"));
 }
 
 #[test]
@@ -458,7 +458,7 @@ Content.
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(
-        !cm.reactions.contains_key("thumbsup"),
+        cm.reactions.get("thumbsup").is_none(),
         "reaction should be removed"
     );
 }
@@ -1807,10 +1807,9 @@ fn project_react_adds_reaction_without_mutating_disk() {
 
     let after_reactions = &after.find_comment("abc").unwrap().reactions;
     assert_eq!(after_reactions.len(), 1);
-    assert_eq!(
-        after_reactions.get(":thumbsup:"),
-        Some(&vec![String::from("eduardo")])
-    );
+    let entries = after_reactions.get(":thumbsup:").unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].author, "eduardo");
 
     let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(

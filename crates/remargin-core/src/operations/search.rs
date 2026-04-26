@@ -20,6 +20,7 @@ use tixschema::model_schema;
 
 use crate::document::allowlist;
 use crate::parser::{self, Segment, required_fence_depth};
+use crate::reactions::{format_reaction_entry_block, quote_emoji_key};
 
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]
@@ -365,8 +366,11 @@ fn serialize_comment_block(cm: &parser::Comment, out: &mut String) {
     }
     if !cm.reactions.is_empty() {
         out.push_str("reactions:\n");
-        for (emoji, authors) in &cm.reactions {
-            let _ = writeln!(out, "  {emoji}: [{}]", authors.join(", "));
+        for (emoji, entries) in cm.reactions.entries_by_emoji() {
+            let _ = writeln!(out, "  {}:", quote_emoji_key(&emoji));
+            for entry in &entries {
+                out.push_str(&format_reaction_entry_block("    ", entry));
+            }
         }
     }
     if !cm.ack.is_empty() {

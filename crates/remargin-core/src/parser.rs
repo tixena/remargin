@@ -2,7 +2,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
 use core::iter::repeat_n;
 use std::collections::HashSet;
@@ -15,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
 use crate::kind::validate_kinds;
+use crate::reactions::{Reactions, format_reaction_entry_block, quote_emoji_key, reactions_schema};
 
 /// An acknowledgment of a comment by another participant.
 #[derive(Debug, Clone, Serialize)]
@@ -79,7 +79,7 @@ pub struct Comment {
     /// 1-indexed line number of the opening fence in the source document.
     /// Zero means "not yet placed" (e.g. newly created, before write).
     pub line: usize,
-    pub reactions: BTreeMap<String, Vec<String>>,
+    pub reactions: Reactions,
     /// Comment classification tags. Absent by default; each entry is a
     /// short lowercase-friendly label (e.g. `question`, `action item`)
     /// matching [`crate::kind::VALID_KIND_REGEX`] and bounded by
@@ -146,8 +146,6 @@ pub struct ParsedDocument {
     pub segments: Vec<Segment>,
 }
 
-pub type Reactions = BTreeMap<String, Vec<String>>;
-
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Segment {
@@ -170,7 +168,7 @@ struct RawYamlHeader {
     checksum: String,
     id: String,
     #[serde(default)]
-    reactions: BTreeMap<String, Vec<String>>,
+    reactions: Reactions,
     #[serde(default, rename = "remargin_kind")]
     remargin_kind: Vec<String>,
     #[serde(rename = "reply-to")]
@@ -354,8 +352,11 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
     }
     if !cm.reactions.is_empty() {
         out.push_str("reactions:\n");
-        for (emoji, authors) in &cm.reactions {
-            let _ = writeln!(out, "  {emoji}: [{}]", authors.join(", "));
+        for (emoji, entries) in cm.reactions.entries_by_emoji() {
+            let _ = writeln!(out, "  {}:", quote_emoji_key(&emoji));
+            for entry in &entries {
+                out.push_str(&format_reaction_entry_block("    ", entry));
+            }
         }
     }
     if !cm.ack.is_empty() {
@@ -582,6 +583,9 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         Some(header.remargin_kind)
     };
 
+    let mut reactions = header.reactions;
+    reactions.backfill_legacy_timestamps(ts, &ack_list);
+
     Ok(Comment {
         ack: ack_list,
         attachments: header.attachments,
@@ -591,7 +595,7 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         content,
         id: header.id,
         line,
-        reactions: header.reactions,
+        reactions,
         remargin_kind,
         reply_to: header.reply_to,
         signature: header.signature,

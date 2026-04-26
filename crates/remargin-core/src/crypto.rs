@@ -25,7 +25,8 @@ use sha2::{Digest as _, Sha256};
 use ssh_key::{HashAlg, PrivateKey, PublicKey};
 
 use crate::kind::canonical_kinds;
-use crate::parser::{Comment, Reactions};
+use crate::parser::Comment;
+use crate::reactions::Reactions;
 
 /// Namespace used for SSH signature operations (PROTOCOL.sshsig).
 const SIGNATURE_NAMESPACE: &str = "remargin";
@@ -76,16 +77,21 @@ pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
 
 /// Returns a string in the format `sha256:<hex>`.
 ///
-/// Reactions are serialized in sorted order (`BTreeMap` guarantees key order,
-/// and each author list is sorted before hashing) to produce a deterministic
-/// checksum.
+/// Emojis are walked in `BTreeMap` key order (already sorted). Within
+/// each emoji's list, entries are projected to `author@ts` strings,
+/// sorted, then joined with commas — so two writers that add the same
+/// reactions in different orders produce the same checksum, and the
+/// checksum changes when either an author or a timestamp changes.
 #[must_use]
 pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
     let mut payload = String::new();
-    for (emoji, authors) in reactions {
-        let mut sorted_authors = authors.clone();
-        sorted_authors.sort();
-        let _ = writeln!(payload, "{emoji}:{}", sorted_authors.join(","));
+    for (emoji, entries) in reactions.entries_by_emoji() {
+        let mut projected: Vec<String> = entries
+            .iter()
+            .map(|e| format!("{}@{}", e.author, e.ts.to_rfc3339()))
+            .collect();
+        projected.sort();
+        let _ = writeln!(payload, "{emoji}:{}", projected.join(","));
     }
     let hash = Sha256::digest(payload.as_bytes());
     format!("sha256:{}", hex::encode(hash))

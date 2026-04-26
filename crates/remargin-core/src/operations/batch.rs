@@ -8,7 +8,6 @@ mod tests;
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +24,7 @@ use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::operations::{copy_attachments, find_comment_mut};
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument};
+use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
 /// A single comment creation operation within a batch.
@@ -222,7 +222,7 @@ pub fn batch_comment(
             content: op.content.clone(),
             id: new_id.clone(),
             line: 0, // Placeholder; updated after document write and re-parse.
-            reactions: BTreeMap::default(),
+            reactions: Reactions::new(),
             remargin_kind,
             reply_to: reply_to.map(String::from),
             signature: None,

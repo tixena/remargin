@@ -2,7 +2,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -12,6 +11,7 @@ use os_shim::mock::MockSystem;
 
 use crate::linter;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment};
+use crate::reactions::Reactions;
 
 use super::{
     InsertPosition, insert_comment, serialize_comment, verify_preservation, write_document,
@@ -28,7 +28,7 @@ fn make_comment(id: &str, content: &str) -> Comment {
         content: String::from(content),
         id: String::from(id),
         line: 0,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: None,
         signature: None,
@@ -54,8 +54,12 @@ fn simple_serialize() {
 
 #[test]
 fn full_serialize() {
-    let mut reactions = BTreeMap::new();
-    reactions.insert(String::from("thumbsup"), vec![String::from("bob")]);
+    let mut reactions = Reactions::new();
+    let _added = reactions.add(
+        "thumbsup",
+        "bob",
+        DateTime::parse_from_rfc3339("2026-04-06T14:35:00-04:00").unwrap(),
+    );
 
     let comment = Comment {
         ack: vec![Acknowledgment {

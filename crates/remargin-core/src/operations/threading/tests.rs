@@ -2,12 +2,11 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
-
 use chrono::DateTime;
 
 use crate::operations::threading::{build_thread_tree, find_descendants, resolve_thread_root};
 use crate::parser::{AuthorType, Comment};
+use crate::reactions::Reactions;
 
 fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comment {
     Comment {
@@ -19,7 +18,7 @@ fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comme
         content: String::from("Test content."),
         id: String::from(id),
         line: 0,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: reply_to.map(String::from),
         signature: None,

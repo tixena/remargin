@@ -2,7 +2,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::DateTime;
@@ -13,6 +12,7 @@ use crate::crypto::{
     verify_checksum, verify_signature,
 };
 use crate::parser::{AuthorType, Comment};
+use crate::reactions::Reactions;
 
 const TEST_PRIVATE_KEY: &str = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
@@ -36,7 +36,7 @@ fn make_comment(content: &str) -> Comment {
         content: String::from(content),
         id: String::from("abc"),
         line: 0,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: None,
         signature: None,
@@ -123,11 +123,13 @@ fn verify_checksum_fail() {
 
 #[test]
 fn reaction_checksum_changes_on_add() {
-    let mut reactions1: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    reactions1.insert(String::from("thumbsup"), vec![String::from("alice")]);
+    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
+    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T13:00:00-04:00").unwrap();
+    let mut reactions1 = Reactions::new();
+    let _added_alice = reactions1.add("thumbsup", "alice", ts1);
 
     let mut reactions2 = reactions1.clone();
-    reactions2.insert(String::from("heart"), vec![String::from("bob")]);
+    let _added_bob = reactions2.add("heart", "bob", ts2);
 
     assert_ne!(
         compute_reaction_checksum(&reactions1),
@@ -146,15 +148,50 @@ fn reaction_does_not_affect_content_checksum() {
 
 #[test]
 fn reaction_checksum_deterministic_order() {
-    let mut reactions: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    reactions.insert(
-        String::from("thumbsup"),
-        vec![String::from("bob"), String::from("alice")],
-    );
+    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
+    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T12:01:00-04:00").unwrap();
+    let mut reactions = Reactions::new();
+    let _added_bob = reactions.add("thumbsup", "bob", ts1);
+    let _added_alice = reactions.add("thumbsup", "alice", ts2);
 
     let c1 = compute_reaction_checksum(&reactions);
     let c2 = compute_reaction_checksum(&reactions);
     assert_eq!(c1, c2);
+}
+
+#[test]
+fn reaction_checksum_changes_when_ts_changes() {
+    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
+    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T13:00:00-04:00").unwrap();
+    let mut r1 = Reactions::new();
+    let _added_one = r1.add("thumbsup", "alice", ts1);
+    let mut r2 = Reactions::new();
+    let _added_two = r2.add("thumbsup", "alice", ts2);
+    assert_ne!(
+        compute_reaction_checksum(&r1),
+        compute_reaction_checksum(&r2),
+        "reaction checksum must change when an entry's ts changes",
+    );
+}
+
+#[test]
+fn reaction_checksum_independent_of_insert_order() {
+    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
+    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T12:01:00-04:00").unwrap();
+
+    let mut a = Reactions::new();
+    let _a_alice = a.add("thumbsup", "alice", ts1);
+    let _a_bob = a.add("thumbsup", "bob", ts2);
+
+    let mut b = Reactions::new();
+    let _b_bob = b.add("thumbsup", "bob", ts2);
+    let _b_alice = b.add("thumbsup", "alice", ts1);
+
+    assert_eq!(
+        compute_reaction_checksum(&a),
+        compute_reaction_checksum(&b),
+        "two writers adding the same reactions in different orders must agree",
+    );
 }
 
 #[test]

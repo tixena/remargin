@@ -6,7 +6,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::DateTime;
@@ -22,6 +21,7 @@ use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment,
 };
 use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
+use crate::reactions::Reactions;
 use crate::writer::InsertPosition;
 
 const SIMPLE_DOC: &str = "\
@@ -54,7 +54,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
         content: String::from(content),
         id: String::from(id),
         line: 0,
-        reactions: BTreeMap::new(),
+        reactions: Reactions::new(),
         remargin_kind: None,
         reply_to: None,
         signature: None,

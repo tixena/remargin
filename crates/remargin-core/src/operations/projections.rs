@@ -16,7 +16,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -37,6 +36,7 @@ use crate::operations::{
     collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
 };
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
 /// One sub-op inside a [`project_batch`] request: same shape as
@@ -360,7 +360,7 @@ pub fn project_batch(
             content: op.content.clone(),
             id: new_id,
             line: 0,
-            reactions: BTreeMap::default(),
+            reactions: Reactions::new(),
             remargin_kind,
             reply_to: op.reply_to.clone(),
             signature: None,
@@ -505,7 +505,7 @@ pub fn project_comment(
         content: String::from(params.content),
         id: new_id,
         line: 0,
-        reactions: BTreeMap::default(),
+        reactions: Reactions::new(),
         remargin_kind,
         reply_to: params.reply_to.map(String::from),
         signature: None,
@@ -723,21 +723,11 @@ pub fn project_react(
     let cm = find_comment_mut(&mut after, comment_id)
         .with_context(|| format!("comment {comment_id:?} not found"))?;
 
+    let now = Utc::now().fixed_offset();
     if remove {
-        if let Some(authors) = cm.reactions.get_mut(emoji) {
-            authors.retain(|author| author != identity);
-            if authors.is_empty() {
-                let _: Option<Vec<String>> = cm.reactions.remove(emoji);
-            }
-        }
+        let _was_removed = cm.reactions.remove(emoji, identity);
     } else {
-        let authors = cm
-            .reactions
-            .entry(String::from(emoji))
-            .or_insert_with(Vec::new);
-        if !authors.contains(&String::from(identity)) {
-            authors.push(String::from(identity));
-        }
+        let _was_added = cm.reactions.add(emoji, identity, now);
     }
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
