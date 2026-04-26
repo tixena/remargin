@@ -4,10 +4,18 @@
 //! Pure-data round-trips: every test feeds a hand-rolled
 //! [`ResolvedRestrict`] in and asserts the returned rule strings.
 
+use core::slice::from_ref;
 use std::path::{Path, PathBuf};
 
+use os_shim::System as _;
+use os_shim::mock::MockSystem;
+use serde_json::{Value, json};
+
 use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
-use crate::permissions::claude_sync::{ALLOW_MCP_REMARGIN, RuleSet, rules_for};
+use crate::permissions::claude_sync::{
+    ALLOW_MCP_REMARGIN, RuleSet, apply_rules, revert_rules, rules_for,
+};
+use crate::permissions::sidecar::{self, sidecar_path};
 
 fn restrict_subpath(path: &str, also_deny_bash: &[&str], cli_allowed: bool) -> ResolvedRestrict {
     ResolvedRestrict {
@@ -201,4 +209,334 @@ fn anchor_argument_does_not_affect_output() {
     let rules_a = rules_for(&entry, Path::new("/a"), &[]);
     let rules_b = rules_for(&entry, Path::new("/somewhere/else"), &[]);
     assert_eq!(rules_a, rules_b);
+}
+
+// ---------------------------------------------------------------------
+// apply_rules / revert_rules
+// ---------------------------------------------------------------------
+
+fn empty_anchor() -> (MockSystem, PathBuf) {
+    let anchor = PathBuf::from("/r");
+    let system = MockSystem::new().with_dir(&anchor).unwrap();
+    (system, anchor)
+}
+
+fn small_rule_set() -> RuleSet {
+    RuleSet {
+        allow: vec![String::from(ALLOW_MCP_REMARGIN)],
+        deny: vec![
+            String::from("Edit(///r/secret/**)"),
+            String::from("Write(///r/secret/**)"),
+        ],
+    }
+}
+
+fn settings_files(anchor: &Path) -> Vec<PathBuf> {
+    vec![
+        anchor.join(".claude/settings.local.json"),
+        PathBuf::from("/home/u/.claude/settings.json"),
+    ]
+}
+
+fn read_settings(system: &MockSystem, path: &Path) -> Value {
+    let body = system.read_to_string(path).unwrap();
+    serde_json::from_str(&body).unwrap()
+}
+
+/// Scenario 6: both settings files missing → both created with the
+/// rules; sidecar created; gitignore updated.
+#[test]
+fn apply_creates_missing_settings_files_and_sidecar() {
+    let (system, anchor) = empty_anchor();
+    let rules = small_rule_set();
+    let files = settings_files(&anchor);
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &rules,
+        &files,
+        "2026-04-26T10:00:00Z",
+    )
+    .unwrap();
+
+    for file in &files {
+        let value = read_settings(&system, file);
+        let deny = value["permissions"]["deny"].as_array().unwrap();
+        assert_eq!(deny.len(), 2, "{file:?} -> {value:#?}");
+        let allow = value["permissions"]["allow"].as_array().unwrap();
+        assert_eq!(allow.len(), 1);
+    }
+
+    let sidecar = sidecar::load(&system, &anchor).unwrap();
+    let entry = &sidecar.entries["/r/secret"];
+    assert_eq!(entry.deny, rules.deny);
+    assert_eq!(entry.allow, rules.allow);
+    assert_eq!(entry.added_at, "2026-04-26T10:00:00Z");
+
+    let gitignore = system.read_to_string(&anchor.join(".gitignore")).unwrap();
+    assert!(gitignore.contains(".claude/.remargin-restrictions.json"));
+}
+
+/// Scenario 7: pre-existing unrelated rules in the deny / allow arrays
+/// stay put; new rules append.
+#[test]
+fn apply_preserves_existing_unrelated_rules() {
+    let (system, anchor) = empty_anchor();
+    let prior = json!({
+        "permissions": {
+            "deny": ["Edit(///some/other/path/**)"],
+            "allow": ["Bash(ls *)"]
+        },
+        "env": { "FOO": "bar" }
+    });
+    let local = anchor.join(".claude/settings.local.json");
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system.write(&local, prior.to_string().as_bytes()).unwrap();
+
+    let rules = small_rule_set();
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &rules,
+        from_ref(&local),
+        "2026-04-26T10:00:00Z",
+    )
+    .unwrap();
+
+    let value = read_settings(&system, &local);
+    let deny = value["permissions"]["deny"].as_array().unwrap();
+    assert!(
+        deny.iter()
+            .any(|v| v.as_str() == Some("Edit(///some/other/path/**)"))
+    );
+    assert!(
+        deny.iter()
+            .any(|v| v.as_str() == Some("Edit(///r/secret/**)"))
+    );
+    assert_eq!(
+        value["env"]["FOO"],
+        json!("bar"),
+        "unrelated keys must be preserved"
+    );
+}
+
+/// Scenario 8 + 19: re-applying the same entry produces the same
+/// state. No duplicates in deny/allow arrays.
+#[test]
+fn apply_is_idempotent_on_repeat() {
+    let (system, anchor) = empty_anchor();
+    let rules = small_rule_set();
+    let files = settings_files(&anchor);
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &rules,
+        &files,
+        "2026-04-26T10:00:00Z",
+    )
+    .unwrap();
+    let first_local = read_settings(&system, &files[0]);
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &rules,
+        &files,
+        "2026-04-26T11:00:00Z",
+    )
+    .unwrap();
+    let second_local = read_settings(&system, &files[0]);
+    assert_eq!(first_local, second_local, "re-apply must not mutate");
+}
+
+/// Manually-duplicated rule does not create a third copy on re-apply.
+#[test]
+fn apply_dedupes_against_manually_duplicated_rules() {
+    let (system, anchor) = empty_anchor();
+    let local = anchor.join(".claude/settings.local.json");
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    let prior = json!({
+        "permissions": {
+            "deny": [
+                "Edit(///r/secret/**)",
+                "Edit(///r/secret/**)"
+            ],
+            "allow": []
+        }
+    });
+    system.write(&local, prior.to_string().as_bytes()).unwrap();
+
+    let rules = small_rule_set();
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &rules,
+        from_ref(&local),
+        "2026-04-26T10:00:00Z",
+    )
+    .unwrap();
+
+    let value = read_settings(&system, &local);
+    let deny = value["permissions"]["deny"].as_array().unwrap();
+    let edit_count = deny
+        .iter()
+        .filter(|v| v.as_str() == Some("Edit(///r/secret/**)"))
+        .count();
+    // The pre-existing duplicate is preserved (we don't aggressively
+    // de-dupe other people's data); apply only adds the missing
+    // entries, so the count stays at the pre-existing 2.
+    assert_eq!(edit_count, 2, "{value:#?}");
+}
+
+/// Scenario 9: applying entries for two different paths leaves both
+/// rules in the settings file and both records in the sidecar.
+#[test]
+fn apply_two_different_entries_keeps_both() {
+    let (system, anchor) = empty_anchor();
+    let files = settings_files(&anchor);
+    let rules_a = RuleSet {
+        allow: Vec::new(),
+        deny: vec![String::from("Edit(///r/a/**)")],
+    };
+    let rules_b = RuleSet {
+        allow: Vec::new(),
+        deny: vec![String::from("Edit(///r/b/**)")],
+    };
+    apply_rules(&system, &anchor, "/r/a", &rules_a, &files, "now").unwrap();
+    apply_rules(&system, &anchor, "/r/b", &rules_b, &files, "now").unwrap();
+
+    let value = read_settings(&system, &files[0]);
+    let deny = value["permissions"]["deny"].as_array().unwrap();
+    assert!(deny.iter().any(|v| v == "Edit(///r/a/**)"));
+    assert!(deny.iter().any(|v| v == "Edit(///r/b/**)"));
+
+    let sidecar = sidecar::load(&system, &anchor).unwrap();
+    assert_eq!(sidecar.entries.len(), 2);
+}
+
+/// Scenario 10: clean revert restores the settings + sidecar to the
+/// pre-apply state.
+#[test]
+fn revert_after_apply_restores_clean_state() {
+    let (system, anchor) = empty_anchor();
+    let files = settings_files(&anchor);
+    let local = files[0].clone();
+    let pre_apply_local = json!({ "env": { "PRESERVE": "true" } });
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .write(&local, pre_apply_local.to_string().as_bytes())
+        .unwrap();
+
+    let rules = small_rule_set();
+    apply_rules(&system, &anchor, "/r/secret", &rules, &files, "now").unwrap();
+    let report = revert_rules(&system, &anchor, "/r/secret").unwrap();
+    assert!(report.warnings.is_empty(), "{:#?}", report.warnings);
+
+    let after = read_settings(&system, &local);
+    let deny = after["permissions"]["deny"].as_array().unwrap();
+    assert!(deny.is_empty(), "{after:#?}");
+    let allow = after["permissions"]["allow"].as_array().unwrap();
+    assert!(allow.is_empty());
+    assert_eq!(after["env"]["PRESERVE"], json!("true"));
+
+    let sidecar = sidecar::load(&system, &anchor).unwrap();
+    assert!(sidecar.entries.is_empty());
+}
+
+/// Scenario 11: a manually-deleted rule between apply and revert
+/// surfaces as a warning but does NOT fail the revert.
+#[test]
+fn revert_warns_on_manually_deleted_rules() {
+    let (system, anchor) = empty_anchor();
+    let local = anchor.join(".claude/settings.local.json");
+    let rules = small_rule_set();
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &rules,
+        from_ref(&local),
+        "now",
+    )
+    .unwrap();
+
+    // Hand-edit the settings: drop one of the deny rules.
+    let mut value = read_settings(&system, &local);
+    let deny = value["permissions"]["deny"].as_array_mut().unwrap();
+    deny.retain(|v| v.as_str() != Some("Edit(///r/secret/**)"));
+    let body = serde_json::to_string_pretty(&value).unwrap();
+    system.write(&local, body.as_bytes()).unwrap();
+
+    let report = revert_rules(&system, &anchor, "/r/secret").unwrap();
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("Edit(///r/secret/**)") && w.contains("manually removed")),
+        "expected manual-removal warning, got: {:#?}",
+        report.warnings
+    );
+}
+
+/// Scenario 12: revert when the sidecar has no entry for `target_path`
+/// returns an empty report (no warnings).
+#[test]
+fn revert_empty_when_no_sidecar_entry() {
+    let (system, anchor) = empty_anchor();
+    let report = revert_rules(&system, &anchor, "/r/never-tracked").unwrap();
+    assert!(report.warnings.is_empty());
+    assert!(report.touched_files.is_empty());
+}
+
+/// Scenario 18: settings files with unrelated top-level keys (env,
+/// hooks, etc.) preserve those keys verbatim across apply.
+#[test]
+fn apply_preserves_top_level_keys() {
+    let (system, anchor) = empty_anchor();
+    let local = anchor.join(".claude/settings.local.json");
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    let prior = json!({
+        "env": { "DEBUG": "true" },
+        "hooks": { "stop": ["echo done"] }
+    });
+    system.write(&local, prior.to_string().as_bytes()).unwrap();
+
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &small_rule_set(),
+        from_ref(&local),
+        "now",
+    )
+    .unwrap();
+
+    let value = read_settings(&system, &local);
+    assert_eq!(value["env"]["DEBUG"], json!("true"));
+    assert_eq!(value["hooks"]["stop"][0], json!("echo done"));
+}
+
+/// Sidecar contains the canonical settings-file paths the apply ran
+/// against, so a later revert can reach exactly the same files even
+/// when the caller's notion of "user-scope" changes (e.g. HOME moves).
+#[test]
+fn sidecar_records_resolved_settings_file_paths() {
+    let (system, anchor) = empty_anchor();
+    let files = settings_files(&anchor);
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &small_rule_set(),
+        &files,
+        "now",
+    )
+    .unwrap();
+    let sidecar = sidecar::load(&system, &anchor).unwrap();
+    assert_eq!(sidecar.entries["/r/secret"].added_to_files, files);
+    let _path = sidecar_path(&anchor);
 }

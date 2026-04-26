@@ -60,11 +60,15 @@
 #[cfg(test)]
 mod tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context as _, Result};
+use os_shim::System;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
+use crate::permissions::sidecar::{self, SidecarEntry};
 
 /// The dot-folder remargin owns. Always re-allowed regardless of the
 /// caller's `allow_dot_folders` list.
@@ -85,6 +89,24 @@ const BASH_MUTATORS: &[&str] = &["cp *", "mv *", "tee", "sed -i *", "truncate *"
 /// blanket `restrict` rule does not lock the user out of the very
 /// commands needed to reverse it.
 const ALLOW_MCP_REMARGIN: &str = "mcp__remargin__*";
+
+/// Diagnostic surface returned by [`revert_rules`].
+///
+/// Manual-edit detection lives here: when the caller deletes a rule
+/// from a settings file by hand between `apply_rules` and
+/// `revert_rules`, the revert path skips the missing rule and records
+/// the omission here so the CLI can surface it without failing the
+/// whole reverse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RevertReport {
+    /// Files the revert opened. Useful for the CLI to print "removed
+    /// rules from N file(s)".
+    pub touched_files: Vec<PathBuf>,
+    /// Human-readable diagnostics: missing rules, missing files, etc.
+    /// Empty on the clean-revert happy path.
+    pub warnings: Vec<String>,
+}
 
 /// Generated rule strings for one [`ResolvedRestrict`] entry.
 ///
@@ -174,4 +196,198 @@ pub fn rules_for(
     }
 
     RuleSet { allow, deny }
+}
+
+/// Apply `rules` to every settings file in `settings_files`, updating
+/// the sidecar to record exactly what was added.
+///
+/// Idempotent: rules already present in a settings file are left
+/// in place (no duplicates), and the sidecar entry is overwritten
+/// with the latest deltas so a subsequent [`revert_rules`] removes
+/// the right strings. `added_at` is caller-supplied so callers can
+/// pin a value in tests.
+///
+/// # Errors
+///
+/// - Settings-file read / parse / write failures.
+/// - Sidecar I/O failures (forwarded from [`sidecar::add_entry`]).
+pub fn apply_rules(
+    system: &dyn System,
+    anchor: &Path,
+    target_path: &str,
+    rules: &RuleSet,
+    settings_files: &[PathBuf],
+    added_at: &str,
+) -> Result<()> {
+    for settings_file in settings_files {
+        merge_rules_into_settings(system, settings_file, rules)?;
+    }
+
+    sidecar::add_entry(
+        system,
+        anchor,
+        target_path,
+        SidecarEntry {
+            added_at: String::from(added_at),
+            added_to_files: settings_files.to_vec(),
+            allow: rules.allow.clone(),
+            deny: rules.deny.clone(),
+        },
+    )
+}
+
+/// Reverse [`apply_rules`] for `target_path`.
+///
+/// Looks up the sidecar entry; for each rule string the entry
+/// recorded, scrubs that string from each `added_to_files` settings
+/// file (skipping silently when the file or the rule is missing —
+/// that's the manual-edit case the [`RevertReport`] documents).
+/// Removes the sidecar entry on success.
+///
+/// Returns an empty [`RevertReport`] (no warnings) when the sidecar
+/// has no entry for `target_path`. The caller decides whether to
+/// surface that as an error or as a soft "nothing to do".
+///
+/// # Errors
+///
+/// Sidecar / settings-file I/O failures (read / parse / write).
+pub fn revert_rules(system: &dyn System, anchor: &Path, target_path: &str) -> Result<RevertReport> {
+    let mut report = RevertReport::default();
+    let Some(entry) = sidecar::remove_entry(system, anchor, target_path)? else {
+        return Ok(report);
+    };
+
+    for settings_file in &entry.added_to_files {
+        report.touched_files.push(settings_file.clone());
+        let body = match system.read_to_string(settings_file) {
+            Ok(body) => body,
+            Err(_err) => {
+                report.warnings.push(format!(
+                    "settings file {} disappeared between apply and revert; skipping",
+                    settings_file.display()
+                ));
+                continue;
+            }
+        };
+        let mut value: Value = match serde_json::from_str(&body) {
+            Ok(value) => value,
+            Err(err) => {
+                report.warnings.push(format!(
+                    "settings file {} no longer parses ({err}); skipping",
+                    settings_file.display()
+                ));
+                continue;
+            }
+        };
+        let removed_deny = scrub_permission_array(&mut value, "deny", &entry.deny);
+        let removed_allow = scrub_permission_array(&mut value, "allow", &entry.allow);
+        for rule in &entry.deny {
+            if !removed_deny.contains(rule) {
+                report.warnings.push(format!(
+                    "deny rule {rule:?} not present in {} (manually removed?)",
+                    settings_file.display()
+                ));
+            }
+        }
+        for rule in &entry.allow {
+            if !removed_allow.contains(rule) {
+                report.warnings.push(format!(
+                    "allow rule {rule:?} not present in {} (manually removed?)",
+                    settings_file.display()
+                ));
+            }
+        }
+        write_settings(system, settings_file, &value)?;
+    }
+
+    Ok(report)
+}
+
+/// Read a settings file (creating an empty `{}` shape when absent),
+/// merge `rules` into its `permissions.{deny,allow}` arrays without
+/// duplicating, and write the result back. Other top-level keys are
+/// preserved verbatim.
+fn merge_rules_into_settings(
+    system: &dyn System,
+    settings_file: &Path,
+    rules: &RuleSet,
+) -> Result<()> {
+    if let Some(parent) = settings_file.parent() {
+        system
+            .create_dir_all(parent)
+            .with_context(|| format!("creating settings directory {}", parent.display()))?;
+    }
+    let body = system.read_to_string(settings_file).unwrap_or_default();
+    let mut value: Value = if body.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str(&body)
+            .with_context(|| format!("parsing settings JSON at {}", settings_file.display()))?
+    };
+
+    append_unique_to_permission_array(&mut value, "deny", &rules.deny);
+    append_unique_to_permission_array(&mut value, "allow", &rules.allow);
+
+    write_settings(system, settings_file, &value)
+}
+
+/// Append every entry in `rules` to `value.permissions.<key>` that is
+/// not already present. Creates the `permissions` and array slots if
+/// they do not exist. No-op when `value` is not a JSON object.
+fn append_unique_to_permission_array(value: &mut Value, key: &str, rules: &[String]) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let permissions_value = root
+        .entry(String::from("permissions"))
+        .or_insert_with(|| Value::Object(Map::new()));
+    let Some(permissions) = permissions_value.as_object_mut() else {
+        return;
+    };
+    let key_value = permissions
+        .entry(String::from(key))
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(array) = key_value.as_array_mut() else {
+        return;
+    };
+    for rule in rules {
+        if !array
+            .iter()
+            .any(|existing| existing.as_str() == Some(rule.as_str()))
+        {
+            array.push(Value::String(rule.clone()));
+        }
+    }
+}
+
+/// Remove every entry in `rules` from `value.permissions.<key>`,
+/// returning the rules that were actually removed (so the caller can
+/// detect manual deletions).
+fn scrub_permission_array(value: &mut Value, key: &str, rules: &[String]) -> Vec<String> {
+    let mut removed: Vec<String> = Vec::new();
+    let Some(permissions) = value.get_mut("permissions").and_then(Value::as_object_mut) else {
+        return removed;
+    };
+    let Some(array) = permissions.get_mut(key).and_then(Value::as_array_mut) else {
+        return removed;
+    };
+    for rule in rules {
+        if let Some(idx) = array
+            .iter()
+            .position(|existing| existing.as_str() == Some(rule.as_str()))
+        {
+            array.remove(idx);
+            removed.push(rule.clone());
+        }
+    }
+    removed
+}
+
+fn write_settings(system: &dyn System, settings_file: &Path, value: &Value) -> Result<()> {
+    let body = serde_json::to_string_pretty(value).context("serializing settings JSON")?;
+    let mut bytes = body.into_bytes();
+    bytes.push(b'\n');
+    system
+        .write(settings_file, &bytes)
+        .with_context(|| format!("writing settings to {}", settings_file.display()))
 }
