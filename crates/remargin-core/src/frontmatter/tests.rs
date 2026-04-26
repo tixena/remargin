@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use chrono::DateTime;
+use chrono::{DateTime, FixedOffset};
 use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
@@ -10,7 +10,9 @@ use crate::frontmatter::{
     add_sandbox_entry_for, ensure_frontmatter, extract_title_from_heading, populate_user_fields,
     read_sandbox_entries, update_remargin_fields, write_sandbox_entries,
 };
-use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{
+    self, Acknowledgment, AuthorType, Comment, ParsedDocument, SandboxEntry, Segment,
+};
 use crate::reactions::Reactions;
 
 /// Create a default `ResolvedConfig` for testing.
@@ -311,4 +313,123 @@ fn sandbox_non_sequence_errors() {
     let err = read_sandbox_entries(&doc).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("not a sequence"), "got: {msg}");
+}
+
+// -------------------------------------------------------------------
+// rem-g3sy.1 / T31: add_sandbox_entry_for refresh semantics.
+//
+// Roster stays one-entry-per-identity, but the entry's `ts` field
+// advances on every successful call. The ts-equality short-circuit
+// preserves the test-friendly noop invariant when the clock has
+// not advanced.
+// -------------------------------------------------------------------
+
+fn t1() -> DateTime<FixedOffset> {
+    DateTime::parse_from_rfc3339("2026-04-16T10:00:00-04:00").unwrap()
+}
+
+fn t2() -> DateTime<FixedOffset> {
+    DateTime::parse_from_rfc3339("2026-04-16T11:00:00-04:00").unwrap()
+}
+
+fn t3() -> DateTime<FixedOffset> {
+    DateTime::parse_from_rfc3339("2026-04-16T12:00:00-04:00").unwrap()
+}
+
+fn t4() -> DateTime<FixedOffset> {
+    DateTime::parse_from_rfc3339("2026-04-16T13:00:00-04:00").unwrap()
+}
+
+/// Scenario 1: first-time add pushes the entry.
+#[test]
+fn add_sandbox_entry_first_time() {
+    let mut entries = Vec::new();
+    let mutated = add_sandbox_entry_for(&mut entries, "alice", t1());
+    assert!(mutated);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].author, "alice");
+    assert_eq!(entries[0].ts, t1());
+}
+
+/// Scenario 2: re-adding the same identity with a newer ts
+/// refreshes the entry in place.
+#[test]
+fn add_sandbox_entry_refreshes_with_new_ts() {
+    let mut entries = vec![SandboxEntry {
+        author: String::from("alice"),
+        ts: t1(),
+    }];
+    let mutated = add_sandbox_entry_for(&mut entries, "alice", t2());
+    assert!(mutated);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].ts, t2());
+}
+
+/// Scenario 3: ts-equality short-circuit returns false (no rewrite).
+#[test]
+fn add_sandbox_entry_noop_on_identical_ts() {
+    let mut entries = vec![SandboxEntry {
+        author: String::from("alice"),
+        ts: t1(),
+    }];
+    let mutated = add_sandbox_entry_for(&mut entries, "alice", t1());
+    assert!(!mutated);
+}
+
+/// Scenario 4: adding a second identity appends.
+#[test]
+fn add_sandbox_entry_appends_second_identity() {
+    let mut entries = vec![SandboxEntry {
+        author: String::from("alice"),
+        ts: t1(),
+    }];
+    let mutated = add_sandbox_entry_for(&mut entries, "bob", t2());
+    assert!(mutated);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].author, "bob");
+}
+
+/// Scenario 5: refreshing one identity in a multi-entry roster
+/// does not perturb the others.
+#[test]
+fn add_sandbox_entry_refreshes_one_in_multi_roster() {
+    let mut entries = vec![
+        SandboxEntry {
+            author: String::from("alice"),
+            ts: t1(),
+        },
+        SandboxEntry {
+            author: String::from("bob"),
+            ts: t2(),
+        },
+    ];
+    let mutated = add_sandbox_entry_for(&mut entries, "alice", t3());
+    assert!(mutated);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].ts, t3());
+    assert_eq!(entries[1].ts, t2());
+}
+
+/// Scenario 8: position is preserved across refreshes.
+#[test]
+fn add_sandbox_entry_preserves_order_across_refresh() {
+    let mut entries = vec![
+        SandboxEntry {
+            author: String::from("alice"),
+            ts: t1(),
+        },
+        SandboxEntry {
+            author: String::from("bob"),
+            ts: t2(),
+        },
+        SandboxEntry {
+            author: String::from("carol"),
+            ts: t3(),
+        },
+    ];
+    add_sandbox_entry_for(&mut entries, "bob", t4());
+    assert_eq!(entries[0].author, "alice");
+    assert_eq!(entries[1].author, "bob");
+    assert_eq!(entries[1].ts, t4());
+    assert_eq!(entries[2].author, "carol");
 }

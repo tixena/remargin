@@ -1,6 +1,8 @@
 //! Tests for sandbox frontmatter operations.
 
+use core::time::Duration;
 use std::path::{Path, PathBuf};
+use std::thread;
 
 use chrono::DateTime;
 use os_shim::System as _;
@@ -150,8 +152,16 @@ fn add_to_new_file_adds_entry() {
     assert!(content.contains("eduardo@"));
 }
 
+/// rem-g3sy.1 / T31: re-adding the same identity refreshes its
+/// timestamp (so the activity command can surface re-sandboxing as a
+/// distinct event). The roster stays one-entry-per-identity, but
+/// the entry's `ts` field advances on every successful call.
+///
+/// The op-level test runs both calls back-to-back; the wall clock
+/// almost always advances between the two, so the second call
+/// rewrites the file with the newer ts. The roster size stays at 1.
 #[test]
-fn add_is_idempotent_and_preserves_timestamp() {
+fn add_refreshes_timestamp_on_repeat() {
     let system = MockSystem::new();
     write_file(&system, "/docs/a.md", simple_doc());
 
@@ -159,13 +169,20 @@ fn add_is_idempotent_and_preserves_timestamp() {
     add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
     let first = read_file(&system, "/docs/a.md");
 
-    // Second add must be a no-op.
+    // Sleep a millisecond so wall-clock ts definitely advances; the
+    // second add then refreshes the recorded timestamp.
+    thread::sleep(Duration::from_millis(2));
     let result = add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
-    assert!(result.changed.is_empty());
-    assert_eq!(result.skipped.len(), 1);
+    assert_eq!(result.changed.len(), 1);
+    assert!(result.skipped.is_empty());
 
     let second = read_file(&system, "/docs/a.md");
-    assert_eq!(first, second, "idempotent re-add must not touch the file");
+    assert_ne!(
+        first, second,
+        "second add must refresh the timestamp and rewrite the file"
+    );
+    // Still exactly one eduardo entry — roster stays idempotent.
+    assert_eq!(second.matches("eduardo@").count(), 1);
 }
 
 #[test]

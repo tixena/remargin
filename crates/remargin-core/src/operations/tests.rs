@@ -1,7 +1,9 @@
 //! Tests for comment operations.
 
 use core::slice::from_ref;
+use core::time::Duration;
 use std::path::{Path, PathBuf};
+use std::thread;
 
 use os_shim::System as _;
 use os_shim::mock::MockSystem;
@@ -263,8 +265,13 @@ fn create_comment_with_sandbox_stages_and_writes_together() {
     assert_eq!(doc.comments()[0].content, "Staged with sandbox.");
 }
 
+/// rem-g3sy.1 / T31: the sandbox roster stays one-entry-per-
+/// identity, and the timestamp refreshes on every sandbox-add path
+/// (including the `comment --sandbox` shortcut). Pre-existing
+/// timestamp at 10:00:00 is replaced by `now`; the roster size
+/// stays at 1.
 #[test]
-fn create_comment_with_sandbox_is_idempotent_against_existing_entry() {
+fn create_comment_with_sandbox_refreshes_existing_entry() {
     // Seed the document with a pre-existing sandbox entry for eduardo.
     let seeded = "\
 ---
@@ -299,9 +306,15 @@ Body.
     )
     .unwrap();
 
-    // Existing `10:00:00` timestamp is preserved (no refresh).
+    // Pre-existing 10:00:00 timestamp is replaced (refresh
+    // semantics from rem-g3sy.1).
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
-    assert!(content.contains("eduardo@2026-04-11T10:00:00+00:00"));
+    assert!(
+        !content.contains("eduardo@2026-04-11T10:00:00+00:00"),
+        "stale timestamp should have been refreshed, doc was:\n{content}"
+    );
+    // Roster stays at one eduardo entry.
+    assert_eq!(content.matches("eduardo@").count(), 1);
     // And the comment was still written.
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 1);
@@ -2307,8 +2320,13 @@ fn project_sandbox_add_projects_frontmatter_entry() {
     );
 }
 
+/// rem-g3sy.1 / T31: `project_sandbox_add` now projects a timestamp
+/// refresh when an entry already exists (only a no-op when the
+/// existing ts is identical to `now` — vanishingly unlikely in
+/// practice, since `Utc::now()` advances every call). The roster
+/// stays one-entry-per-identity.
 #[test]
-fn project_sandbox_add_is_idempotent_second_call_is_noop() {
+fn project_sandbox_add_refreshes_existing_entry() {
     let (system, config, _first) = seed_with_comment();
 
     // First projection — not idempotent against the on-disk doc yet.
@@ -2324,14 +2342,19 @@ fn project_sandbox_add_is_idempotent_second_call_is_noop() {
         &config,
     )
     .unwrap();
+    // Sleep a couple of ms so Utc::now() definitely advances; the
+    // refresh path needs a strictly newer ts to mutate.
+    thread::sleep(Duration::from_millis(2));
 
     let (before, after) =
         projections::project_sandbox_add(&system, Path::new("/docs/test.md"), &config).unwrap();
-    assert_eq!(
+    assert_ne!(
         before.to_markdown(),
         after.to_markdown(),
-        "second sandbox-add must project a noop when an entry already exists"
+        "second sandbox-add must project a refresh when an entry already exists"
     );
+    // Roster stays at exactly one eduardo entry.
+    assert_eq!(after.to_markdown().matches("eduardo@").count(), 1);
 }
 
 #[test]

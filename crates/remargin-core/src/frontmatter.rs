@@ -146,17 +146,29 @@ pub fn set_sandbox_on_mapping(mapping: &mut Mapping, entries: &[SandboxEntry]) {
     mapping.insert(key, Value::Sequence(values));
 }
 
-/// Append a sandbox entry for `identity` if one does not already exist.
+/// Append a sandbox entry for `identity`, OR refresh the existing
+/// entry's timestamp when it already exists (rem-g3sy.1 / T31).
 ///
-/// Returns `true` when a new entry was added, `false` when the identity was
-/// already present (idempotent: existing timestamp is preserved).
+/// Returns:
+/// - `true` when the entries vector was mutated (push OR ts update).
+/// - `false` only when an existing entry's `ts` already equals `now`
+///   (preserves the test-friendly "no clock advance, no rewrite"
+///   noop invariant the op layer relies on).
+///
+/// The roster stays one-entry-per-identity. Position is preserved
+/// across timestamp refreshes — only the matching entry's `ts`
+/// field is mutated; surrounding entries are left untouched.
 pub fn add_sandbox_entry_for(
     entries: &mut Vec<SandboxEntry>,
     identity: &str,
     now: DateTime<FixedOffset>,
 ) -> bool {
-    if entries.iter().any(|e| e.author == identity) {
-        return false;
+    if let Some(existing) = entries.iter_mut().find(|e| e.author == identity) {
+        if existing.ts == now {
+            return false;
+        }
+        existing.ts = now;
+        return true;
     }
     entries.push(SandboxEntry {
         author: String::from(identity),
