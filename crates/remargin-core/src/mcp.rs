@@ -36,6 +36,7 @@ use crate::operations::search;
 use crate::parser;
 use crate::path::expand_path;
 use crate::permissions::inspect as permissions_inspect;
+use crate::permissions::restrict as permissions_restrict;
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -67,11 +68,17 @@ const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "file", "key", "path"];
 /// Array-valued path fields — each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 
-/// Tools that take no path-shaped argument and therefore bypass the
-/// `McpSandbox` boundary (rem-w6m1). Listed alphabetically. New tools
-/// that take paths must NOT be added here; new tools that take none
-/// must.
-const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show"];
+/// Tools that take no path-shaped argument OR whose own validation
+/// supersedes the `McpSandbox` boundary (rem-w6m1). Listed
+/// alphabetically.
+///
+/// `restrict` writes to absolute settings files outside the spawn
+/// sandbox by design (`~/.claude/settings.json` is the canonical
+/// user-scope file); its own anchor-walk + lexical-normalisation
+/// guarantees the restricted path lives under a valid `.claude/`
+/// ancestor. Routing it through `ensure_sandbox_covers_request`
+/// would reject the user-scope settings path and break the command.
+const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show", "restrict"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -665,6 +672,39 @@ fn desc_permissions_check() -> ToolDesc {
     }
 }
 
+/// Build the `restrict` tool descriptor (rem-yj1j.5 / rem-rdjy).
+fn desc_restrict() -> ToolDesc {
+    ToolDesc {
+        name: "restrict",
+        description: "Add a permissions.restrict entry under the nearest .claude/-bearing ancestor's \
+             .remargin.yaml AND project the equivalent rules into both Claude settings files \
+             (project-scope + user-scope) plus the sidecar. Idempotent. Supports the literal '*' \
+             for realm-wide restriction.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Subpath relative to the anchor, OR the literal '*' for realm-wide." },
+                "also_deny_bash": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Extra Bash command names to deny on the restricted path.",
+                    "default": []
+                },
+                "cli_allowed": {
+                    "type": "boolean",
+                    "description": "When true, allow Bash(remargin *) on the path so the CLI stays usable; the MCP / agent surfaces are still blocked.",
+                    "default": false
+                },
+                "user_settings": {
+                    "type": "string",
+                    "description": "Optional alternative path for the user-scope settings file. Defaults to ~/.claude/settings.json."
+                }
+            },
+            "required": ["path"]
+        }),
+    }
+}
+
 /// Build the `sandbox_add` tool descriptor.
 fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
@@ -759,6 +799,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_purge(),
         desc_query(),
         desc_react(),
+        desc_restrict(),
         desc_rm(),
         desc_sandbox_add(),
         desc_sandbox_list(),
@@ -1125,6 +1166,7 @@ fn dispatch_tool(
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
+        "restrict" => handle_restrict(system, base_dir, p),
         "rm" => handle_rm(system, base_dir, config, p),
         "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
         "sandbox_list" => handle_sandbox_list(system, base_dir, config, p),
@@ -1921,6 +1963,56 @@ fn handle_react(
 
     let action = if remove { "removed" } else { "added" };
     Ok(json!({ "action": action, "emoji": emoji, "comment_id": comment_id }))
+}
+
+/// Handle the `restrict` tool (rem-yj1j.5 / rem-rdjy).
+///
+/// Mirrors the CLI surface: anchor-walk from `base_dir`, append-or-
+/// merge into `<anchor>/.remargin.yaml`, project rules into both
+/// settings files (project-scope = `<anchor>/.claude/settings.local.json`,
+/// user-scope = `~/.claude/settings.json` unless overridden), update
+/// the sidecar.
+///
+/// `path` is a required field. `also_deny_bash` and `cli_allowed`
+/// are optional with the same defaults as the CLI. `user_settings`
+/// replaces the default user-scope path; the param normalisation
+/// pass already expanded `~` / `$VAR`.
+fn handle_restrict(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let path_str = required_str(params, "path")?;
+    let cli_allowed = optional_bool(params, "cli_allowed");
+    let also_deny_bash = string_array(params, "also_deny_bash");
+
+    let user_scope = match optional_str(params, "user_settings") {
+        Some(explicit) => PathBuf::from(explicit),
+        None => expand_path(system, "~/.claude/settings.json")
+            .context("expanding default ~/.claude/settings.json")?,
+    };
+    let anchor = permissions_restrict::find_claude_anchor(system, base_dir)?;
+    let project_scope = anchor.join(".claude/settings.local.json");
+
+    let args = permissions_restrict::RestrictArgs::new(
+        String::from(path_str),
+        also_deny_bash,
+        cli_allowed,
+    );
+    let outcome =
+        permissions_restrict::restrict(system, base_dir, &args, &[project_scope, user_scope])?;
+
+    Ok(json!({
+        "absolute_path": outcome.absolute_path.display().to_string(),
+        "anchor": outcome.anchor.display().to_string(),
+        "claude_files_touched": outcome
+            .claude_files_touched
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>(),
+        "rules_applied": outcome.rules_applied,
+        "yaml_was_created": outcome.yaml_was_created,
+    }))
 }
 
 /// Handle the `rm` tool: remove a file from the managed document tree.

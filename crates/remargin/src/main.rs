@@ -38,6 +38,7 @@ use remargin_core::operations::search;
 use remargin_core::parser;
 use remargin_core::path::expand_path;
 use remargin_core::permissions::inspect as permissions_inspect;
+use remargin_core::permissions::restrict as permissions_restrict;
 use remargin_core::skill;
 use remargin_core::writer::InsertPosition;
 
@@ -60,6 +61,13 @@ const EXIT_NOT_RESTRICTED: u8 = 1;
 /// "not restricted" to [`classify_error`] without leaking through
 /// stderr.
 const PERMISSIONS_NOT_RESTRICTED_MARKER: &str = "__remargin_permissions_check_not_restricted__";
+
+/// Default user-scope settings file used by `remargin restrict`.
+/// Resolved through [`expand_path`] so `$HOME` follows the active
+/// [`System`] (the `obsidian` feature already exercises this pattern;
+/// we follow the same approach so tests stay hermetic via the
+/// `--user-settings` flag).
+const DEFAULT_USER_SETTINGS: &str = "~/.claude/settings.json";
 
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
@@ -573,6 +581,36 @@ enum Commands {
         /// current directory.
         #[arg(long)]
         cwd: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Restrict an agent-edit subpath (rem-yj1j.5 / T26).
+    ///
+    /// Adds a `permissions.restrict` entry to the nearest
+    /// `.claude/`-bearing ancestor's `.remargin.yaml` and projects
+    /// the equivalent rules into both Claude settings files
+    /// (`<anchor>/.claude/settings.local.json` and
+    /// `~/.claude/settings.json`). Idempotent.
+    ///
+    /// No identity flags — `restrict` is a sanctioned config write
+    /// that the user is presumed to have authority over.
+    Restrict {
+        /// Subpath relative to the anchor, OR the literal `*` for
+        /// realm-wide.
+        path: String,
+        /// Extra Bash commands to deny on the restricted path. Pass
+        /// repeatedly: `--also-deny-bash curl --also-deny-bash wget`.
+        #[arg(long = "also-deny-bash")]
+        also_deny_bash: Vec<String>,
+        /// When set, allow `Bash(remargin *)` on the path so the CLI
+        /// stays usable. The MCP / agent surfaces are still blocked.
+        #[arg(long)]
+        cli_allowed: bool,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Pass an explicit path to keep
+        /// hermetic test runs out of the user's real home.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1320,6 +1358,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::React { output_args, .. }
         | Commands::Registry { output_args, .. }
         | Commands::ResolveMode { output_args, .. }
+        | Commands::Restrict { output_args, .. }
         | Commands::Rm { output_args, .. }
         | Commands::Sandbox { output_args, .. }
         | Commands::Search { output_args, .. }
@@ -1513,6 +1552,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Identity { .. }
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
+        | Commands::Restrict { .. }
         | Commands::Keygen { .. }
         | Commands::Skill { .. } => true,
         #[cfg(feature = "obsidian")]
@@ -1577,6 +1617,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Permissions { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
+        | Commands::Restrict { .. }
         | Commands::Search { .. }
         | Commands::Skill { .. }
         | Commands::Version => None,
@@ -1610,6 +1651,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::React { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
+        | Commands::Restrict { .. }
         | Commands::Rm { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
@@ -1660,6 +1702,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::React { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
+        | Commands::Restrict { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
@@ -1725,6 +1768,23 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         } => return cmd_skill(system, action, output_args.json),
         Commands::Permissions { action } => {
             return cmd_permissions(system, cwd, action);
+        }
+        Commands::Restrict {
+            path,
+            also_deny_bash,
+            cli_allowed,
+            user_settings,
+            output_args,
+        } => {
+            return cmd_restrict(
+                system,
+                cwd,
+                path,
+                also_deny_bash,
+                *cli_allowed,
+                user_settings.as_deref(),
+                output_args.json,
+            );
         }
         _ => {
             debug_assert!(
@@ -2067,6 +2127,7 @@ fn dispatch_with_config(
         | Commands::Keygen { .. }
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
+        | Commands::Restrict { .. }
         | Commands::Skill { .. } => Ok(()),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => Ok(()),
@@ -2709,6 +2770,90 @@ fn emit_permissions_check_text(report: &permissions_inspect::CheckOutput, why: b
         eprintln!("  kind:    {}", rule.kind);
         eprintln!("  source:  {}", rule.source_file.display());
     }
+}
+
+/// Wire the CLI `restrict` subcommand to the
+/// [`permissions_restrict::restrict`] core (rem-yj1j.5 / T26).
+///
+/// `user_settings_explicit` lets tests pin a hermetic location for
+/// the user-scope file. When `None`, the function expands
+/// [`DEFAULT_USER_SETTINGS`] through the active `System`.
+fn cmd_restrict(
+    system: &dyn System,
+    cwd: &Path,
+    path: &str,
+    also_deny_bash: &[String],
+    cli_allowed: bool,
+    user_settings_explicit: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let user_scope = match user_settings_explicit {
+        Some(explicit) => expand_cli_pathbuf(system, explicit)?,
+        None => expand_cli_path(system, DEFAULT_USER_SETTINGS)?,
+    };
+    let anchor = permissions_restrict::find_claude_anchor(system, cwd)?;
+    let project_scope = anchor.join(".claude/settings.local.json");
+    let settings_files = vec![project_scope, user_scope];
+
+    let args = permissions_restrict::RestrictArgs::new(
+        String::from(path),
+        also_deny_bash.to_vec(),
+        cli_allowed,
+    );
+    let outcome = permissions_restrict::restrict(system, cwd, &args, &settings_files)?;
+
+    if json_mode {
+        let value = serde_json::json!({
+            "absolute_path": outcome.absolute_path.display().to_string(),
+            "anchor": outcome.anchor.display().to_string(),
+            "claude_files_touched": outcome
+                .claude_files_touched
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>(),
+            "rules_applied": outcome.rules_applied,
+            "yaml_was_created": outcome.yaml_was_created,
+        });
+        print_output(true, &value)?;
+    } else {
+        emit_restrict_summary(&outcome);
+    }
+    Ok(())
+}
+
+fn emit_restrict_summary(outcome: &permissions_restrict::RestrictOutcome) {
+    eprintln!("Restricted: {}", outcome.absolute_path.display());
+    eprintln!("  Anchor: {}", outcome.anchor.display());
+    if outcome.yaml_was_created {
+        eprintln!(
+            "  .remargin.yaml created at {}",
+            outcome.anchor.join(".remargin.yaml").display()
+        );
+    } else {
+        eprintln!(
+            "  .remargin.yaml updated at {}",
+            outcome.anchor.join(".remargin.yaml").display()
+        );
+    }
+    eprintln!(
+        "  Settings updated: {} file(s)",
+        outcome.claude_files_touched.len()
+    );
+    for file in &outcome.claude_files_touched {
+        eprintln!("    {}", file.display());
+    }
+    eprintln!("  Rules written: {}", outcome.rules_applied.len());
+    eprintln!(
+        "  Sidecar updated: {}",
+        outcome
+            .anchor
+            .join(".claude/.remargin-restrictions.json")
+            .display()
+    );
+    eprintln!(
+        "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
+    );
+    eprintln!("  Layer 1 (remargin's own ops) is enforcing immediately on the next call.");
 }
 
 fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<()> {

@@ -63,6 +63,23 @@ pub struct RestrictArgs {
     pub path: String,
 }
 
+impl RestrictArgs {
+    /// Build a [`RestrictArgs`] across the crate boundary. The struct
+    /// is `#[non_exhaustive]` so external callers cannot use struct
+    /// literals; this constructor keeps the construction surface
+    /// stable while leaving room to add fields without breaking
+    /// callers (a new optional field would land as a separate
+    /// `with_<field>` setter or a builder).
+    #[must_use]
+    pub const fn new(path: String, also_deny_bash: Vec<String>, cli_allowed: bool) -> Self {
+        Self {
+            also_deny_bash,
+            cli_allowed,
+            path,
+        }
+    }
+}
+
 /// Description of what [`restrict`] mutated. Returned to the caller
 /// (CLI prints a human summary; MCP returns the JSON form) so the
 /// user can see exactly which files were touched.

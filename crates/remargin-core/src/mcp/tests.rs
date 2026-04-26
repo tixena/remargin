@@ -231,7 +231,7 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 26_usize);
+    assert_eq!(tools.len(), 27_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -253,6 +253,7 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"permissions_check"));
     assert!(names.contains(&"plan"));
     assert!(names.contains(&"query"));
+    assert!(names.contains(&"restrict"));
     assert!(names.contains(&"rm"));
     assert!(names.contains(&"search"));
     assert!(names.contains(&"sign"));

@@ -11,7 +11,9 @@ use os_shim::System as _;
 use os_shim::mock::MockSystem;
 use serde_yaml::Value;
 
-use crate::permissions::restrict::{RestrictArgs, find_claude_anchor, restrict, write_remargin_yaml};
+use crate::permissions::restrict::{
+    RestrictArgs, find_claude_anchor, restrict, write_remargin_yaml,
+};
 use crate::permissions::sidecar;
 
 fn realm_with_claude(extra_files: &[(&str, &str)]) -> (MockSystem, PathBuf) {
