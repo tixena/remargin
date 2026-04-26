@@ -142,9 +142,39 @@ remargin plan batch file=... ops='[...]'
 ```
 remargin resolve-mode      # open | registered | strict
 remargin identity          # who am I? do I have a key wired?
+remargin permissions show  # what's restricted in this realm?
 ```
 
 In strict mode, an unsigned or unregistered post is rejected by the verify gate before write. Don't assume an earlier op succeeding implies the next will.
+
+### Q: I want to restrict (or unprotect) a path.
+
+1. `remargin restrict <path>` — appends an entry to
+   `<.claude-anchor>/.remargin.yaml` AND syncs the equivalent rules
+   into `.claude/settings.local.json` + `~/.claude/settings.json`.
+   Layer 1 (remargin-core) starts refusing ops on the path on the
+   very next call. Layer 2 (Claude's NATIVE Read/Edit/Write/Bash
+   tools) takes effect when Claude reloads its settings (typically
+   a Claude restart — outside remargin's control).
+2. `remargin unprotect <path>` — exact reverse. Uses a sidecar
+   (`<.claude-anchor>/.claude/.remargin-restrictions.json`) to know
+   precisely which rules to remove; never touches user-added rules.
+3. `remargin permissions show` — print the resolved permissions
+   tree at cwd. JSON via `--json`.
+4. `remargin permissions check <path> [--why]` — gitignore-style:
+   exit 0 when restricted, 1 when not.
+
+Wildcard form: `remargin restrict "*"` and `remargin unprotect "*"`
+cover the entire realm anchored at the matching `.remargin.yaml`.
+
+Optional flags:
+- `--also-deny-bash <cmd>` (repeatable) — extra Bash command names
+  to deny on the restricted path (e.g. `curl`, `wget`).
+- `--cli-allowed` — keep the `remargin` CLI usable on the path
+  (only the MCP / agent surfaces are blocked).
+
+No identity flags. Editing your own permissions doesn't need an
+identity declaration.
 
 ---
 
@@ -310,6 +340,17 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 - `identity` — print configured identity. `identity create --identity NAME --type human|agent [--key PATH]` prints YAML to stdout.
 - `version` — print version info.
 
+### Permissions (CLI + MCP)
+
+| Need | MCP tool | CLI |
+|---|---|---|
+| Restrict a path | `mcp__remargin__restrict` | `remargin restrict` |
+| Unprotect a path | `mcp__remargin__unprotect` | `remargin unprotect` |
+| Show resolved permissions | `mcp__remargin__permissions_show` | `remargin permissions show` |
+| Check if path is restricted | `mcp__remargin__permissions_check` | `remargin permissions check` |
+
+No identity flags on these commands — editing your own permissions doesn't need an identity declaration.
+
 ---
 
 ## Comment format
@@ -397,7 +438,16 @@ If `mcp__remargin__*` tools require approval on every call, ask the user to add 
 }
 ```
 
-Approves all remargin tools at once.
+Approves all remargin tools at once. The wildcard automatically covers
+the new `mcp__remargin__restrict`, `mcp__remargin__unprotect`,
+`mcp__remargin__permissions_show`, and `mcp__remargin__permissions_check`
+tools — no edit needed when the new commands ship.
+
+When `remargin restrict <path>` itself runs, it APPENDS additional
+deny / allow rules to the same `permissions` block (see the
+"restrict / unprotect" decision flowchart above for the full
+mechanism). The synchronizer is idempotent and the
+`mcp__remargin__*` allow is preserved verbatim.
 
 ---
 

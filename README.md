@@ -312,6 +312,70 @@ All config values can be overridden per-invocation:
 remargin --identity alice --type human --mode strict comment ...
 ```
 
+## Permissions and access control
+
+Remargin supports a `permissions:` block in `.remargin.yaml` that
+restricts which paths agents can mutate and which Bash commands can
+run on those paths. Two enforcement layers consume the block:
+
+```yaml
+permissions:
+  trusted_roots:
+    - ~/src/tixena/eburgos_notes
+    - ~/src/tixena/remargin
+  restrict:
+    - path: src/01_personal/secure
+      also_deny_bash: [curl, wget]
+    - path: '*'
+  deny_ops:
+    - path: src/01_personal/signed_archive
+      ops: [purge, delete]
+  allow_dot_folders: ['.github']
+```
+
+- **Layer 1 (remargin-core, CLI + MCP, per-op).** Every mutating op
+  parent-walks `.remargin.yaml` and refuses ops covered by `restrict`
+  or matching `deny_ops`. The walk runs fresh on every call — no
+  cache, no reload command, no mtime watcher. Editing
+  `.remargin.yaml` between two ops takes effect on the second op
+  without a restart.
+- **Layer 2 (Claude Code permission sync, one-shot).** Running
+  `remargin restrict <path>` projects the entry into
+  `.claude/settings.local.json` + `~/.claude/settings.json` so
+  Claude's NATIVE Read / Edit / Write / Bash tools respect the same
+  boundaries. Claude needs to reload its settings (typically a
+  Claude restart) before Layer 2 takes effect.
+
+The single exception to per-op evaluation is `trusted_roots`, which
+defines the MCP server's filesystem sandbox at boot time — the
+sandbox cannot be expanded mid-session.
+
+### Commands
+
+```
+# Add / remove restrictions
+remargin restrict <PATH | *> [--also-deny-bash CMD,CMD] [--cli-allowed]
+remargin unprotect <PATH | *>
+
+# Inspect
+remargin permissions show [--json]
+remargin permissions check <PATH> [--why]
+```
+
+`restrict` records the exact rule strings it added in a sidecar at
+`<.claude-anchor>/.claude/.remargin-restrictions.json` so
+`unprotect` reverses cleanly without ever touching user-added
+rules. The sidecar is `.gitignore`d automatically (its absolute
+paths and per-machine timestamps don't belong in version control).
+
+`permissions check <path>` exits gitignore-style: 0 when the path is
+restricted, 1 when not. Pair with `--why` for the matching rule's
+kind, source file, and rule text.
+
+Same surfaces are exposed via MCP as `mcp__remargin__restrict`,
+`mcp__remargin__unprotect`, `mcp__remargin__permissions_show`, and
+`mcp__remargin__permissions_check`.
+
 ## CLI Reference
 
 ```
