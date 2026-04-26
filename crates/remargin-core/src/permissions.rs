@@ -27,3 +27,4 @@
 pub mod claude_sync;
 pub mod inspect;
 pub mod op_guard;
+pub mod sidecar;
