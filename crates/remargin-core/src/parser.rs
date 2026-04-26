@@ -112,6 +112,19 @@ pub struct Comment {
 }
 
 impl Comment {
+    /// `max(ts, edited_at)` — the timestamp consumers should use
+    /// when deciding whether the comment is "newer than X." The
+    /// activity command (rem-g3sy.3) uses this to surface edited
+    /// comments under their edit time rather than the original
+    /// creation time.
+    #[must_use]
+    pub fn effective_ts(&self) -> DateTime<FixedOffset> {
+        match self.edited_at {
+            Some(edited) if edited > self.ts => edited,
+            _ => self.ts,
+        }
+    }
+
     /// Borrow the comment's classification tags as a slice. Returns
     /// `&[]` when the field is absent, so callers that do not care
     /// about the `Some(empty)` vs `None` distinction can iterate,

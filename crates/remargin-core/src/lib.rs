@@ -5,6 +5,7 @@
 //! signatures, and cross-document queries.
 
 // Module declarations — uncommented as features are implemented.
+pub mod activity;
 pub mod config;
 pub mod crypto;
 pub mod display;
