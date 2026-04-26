@@ -15,11 +15,7 @@ import { SettingsTab } from "./components/settings/SettingsTab";
 import { BackendContext } from "./hooks/useBackend";
 import { PluginContext } from "./hooks/usePlugin";
 import { PortalContainerContext } from "./hooks/usePortalContainer";
-import {
-  detectNewUpdates,
-  type ReleasesFetcher,
-  type UpdateComponent,
-} from "./lib/githubReleases";
+import { detectNewUpdates, type ReleasesFetcher, type UpdateComponent } from "./lib/githubReleases";
 import { snapAfterCommentBlock } from "./lib/line-snap";
 // import { commentWidgetPlugin } from "./editor/commentWidget";
 // import { remarginPostProcessor } from "./editor/readingModeProcessor";
@@ -75,7 +71,7 @@ class RemarginView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private plugin: RemarginPlugin,
+    private plugin: RemarginPlugin
   ) {
     super(leaf);
   }
@@ -95,10 +91,10 @@ class RemarginView extends ItemView {
           createElement(
             PortalContainerContext.Provider,
             { value: container },
-            createElement(RemarginSidebar, { plugin: this.plugin }),
-          ),
-        ),
-      ),
+            createElement(RemarginSidebar, { plugin: this.plugin })
+          )
+        )
+      )
     );
   }
 
@@ -144,9 +140,9 @@ class RemarginSettingTab extends PluginSettingTab {
               await this.plugin.runUpdateCheck(true);
               return this.plugin.settings;
             },
-          }),
-        ),
-      ),
+          })
+        )
+      )
     );
   }
 
@@ -198,10 +194,7 @@ export default class RemarginPlugin extends Plugin {
     // this.registerEditorExtension([commentWidgetPlugin]);
     // this.registerMarkdownPostProcessor(remarginPostProcessor);
 
-    this.registerView(
-      VIEW_TYPE_REMARGIN,
-      (leaf) => new RemarginView(leaf, this),
-    );
+    this.registerView(VIEW_TYPE_REMARGIN, (leaf) => new RemarginView(leaf, this));
 
     // Seed the last-markdown-view cache from current workspace state.
     const initialView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -215,13 +208,13 @@ export default class RemarginPlugin extends Plugin {
       this.app.workspace.on("active-leaf-change", () => {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (view) this.lastMarkdownView = view;
-      }),
+      })
     );
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (view) this.lastMarkdownView = view;
-      }),
+      })
     );
     // On layout change, invalidate the cache if the cached view's file is
     // gone (pane closed, file deleted, etc.).
@@ -230,7 +223,7 @@ export default class RemarginPlugin extends Plugin {
         if (this.lastMarkdownView && !this.lastMarkdownView.file) {
           this.lastMarkdownView = null;
         }
-      }),
+      })
     );
 
     this.addCommand({
@@ -316,7 +309,7 @@ export default class RemarginPlugin extends Plugin {
       if (!check.latest) continue;
       new Notice(
         `Remargin ${COMPONENT_LABELS[component]} ${check.latest} available — open Settings → Updates`,
-        UPDATE_NOTICE_MS,
+        UPDATE_NOTICE_MS
       );
     }
   }
@@ -339,9 +332,7 @@ export default class RemarginPlugin extends Plugin {
     // the resolved path. Otherwise fall back to manual mode.
     this.settings = { ...DEFAULT_SETTINGS };
     try {
-      const vaultPath =
-        (this.app.vault.adapter as unknown as { basePath?: string }).basePath ??
-        "";
+      const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
       const probe = new RemarginBackend(this.settings, vaultPath);
       const info = await probe.identity("human");
       if (info.found && info.path) {
@@ -360,9 +351,7 @@ export default class RemarginPlugin extends Plugin {
     await this.saveData(settings);
 
     if (previousSide !== settings.sidebarSide) {
-      for (const leaf of this.app.workspace.getLeavesOfType(
-        VIEW_TYPE_REMARGIN,
-      )) {
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REMARGIN)) {
         leaf.detach();
       }
       await this.activateView();
