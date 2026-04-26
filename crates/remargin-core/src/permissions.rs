@@ -29,3 +29,4 @@ pub mod inspect;
 pub mod op_guard;
 pub mod restrict;
 pub mod sidecar;
+pub mod unprotect;
