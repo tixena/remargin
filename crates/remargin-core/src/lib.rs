@@ -17,6 +17,7 @@ pub mod mcp;
 pub mod operations;
 pub mod parser;
 pub mod path;
+pub mod permissions;
 pub mod reactions;
 pub mod skill;
 pub mod writer;

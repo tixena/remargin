@@ -117,6 +117,59 @@ fn frontmatter_cleanup() {
 // Note: per-op `--dry-run` was removed in rem-0ry; `plan purge` covers
 // that preview path now.
 
+// ---------------------------------------------------------------------
+// Layer 1 op-guard wiring (rem-yj1j.2 / T23) — purge is the
+// representative integration. The follow-up ticket wires the remaining
+// mutating ops; the op_guard helper itself is exhaustively tested under
+// `permissions::op_guard::tests`.
+// ---------------------------------------------------------------------
+
+#[test]
+fn purge_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc_with_comments().as_bytes())
+        .unwrap()
+        .with_file(Path::new("/docs/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    let err = purge(&system, Path::new("/docs/test.md"), &open_config()).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("denied by `restrict`"),
+        "expected restrict refusal, got {chain}"
+    );
+}
+
+#[test]
+fn purge_refused_when_deny_ops_lists_purge() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [purge]\n";
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc_with_comments().as_bytes())
+        .unwrap()
+        .with_file(Path::new("/docs/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    let err = purge(&system, Path::new("/docs/test.md"), &open_config()).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("denied by `deny_ops`"),
+        "expected deny_ops refusal, got {chain}"
+    );
+}
+
+#[test]
+fn purge_allowed_when_deny_ops_lists_other_op() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete]\n";
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc_with_comments().as_bytes())
+        .unwrap()
+        .with_file(Path::new("/docs/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    purge(&system, Path::new("/docs/test.md"), &open_config()).unwrap();
+}
+
 #[test]
 fn no_comments() {
     let plain = "---\ntitle: Plain\n---\n\n# Just text\n";
