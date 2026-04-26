@@ -198,6 +198,7 @@ enum Commands {
         /// Path to the document (use - for stdin).
         file: String,
         /// Comment body text (mutually exclusive with --comment-file).
+        #[arg(allow_hyphen_values = true)]
         content: Option<String>,
         /// Insert after this comment ID.
         #[arg(long)]
