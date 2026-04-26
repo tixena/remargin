@@ -16,7 +16,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
 use crate::parser::{self, Comment, ParsedDocument, Segment, required_fence_depth};
-use crate::reactions::{format_reaction_entry_block, quote_emoji_key};
+use crate::reactions::{ReactionsExt as _, format_reaction_entry_block, quote_emoji_key};
 
 /// Filenames the writer refuses to modify under any circumstances.
 ///

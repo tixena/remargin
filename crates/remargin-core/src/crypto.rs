@@ -26,7 +26,7 @@ use ssh_key::{HashAlg, PrivateKey, PublicKey};
 
 use crate::kind::canonical_kinds;
 use crate::parser::Comment;
-use crate::reactions::Reactions;
+use crate::reactions::{Reactions, ReactionsExt as _};
 
 /// Namespace used for SSH signature operations (PROTOCOL.sshsig).
 const SIGNATURE_NAMESPACE: &str = "remargin";

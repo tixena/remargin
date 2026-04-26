@@ -11,7 +11,7 @@ use os_shim::mock::MockSystem;
 
 use crate::linter;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment};
-use crate::reactions::Reactions;
+use crate::reactions::{Reactions, ReactionsExt as _};
 
 use super::{
     InsertPosition, insert_comment, serialize_comment, verify_preservation, write_document,
@@ -56,7 +56,7 @@ fn simple_serialize() {
 #[test]
 fn full_serialize() {
     let mut reactions = Reactions::new();
-    let _added = reactions.add(
+    let _added = reactions.add_reaction(
         "thumbsup",
         "bob",
         DateTime::parse_from_rfc3339("2026-04-06T14:35:00-04:00").unwrap(),

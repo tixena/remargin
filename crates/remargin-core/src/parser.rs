@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
 use core::iter::repeat_n;
 use std::collections::HashSet;
@@ -14,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
 use crate::kind::validate_kinds;
-use crate::reactions::{Reactions, format_reaction_entry_block, quote_emoji_key, reactions_schema};
+use crate::reactions::{
+    ReactionEntry, Reactions, ReactionsExt as _, format_reaction_entry_block, quote_emoji_key,
+};
 
 /// An acknowledgment of a comment by another participant.
 #[derive(Debug, Clone, Serialize)]
@@ -86,7 +89,7 @@ pub struct Comment {
     /// 1-indexed line number of the opening fence in the source document.
     /// Zero means "not yet placed" (e.g. newly created, before write).
     pub line: usize,
-    pub reactions: Reactions,
+    pub reactions: BTreeMap<String, Vec<ReactionEntry>>,
     /// Comment classification tags. Absent by default; each entry is a
     /// short lowercase-friendly label (e.g. `question`, `action item`)
     /// matching [`crate::kind::VALID_KIND_REGEX`] and bounded by
@@ -189,7 +192,10 @@ struct RawYamlHeader {
     #[serde(default)]
     edited_at: Option<String>,
     id: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::reactions::deserialize_with_legacy"
+    )]
     reactions: Reactions,
     #[serde(default, rename = "remargin_kind")]
     remargin_kind: Vec<String>,

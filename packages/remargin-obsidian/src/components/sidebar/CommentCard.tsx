@@ -152,7 +152,8 @@ export function CommentCard({
             <EmojiPicker
               onPick={(emoji) => {
                 if (comment.id) {
-                  const already = !!me && (comment.reactions?.[emoji]?.includes(me) ?? false);
+                  const already =
+                    !!me && (comment.reactions?.[emoji]?.some((e) => e.author === me) ?? false);
                   onReact(comment.id, emoji, already);
                 }
               }}

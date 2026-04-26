@@ -124,10 +124,10 @@ This is the comment body.
     assert_eq!(c.thread.as_deref(), Some("t01"));
     assert_eq!(c.attachments, vec!["diagram.png", "notes.pdf"]);
     assert_eq!(c.reactions.len(), 2);
-    let thumbsup_entries = c.reactions.get("thumbsup").unwrap();
+    let thumbsup_entries = &c.reactions["thumbsup"];
     let thumbsup_authors: Vec<String> = thumbsup_entries.iter().map(|e| e.author.clone()).collect();
     assert_eq!(thumbsup_authors, vec!["eduardo", "jorge"]);
-    let heart_entries = c.reactions.get("heart").unwrap();
+    let heart_entries = &c.reactions["heart"];
     let heart_authors: Vec<String> = heart_entries.iter().map(|e| e.author.clone()).collect();
     assert_eq!(heart_authors, vec!["claude"]);
     assert_eq!(c.ack.len(), 2);
@@ -724,7 +724,7 @@ hello
     let cm = parsed.comments()[0];
 
     // Both legacy entries land with the comment's own ts (no ack list).
-    let entries = cm.reactions.get("thumbsup").unwrap();
+    let entries = &cm.reactions["thumbsup"];
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].author, "eduardo");
     assert_eq!(entries[1].author, "claude");
@@ -770,7 +770,7 @@ hi
 ";
     let parsed = parse(doc).unwrap();
     let cm = parsed.comments()[0];
-    let entries = cm.reactions.get("thumbsup").unwrap();
+    let entries = &cm.reactions["thumbsup"];
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T11:00:00-04:00");
 }

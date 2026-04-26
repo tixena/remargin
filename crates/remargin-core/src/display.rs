@@ -7,6 +7,7 @@ use core::fmt::Write as _;
 
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::Comment;
+use crate::reactions::ReactionsExt as _;
 
 const MAX_CONTENT_LINES: usize = 5;
 

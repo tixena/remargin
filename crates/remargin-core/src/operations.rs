@@ -33,7 +33,7 @@ use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::permissions::op_guard::pre_mutate_check;
-use crate::reactions::Reactions;
+use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::writer::{self, InsertPosition};
 
 /// Parameters for creating a new comment.
@@ -330,9 +330,9 @@ pub fn react(
 
     let now = Utc::now().fixed_offset();
     if remove {
-        let _was_removed = cm.reactions.remove(emoji, identity);
+        let _was_removed = cm.reactions.remove_reaction(emoji, identity);
     } else {
-        let _was_added = cm.reactions.add(emoji, identity, now);
+        let _was_added = cm.reactions.add_reaction(emoji, identity, now);
     }
 
     let _reaction_checksum = compute_reaction_checksum(&cm.reactions);

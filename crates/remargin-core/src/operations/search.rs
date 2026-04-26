@@ -20,7 +20,7 @@ use tixschema::model_schema;
 
 use crate::document::allowlist;
 use crate::parser::{self, Segment, required_fence_depth};
-use crate::reactions::{format_reaction_entry_block, quote_emoji_key};
+use crate::reactions::{ReactionsExt as _, format_reaction_entry_block, quote_emoji_key};
 
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]

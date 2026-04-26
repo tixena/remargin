@@ -8,6 +8,7 @@ mod tests;
 
 extern crate alloc;
 
+use alloc::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
@@ -21,7 +22,7 @@ use crate::document::allowlist;
 use crate::kind::matches_kind_filter;
 use crate::parser::{self, Acknowledgment, AuthorType};
 use crate::parser::{acknowledgment_schema, author_type_schema};
-use crate::reactions::{Reactions, reactions_schema};
+use crate::reactions::ReactionEntry;
 
 /// Filter for cross-document queries.
 ///
@@ -208,7 +209,7 @@ pub struct ExpandedComment {
     /// 1-indexed line number in the source document.
     pub line: usize,
     /// Emoji reactions, each carrying per-author timestamps.
-    pub reactions: Reactions,
+    pub reactions: BTreeMap<String, Vec<ReactionEntry>>,
     /// Comment classification tags (rem-n4x7). Absent when the
     /// underlying comment had no `remargin_kind:` line so pre-field
     /// comments round-trip without a visible change on the JSON wire.

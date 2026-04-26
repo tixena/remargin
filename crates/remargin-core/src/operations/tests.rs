@@ -426,7 +426,7 @@ fn react_add_emoji() {
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
-    let entries = cm.reactions.get("thumbsup").unwrap();
+    let entries = &cm.reactions["thumbsup"];
     assert!(entries.iter().any(|e| e.author == "eduardo"));
 }
 
@@ -471,7 +471,7 @@ Content.
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(
-        cm.reactions.get("thumbsup").is_none(),
+        !cm.reactions.contains_key("thumbsup"),
         "reaction should be removed"
     );
 }

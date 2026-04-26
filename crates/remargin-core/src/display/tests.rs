@@ -11,7 +11,7 @@ use crate::display::{
 };
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{Acknowledgment, AuthorType, Comment};
-use crate::reactions::Reactions;
+use crate::reactions::{Reactions, ReactionsExt as _};
 
 /// Parameters for building a test comment.
 struct TestComment<'param> {
@@ -316,12 +316,12 @@ fn render_multiple_acks() {
 #[test]
 fn render_reactions() {
     let mut reactions = Reactions::new();
-    let _added_jorge = reactions.add(
+    let _added_jorge = reactions.add_reaction(
         "\u{1f44d}",
         "jorge",
         DateTime::parse_from_rfc3339("2026-04-06T14:00:00-04:00").unwrap(),
     );
-    let _added_alice = reactions.add(
+    let _added_alice = reactions.add_reaction(
         "\u{1f44d}",
         "alice",
         DateTime::parse_from_rfc3339("2026-04-06T14:01:00-04:00").unwrap(),
@@ -760,12 +760,12 @@ fn query_pretty_content_truncation() {
 #[test]
 fn query_pretty_reactions() {
     let mut reactions = Reactions::new();
-    let _added_alice = reactions.add(
+    let _added_alice = reactions.add_reaction(
         "\u{1f44d}",
         "alice",
         DateTime::parse_from_rfc3339("2026-04-06T14:00:00-04:00").unwrap(),
     );
-    let _added_bob = reactions.add(
+    let _added_bob = reactions.add_reaction(
         "\u{1f44d}",
         "bob",
         DateTime::parse_from_rfc3339("2026-04-06T14:01:00-04:00").unwrap(),

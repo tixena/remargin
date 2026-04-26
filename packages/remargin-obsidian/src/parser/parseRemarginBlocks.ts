@@ -1,4 +1,19 @@
-import type { AuthorType, Comment } from "@/generated";
+import type { AuthorType, Comment, ReactionEntry } from "@/generated";
+
+const LEGACY_REACTION_TS = "1970-01-01T00:00:00+00:00";
+
+function normalizeReactions(
+  raw: Record<string, Array<string | { author: string; ts: string }>> | undefined
+): Record<string, ReactionEntry[]> {
+  if (!raw) return {};
+  const out: Record<string, ReactionEntry[]> = {};
+  for (const [emoji, items] of Object.entries(raw)) {
+    out[emoji] = items.map((item) =>
+      typeof item === "string" ? { author: item, ts: LEGACY_REACTION_TS } : item
+    );
+  }
+  return out;
+}
 
 export interface ParsedBlock {
   startLine: number;
@@ -28,7 +43,7 @@ interface YamlFields {
   thread?: string;
   to?: string[];
   ack?: Array<{ author: string; ts: string }>;
-  reactions?: Record<string, string[]>;
+  reactions?: Record<string, Array<string | { author: string; ts: string }>>;
   attachments?: string[];
   checksum?: string;
   signature?: string;
@@ -156,7 +171,7 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
               thread: yaml.thread,
               to: yaml.to ?? [],
               ack: yaml.ack ?? [],
-              reactions: yaml.reactions ?? {},
+              reactions: normalizeReactions(yaml.reactions),
               attachments: yaml.attachments ?? [],
               checksum: yaml.checksum,
               signature: yaml.signature,

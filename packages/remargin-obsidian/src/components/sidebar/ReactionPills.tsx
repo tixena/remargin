@@ -1,19 +1,13 @@
-import type { RawReactionItem, Reactions } from "@/generated";
+import type { ReactionEntry } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
 import { cn } from "@/lib/utils";
-
-function authorOf(item: RawReactionItem): string {
-  return typeof item === "string" ? item : item.author;
-}
 
 export interface ReactionPillsProps {
   /**
    * Reaction map keyed by emoji. Each value is the per-author entry
-   * list for that emoji. Items may be either the legacy bare-string
-   * shape or the new `{ author, ts }` shape — both resolve to an
-   * author name here.
+   * list for that emoji.
    */
-  reactions: Reactions | Partial<Record<string, RawReactionItem[]>>;
+  reactions: Partial<Record<string, ReactionEntry[]>>;
   /** Current identity name; used to tell "mine" apart from others'. */
   me?: string | null;
   /**
@@ -32,7 +26,7 @@ export function ReactionPills({ reactions, me, onToggle }: ReactionPillsProps) {
   const { resolveDisplayName } = useParticipants();
   const entries: Array<[string, string[]]> = [];
   for (const [emoji, items] of Object.entries(reactions)) {
-    if (items && items.length > 0) entries.push([emoji, items.map(authorOf)]);
+    if (items && items.length > 0) entries.push([emoji, items.map((e) => e.author)]);
   }
   entries.sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return null;
