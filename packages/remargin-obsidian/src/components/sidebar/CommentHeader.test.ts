@@ -27,6 +27,7 @@ function fixture(overrides: Partial<Comment>): Comment {
     author_type: "human",
     checksum: "",
     content: "",
+    edited_at: undefined,
     id: "oi5",
     line: 0,
     reactions: {},

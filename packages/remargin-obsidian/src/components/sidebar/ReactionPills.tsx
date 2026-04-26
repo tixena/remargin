@@ -1,13 +1,19 @@
+import type { RawReactionItem, Reactions } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
 import { cn } from "@/lib/utils";
 
+function authorOf(item: RawReactionItem): string {
+  return typeof item === "string" ? item : item.author;
+}
+
 export interface ReactionPillsProps {
   /**
-   * Reaction map as parsed from the comment frontmatter:
-   * `{ [emoji]: [author, author, ...] }`. Values may be undefined to match
-   * the generated `Partial<Record<string, string[]>>` shape.
+   * Reaction map keyed by emoji. Each value is the per-author entry
+   * list for that emoji. Items may be either the legacy bare-string
+   * shape or the new `{ author, ts }` shape — both resolve to an
+   * author name here.
    */
-  reactions: Partial<Record<string, string[]>>;
+  reactions: Reactions | Partial<Record<string, RawReactionItem[]>>;
   /** Current identity name; used to tell "mine" apart from others'. */
   me?: string | null;
   /**
@@ -25,8 +31,8 @@ export interface ReactionPillsProps {
 export function ReactionPills({ reactions, me, onToggle }: ReactionPillsProps) {
   const { resolveDisplayName } = useParticipants();
   const entries: Array<[string, string[]]> = [];
-  for (const [emoji, authors] of Object.entries(reactions)) {
-    if (authors && authors.length > 0) entries.push([emoji, authors]);
+  for (const [emoji, items] of Object.entries(reactions)) {
+    if (items && items.length > 0) entries.push([emoji, items.map(authorOf)]);
   }
   entries.sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return null;
