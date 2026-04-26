@@ -333,3 +333,43 @@ fn dot_folder_match_helper_is_callable() {
     .into();
     assert!(dot_folder_match(&err, ".git", "/r/.remargin.yaml"));
 }
+
+// ---------------------------------------------------------------------
+// Scenario 13 (full form) — symlinks resolved before matching.
+//
+// `MockSystem` does not model symlinks, so this exercise needs the
+// real filesystem. We materialise a realm with a `restrict` rule on a
+// real path, create a symlink that points into the restricted subtree,
+// and verify the guard refuses the op when invoked through the link.
+// ---------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn scenario_13_symlink_target_resolves_to_restricted_path() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use os_shim::real::RealSystem;
+    use tempfile::TempDir;
+
+    let realm = TempDir::new().unwrap();
+    let realm_path = realm.path();
+    fs::create_dir_all(realm_path.join("src/secret")).unwrap();
+    fs::write(realm_path.join("src/secret/foo.md"), "x").unwrap();
+    fs::write(
+        realm_path.join(".remargin.yaml"),
+        "permissions:\n  restrict:\n    - path: src/secret\n",
+    )
+    .unwrap();
+
+    let link = realm_path.join("alias.md");
+    symlink(realm_path.join("src/secret/foo.md"), &link).unwrap();
+
+    let system = RealSystem::new();
+    let err = pre_mutate_check(&system, "comment", &link).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("denied by `restrict`"),
+        "expected restrict refusal through symlink, got: {chain}"
+    );
+}

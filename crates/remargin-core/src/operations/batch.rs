@@ -24,6 +24,7 @@ use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::operations::{copy_attachments, find_comment_mut};
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument};
+use crate::permissions::op_guard::pre_mutate_check;
 use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
@@ -146,6 +147,11 @@ pub fn batch_comment(
     operations: &[BatchCommentOp],
 ) -> Result<Vec<String>> {
     writer::ensure_not_forbidden_target(path)?;
+    // All sub-ops mutate the same `path`, so one guard call covers
+    // every sub-op (rem-mu9h scenario 18 — atomic refusal). If the
+    // path becomes restricted, the entire batch is rejected before
+    // any I/O.
+    pre_mutate_check(system, "batch", path)?;
 
     let identity = config
         .identity

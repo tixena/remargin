@@ -32,6 +32,7 @@ use crate::kind::validate_kinds;
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::permissions::op_guard::pre_mutate_check;
 use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
@@ -91,6 +92,7 @@ pub fn create_comment(
     params: &CreateCommentParams<'_>,
 ) -> Result<String> {
     writer::ensure_not_forbidden_target(path)?;
+    pre_mutate_check(system, "comment", path)?;
 
     let identity = config
         .identity
@@ -251,6 +253,7 @@ pub fn ack_comments(
     remove: bool,
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
+    pre_mutate_check(system, "ack", path)?;
 
     let identity = config
         .identity
@@ -312,6 +315,7 @@ pub fn react(
     remove: bool,
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
+    pre_mutate_check(system, "react", path)?;
 
     let identity = config
         .identity
@@ -356,6 +360,7 @@ pub fn delete_comments(
     comment_ids: &[&str],
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
+    pre_mutate_check(system, "delete", path)?;
     let mut doc = parser::parse_file(system, path)?;
 
     let deleted_attachments: Vec<String> = comment_ids
@@ -435,6 +440,7 @@ pub fn edit_comment(
     new_kinds: Option<&[String]>,
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
+    pre_mutate_check(system, "edit", path)?;
     let identity = config.identity.as_deref();
 
     // Strict-mode key presence is validated at resolve time (rem-xc8x);

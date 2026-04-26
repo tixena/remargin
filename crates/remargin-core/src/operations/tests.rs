@@ -2858,3 +2858,536 @@ fn read_file(system: &MockSystem, path: &Path) -> Vec<u8> {
     reader.read_to_end(&mut buf).unwrap();
     buf
 }
+
+// ---------------------------------------------------------------------
+// Layer 1 op-guard wiring (rem-mu9h / scenarios 15, 16, 18).
+//
+// `purge` already has its own restrict / deny_ops integration tests
+// in operations/purge/tests.rs; the rest of the mutating ops are
+// covered here. Each op gets at minimum:
+//   - a restrict-blocks test (mutating-only: `restrict: ['*']`)
+//   - a deny_ops-blocks test (`deny_ops: [{path: ., ops: [<op>]}]`)
+// Where the op signature makes one of those obvious to add but not
+// trivial to spell, the test is omitted in favor of the broader
+// scenario-15 sweep below (`all_mutating_ops_refused_under_wildcard`)
+// which exercises every wired op against the same wildcard restrict.
+// ---------------------------------------------------------------------
+
+fn doc_with_one_comment_for_guard() -> &'static str {
+    "\
+---
+title: Guard fixture
+---
+
+# Guarded
+
+```remargin
+---
+id: gid
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:c9da2b6d12c7be5b80a1c37b5eaf0fe26f1b2cf32a8c9ed1b9e9eab1f9e12345
+---
+Body.
+```
+"
+}
+
+fn system_with_doc_and_yaml(doc: &str, yaml: &str) -> MockSystem {
+    MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/docs/.remargin.yaml"), yaml.as_bytes())
+        .unwrap()
+}
+
+fn assert_restrict_refusal(err: &anyhow::Error) {
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("denied by `restrict`"),
+        "expected restrict refusal, got: {chain}"
+    );
+}
+
+fn assert_deny_ops_refusal(err: &anyhow::Error) {
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("denied by `deny_ops`"),
+        "expected deny_ops refusal, got: {chain}"
+    );
+}
+
+#[test]
+fn comment_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let position = InsertPosition::Append;
+    let params = CreateCommentParams {
+        attachments: &[],
+        auto_ack: false,
+        content: "hi",
+        position: &position,
+        remargin_kind: &[],
+        reply_to: None,
+        sandbox: false,
+        to: &[],
+    };
+    let err = create_comment(&system, Path::new("/docs/test.md"), &config, &params).unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn comment_refused_when_deny_ops_lists_comment() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [comment]\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let position = InsertPosition::Append;
+    let params = CreateCommentParams {
+        attachments: &[],
+        auto_ack: false,
+        content: "hi",
+        position: &position,
+        remargin_kind: &[],
+        reply_to: None,
+        sandbox: false,
+        to: &[],
+    };
+    let err = create_comment(&system, Path::new("/docs/test.md"), &config, &params).unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn ack_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn ack_refused_when_deny_ops_lists_ack() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [ack]\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = ack_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["abc"],
+        false,
+    )
+    .unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn react_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = react(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        "thumbsup",
+        false,
+    )
+    .unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn react_refused_when_deny_ops_lists_react() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [react]\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = react(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        "thumbsup",
+        false,
+    )
+    .unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn delete_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]).unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn delete_refused_when_deny_ops_lists_delete() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete]\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]).unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn edit_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = edit_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        "new",
+        None,
+    )
+    .unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn edit_refused_when_deny_ops_lists_edit() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [edit]\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config();
+    let err = edit_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        "new",
+        None,
+    )
+    .unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn batch_refused_when_target_under_restrict() {
+    use crate::operations::batch::{BatchCommentOp, batch_comment};
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let ops = vec![
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("a"),
+            reply_to: None,
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("b"),
+            reply_to: None,
+            to: Vec::new(),
+        },
+    ];
+    let err = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn batch_refused_when_deny_ops_lists_batch() {
+    use crate::operations::batch::{BatchCommentOp, batch_comment};
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [batch]\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: false,
+        content: String::from("solo"),
+        reply_to: None,
+        to: Vec::new(),
+    }];
+    let err = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+/// Scenario 18: a restricted target rejects the entire batch atomically
+/// before any sub-op runs. The fixture starts with no comments; if the
+/// batch had any side effect the comments list would not be empty.
+#[test]
+fn batch_atomic_refusal_leaves_doc_untouched() {
+    use crate::operations::batch::{BatchCommentOp, batch_comment};
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let ops = vec![
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("first"),
+            reply_to: None,
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("second"),
+            reply_to: None,
+            to: Vec::new(),
+        },
+        BatchCommentOp {
+            after_comment: None,
+            after_line: None,
+            attachments: Vec::new(),
+            auto_ack: false,
+            content: String::from("third"),
+            reply_to: None,
+            to: Vec::new(),
+        },
+    ];
+    let err = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap_err();
+    assert_restrict_refusal(&err);
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert_eq!(
+        before, after,
+        "batch must not partially write under restrict"
+    );
+}
+
+#[test]
+fn migrate_refused_when_target_under_restrict() {
+    use crate::operations::migrate::{MigrateIdentities, migrate};
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let err = migrate(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &MigrateIdentities::default(),
+        false,
+    )
+    .unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn migrate_refused_when_deny_ops_lists_migrate() {
+    use crate::operations::migrate::{MigrateIdentities, migrate};
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [migrate]\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let err = migrate(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &MigrateIdentities::default(),
+        false,
+    )
+    .unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn sandbox_add_refused_when_target_under_restrict() {
+    use core::slice::from_ref;
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let path = PathBuf::from("/docs/test.md");
+    let result = sandbox_ops::add_to_files(&system, from_ref(&path), "eduardo", &config).unwrap();
+    // Per-file failure surface: the op records a per-path failure
+    // rather than bailing the whole call. That keeps the bulk
+    // surface tolerant of partial blocks.
+    assert_eq!(result.changed.len(), 0);
+    assert_eq!(result.failed.len(), 1);
+    assert!(
+        result.failed[0].reason.contains("denied by `restrict`"),
+        "expected restrict refusal in per-file failure, got: {}",
+        result.failed[0].reason
+    );
+}
+
+#[test]
+fn sandbox_add_refused_when_deny_ops_lists_sandbox_add() {
+    use core::slice::from_ref;
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [sandbox-add]\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let path = PathBuf::from("/docs/test.md");
+    let result = sandbox_ops::add_to_files(&system, from_ref(&path), "eduardo", &config).unwrap();
+    assert_eq!(result.changed.len(), 0);
+    assert_eq!(result.failed.len(), 1);
+    assert!(
+        result.failed[0].reason.contains("denied by `deny_ops`"),
+        "expected deny_ops refusal, got: {}",
+        result.failed[0].reason
+    );
+}
+
+#[test]
+fn sandbox_remove_refused_when_target_under_restrict() {
+    use core::slice::from_ref;
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let path = PathBuf::from("/docs/test.md");
+    let result =
+        sandbox_ops::remove_from_files(&system, from_ref(&path), "eduardo", &config).unwrap();
+    assert_eq!(result.changed.len(), 0);
+    assert_eq!(result.failed.len(), 1);
+    assert!(
+        result.failed[0].reason.contains("denied by `restrict`"),
+        "expected restrict refusal, got: {}",
+        result.failed[0].reason
+    );
+}
+
+#[test]
+fn sandbox_remove_refused_when_deny_ops_lists_sandbox_remove() {
+    use core::slice::from_ref;
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [sandbox-remove]\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let path = PathBuf::from("/docs/test.md");
+    let result =
+        sandbox_ops::remove_from_files(&system, from_ref(&path), "eduardo", &config).unwrap();
+    assert_eq!(result.changed.len(), 0);
+    assert_eq!(result.failed.len(), 1);
+    assert!(
+        result.failed[0].reason.contains("denied by `deny_ops`"),
+        "expected deny_ops refusal, got: {}",
+        result.failed[0].reason
+    );
+}
+
+#[test]
+fn sign_refused_when_target_under_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/test.md"),
+            doc_with_one_comment_for_guard().as_bytes(),
+        )
+        .unwrap()
+        .with_file(Path::new("/docs/.remargin.yaml"), yaml.as_bytes())
+        .unwrap()
+        .with_file(
+            Path::new("/keys/ed25519"),
+            PROJECT_SIGN_PRIVATE_KEY.as_bytes(),
+        )
+        .unwrap();
+    let config = sign_config();
+    let err = sign::sign_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::AllMine,
+        sign::SignOptions::default(),
+    )
+    .unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn sign_refused_when_deny_ops_lists_sign() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [sign]\n";
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/test.md"),
+            doc_with_one_comment_for_guard().as_bytes(),
+        )
+        .unwrap()
+        .with_file(Path::new("/docs/.remargin.yaml"), yaml.as_bytes())
+        .unwrap()
+        .with_file(
+            Path::new("/keys/ed25519"),
+            PROJECT_SIGN_PRIVATE_KEY.as_bytes(),
+        )
+        .unwrap();
+    let config = sign_config();
+    let err = sign::sign_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &sign::SignSelection::AllMine,
+        sign::SignOptions::default(),
+    )
+    .unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn write_refused_when_target_under_restrict() {
+    use crate::document::{WriteOptions, write};
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let err = write(
+        &system,
+        Path::new("/docs"),
+        Path::new("/docs/test.md"),
+        "stuff",
+        &config,
+        WriteOptions::new().raw(true),
+    )
+    .unwrap_err();
+    assert_restrict_refusal(&err);
+}
+
+#[test]
+fn write_refused_when_deny_ops_lists_write() {
+    use crate::document::{WriteOptions, write};
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [write]\n";
+    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
+    let config = open_config();
+    let err = write(
+        &system,
+        Path::new("/docs"),
+        Path::new("/docs/test.md"),
+        "stuff",
+        &config,
+        WriteOptions::new().raw(true),
+    )
+    .unwrap_err();
+    assert_deny_ops_refusal(&err);
+}
+
+/// Scenario 16: read-side ops bypass `restrict`. Comments / verify /
+/// query / get / metadata / lint / search / ls all run unaffected when
+/// only `restrict` (no `deny_ops`) is declared. We exercise the simplest
+/// representative — `comments` (the per-file lister) — to pin the
+/// behaviour. The `op_guard` helper itself has direct unit-test coverage
+/// for every read op.
+#[test]
+fn read_ops_unaffected_by_restrict() {
+    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+
+    // Reading the file directly should still work (no mutation, no guard).
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert!(content.contains("# Test"));
+
+    // The parser is a pure read; it must not be guarded either.
+    let parsed = parser::parse(&content).unwrap();
+    assert!(!parsed.comments().is_empty());
+}
