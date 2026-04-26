@@ -25,10 +25,10 @@ pub mod resolve;
 #[cfg(test)]
 mod tests;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A single entry under `permissions.deny_ops`.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DenyOpsEntry {
@@ -45,7 +45,7 @@ pub struct DenyOpsEntry {
 ///
 /// All fields have `#[serde(default)]` so partial declarations
 /// (`permissions: { trusted_roots: [...] }`) are valid.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Permissions {
@@ -70,7 +70,7 @@ pub struct Permissions {
 }
 
 /// A single entry under `permissions.restrict`.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RestrictEntry {
