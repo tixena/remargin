@@ -24,5 +24,6 @@
 //! resolver on every check. Configuration changes take effect at the
 //! next op without a restart.
 
+pub mod claude_sync;
 pub mod inspect;
 pub mod op_guard;
