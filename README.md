@@ -545,6 +545,35 @@ Signatures cover the comment content plus metadata (id, author, type, timestamp,
 
 Every write operation enforces a strict invariant: the set of comment IDs before and after the write must match exactly, with only the expected delta (new comments added, or specific comments deleted). Any unexpected change aborts the operation. This guarantees that document edits -- whether by humans or agents -- never accidentally destroy comments.
 
+## Tracking change
+
+The `remargin activity` command answers "what's new since X?" across
+managed `.md` files in the current realm. Per-file change records
+(comments, acks, sandbox-adds) are returned sorted by ts:
+
+```bash
+# What's new since I last acted (per-file caller-last-action cutoff).
+remargin activity
+
+# Explicit cutoff.
+remargin activity --since 2026-04-20T00:00:00Z
+
+# Human-readable timeline.
+remargin activity --pretty
+```
+
+The default JSON output is the structured `ActivityResult` shape;
+`--pretty` switches to a per-file timeline rendered to stderr (so
+stdout stays clean for piping). When `--since` is omitted, the
+per-file cutoff is the latest of (caller's authored comments,
+caller's acks, caller's sandbox-adds) in that file — files where
+the caller has never acted return everything (the "initial-touch"
+fallback). The command also folds in comment edits (via the
+`Comment.edited_at` field) and sandbox-roster timestamp refreshes,
+neither of which `comments` / `query` surface as distinct events.
+
+Same surface is exposed via MCP as `mcp__remargin__activity`.
+
 ## Typical Workflows
 
 ### Document Review

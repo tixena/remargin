@@ -26,6 +26,7 @@ A **realm** is any directory tree containing a `.remargin.yaml` (discovered by w
 8. **`auto_ack: true` is allowed only when** (a) the parent comment is addressed to you via `to:` AND (b) your reply fully resolves the ask. `auto_ack` without `reply_to` is rejected.
 9. **Never declare a different identity per call** unless the user explicitly asked. Per-call `identity` / `type` / `config_path` to declare someone else = impersonation.
 10. **Never delete other participants' comments** to unblock your own op. Find another path or ask the user.
+11. **Use `remargin activity` to find what's new in managed `.md` since you last acted.** Do not hand-roll timestamps from `comments` / `query` for this purpose — those tools don't compute the per-file caller-last-action cutoff and don't fold edits / re-sandboxes into a single change list.
 
 ---
 
@@ -57,6 +58,23 @@ This is the most common multi-comment workflow. Use `batch`. **Do not** bundle i
 ❌ **Never:** post one comment that summarizes answers to N other comments. Forces the user to re-thread mentally or reply with their own consolidation. Defeats threading. This was a real failure pattern — don't repeat it.
 
 ❌ **Never:** call `remargin comment` N times in sequence on the same file. Line numbers shift between calls; subsequent inserts land in the wrong places.
+
+### Q: What's new in managed `.md` since I last acted?
+
+`remargin activity [<PATH>] [--since <ISO>] [--pretty]`. Walks
+managed `.md` files and returns per-file change records (comments,
+acks, sandbox-adds) sorted by ts. With `--since` omitted, the
+per-file cutoff is the caller's last action in that file (max of
+the caller's authored comments, acks, and sandbox-adds in that
+file); files where the caller has never acted return everything —
+the "initial-touch" fallback. JSON is the default; `--pretty`
+renders a human-readable timeline.
+
+Use this instead of stitching `comments` / `query` calls together
+with hand-rolled timestamps. The activity command also folds in
+edits (via `Comment.edited_at`) and re-sandboxes (via the
+sandbox-add timestamp refresh) — neither of which `comments` /
+`query` surface as distinct events.
 
 ### Q: A pending comment is just FYI / acknowledgment-only. What do I do?
 
@@ -316,6 +334,7 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 | Op | Purpose |
 |----|---------|
+| `activity` | "What's new since X" across managed `.md`. Per-file change records (comments, acks, sandbox-adds) sorted by ts. With `since` omitted, the per-file cutoff is the caller's last action — files where the caller has never acted return everything. Folds in comment edits (via `edited_at`) and sandbox refreshes. |
 | `query` | Search across documents for comments. Filters: `pending` (broad — directed + broadcast), `pending_for` (directed to recipient), `pending_for_me` (directed to caller), `pending_broadcast` (unacked broadcasts), `author`, `since`, `comment_id`. Pending filters compose as a union. `expanded=true` includes comments inline. |
 | `search` | Search across documents for text. `regex`, `scope` (all/body/comments), `context`, `ignore_case`. |
 | `lint` | Structural lint checks. |
