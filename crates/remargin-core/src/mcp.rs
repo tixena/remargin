@@ -37,6 +37,7 @@ use crate::parser;
 use crate::path::expand_path;
 use crate::permissions::inspect as permissions_inspect;
 use crate::permissions::restrict as permissions_restrict;
+use crate::permissions::unprotect as permissions_unprotect;
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -78,7 +79,12 @@ const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 /// guarantees the restricted path lives under a valid `.claude/`
 /// ancestor. Routing it through `ensure_sandbox_covers_request`
 /// would reject the user-scope settings path and break the command.
-const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show", "restrict"];
+const NO_PATH_TOOLS: &[&str] = &[
+    "identity_create",
+    "permissions_show",
+    "restrict",
+    "unprotect",
+];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -705,6 +711,24 @@ fn desc_restrict() -> ToolDesc {
     }
 }
 
+/// Build the `unprotect` tool descriptor (rem-yj1j.6 / rem-hsg4).
+fn desc_unprotect() -> ToolDesc {
+    ToolDesc {
+        name: "unprotect",
+        description: "Reverse a previous restrict: remove the matching permissions.restrict entry \
+             from the nearest .claude/-bearing ancestor's .remargin.yaml AND scrub the sidecar-tracked \
+             rules from both Claude settings files. Idempotent. Surfaces manual-edit divergences as \
+             warnings (never errors).",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Subpath relative to the anchor (matches the on-disk `path` field of the original restrict entry), OR the literal '*' for realm-wide." }
+            },
+            "required": ["path"]
+        }),
+    }
+}
+
 /// Build the `sandbox_add` tool descriptor.
 fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
@@ -806,6 +830,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_sandbox_remove(),
         desc_search(),
         desc_sign(),
+        desc_unprotect(),
         desc_verify(),
         desc_write(),
     ]
@@ -1173,6 +1198,7 @@ fn dispatch_tool(
         "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, p),
         "search" => handle_search(system, base_dir, p),
         "sign" => handle_sign(system, base_dir, config, p),
+        "unprotect" => handle_unprotect(system, base_dir, p),
         "verify" => handle_verify(system, base_dir, config, p),
         "write" => handle_write(system, base_dir, config, p),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
@@ -2232,6 +2258,35 @@ fn handle_sign(
         "repaired": repaired,
         "signed": signed,
         "skipped": skipped,
+    }))
+}
+
+/// Handle the `unprotect` tool (rem-yj1j.6 / rem-hsg4).
+///
+/// Mirrors the CLI surface: anchor-walk from `base_dir`, look up
+/// the sidecar, remove the matching `.remargin.yaml` entry, and
+/// scrub the recorded rules from each settings file the
+/// corresponding `restrict` call touched.
+fn handle_unprotect(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let path_str = required_str(params, "path")?;
+    let args = permissions_unprotect::UnprotectArgs::new(String::from(path_str));
+    let outcome = permissions_unprotect::unprotect(system, base_dir, &args)?;
+
+    Ok(json!({
+        "absolute_path": outcome.absolute_path.display().to_string(),
+        "anchor": outcome.anchor.display().to_string(),
+        "claude_files_touched": outcome
+            .claude_files_touched
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>(),
+        "rules_removed": outcome.rules_removed,
+        "warnings": outcome.warnings,
+        "yaml_entry_removed": outcome.yaml_entry_removed,
     }))
 }
 

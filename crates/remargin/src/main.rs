@@ -39,6 +39,7 @@ use remargin_core::parser;
 use remargin_core::path::expand_path;
 use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::permissions::restrict as permissions_restrict;
+use remargin_core::permissions::unprotect as permissions_unprotect;
 use remargin_core::skill;
 use remargin_core::writer::InsertPosition;
 
@@ -697,6 +698,29 @@ enum Commands {
         /// Subcommand: install, uninstall, test.
         #[command(subcommand)]
         action: SkillAction,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Reverse a previous `restrict` (rem-yj1j.6 / T27).
+    ///
+    /// Removes the matching `permissions.restrict` entry from the
+    /// nearest `.claude/`-bearing ancestor's `.remargin.yaml` AND
+    /// scrubs the sidecar-tracked rules from both Claude settings
+    /// files. Idempotent. Surfaces manual-edit divergences as
+    /// warnings (never errors).
+    ///
+    /// No identity flags — symmetric with `restrict`.
+    Unprotect {
+        /// Subpath to unprotect (matches the on-disk `path` field of
+        /// the original restrict entry), OR the literal `*` for the
+        /// realm-wide wildcard restrict.
+        path: String,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Symmetric with `restrict`'s
+        /// flag so hermetic test runs can stay out of the user's
+        /// real home.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1364,6 +1388,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Search { output_args, .. }
         | Commands::Sign { output_args, .. }
         | Commands::Skill { output_args, .. }
+        | Commands::Unprotect { output_args, .. }
         | Commands::Verify { output_args, .. }
         | Commands::Write { output_args, .. } => Some(output_args),
         #[cfg(feature = "obsidian")]
@@ -1554,7 +1579,8 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::ResolveMode { .. }
         | Commands::Restrict { .. }
         | Commands::Keygen { .. }
-        | Commands::Skill { .. } => true,
+        | Commands::Skill { .. }
+        | Commands::Unprotect { .. } => true,
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => true,
         Commands::Ack { .. }
@@ -1620,6 +1646,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Restrict { .. }
         | Commands::Search { .. }
         | Commands::Skill { .. }
+        | Commands::Unprotect { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => None,
@@ -1657,6 +1684,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Search { .. }
         | Commands::Sign { .. }
         | Commands::Skill { .. }
+        | Commands::Unprotect { .. }
         | Commands::Verify { .. }
         | Commands::Version
         | Commands::Write { .. } => None,
@@ -1707,6 +1735,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Search { .. }
         | Commands::Sign { .. }
         | Commands::Skill { .. }
+        | Commands::Unprotect { .. }
         | Commands::Verify { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
@@ -1714,6 +1743,10 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "config-free subcommand short-circuit list grows linearly with commands"
+)]
 fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     let output = subcommand_output(&cli.command);
     let json_mode = output.is_some_and(|o| o.json);
@@ -1782,6 +1815,19 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
                 path,
                 also_deny_bash,
                 *cli_allowed,
+                user_settings.as_deref(),
+                output_args.json,
+            );
+        }
+        Commands::Unprotect {
+            path,
+            user_settings,
+            output_args,
+        } => {
+            return cmd_unprotect(
+                system,
+                cwd,
+                path,
                 user_settings.as_deref(),
                 output_args.json,
             );
@@ -2128,7 +2174,8 @@ fn dispatch_with_config(
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
         | Commands::Restrict { .. }
-        | Commands::Skill { .. } => Ok(()),
+        | Commands::Skill { .. }
+        | Commands::Unprotect { .. } => Ok(()),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => Ok(()),
     }
@@ -2854,6 +2901,78 @@ fn emit_restrict_summary(outcome: &permissions_restrict::RestrictOutcome) {
         "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
     );
     eprintln!("  Layer 1 (remargin's own ops) is enforcing immediately on the next call.");
+}
+
+/// Wire the CLI `unprotect` subcommand to the
+/// [`permissions_unprotect::unprotect`] core (rem-yj1j.6 / T27).
+///
+/// `_user_settings_explicit` is accepted on the CLI for symmetry
+/// with `restrict` but ignored here: the unprotect path consults
+/// the sidecar's `added_to_files` list (rem-7m4u captured the
+/// resolved settings paths at apply time), so the reversal
+/// scrubs exactly the files the corresponding `restrict` touched.
+fn cmd_unprotect(
+    system: &dyn System,
+    cwd: &Path,
+    path: &str,
+    _user_settings_explicit: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    let args = permissions_unprotect::UnprotectArgs::new(String::from(path));
+    let outcome = permissions_unprotect::unprotect(system, cwd, &args)?;
+
+    if json_mode {
+        let value = serde_json::json!({
+            "absolute_path": outcome.absolute_path.display().to_string(),
+            "anchor": outcome.anchor.display().to_string(),
+            "claude_files_touched": outcome
+                .claude_files_touched
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>(),
+            "rules_removed": outcome.rules_removed,
+            "warnings": outcome.warnings,
+            "yaml_entry_removed": outcome.yaml_entry_removed,
+        });
+        print_output(true, &value)?;
+    } else {
+        emit_unprotect_summary(&outcome);
+    }
+    Ok(())
+}
+
+fn emit_unprotect_summary(outcome: &permissions_unprotect::UnprotectOutcome) {
+    eprintln!("Unprotected: {}", outcome.absolute_path.display());
+    eprintln!("  Anchor: {}", outcome.anchor.display());
+    if outcome.yaml_entry_removed {
+        eprintln!(
+            "  .remargin.yaml updated at {}",
+            outcome.anchor.join(".remargin.yaml").display()
+        );
+    } else {
+        eprintln!("  .remargin.yaml: no matching entry");
+    }
+    if outcome.claude_files_touched.is_empty() {
+        eprintln!("  Settings: none touched (no sidecar entry)");
+    } else {
+        eprintln!(
+            "  Settings updated: {} file(s)",
+            outcome.claude_files_touched.len()
+        );
+        for file in &outcome.claude_files_touched {
+            eprintln!("    {}", file.display());
+        }
+    }
+    if !outcome.warnings.is_empty() {
+        eprintln!("  Warnings:");
+        for warning in &outcome.warnings {
+            eprintln!("    - {warning}");
+        }
+    }
+    eprintln!(
+        "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
+    );
+    eprintln!("  Layer 1 (remargin's own ops) stops enforcing immediately on the next call.");
 }
 
 fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<()> {
