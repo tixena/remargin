@@ -37,6 +37,7 @@ use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
 use remargin_core::parser;
 use remargin_core::path::expand_path;
+use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::skill;
 use remargin_core::writer::InsertPosition;
 
@@ -48,6 +49,17 @@ const EXIT_PRESERVATION: u8 = 5;
 const EXIT_SKILL: u8 = 6;
 const EXIT_NOT_FOUND: u8 = 7;
 const EXIT_AMBIGUOUS: u8 = 8;
+/// Gitignore-style "no match" sentinel returned by
+/// `permissions check` when the path is unrestricted (rem-yj1j.7 / T28).
+/// Numerically equal to [`EXIT_ERROR`] so existing tooling that branches
+/// on `1 vs 0` still works; the `main` harness recognises the sentinel
+/// to skip the "error: ..." render that would otherwise prepend the
+/// gitignore-style result.
+const EXIT_NOT_RESTRICTED: u8 = 1;
+/// Internal marker substring used by [`cmd_permissions`] to communicate
+/// "not restricted" to [`classify_error`] without leaking through
+/// stderr.
+const PERMISSIONS_NOT_RESTRICTED_MARKER: &str = "__remargin_permissions_check_not_restricted__";
 
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
@@ -424,6 +436,20 @@ enum Commands {
         action: ObsidianAction,
         #[command(flatten)]
         output_args: OutputArgs,
+    },
+    /// Inspect the resolved permissions for the current directory
+    /// (rem-yj1j.7 / T28).
+    ///
+    /// Read-only surface over `permissions::inspect`. `show` prints the
+    /// parent-walked `.remargin.yaml` permissions (with `trusted_roots`
+    /// recursive expansion); `check <path>` answers gitignore-style
+    /// "is this path restricted?" with exit-code semantics
+    /// (0 = restricted, 1 = not).
+    ///
+    /// No identity flags — both subcommands are pure observers.
+    Permissions {
+        #[command(subcommand)]
+        action: PermissionsAction,
     },
     /// Structured pre-commit prediction for a mutating op (rem-bhk).
     ///
@@ -872,6 +898,28 @@ enum RegistryAction {
     Show,
 }
 
+/// `remargin permissions` subcommands (rem-yj1j.7 / T28).
+#[derive(clap::Subcommand)]
+enum PermissionsAction {
+    /// Gitignore-style: exit 0 when `path` is restricted, 1 otherwise.
+    Check {
+        /// Path to test.
+        path: PathBuf,
+        /// Print the matching rule (kind, source file, rule text) when
+        /// the path is restricted. Adds detail to both text and JSON
+        /// output.
+        #[arg(long)]
+        why: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Print the resolved permissions for the current directory.
+    Show {
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+}
+
 /// `remargin identity` subcommands (rem-8cnc). Default action
 /// (no subcommand) is `show` — the pre-rem-8cnc diagnostic surface.
 #[derive(clap::Subcommand)]
@@ -1281,8 +1329,19 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Write { output_args, .. } => Some(output_args),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { output_args, .. } => Some(output_args),
+        Commands::Permissions { action } => Some(permissions_action_output(action)),
         Commands::Plan { action, .. } => Some(plan_action_output(action)),
         Commands::Version => None,
+    }
+}
+
+/// Pull the per-action [`OutputArgs`] from a [`PermissionsAction`]
+/// variant. Both `show` and `check` flatten an `OutputArgs`.
+const fn permissions_action_output(action: &PermissionsAction) -> &OutputArgs {
+    match action {
+        PermissionsAction::Show { output_args } | PermissionsAction::Check { output_args, .. } => {
+            output_args
+        }
     }
 }
 
@@ -1338,15 +1397,22 @@ fn main() -> ExitCode {
     let exit = match run(&cli, &system, &cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
+            let err_msg = format!("{err:#}");
+            let is_silent_sentinel = err_msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER);
             let exit_code = classify_error(&err);
-            if json_mode {
-                let error_json = inject_elapsed_ms(&json!({ "error": format!("{err:#}") }));
+            if is_silent_sentinel {
+                // Sentinel for `permissions check` (rem-yj1j.7 / T28).
+                // Output already emitted on the success path; we only
+                // need the gitignore-style exit code, no "error: ..."
+                // render.
+            } else if json_mode {
+                let error_json = inject_elapsed_ms(&json!({ "error": err_msg }));
                 eprintln!(
                     "{}",
                     serde_json::to_string_pretty(&error_json).unwrap_or_default()
                 );
             } else {
-                eprintln!("error: {err:#}");
+                eprintln!("error: {err_msg}");
             }
             ExitCode::from(exit_code)
         }
@@ -1361,7 +1427,9 @@ fn main() -> ExitCode {
 
 fn classify_error(err: &anyhow::Error) -> u8 {
     let msg = format!("{err:#}");
-    if msg.contains("Lint error") {
+    if msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER) {
+        EXIT_NOT_RESTRICTED
+    } else if msg.contains("Lint error") {
         EXIT_LINT
     } else if msg.contains("checksum") || msg.contains("signature") || msg.contains("integrity") {
         EXIT_INTEGRITY
@@ -1443,6 +1511,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
     match cmd {
         Commands::Version
         | Commands::Identity { .. }
+        | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
         | Commands::Keygen { .. }
         | Commands::Skill { .. } => true,
@@ -1505,6 +1574,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Lint { .. }
         | Commands::Ls { .. }
         | Commands::Metadata { .. }
+        | Commands::Permissions { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
         | Commands::Search { .. }
@@ -1533,6 +1603,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Mcp { .. }
         | Commands::Metadata { .. }
         | Commands::Migrate { .. }
+        | Commands::Permissions { .. }
         | Commands::Plan { .. }
         | Commands::Purge { .. }
         | Commands::Query { .. }
@@ -1582,6 +1653,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Lint { .. }
         | Commands::Mcp { .. }
         | Commands::Migrate { .. }
+        | Commands::Permissions { .. }
         | Commands::Plan { .. }
         | Commands::Purge { .. }
         | Commands::Query { .. }
@@ -1651,6 +1723,9 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             action,
             output_args,
         } => return cmd_skill(system, action, output_args.json),
+        Commands::Permissions { action } => {
+            return cmd_permissions(system, cwd, action);
+        }
         _ => {
             debug_assert!(
                 !subcommand_is_config_free(&cli.command),
@@ -1990,6 +2065,7 @@ fn dispatch_with_config(
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
+        | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
         | Commands::Skill { .. } => Ok(()),
         #[cfg(feature = "obsidian")]
@@ -2438,6 +2514,201 @@ fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
     let msg = format!("{err:#}");
     msg.contains("no identity resolved")
         || msg.contains("no .remargin.yaml matched the supplied filters")
+}
+
+/// Dispatch `remargin permissions <show|check>` (rem-yj1j.7 / T28).
+///
+/// `show` prints the resolved permissions tree at `cwd`. `check`
+/// canonicalises its target path, asks the inspector whether any
+/// `restrict` or `deny_ops` rule covers it, and exits gitignore-style:
+/// 0 when restricted, 1 when not. Both paths support `--json`.
+fn cmd_permissions(system: &dyn System, cwd: &Path, action: &PermissionsAction) -> Result<()> {
+    match action {
+        PermissionsAction::Show { output_args } => {
+            let report = permissions_inspect::show(system, cwd)?;
+            if output_args.json {
+                let value =
+                    serde_json::to_value(&report).context("serializing permissions show output")?;
+                print_output(true, &value)?;
+            } else {
+                emit_permissions_show_text(cwd, &report);
+            }
+            Ok(())
+        }
+        PermissionsAction::Check {
+            path,
+            why,
+            output_args,
+        } => {
+            let expanded = expand_cli_pathbuf(system, path)?;
+            let target = if expanded.is_absolute() {
+                expanded
+            } else {
+                cwd.join(expanded)
+            };
+            let report = permissions_inspect::check(system, cwd, &target, *why)?;
+            if output_args.json {
+                let value = serde_json::to_value(&report)
+                    .context("serializing permissions check output")?;
+                print_output(true, &value)?;
+            } else {
+                emit_permissions_check_text(&report, *why);
+            }
+            // Gitignore-style exit code: 0 when restricted, 1 otherwise.
+            // We have already printed our payload, so signal "miss" with
+            // a sentinel error that `main` recognises as
+            // [`EXIT_NOT_RESTRICTED`] and renders silently (no
+            // "error: ..." prefix).
+            if report.restricted {
+                Ok(())
+            } else {
+                bail!("{PERMISSIONS_NOT_RESTRICTED_MARKER}");
+            }
+        }
+    }
+}
+
+/// Bracket a list of `String` values using `Display` formatting so the
+/// output can be read by humans without leaking `Debug`'s escape rules
+/// (clippy denies `use_debug` workspace-wide).
+fn format_string_list(items: &[String]) -> String {
+    let mut out = String::from("[");
+    for (idx, item) in items.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(item);
+    }
+    out.push(']');
+    out
+}
+
+/// Render a [`permissions_inspect::ShowOutput`] as multi-line text. Top
+/// level lists are sorted by source-file ordering already; the function
+/// only formats.
+fn emit_permissions_show_text(cwd: &Path, report: &permissions_inspect::ShowOutput) {
+    eprintln!("Permissions resolved at {}:", cwd.display());
+    eprintln!();
+
+    eprintln!("  trusted_roots:");
+    if report.trusted_roots.is_empty() {
+        eprintln!("    (none)");
+    } else {
+        for entry in &report.trusted_roots {
+            eprintln!(
+                "    {}  (source: {})",
+                entry.path.display(),
+                entry.source_file.display()
+            );
+            if let Some(nested) = entry.recursive.as_deref() {
+                eprintln!(
+                    "      recursive permissions inside {}:",
+                    entry.path.display()
+                );
+                emit_permissions_show_indented(nested, "        ");
+            }
+        }
+    }
+    eprintln!();
+
+    eprintln!("  restrict:");
+    if report.restrict.is_empty() {
+        eprintln!("    (none)");
+    } else {
+        for entry in &report.restrict {
+            eprintln!(
+                "    {}  (source: {})",
+                entry.path_text,
+                entry.source_file.display()
+            );
+            if let Some(realm) = entry.realm_root.as_deref() {
+                eprintln!("      realm_root: {}", realm.display());
+            }
+            if !entry.also_deny_bash.is_empty() {
+                eprintln!(
+                    "      also_deny_bash: {}",
+                    format_string_list(&entry.also_deny_bash)
+                );
+            }
+            eprintln!("      cli_allowed: {}", entry.cli_allowed);
+        }
+    }
+    eprintln!();
+
+    eprintln!("  deny_ops:");
+    if report.deny_ops.is_empty() {
+        eprintln!("    (none)");
+    } else {
+        for entry in &report.deny_ops {
+            eprintln!(
+                "    {}  ops={}  (source: {})",
+                entry.path.display(),
+                format_string_list(&entry.ops),
+                entry.source_file.display()
+            );
+        }
+    }
+    eprintln!();
+
+    eprintln!("  allow_dot_folders:");
+    if report.allow_dot_folders.is_empty() {
+        eprintln!("    (none)");
+    } else {
+        for entry in &report.allow_dot_folders {
+            eprintln!("    {}", format_string_list(&entry.names));
+        }
+    }
+}
+
+/// Indented variant used to render the `recursive` block under a
+/// trusted-root entry. Keeps the formatting compact since we are
+/// already nested.
+fn emit_permissions_show_indented(report: &permissions_inspect::ShowOutput, indent: &str) {
+    if !report.trusted_roots.is_empty() {
+        eprintln!("{indent}trusted_roots:");
+        for entry in &report.trusted_roots {
+            eprintln!(
+                "{indent}  {}  (source: {})",
+                entry.path.display(),
+                entry.source_file.display()
+            );
+        }
+    }
+    if !report.restrict.is_empty() {
+        eprintln!("{indent}restrict:");
+        for entry in &report.restrict {
+            eprintln!(
+                "{indent}  {}  (source: {})",
+                entry.path_text,
+                entry.source_file.display()
+            );
+        }
+    }
+    if !report.deny_ops.is_empty() {
+        eprintln!("{indent}deny_ops:");
+        for entry in &report.deny_ops {
+            eprintln!(
+                "{indent}  {}  ops={}",
+                entry.path.display(),
+                format_string_list(&entry.ops)
+            );
+        }
+    }
+    if !report.allow_dot_folders.is_empty() {
+        eprintln!("{indent}allow_dot_folders:");
+        for entry in &report.allow_dot_folders {
+            eprintln!("{indent}  {}", format_string_list(&entry.names));
+        }
+    }
+}
+
+fn emit_permissions_check_text(report: &permissions_inspect::CheckOutput, why: bool) {
+    eprintln!("restricted: {}", report.restricted);
+    if why && let Some(rule) = &report.matching_rule {
+        eprintln!("  matched: {}", rule.rule_text);
+        eprintln!("  kind:    {}", rule.kind);
+        eprintln!("  source:  {}", rule.source_file.display());
+    }
 }
 
 fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<()> {

@@ -33,6 +33,7 @@ use crate::operations::sandbox as sandbox_ops;
 use crate::operations::search;
 use crate::parser;
 use crate::path::expand_path;
+use crate::permissions::inspect as permissions_inspect;
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -622,6 +623,40 @@ fn desc_verify() -> ToolDesc {
     }
 }
 
+/// Build the `permissions_show` tool descriptor (rem-yj1j.7 / T28).
+fn desc_permissions_show() -> ToolDesc {
+    ToolDesc {
+        name: "permissions_show",
+        description: "Print the resolved permissions for the MCP server's working directory \
+             (parent-walk of `.remargin.yaml`). Includes recursive expansion of \
+             `trusted_roots` that are themselves realms (bounded depth, cycle-safe). \
+             Read-only; no identity flags.",
+        schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+/// Build the `permissions_check` tool descriptor (rem-yj1j.7 / T28).
+fn desc_permissions_check() -> ToolDesc {
+    ToolDesc {
+        name: "permissions_check",
+        description: "Gitignore-style: returns `restricted=true` when the path is covered \
+             by any `restrict` or `deny_ops` rule from the parent-walked `.remargin.yaml`. \
+             With `why=true`, the matching rule's kind, source file, and rule text are \
+             included. Read-only; no identity flags.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Absolute or relative path to test." },
+                "why": { "type": "boolean", "description": "Include the matching rule details when restricted.", "default": false }
+            },
+            "required": ["path"]
+        }),
+    }
+}
+
 /// Build the `sandbox_add` tool descriptor.
 fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
@@ -710,6 +745,8 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_ls(),
         desc_metadata(),
         desc_migrate(),
+        desc_permissions_check(),
+        desc_permissions_show(),
         desc_plan(),
         desc_purge(),
         desc_query(),
@@ -992,6 +1029,8 @@ fn dispatch_tool(
         "ls" => handle_ls(system, base_dir, config, p),
         "metadata" => handle_metadata(system, base_dir, p),
         "migrate" => handle_migrate(system, base_dir, config, p),
+        "permissions_check" => handle_permissions_check(system, base_dir, p),
+        "permissions_show" => handle_permissions_show(system, base_dir),
         "plan" => handle_plan(system, base_dir, config, p),
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
@@ -1739,6 +1778,38 @@ fn build_query_filter_from_params(
         filter = filter.with_content_regex(pattern, optional_bool(params, "ignore_case"))?;
     }
     Ok(filter)
+}
+
+/// Handle the `permissions_show` tool (rem-yj1j.7 / T28).
+///
+/// Pure read-only inspection — no identity resolution, no config
+/// load. Returns the parent-walked `.remargin.yaml` permissions tree
+/// rooted at `base_dir` (the MCP server's working directory).
+fn handle_permissions_show(system: &dyn System, base_dir: &Path) -> Result<Value> {
+    let report = permissions_inspect::show(system, base_dir)?;
+    serde_json::to_value(&report).context("serializing permissions show output")
+}
+
+/// Handle the `permissions_check` tool (rem-yj1j.7 / T28).
+///
+/// Returns `restricted=true` when any `restrict` or `deny_ops` rule
+/// covers the supplied path. With `why=true`, the closest matching
+/// rule is included.
+fn handle_permissions_check(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let path_str = required_str(params, "path")?;
+    let why = optional_bool(params, "why");
+    let candidate = Path::new(path_str);
+    let absolute = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        base_dir.join(candidate)
+    };
+    let report = permissions_inspect::check(system, base_dir, &absolute, why)?;
+    serde_json::to_value(&report).context("serializing permissions check output")
 }
 
 /// Handle the `react` tool: add or remove an emoji reaction.
