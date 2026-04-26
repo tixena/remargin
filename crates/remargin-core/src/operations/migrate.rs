@@ -274,6 +274,7 @@ pub(crate) fn build_migrated_segments(
                     author_type,
                     checksum,
                     content: lc.content.clone(),
+                    edited_at: None,
                     id: new_id.clone(),
                     line: 0,
                     reactions: Reactions::new(),

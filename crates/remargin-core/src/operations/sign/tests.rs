@@ -142,6 +142,7 @@ fn pre_signed_doc(system_for_signing: &MockSystem) -> String {
         author_type: AuthorType::Human,
         checksum: cksum.clone(),
         content: String::from(content),
+        edited_at: None,
         id: String::from("alc"),
         line: 0,
         reactions: Reactions::new(),

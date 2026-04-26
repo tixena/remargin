@@ -34,6 +34,7 @@ fn make_comment(content: &str) -> Comment {
         author_type: AuthorType::Human,
         checksum: compute_checksum(content, &[]),
         content: String::from(content),
+        edited_at: None,
         id: String::from("abc"),
         line: 0,
         reactions: Reactions::new(),

@@ -52,6 +52,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
         author_type: AuthorType::Human,
         checksum,
         content: String::from(content),
+        edited_at: None,
         id: String::from(id),
         line: 0,
         reactions: Reactions::new(),

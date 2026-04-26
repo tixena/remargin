@@ -75,6 +75,13 @@ pub struct Comment {
     pub author_type: AuthorType,
     pub checksum: String,
     pub content: String,
+    /// Set by [`crate::operations::edit_comment`] on every successful
+    /// edit (rem-g3sy.2 / T32). `None` for comments that have never
+    /// been edited. Pretty-print + the activity command surface this
+    /// when present. Deliberately NOT included in the signed payload
+    /// (see [`crate::crypto::signature_payload`] for the rationale).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<DateTime<FixedOffset>>,
     pub id: String,
     /// 1-indexed line number of the opening fence in the source document.
     /// Zero means "not yet placed" (e.g. newly created, before write).
@@ -166,6 +173,8 @@ struct RawYamlHeader {
     #[serde(rename = "type")]
     author_type: String,
     checksum: String,
+    #[serde(default)]
+    edited_at: Option<String>,
     id: String,
     #[serde(default)]
     reactions: Reactions,
@@ -327,6 +336,9 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
     let _ = writeln!(out, "author: {}", cm.author);
     let _ = writeln!(out, "type: {}", cm.author_type.as_str());
     let _ = writeln!(out, "ts: {}", cm.ts.to_rfc3339());
+    if let Some(edited_at) = cm.edited_at {
+        let _ = writeln!(out, "edited_at: {}", edited_at.to_rfc3339());
+    }
     let _ = writeln!(out, "checksum: {}", cm.checksum);
 
     if !cm.to.is_empty() {
@@ -547,6 +559,14 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
     let ts = DateTime::parse_from_rfc3339(&header.ts)
         .with_context(|| format!("invalid timestamp: {}", header.ts))?;
 
+    let edited_at = match header.edited_at.as_deref() {
+        Some(raw) => Some(
+            DateTime::parse_from_rfc3339(raw)
+                .with_context(|| format!("invalid edited_at: {raw}"))?,
+        ),
+        None => None,
+    };
+
     let author_type = match header.author_type.as_str() {
         "human" => AuthorType::Human,
         "agent" => AuthorType::Agent,
@@ -593,6 +613,7 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         author_type,
         checksum: header.checksum,
         content,
+        edited_at,
         id: header.id,
         line,
         reactions,

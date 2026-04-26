@@ -195,6 +195,12 @@ pub struct ExpandedComment {
     pub checksum: String,
     /// Comment body text.
     pub content: String,
+    /// Edit timestamp set by [`crate::operations::edit_comment`]
+    /// (rem-g3sy.2 / T32). `None` for comments that have never been
+    /// edited. Pretty-print and the activity command both surface
+    /// this when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<DateTime<FixedOffset>>,
     /// Relative path to the file this comment belongs to.
     pub file: PathBuf,
     /// Unique short identifier.
@@ -469,6 +475,7 @@ fn expanded_from_comment(cm: &parser::Comment, file: &Path) -> ExpandedComment {
         author_type: cm.author_type.clone(),
         checksum: cm.checksum.clone(),
         content: cm.content.clone(),
+        edited_at: cm.edited_at,
         file: file.to_path_buf(),
         id: cm.id.clone(),
         line: cm.line,

@@ -16,6 +16,7 @@ fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comme
         author_type: AuthorType::Human,
         checksum: String::from("sha256:test"),
         content: String::from("Test content."),
+        edited_at: None,
         id: String::from(id),
         line: 0,
         reactions: Reactions::new(),

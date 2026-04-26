@@ -169,6 +169,7 @@ pub fn create_comment(
         author_type,
         checksum,
         content: String::from(params.content),
+        edited_at: None,
         id: new_id.clone(),
         line: 0, // Placeholder; updated after document write and re-parse.
         reactions: Reactions::new(),
@@ -472,6 +473,14 @@ pub fn edit_comment(
     // absent, matching the pre-kind back-compat hinge in
     // [`compute_checksum`].
     cm.checksum = compute_checksum(new_content, cm.kinds());
+
+    // rem-g3sy.2 / T32: stamp the edit time so the activity command
+    // can surface this edit as a distinct event. Original `ts`
+    // (creation time) is preserved; `edited_at` is the new field.
+    // The signature payload deliberately excludes `edited_at` so
+    // pre-edit signatures stay valid against the canonical metadata
+    // (see [`crate::crypto::signature_payload`]).
+    cm.edited_at = Some(Utc::now().fixed_offset());
 
     cm.ack.clear();
 

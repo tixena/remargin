@@ -39,6 +39,7 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
         author_type: AuthorType::Human,
         checksum: String::from("sha256:test"),
         content: String::from("Test content."),
+        edited_at: None,
         id: String::from(id),
         line: 0,
         reactions: Reactions::new(),

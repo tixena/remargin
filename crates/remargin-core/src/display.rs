@@ -141,6 +141,11 @@ fn render_node(
         cm.id, cm.author
     );
 
+    if let Some(edited_at) = cm.edited_at {
+        let edited_short = edited_at.format("%Y-%m-%d %H:%M");
+        let _ = writeln!(out, "{indent}\u{2502} edited {edited_short}");
+    }
+
     if let Some(parent_id) = &cm.reply_to {
         let _ = writeln!(out, "{indent}\u{2502} \u{2934} reply-to: {parent_id}");
     }
@@ -255,6 +260,11 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
         "  {} \u{00b7} {} ({author_type_str}) \u{00b7} {ts_short}",
         cm.id, cm.author
     );
+
+    if let Some(edited_at) = cm.edited_at {
+        let edited_short = edited_at.format("%Y-%m-%d %H:%M");
+        let _ = writeln!(out, "  \u{2502} edited {edited_short}");
+    }
 
     if let Some(parent_id) = &cm.reply_to {
         let _ = writeln!(out, "  \u{2502} \u{2934} reply-to: {parent_id}");

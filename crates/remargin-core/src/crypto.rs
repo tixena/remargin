@@ -177,7 +177,11 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
 /// Signed fields (in order): id, author, type, ts, to, reply-to, thread,
 /// attachments, `remargin_kind`, content.
 ///
-/// Excluded: reactions, ack, checksum (these are mutable after creation).
+/// Excluded: reactions, ack, checksum (these are mutable after
+/// creation), AND `edited_at` (rem-g3sy.2 / T32 — the signature
+/// promises content authorship, not edit metadata; including
+/// `edited_at` would force every edit to invalidate the prior
+/// signature instead of cleanly re-signing the new content).
 ///
 /// `remargin_kind` contributes zero bytes when the vector is empty, so
 /// pre-`remargin_kind` comments sign and verify identically to how they

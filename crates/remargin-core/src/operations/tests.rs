@@ -532,6 +532,96 @@ Original content.
     assert!(cm.ack.is_empty(), "ack should be cleared after edit");
 }
 
+/// rem-g3sy.2 / T32: every successful edit stamps `edited_at` on
+/// the comment so the activity command can surface the edit. The
+/// original `ts` (creation time) stays put; only `edited_at`
+/// advances.
+#[test]
+fn edit_stamps_edited_at() {
+    let doc_content = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:old
+---
+Original.
+```
+";
+    let system = system_with_doc(doc_content);
+    let config = open_config();
+
+    edit_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        "abc",
+        "Updated.",
+        None,
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let cm = doc.find_comment("abc").unwrap();
+    assert!(cm.edited_at.is_some(), "edit must stamp edited_at");
+    // Original ts unchanged.
+    assert_eq!(
+        cm.ts.to_rfc3339(),
+        "2026-04-06T12:00:00-04:00",
+        "creation ts must survive edit"
+    );
+    // The serialized form carries the new field.
+    assert!(content.contains("edited_at:"));
+}
+
+/// rem-g3sy.2 / T32: comments parsed from older docs without an
+/// `edited_at:` line round-trip with `edited_at = None`. No
+/// fabricated value, no extra YAML line, no checksum drift.
+#[test]
+fn pre_existing_comment_without_edited_at_round_trips() {
+    let doc_content = "\
+---
+title: Test
+author: eduardo
+---
+
+# Test Document
+
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:c9da2b6d12c7be5b80a1c37b5eaf0fe26f1b2cf32a8c9ed1b9e9eab1f9e12345
+---
+Body.
+```
+";
+    let parsed = parser::parse(doc_content).unwrap();
+    assert!(parsed.find_comment("abc").unwrap().edited_at.is_none());
+
+    // Round-trip: re-emit the doc and re-parse. No `edited_at:` line
+    // should appear and the second parse should still have None.
+    let re_emitted = parsed.to_markdown();
+    assert!(
+        !re_emitted.contains("edited_at:"),
+        "re-emitted doc must not fabricate edited_at: {re_emitted}"
+    );
+    let reparsed = parser::parse(&re_emitted).unwrap();
+    assert!(reparsed.find_comment("abc").unwrap().edited_at.is_none());
+}
+
 #[test]
 fn edit_cascade_clears_acks() {
     let system = system_with_doc(&doc_with_thread());
