@@ -17,6 +17,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 use serde_json::{Map, Value, json};
 
+use crate::activity;
 use crate::config::identity::{IdentityFlags, resolve_identity};
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
@@ -157,6 +158,25 @@ fn with_identity_flag_schema(mut base: Value) -> Value {
     );
 
     base
+}
+
+/// Build the `activity` tool descriptor (rem-g3sy.4 / T34).
+fn desc_activity() -> ToolDesc {
+    ToolDesc {
+        name: "activity",
+        description: "Show what's new since X across managed .md files. Walks <path> (file or \
+             directory; defaults to the MCP server's working directory) and returns per-file \
+             change records (comments, acks, sandbox-adds) sorted by ts. With `since` omitted, \
+             the per-file cutoff is the caller's last action in that file; files where the \
+             caller has never acted return everything.",
+        schema: with_identity_flag_schema(json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "File or directory to scan; defaults to the MCP server's working directory." },
+                "since": { "type": "string", "description": "ISO 8601 cutoff. Omit to derive per-file from caller's last action." }
+            }
+        })),
+    }
 }
 
 /// Build the ack tool descriptor.
@@ -806,6 +826,7 @@ fn desc_write() -> ToolDesc {
 fn tool_descriptors() -> Vec<ToolDesc> {
     vec![
         desc_ack(),
+        desc_activity(),
         desc_batch(),
         desc_comment(),
         desc_comments(),
@@ -1174,6 +1195,7 @@ fn dispatch_tool(
     }
     let result = match tool_name {
         "ack" => handle_ack(system, base_dir, config, p),
+        "activity" => handle_activity(system, base_dir, config, p),
         "batch" => handle_batch(system, base_dir, config, p),
         "comment" => handle_comment(system, base_dir, config, p),
         "comments" => handle_comments(system, base_dir, p),
@@ -1216,6 +1238,42 @@ fn dispatch_tool(
         }
         Err(err) => tool_result_error(&format!("{err:#}")),
     }
+}
+
+/// Handle the `activity` tool (rem-g3sy.4 / T34).
+fn handle_activity(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let target = optional_str(params, "path").map_or_else(
+        || base_dir.to_path_buf(),
+        |raw| {
+            let candidate = Path::new(raw);
+            if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else {
+                base_dir.join(candidate)
+            }
+        },
+    );
+    let cutoff = match optional_str(params, "since") {
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .with_context(|| format!("activity: invalid ISO 8601 since={raw:?}"))?,
+        ),
+        None => None,
+    };
+    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
+    let cfg = effective_config(config, declared.as_ref());
+    let caller = cfg
+        .identity
+        .as_deref()
+        .context("activity: caller identity required (declare via identity / config_path)")?;
+
+    let result = activity::gather_activity(system, &target, cutoff, caller)?;
+    serde_json::to_value(&result).context("serializing activity result")
 }
 
 /// Handle the `ack` tool: acknowledge one or more comments.

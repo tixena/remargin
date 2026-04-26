@@ -221,8 +221,7 @@ fn sandbox_entry_surfaces() {
 /// new comment at T4 is surfaced.
 #[test]
 fn caller_last_action_derives_cutoff() {
-    let prefix =
-        "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T13:00:00-04:00\n---\n\n# Body\n";
+    let prefix = "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T13:00:00-04:00\n---\n\n# Body\n";
     let c1 = "```remargin\n---\nid: a1\nauthor: alice\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:t\nack:\n  - alice@2026-04-06T14:00:00-04:00\n---\nMine.\n```";
     let c2 = "```remargin\n---\nid: b2\nauthor: bob\ntype: human\nts: 2026-04-06T13:30:00-04:00\nchecksum: sha256:t\n---\nDropped.\n```";
     let c3 = "```remargin\n---\nid: b3\nauthor: bob\ntype: human\nts: 2026-04-06T15:00:00-04:00\nchecksum: sha256:t\n---\nKept.\n```";
@@ -237,7 +236,11 @@ fn caller_last_action_derives_cutoff() {
             Change::Ack { .. } | Change::Sandbox { .. } => None,
         })
         .collect();
-    assert_eq!(comment_ids, vec!["b3"], "expected only b3 past 14:00 cutoff");
+    assert_eq!(
+        comment_ids,
+        vec!["b3"],
+        "expected only b3 past 14:00 cutoff"
+    );
 }
 
 /// Scenario 13: directory walk returns one `FileChanges` per file

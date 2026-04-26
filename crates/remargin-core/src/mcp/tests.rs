@@ -231,13 +231,14 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 28_usize);
+    assert_eq!(tools.len(), 29_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
     assert!(names.contains(&"comment"));
     assert!(names.contains(&"batch"));
     assert!(names.contains(&"ack"));
+    assert!(names.contains(&"activity"));
     assert!(names.contains(&"react"));
     assert!(names.contains(&"delete"));
     assert!(names.contains(&"edit"));

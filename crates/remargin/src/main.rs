@@ -19,6 +19,7 @@ use os_shim::System;
 use os_shim::real::RealSystem;
 use serde_json::{Value, json};
 
+use remargin_core::activity;
 use remargin_core::config::identity::IdentityFlags;
 use remargin_core::config::{self, ResolvedConfig};
 use remargin_core::display;
@@ -195,6 +196,33 @@ enum Commands {
         /// Remove this identity's ack instead of adding one.
         #[arg(long)]
         remove: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Show "what's new since X" across managed `.md` files
+    /// (rem-g3sy.4 / T34).
+    ///
+    /// Walks `<path>` (file or directory; defaults to cwd) and
+    /// returns per-file change records (comments, acks,
+    /// sandbox-adds) sorted by ts. When `--since` is omitted, the
+    /// per-file cutoff is the caller's last action in that file —
+    /// files where the caller has never acted return everything.
+    ///
+    /// Identity is read-only here (no signature); the quartet is
+    /// used only to resolve the caller name that drives the
+    /// cutoff.
+    Activity {
+        /// Path to scan. Defaults to the current directory.
+        path: Option<PathBuf>,
+        /// Cutoff timestamp (ISO 8601). Omit to derive per-file
+        /// from the caller's last action.
+        #[arg(long)]
+        since: Option<String>,
+        /// Render a human-readable timeline instead of JSON.
+        #[arg(long)]
+        pretty: bool,
         #[command(flatten)]
         identity_args: IdentityArgs,
         #[command(flatten)]
@@ -1364,6 +1392,7 @@ fn parse_line_range(raw: &str) -> Result<(usize, usize)> {
 const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
     match cmd {
         Commands::Ack { output_args, .. }
+        | Commands::Activity { output_args, .. }
         | Commands::Batch { output_args, .. }
         | Commands::Comment { output_args, .. }
         | Commands::Comments { output_args, .. }
@@ -1574,6 +1603,7 @@ fn build_identity_flags(
 const fn subcommand_is_config_free(cmd: &Commands) -> bool {
     match cmd {
         Commands::Version
+        | Commands::Activity { .. }
         | Commands::Identity { .. }
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
@@ -1618,6 +1648,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
 const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
     match cmd {
         Commands::Ack { identity_args, .. }
+        | Commands::Activity { identity_args, .. }
         | Commands::Batch { identity_args, .. }
         | Commands::Comment { identity_args, .. }
         | Commands::Delete { identity_args, .. }
@@ -1661,6 +1692,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Comment { assets_args, .. }
         | Commands::Edit { assets_args, .. } => Some(assets_args),
         Commands::Ack { .. }
+        | Commands::Activity { .. }
         | Commands::Comments { .. }
         | Commands::Delete { .. }
         | Commands::Get { .. }
@@ -1713,6 +1745,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
             unrestricted_args, ..
         } => Some(unrestricted_args),
         Commands::Ack { .. }
+        | Commands::Activity { .. }
         | Commands::Batch { .. }
         | Commands::Comment { .. }
         | Commands::Comments { .. }
@@ -1799,6 +1832,23 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             action,
             output_args,
         } => return cmd_skill(system, action, output_args.json),
+        Commands::Activity {
+            path,
+            since,
+            pretty,
+            identity_args,
+            output_args,
+        } => {
+            return cmd_activity(
+                system,
+                cwd,
+                path.as_deref(),
+                since.as_deref(),
+                *pretty,
+                identity_args,
+                output_args.json,
+            );
+        }
         Commands::Permissions { action } => {
             return cmd_permissions(system, cwd, action);
         }
@@ -2168,6 +2218,7 @@ fn dispatch_with_config(
             )
         }
         Commands::Version
+        | Commands::Activity { .. }
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
@@ -2630,6 +2681,120 @@ fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
 /// canonicalises its target path, asks the inspector whether any
 /// `restrict` or `deny_ops` rule covers it, and exits gitignore-style:
 /// 0 when restricted, 1 when not. Both paths support `--json`.
+/// Wire the CLI `activity` subcommand to the
+/// [`activity::gather_activity`] core (rem-g3sy.4 / T34).
+///
+/// Output mode follows the workspace `--json` convention:
+/// `--json` (default) emits the structured `ActivityResult`;
+/// `--pretty` switches to a human-readable timeline. Both flags
+/// at once is rejected (clap-level via the surrounding
+/// [`OutputArgs::json`] flag plus the local `pretty` boolean).
+///
+/// Identity is read-only here — the quartet resolves only the
+/// caller name driving the per-file cutoff. No signing, no key
+/// requirement.
+fn cmd_activity(
+    system: &dyn System,
+    cwd: &Path,
+    explicit_path: Option<&Path>,
+    since: Option<&str>,
+    pretty: bool,
+    identity_args: &IdentityArgs,
+    json_mode: bool,
+) -> Result<()> {
+    if pretty && json_mode {
+        bail!("--pretty and --json are mutually exclusive");
+    }
+
+    let resolved_path = match explicit_path {
+        Some(p) => {
+            let expanded = expand_cli_pathbuf(system, p)?;
+            if expanded.is_absolute() {
+                expanded
+            } else {
+                cwd.join(expanded)
+            }
+        }
+        None => cwd.to_path_buf(),
+    };
+
+    let cutoff = match since {
+        Some(raw) => Some(
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .with_context(|| format!("--since: invalid ISO 8601 timestamp {raw:?}"))?,
+        ),
+        None => None,
+    };
+
+    let (flags, _assets_dir) = build_identity_flags(system, identity_args, None)?;
+    let resolved = ResolvedConfig::resolve(system, cwd, &flags, None)?;
+    let caller = resolved
+        .identity
+        .as_deref()
+        .context("activity: caller identity required (declare via --identity / --config)")?;
+
+    let result = activity::gather_activity(system, &resolved_path, cutoff, caller)?;
+
+    if pretty {
+        emit_activity_pretty(&result);
+    } else {
+        let value = serde_json::to_value(&result).context("serializing activity result")?;
+        print_output(true, &value)?;
+    }
+    Ok(())
+}
+
+fn emit_activity_pretty(result: &activity::ActivityResult) {
+    if result.files.is_empty() {
+        eprintln!("(no activity)");
+        return;
+    }
+    for file in &result.files {
+        eprintln!("{}:", file.path.display());
+        for change in &file.changes {
+            match change {
+                activity::Change::Comment {
+                    ts,
+                    comment_id,
+                    author,
+                    line_start,
+                    line_end,
+                    reply_to,
+                    ..
+                } => {
+                    let arrow = reply_to
+                        .as_deref()
+                        .map_or_else(String::new, |p| format!(" \u{2934} {p}"));
+                    eprintln!(
+                        "  {} \u{00b7} comment \u{00b7} {comment_id} by {author}{arrow} (lines {line_start}-{line_end})",
+                        ts.format("%Y-%m-%d %H:%M")
+                    );
+                }
+                activity::Change::Ack { ts, comment_id, by } => {
+                    eprintln!(
+                        "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {by}",
+                        ts.format("%Y-%m-%d %H:%M")
+                    );
+                }
+                activity::Change::Sandbox { ts, by } => {
+                    eprintln!(
+                        "  {} \u{00b7} sandbox \u{00b7} {by}",
+                        ts.format("%Y-%m-%d %H:%M")
+                    );
+                }
+                // The Change enum is `#[non_exhaustive]`; future
+                // variants surface as a generic line until the
+                // pretty-printer is taught about them.
+                _ => {}
+            }
+        }
+        eprintln!();
+    }
+    if let Some(ts) = result.newest_ts_overall {
+        eprintln!("(newest_ts_overall: {})", ts.to_rfc3339());
+    }
+}
+
 fn cmd_permissions(system: &dyn System, cwd: &Path, action: &PermissionsAction) -> Result<()> {
     match action {
         PermissionsAction::Show { output_args } => {
