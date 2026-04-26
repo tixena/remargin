@@ -172,6 +172,8 @@ Each is a concrete failure mode that has bitten a session.
 
 ❌ **Replying with a summary of the original comment** instead of doing the work. Reply demonstrates substance, not paraphrase.
 
+❌ **Cross-referencing internal IDs in user-facing replies** ("see Decision 13", "as in `xyz`", "per the `abc` thread"). Agents track IDs; users read replies linearly and shouldn't have to navigate to find the meaning. Restate the relevant content inline, even if it duplicates across replies. The reply must stand on its own.
+
 ❌ **Replying "Acked." or "Noted." to an agreement.** Adds zero info, creates a pending the other person has to clear. Just ack and move on.
 
 ❌ **`write` that drops comments to unblock yourself.** If preservation fails, re-read with `get`, rebuild correct content, retry. Never delete others' comments.

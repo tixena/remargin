@@ -182,6 +182,16 @@ export default class RemarginPlugin extends Plugin {
    */
   private pendingCompose: ComposeRequest | null = null;
 
+  /** Registered by RemarginSidebar on mount; called by `requestRefresh`. */
+  private refreshHandler: (() => void) | null = null;
+
+  /**
+   * `true` when a refresh was requested before the React sidebar registered
+   * its handler (e.g. the command was fired while the sidebar was closed).
+   * Drained on the next `setRefreshHandler` call.
+   */
+  private pendingRefresh = false;
+
   async onload() {
     await this.loadSettings();
 
@@ -244,7 +254,12 @@ export default class RemarginPlugin extends Plugin {
       id: "refresh",
       name: "Refresh comments",
       callback: () => {
-        this.activateView();
+        // Open the sidebar if it isn't already, then ask it to refetch.
+        // If the sidebar is closed, `requestRefresh` stashes the request
+        // and the sidebar drains it on its next `setRefreshHandler` call
+        // (mirrors the compose-handler pattern).
+        void this.activateView();
+        this.requestRefresh();
       },
     });
 
@@ -416,6 +431,32 @@ export default class RemarginPlugin extends Plugin {
       this.composeHandler(request);
     } else {
       this.pendingCompose = request;
+    }
+  }
+
+  /**
+   * Register (or clear) the React sidebar's handler for refresh requests.
+   * If a refresh was requested before the handler was ready, the pending
+   * flag is drained synchronously here so the sidebar refetches on mount.
+   */
+  setRefreshHandler(handler: (() => void) | null) {
+    this.refreshHandler = handler;
+    if (handler && this.pendingRefresh) {
+      this.pendingRefresh = false;
+      handler();
+    }
+  }
+
+  /**
+   * Ask the React sidebar to refetch every section. If the sidebar is
+   * not mounted yet (command fired while the sidebar was closed), the
+   * request is stashed and drained on the next `setRefreshHandler` call.
+   */
+  private requestRefresh() {
+    if (this.refreshHandler) {
+      this.refreshHandler();
+    } else {
+      this.pendingRefresh = true;
     }
   }
 

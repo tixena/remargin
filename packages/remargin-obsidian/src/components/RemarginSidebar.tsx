@@ -144,6 +144,15 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     return () => plugin.setComposeHandler(null);
   }, [plugin]);
 
+  // Register our refresh handler with the plugin so the `Refresh comments`
+  // command (and any future external triggers) can bump every section's
+  // refreshKey and force a refetch. Mirrors the compose-handler pattern:
+  // the plugin drains any refresh requested before we mounted.
+  useEffect(() => {
+    plugin.setRefreshHandler(bumpRefresh);
+    return () => plugin.setRefreshHandler(null);
+  }, [plugin, bumpRefresh]);
+
   const handleOpenAtLine = useCallback(
     (filePath: string, line?: number) => {
       void openFileAtLine(plugin, filePath, line);
