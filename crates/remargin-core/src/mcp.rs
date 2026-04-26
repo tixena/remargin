@@ -23,6 +23,7 @@ use crate::display;
 use crate::document;
 use crate::kind::matches_kind_filter;
 use crate::linter;
+use crate::mcp::sandbox::McpSandbox;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
 use crate::operations::migrate;
@@ -65,6 +66,12 @@ const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "file", "key", "path"];
 
 /// Array-valued path fields — each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
+
+/// Tools that take no path-shaped argument and therefore bypass the
+/// `McpSandbox` boundary (rem-w6m1). Listed alphabetically. New tools
+/// that take paths must NOT be added here; new tools that take none
+/// must.
+const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -984,6 +991,77 @@ fn effective_config<'cfg>(
     declared.unwrap_or(config)
 }
 
+/// Ensure every path-shaped argument in `params` lives inside the
+/// configured `McpSandbox` roots.
+///
+/// `tool_name` is consulted only for the path-free tool list. Path
+/// extraction uses the same field names as
+/// [`SCALAR_PATH_FIELDS`] / [`ARRAY_PATH_FIELDS`] so the boundary
+/// check sees exactly the values that downstream handlers will
+/// dispatch against.
+///
+/// Per-tool special cases:
+///
+/// - `permissions_check`: the `path` field IS the target — the
+///   inspect surface has its own bypass logic for read-only checks
+///   but we still gate it through the sandbox so callers cannot
+///   probe arbitrary filesystem paths.
+/// - `search`, `query`, `ls`, `sandbox_list`: the `path` field is a
+///   base directory the op walks; sandbox check applies.
+fn ensure_sandbox_covers_request(
+    system: &dyn System,
+    base_dir: &Path,
+    sandbox: &McpSandbox,
+    tool_name: &str,
+    params: &Map<String, Value>,
+) -> Result<()> {
+    if NO_PATH_TOOLS.contains(&tool_name) {
+        return Ok(());
+    }
+
+    for field in SCALAR_PATH_FIELDS {
+        // `config_path` and `key` are identity-declaration paths that
+        // legitimately point outside the sandbox (e.g. `~/.ssh/id_ed25519`
+        // or a `.remargin.yaml` in the user's home). They are not the
+        // op's target, so the sandbox check skips them. The identity
+        // resolver's own validation handles their existence and
+        // reachability.
+        if matches!(*field, "config_path" | "key") {
+            continue;
+        }
+        if let Some(raw) = params.get(*field).and_then(Value::as_str) {
+            check_one(system, base_dir, sandbox, raw)?;
+        }
+    }
+    for field in ARRAY_PATH_FIELDS {
+        // `attachments` are write-side asset sources whose existence
+        // is checked at the asset-copy step; the sandbox check focuses
+        // on the canonical target paths in `files`.
+        if *field == "attachments" {
+            continue;
+        }
+        if let Some(items) = params.get(*field).and_then(Value::as_array) {
+            for item in items {
+                if let Some(raw) = item.as_str() {
+                    check_one(system, base_dir, sandbox, raw)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn check_one(system: &dyn System, base_dir: &Path, sandbox: &McpSandbox, raw: &str) -> Result<()> {
+    let candidate = Path::new(raw);
+    let absolute = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        base_dir.join(candidate)
+    };
+    sandbox.ensure_covers(system, &absolute)
+}
+
 /// Resolve insertion position from tool parameters.
 ///
 /// Shim around [`InsertPosition::from_hints`] (rem-3a2): extracts the
@@ -1004,6 +1082,7 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
 fn dispatch_tool(
     system: &dyn System,
     base_dir: &Path,
+    sandbox: &McpSandbox,
     config: &ResolvedConfig,
     tool_name: &str,
     params: &Map<String, Value>,
@@ -1017,6 +1096,16 @@ fn dispatch_tool(
         Err(err) => return tool_result_error(&format!("{err:#}")),
     };
     let p = &normalized;
+
+    // rem-w6m1 / T24: outer boundary check. Every path-shaped param is
+    // canonicalised against the McpSandbox roots (built from
+    // permissions.trusted_roots at server boot) before the per-tool
+    // handler runs. Tools that take no path (identity_create,
+    // permissions_show) skip this branch by virtue of having nothing
+    // to extract.
+    if let Err(err) = ensure_sandbox_covers_request(system, base_dir, sandbox, tool_name, p) {
+        return tool_result_error(&format!("{err:#}"));
+    }
     let result = match tool_name {
         "ack" => handle_ack(system, base_dir, config, p),
         "batch" => handle_batch(system, base_dir, config, p),
@@ -2245,6 +2334,7 @@ fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
 fn process_message(
     system: &dyn System,
     base_dir: &Path,
+    sandbox: &McpSandbox,
     config: &ResolvedConfig,
     message: &Value,
 ) -> Option<Value> {
@@ -2307,7 +2397,8 @@ fn process_message(
                 .unwrap_or_default();
 
             let start = Instant::now();
-            let mut result = dispatch_tool(system, base_dir, config, tool_name, &arguments);
+            let mut result =
+                dispatch_tool(system, base_dir, sandbox, config, tool_name, &arguments);
             let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
             // Inject elapsed_ms into the tool result's text JSON.
@@ -2362,6 +2453,13 @@ pub fn run(
     let reader = stdin.lock();
     let mut writer = stdout.lock();
 
+    // rem-w6m1 / T24 (Decision 13): the sandbox is captured once at
+    // server boot and never reloaded. Edits to `trusted_roots` only
+    // take effect on the next remargin mcp invocation. Per-op
+    // permissions (restrict, deny_ops) still re-resolve through the
+    // op_guard parent walk; this static cap is intentional.
+    let sandbox = McpSandbox::from_walk(system, base_dir)?;
+
     for raw_line in reader.lines() {
         let line = raw_line.context("reading from stdin")?;
         let trimmed = line.trim();
@@ -2384,7 +2482,7 @@ pub fn run(
         // picked up without restarting the MCP server.
         let config = ResolvedConfig::resolve(system, base_dir, startup_flags, startup_assets_dir)?;
 
-        if let Some(response) = process_message(system, base_dir, &config, &message) {
+        if let Some(response) = process_message(system, base_dir, &sandbox, &config, &message) {
             writeln!(writer, "{response}").context("writing to stdout")?;
             writer.flush().context("flushing stdout")?;
         }
@@ -2407,7 +2505,8 @@ pub fn process_request(
     config: &ResolvedConfig,
     request_json: &str,
 ) -> Result<Option<String>> {
+    let sandbox = McpSandbox::from_walk(system, base_dir)?;
     let message: Value = serde_json::from_str(request_json).context("parsing JSON-RPC request")?;
-    let response = process_message(system, base_dir, config, &message);
+    let response = process_message(system, base_dir, &sandbox, config, &message);
     Ok(response.map(|val| val.to_string()))
 }

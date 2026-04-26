@@ -348,4 +348,175 @@ mod tests {
         );
         assert_status(&out, 0);
     }
+
+    // --- rem-w6m1: McpSandbox boundary -------------------------------------
+
+    fn extract_tool_text(result: &Value) -> String {
+        let content = result.get("content").and_then(Value::as_array).unwrap();
+        content[0]
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    }
+
+    fn is_tool_error(result: &Value) -> bool {
+        result
+            .get("isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// Sandbox bootstrap: with no `trusted_roots`, the spawn cwd is the
+    /// only root. Reading a file under it succeeds.
+    #[test]
+    fn mcp_sandbox_allows_path_under_spawn_cwd() {
+        let realm = TempDir::new().unwrap();
+        let inner = realm.path().join("note.md");
+        fs::write(&inner, b"# hi\n").unwrap();
+        let system = RealSystem::new();
+        let base = system.canonicalize(realm.path()).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+        let result = mcp_call(&base, &config, "get", &json!({ "path": "note.md" }));
+        assert!(!is_tool_error(&result), "{result:#?}");
+        let text = extract_tool_text(&result);
+        assert!(text.contains("# hi"), "{text}");
+    }
+
+    /// Sandbox enforcement: a path that escapes the cwd's
+    /// (canonicalised) root surfaces as a tool-level error containing
+    /// the documented `path escapes MCP sandbox` marker.
+    #[test]
+    fn mcp_sandbox_rejects_path_outside_root() {
+        let realm = TempDir::new().unwrap();
+        let outsider = TempDir::new().unwrap();
+        let outsider_file = outsider.path().join("foo.md");
+        fs::write(&outsider_file, b"# leak\n").unwrap();
+
+        let system = RealSystem::new();
+        let base = system.canonicalize(realm.path()).unwrap();
+        let outsider_canonical = system.canonicalize(&outsider_file).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+        let result = mcp_call(
+            &base,
+            &config,
+            "get",
+            &json!({ "path": outsider_canonical.to_string_lossy() }),
+        );
+        assert!(is_tool_error(&result), "{result:#?}");
+        let text = extract_tool_text(&result);
+        assert!(
+            text.contains("path escapes MCP sandbox"),
+            "expected sandbox-escape error, got: {text}"
+        );
+    }
+
+    /// `permissions_show` is in the no-path tool list — it works even
+    /// when the spawn cwd is the sandbox's only root.
+    #[test]
+    fn mcp_sandbox_lets_permissions_show_through() {
+        let realm = TempDir::new().unwrap();
+        let system = RealSystem::new();
+        let base = system.canonicalize(realm.path()).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+        let result = mcp_call(&base, &config, "permissions_show", &json!({}));
+        assert!(!is_tool_error(&result), "{result:#?}");
+    }
+
+    /// Recursive realm respect (rem-yj1j.3 scenario 12): with the
+    /// spawn realm trusting `/b` and `/b/.remargin.yaml` declaring a
+    /// `restrict` rule on `src/secret`, an MCP `write` against
+    /// `/b/src/secret/foo.md` is refused by the `op_guard` parent walk
+    /// even though the path is within the sandbox roots.
+    #[test]
+    fn mcp_recursive_realm_respect_blocks_write_under_target_restrict() {
+        let spawn = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let target_canonical = RealSystem::new().canonicalize(target.path()).unwrap();
+        write_realm_yaml(
+            spawn.path(),
+            &format!(
+                "permissions:\n  trusted_roots:\n    - {}\n",
+                target_canonical.display()
+            ),
+        );
+        write_realm_yaml(
+            &target_canonical,
+            "permissions:\n  restrict:\n    - path: src/secret\n",
+        );
+        fs::create_dir_all(target_canonical.join("src/secret")).unwrap();
+        let restricted_file = target_canonical.join("src/secret/foo.md");
+        fs::write(&restricted_file, "# initial\n").unwrap();
+
+        let system = RealSystem::new();
+        let base = system.canonicalize(spawn.path()).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+        let result = mcp_call(
+            &base,
+            &config,
+            "write",
+            &json!({
+                "path": restricted_file.to_string_lossy(),
+                "content": "# overwrite\n",
+                "raw": true,
+            }),
+        );
+        assert!(is_tool_error(&result), "{result:#?}");
+        let text = extract_tool_text(&result);
+        assert!(
+            text.contains("denied by `restrict`"),
+            "expected target-realm restrict refusal, got: {text}"
+        );
+    }
+
+    /// No transitive trust (rem-yj1j.3 scenario 13): the spawn realm
+    /// trusts `/b`, `/b/.remargin.yaml` lists `/c` as its own
+    /// `trusted_roots`. An MCP request against `/c/foo.md` is
+    /// rejected at the sandbox boundary because `/c` is NOT mounted
+    /// into the spawn session.
+    #[test]
+    fn mcp_no_transitive_trust_rejects_target_realm_trusted_roots() {
+        let spawn = TempDir::new().unwrap();
+        let trusted = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        let trusted_canonical = RealSystem::new().canonicalize(trusted.path()).unwrap();
+        let unrelated_canonical = RealSystem::new().canonicalize(unrelated.path()).unwrap();
+        write_realm_yaml(
+            spawn.path(),
+            &format!(
+                "permissions:\n  trusted_roots:\n    - {}\n",
+                trusted_canonical.display()
+            ),
+        );
+        write_realm_yaml(
+            &trusted_canonical,
+            &format!(
+                "permissions:\n  trusted_roots:\n    - {}\n",
+                unrelated_canonical.display()
+            ),
+        );
+        let outsider_file = unrelated_canonical.join("foo.md");
+        fs::write(&outsider_file, b"# beyond\n").unwrap();
+
+        let system = RealSystem::new();
+        let base = system.canonicalize(spawn.path()).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+        let result = mcp_call(
+            &base,
+            &config,
+            "get",
+            &json!({ "path": outsider_file.to_string_lossy() }),
+        );
+        assert!(is_tool_error(&result), "{result:#?}");
+        let text = extract_tool_text(&result);
+        assert!(
+            text.contains("path escapes MCP sandbox"),
+            "expected sandbox rejection for non-transitive trust, got: {text}"
+        );
+    }
 }
