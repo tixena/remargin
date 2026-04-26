@@ -1,6 +1,7 @@
 //! Configuration loader: `.remargin.yaml` walk-up resolution.
 
 pub mod identity;
+pub mod permissions;
 pub mod registry;
 
 #[cfg(test)]
@@ -12,6 +13,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use serde::Deserialize;
 
+use crate::config::permissions::Permissions;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::parser::AuthorType;
 use crate::path::expand_path;
@@ -33,6 +35,13 @@ pub struct Config {
     pub key: Option<String>,
     #[serde(default = "default_mode")]
     pub mode: Mode,
+    /// Permissions block (rem-yj1j.1 / T22). Missing in legacy
+    /// `.remargin.yaml` files; defaults to an empty
+    /// [`Permissions`] so back-compat parsing stays lossless.
+    /// Enforcement is added in T23 and beyond — this loader is data-
+    /// only.
+    #[serde(default)]
+    pub permissions: Permissions,
 }
 
 /// Enforcement mode for the participant registry.
