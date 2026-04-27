@@ -221,6 +221,47 @@ mod tests {
         );
     }
 
+    /// rem-em33: emitted deny rules carry exactly one leading slash
+    /// before the path glob (no `//`, no `///`), matching Claude's
+    /// documented format and the user-scope settings file's rules.
+    #[test]
+    fn plan_emits_single_slash_path_globs() {
+        let realm = realm_with_claude();
+        let user_settings = user_settings_arg(&realm);
+        let canonical = fs::canonicalize(realm.path()).unwrap();
+
+        let out = run_in(
+            realm.path(),
+            &[
+                "plan",
+                "restrict",
+                "*",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert_status(&out, 0);
+        let report = parse_json(&out);
+        let cd = &report["config_diff"];
+        let realm_str = canonical.display().to_string();
+        for sf in cd["settings_files"].as_array().unwrap() {
+            for rule in sf["deny_rules_to_add"].as_array().unwrap() {
+                let rule_str = rule.as_str().unwrap();
+                let slashed = format!("//{realm_str}");
+                assert!(
+                    !rule_str.contains(&slashed),
+                    "rule {rule_str} must not have multi-slash before path"
+                );
+                let triple = format!("///{realm_str}");
+                assert!(
+                    !rule_str.contains(&triple),
+                    "rule {rule_str} must not have triple-slash before path"
+                );
+            }
+        }
+    }
+
     /// rem-aovx scenario 18 (CLI): subtree-shadow overlap surfaces
     /// `kind=allow_deny_overlap` and reports `overlap_kind` =
     /// `allow_shadowed_by_broader_deny` so the formatter / parser can

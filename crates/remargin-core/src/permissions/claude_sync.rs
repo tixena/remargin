@@ -9,28 +9,34 @@
 //!
 //! ## Output shape
 //!
+//! `<path>` below is a single-leading-slash absolute path glob —
+//! Claude's documented form. Earlier revisions emitted `//<path>` /
+//! `///<path>` (rem-em33); legacy on-disk rules in either of those
+//! forms are still recognised for membership / overlap purposes via
+//! [`canonicalize_rule`].
+//!
 //! ```text
 //! deny:
-//!   Edit(//<path>/**)
-//!   Write(//<path>/**)
-//!   Read(//<path>/**)
-//!   NotebookEdit(//<path>/**)
-//!   Read(//<path>/.*/**)             ← dot-folder default-deny (one
-//!   Edit(//<path>/.*/**)               wildcard rule per Claude tool;
-//!   Write(//<path>/.*/**)              suppressed when allow_dot_folders
-//!   NotebookEdit(//<path>/.*/**)       names every dot-folder)
+//!   Edit(<path>/**)
+//!   Write(<path>/**)
+//!   Read(<path>/**)
+//!   NotebookEdit(<path>/**)
+//!   Read(<path>/.*/**)             ← dot-folder default-deny (one
+//!   Edit(<path>/.*/**)               wildcard rule per Claude tool;
+//!   Write(<path>/.*/**)              suppressed when allow_dot_folders
+//!   NotebookEdit(<path>/.*/**)       names every dot-folder)
 //!   <per allow_dot_folders entry, RE-allow rules>
-//!   Bash(cp * //<path>/**)            ← write-side bash mutators
-//!   Bash(mv * //<path>/**)
-//!   Bash(tee //<path>/**)
-//!   Bash(sed -i * //<path>/**)
-//!   Bash(truncate * //<path>/**)
-//!   Bash(touch //<path>/**)
-//!   <per also_deny_bash entry, Bash(<cmd> * //<path>/**)>
-//!   Bash(remargin * //<path>/**)      ← only when cli_allowed=false
+//!   Bash(cp * <path>/**)            ← write-side bash mutators
+//!   Bash(mv * <path>/**)
+//!   Bash(tee <path>/**)
+//!   Bash(sed -i * <path>/**)
+//!   Bash(truncate * <path>/**)
+//!   Bash(touch <path>/**)
+//!   <per also_deny_bash entry, Bash(<cmd> * <path>/**)>
+//!   Bash(remargin * <path>/**)      ← only when cli_allowed=false
 //!
 //! allow:
-//!   mcp__remargin__*                  ← always present
+//!   mcp__remargin__*                ← always present
 //! ```
 //!
 //! ## Why a single wildcard for dot-folder denies
@@ -188,33 +194,39 @@ pub fn rules_for(
 
     let mut deny: Vec<String> = Vec::new();
 
+    // `glob_root` is canonical absolute (leading `/`). Format strings
+    // therefore emit `Tool(/path/**)` directly — no extra `//` prefix
+    // (rem-em33). Legacy on-disk rules with the older `//` / `///`
+    // prefix still match for membership purposes via
+    // [`canonicalize_rule`].
+
     // 1. Base read/write tool denies — the editor-side defenses.
     for tool in EDITOR_TOOLS {
-        deny.push(format!("{tool}(//{glob_root}/**)"));
+        deny.push(format!("{tool}({glob_root}/**)"));
     }
 
     // 2. Dot-folder default-deny. A single wildcard rule per tool
     //    covers every current and future dot-folder under the
     //    restricted root; specific allows below override.
     for tool in EDITOR_TOOLS {
-        deny.push(format!("{tool}(//{glob_root}/.*/**)"));
+        deny.push(format!("{tool}({glob_root}/.*/**)"));
     }
 
     // 3. Bash mutators — keep shell-out paths from dodging the
     //    editor-tool denies.
     for cmd in BASH_MUTATORS {
-        deny.push(format!("Bash({cmd} //{glob_root}/**)"));
+        deny.push(format!("Bash({cmd} {glob_root}/**)"));
     }
 
     // 4. Caller-supplied bash extras, e.g. `also_deny_bash: [curl]`.
     for cmd in &entry.also_deny_bash {
-        deny.push(format!("Bash({cmd} * //{glob_root}/**)"));
+        deny.push(format!("Bash({cmd} * {glob_root}/**)"));
     }
 
     // 5. Block remargin CLI invocations against the restricted root
     //    unless the caller explicitly opted in via `cli_allowed: true`.
     if !entry.cli_allowed {
-        deny.push(format!("Bash(remargin * //{glob_root}/**)"));
+        deny.push(format!("Bash(remargin * {glob_root}/**)"));
     }
 
     // 6. Allow list. The MCP allow is always present; per-dot-folder
@@ -225,7 +237,7 @@ pub fn rules_for(
     let mut allow: Vec<String> = vec![String::from(ALLOW_MCP_REMARGIN)];
     for folder in allow_dot_folders {
         for tool in EDITOR_TOOLS {
-            allow.push(format!("{tool}(//{glob_root}/{folder}/**)"));
+            allow.push(format!("{tool}({glob_root}/{folder}/**)"));
         }
     }
 
@@ -294,13 +306,43 @@ fn partition_rules(rules: &[String], existing: &[String]) -> (Vec<String>, Vec<S
     let mut already: Vec<String> = Vec::new();
     let mut to_add: Vec<String> = Vec::new();
     for rule in rules {
-        if existing.iter().any(|e| e == rule) {
+        let target = canonicalize_rule(rule);
+        if existing.iter().any(|e| canonicalize_rule(e) == target) {
             already.push(rule.clone());
         } else {
             to_add.push(rule.clone());
         }
     }
     (already, to_add)
+}
+
+/// Collapse runs of `/` inside a rule string to a single `/`.
+///
+/// Maps legacy on-disk forms (`Read(//foo/**)`, `Read(///foo/**)`) to
+/// the canonical single-slash form (`Read(/foo/**)`) for membership
+/// purposes (rem-em33).
+///
+/// Pure, idempotent. `Bash(curl * //foo/**)` becomes
+/// `Bash(curl * /foo/**)`; the cmd tokens themselves are not analysed
+/// — `Bash(http://x.example/x  /foo/**)` would also collapse the URL,
+/// but every Claude rule we emit anchors paths absolutely so the
+/// happy-path round-trip is exact.
+#[must_use]
+pub fn canonicalize_rule(rule: &str) -> String {
+    let mut out = String::with_capacity(rule.len());
+    let mut prev_slash = false;
+    for ch in rule.chars() {
+        if ch == '/' {
+            if prev_slash {
+                continue;
+            }
+            prev_slash = true;
+        } else {
+            prev_slash = false;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn read_permission_array(value: &Value, key: &str) -> Vec<String> {
@@ -469,10 +511,12 @@ fn append_unique_to_permission_array(value: &mut Value, key: &str, rules: &[Stri
         return;
     };
     for rule in rules {
-        if !array
-            .iter()
-            .any(|existing| existing.as_str() == Some(rule.as_str()))
-        {
+        let target = canonicalize_rule(rule);
+        if !array.iter().any(|existing| {
+            existing
+                .as_str()
+                .is_some_and(|e| canonicalize_rule(e) == target)
+        }) {
             array.push(Value::String(rule.clone()));
         }
     }
@@ -490,11 +534,13 @@ fn scrub_permission_array(value: &mut Value, key: &str, rules: &[String]) -> Vec
         return removed;
     };
     for rule in rules {
-        if let Some(idx) = array
-            .iter()
-            .position(|existing| existing.as_str() == Some(rule.as_str()))
-        {
-            array.remove(idx);
+        let target = canonicalize_rule(rule);
+        if let Some(idx) = array.iter().position(|existing| {
+            existing
+                .as_str()
+                .is_some_and(|e| canonicalize_rule(e) == target)
+        }) {
+            let _: Value = array.remove(idx);
             removed.push(rule.clone());
         }
     }

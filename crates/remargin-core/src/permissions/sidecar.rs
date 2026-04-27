@@ -26,7 +26,7 @@
 //!         "/home/u/.claude/settings.json"
 //!       ],
 //!       "allow": ["mcp__remargin__*"],
-//!       "deny": ["Edit(///abs/path/to/restricted/**)", "..."]
+//!       "deny": ["Edit(/abs/path/to/restricted/**)", "..."]
 //!     }
 //!   }
 //! }

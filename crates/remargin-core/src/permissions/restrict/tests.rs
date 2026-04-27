@@ -193,7 +193,7 @@ fn rerun_backfills_missing_settings_rule() {
         .and_then(|p| p.get_mut("deny"))
         .and_then(|d| d.as_sequence_mut())
     {
-        deny.retain(|v| v.as_str() != Some("Edit(///r/src/secret/**)"));
+        deny.retain(|v| v.as_str() != Some("Edit(/r/src/secret/**)"));
     }
     let body = serde_json::to_string_pretty(&value).unwrap();
     system.write(&local, body.as_bytes()).unwrap();
@@ -205,7 +205,7 @@ fn rerun_backfills_missing_settings_rule() {
     let deny = after["permissions"]["deny"].as_array().unwrap();
     assert!(
         deny.iter()
-            .any(|v| v.as_str() == Some("Edit(///r/src/secret/**)")),
+            .any(|v| v.as_str() == Some("Edit(/r/src/secret/**)")),
         "missing edit deny was not backfilled: {after:#?}"
     );
 }

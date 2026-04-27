@@ -31,8 +31,8 @@ fn sample_entry() -> SidecarEntry {
         ],
         allow: vec![String::from("mcp__remargin__*")],
         deny: vec![
-            String::from("Edit(///r/secret/**)"),
-            String::from("Write(///r/secret/**)"),
+            String::from("Edit(/r/secret/**)"),
+            String::from("Write(/r/secret/**)"),
         ],
     }
 }
@@ -79,7 +79,7 @@ fn add_entry_replaces_existing_record() {
 
     let mut second = sample_entry();
     second.added_at = String::from("2026-04-26T11:00:00Z");
-    second.deny.push(String::from("Read(///r/secret/.git/**)"));
+    second.deny.push(String::from("Read(/r/secret/.git/**)"));
     add_entry(&system, &anchor, "/r/secret", second.clone()).unwrap();
 
     let reloaded = load(&system, &anchor).unwrap();

@@ -51,27 +51,27 @@ fn subpath_no_extras_emits_full_default_set() {
     assert_eq!(rules.deny.len(), 15, "{:#?}", rules.deny);
 
     // Editor-tool denies in spec order.
-    assert_eq!(rules.deny[0], "Edit(///a/b/**)");
-    assert_eq!(rules.deny[1], "Write(///a/b/**)");
-    assert_eq!(rules.deny[2], "Read(///a/b/**)");
-    assert_eq!(rules.deny[3], "NotebookEdit(///a/b/**)");
+    assert_eq!(rules.deny[0], "Edit(/a/b/**)");
+    assert_eq!(rules.deny[1], "Write(/a/b/**)");
+    assert_eq!(rules.deny[2], "Read(/a/b/**)");
+    assert_eq!(rules.deny[3], "NotebookEdit(/a/b/**)");
 
     // Dot-folder wildcard denies.
-    assert_eq!(rules.deny[4], "Edit(///a/b/.*/**)");
-    assert_eq!(rules.deny[5], "Write(///a/b/.*/**)");
-    assert_eq!(rules.deny[6], "Read(///a/b/.*/**)");
-    assert_eq!(rules.deny[7], "NotebookEdit(///a/b/.*/**)");
+    assert_eq!(rules.deny[4], "Edit(/a/b/.*/**)");
+    assert_eq!(rules.deny[5], "Write(/a/b/.*/**)");
+    assert_eq!(rules.deny[6], "Read(/a/b/.*/**)");
+    assert_eq!(rules.deny[7], "NotebookEdit(/a/b/.*/**)");
 
     // Bash mutators.
-    assert_eq!(rules.deny[8], "Bash(cp * ///a/b/**)");
-    assert_eq!(rules.deny[9], "Bash(mv * ///a/b/**)");
-    assert_eq!(rules.deny[10], "Bash(tee ///a/b/**)");
-    assert_eq!(rules.deny[11], "Bash(sed -i * ///a/b/**)");
-    assert_eq!(rules.deny[12], "Bash(truncate * ///a/b/**)");
-    assert_eq!(rules.deny[13], "Bash(touch ///a/b/**)");
+    assert_eq!(rules.deny[8], "Bash(cp * /a/b/**)");
+    assert_eq!(rules.deny[9], "Bash(mv * /a/b/**)");
+    assert_eq!(rules.deny[10], "Bash(tee /a/b/**)");
+    assert_eq!(rules.deny[11], "Bash(sed -i * /a/b/**)");
+    assert_eq!(rules.deny[12], "Bash(truncate * /a/b/**)");
+    assert_eq!(rules.deny[13], "Bash(touch /a/b/**)");
 
     // remargin-cli deny because cli_allowed = false.
-    assert_eq!(rules.deny[14], "Bash(remargin * ///a/b/**)");
+    assert_eq!(rules.deny[14], "Bash(remargin * /a/b/**)");
 
     // Allow set: only the MCP allow (rem-2plr removed the implicit
     // `.remargin/` editor-tool re-allow — `mcp__remargin__*` is the
@@ -91,11 +91,11 @@ fn wildcard_uses_realm_root_for_glob() {
     let entry = restrict_wildcard("/r", false);
     let rules = rules_for(&entry, Path::new("/r"), &[]);
 
-    assert_eq!(rules.deny[0], "Edit(///r/**)");
-    assert_eq!(rules.deny[4], "Edit(///r/.*/**)");
+    assert_eq!(rules.deny[0], "Edit(/r/**)");
+    assert_eq!(rules.deny[4], "Edit(/r/.*/**)");
     // The realm root is anchored by the entry, not by the supplied
     // anchor (see rules_for's docstring).
-    assert!(rules.deny.iter().all(|rule| rule.contains("///r/")));
+    assert!(rules.deny.iter().all(|rule| rule.contains("/r/")));
 }
 
 /// Scenario 3 — `cli_allowed = true` removes the remargin-cli deny.
@@ -126,12 +126,12 @@ fn also_deny_bash_extras_appended() {
     let curl_idx = rules
         .deny
         .iter()
-        .position(|r| r == "Bash(curl * ///a/b/**)")
+        .position(|r| r == "Bash(curl * /a/b/**)")
         .unwrap();
     let wget_idx = rules
         .deny
         .iter()
-        .position(|r| r == "Bash(wget * ///a/b/**)")
+        .position(|r| r == "Bash(wget * /a/b/**)")
         .unwrap();
     // Extras appear before the cli deny so the surface stays human-
     // readable: standard mutators, callers' extras, then the
@@ -198,7 +198,7 @@ fn no_implicit_remargin_native_allows_emitted() {
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
     for tool in ["Edit", "Write", "Read", "NotebookEdit"] {
-        let needle = format!("{tool}(///a/b/.remargin/**)");
+        let needle = format!("{tool}(/a/b/.remargin/**)");
         assert!(
             !rules.allow.iter().any(|r| r == &needle),
             "rem-2plr: {needle} must not appear in allow, got: {:#?}",
@@ -251,8 +251,8 @@ fn small_rule_set() -> RuleSet {
     RuleSet {
         allow: vec![String::from(ALLOW_MCP_REMARGIN)],
         deny: vec![
-            String::from("Edit(///r/secret/**)"),
-            String::from("Write(///r/secret/**)"),
+            String::from("Edit(/r/secret/**)"),
+            String::from("Write(/r/secret/**)"),
         ],
     }
 }
@@ -339,7 +339,7 @@ fn apply_preserves_existing_unrelated_rules() {
     );
     assert!(
         deny.iter()
-            .any(|v| v.as_str() == Some("Edit(///r/secret/**)"))
+            .any(|v| v.as_str() == Some("Edit(/r/secret/**)"))
     );
     assert_eq!(
         value["env"]["FOO"],
@@ -387,8 +387,8 @@ fn apply_dedupes_against_manually_duplicated_rules() {
     let prior = json!({
         "permissions": {
             "deny": [
-                "Edit(///r/secret/**)",
-                "Edit(///r/secret/**)"
+                "Edit(/r/secret/**)",
+                "Edit(/r/secret/**)"
             ],
             "allow": []
         }
@@ -410,7 +410,7 @@ fn apply_dedupes_against_manually_duplicated_rules() {
     let deny = value["permissions"]["deny"].as_array().unwrap();
     let edit_count = deny
         .iter()
-        .filter(|v| v.as_str() == Some("Edit(///r/secret/**)"))
+        .filter(|v| v.as_str() == Some("Edit(/r/secret/**)"))
         .count();
     // The pre-existing duplicate is preserved (we don't aggressively
     // de-dupe other people's data); apply only adds the missing
@@ -426,19 +426,19 @@ fn apply_two_different_entries_keeps_both() {
     let files = settings_files(&anchor);
     let rules_a = RuleSet {
         allow: Vec::new(),
-        deny: vec![String::from("Edit(///r/a/**)")],
+        deny: vec![String::from("Edit(/r/a/**)")],
     };
     let rules_b = RuleSet {
         allow: Vec::new(),
-        deny: vec![String::from("Edit(///r/b/**)")],
+        deny: vec![String::from("Edit(/r/b/**)")],
     };
     apply_rules(&system, &anchor, "/r/a", &rules_a, &files, "now").unwrap();
     apply_rules(&system, &anchor, "/r/b", &rules_b, &files, "now").unwrap();
 
     let value = read_settings(&system, &files[0]);
     let deny = value["permissions"]["deny"].as_array().unwrap();
-    assert!(deny.iter().any(|v| v == "Edit(///r/a/**)"));
-    assert!(deny.iter().any(|v| v == "Edit(///r/b/**)"));
+    assert!(deny.iter().any(|v| v == "Edit(/r/a/**)"));
+    assert!(deny.iter().any(|v| v == "Edit(/r/b/**)"));
 
     let sidecar = sidecar::load(&system, &anchor).unwrap();
     assert_eq!(sidecar.entries.len(), 2);
@@ -493,7 +493,7 @@ fn revert_warns_on_manually_deleted_rules() {
     // Hand-edit the settings: drop one of the deny rules.
     let mut value = read_settings(&system, &local);
     let deny = value["permissions"]["deny"].as_array_mut().unwrap();
-    deny.retain(|v| v.as_str() != Some("Edit(///r/secret/**)"));
+    deny.retain(|v| v.as_str() != Some("Edit(/r/secret/**)"));
     let body = serde_json::to_string_pretty(&value).unwrap();
     system.write(&local, body.as_bytes()).unwrap();
 
@@ -502,7 +502,7 @@ fn revert_warns_on_manually_deleted_rules() {
         report
             .warnings
             .iter()
-            .any(|w| w.contains("Edit(///r/secret/**)") && w.contains("manually removed")),
+            .any(|w| w.contains("Edit(/r/secret/**)") && w.contains("manually removed")),
         "expected manual-removal warning, got: {:#?}",
         report.warnings
     );
@@ -565,6 +565,147 @@ fn sidecar_records_resolved_settings_file_paths() {
     let sidecar = sidecar::load(&system, &anchor).unwrap();
     assert_eq!(sidecar.entries["/r/secret"].added_to_files, files);
     let _path = sidecar_path(&anchor);
+}
+
+// ---------------------------------------------------------------------
+// canonicalize_rule + cross-format membership (rem-em33)
+// ---------------------------------------------------------------------
+
+/// rem-em33 #7: triple slash collapses to single slash.
+#[test]
+fn canonicalize_rule_collapses_triple_slash() {
+    use crate::permissions::claude_sync::canonicalize_rule;
+    assert_eq!(canonicalize_rule("Read(///foo/**)"), "Read(/foo/**)");
+}
+
+/// rem-em33 #8: double slash collapses to single slash.
+#[test]
+fn canonicalize_rule_collapses_double_slash() {
+    use crate::permissions::claude_sync::canonicalize_rule;
+    assert_eq!(canonicalize_rule("Read(//foo/**)"), "Read(/foo/**)");
+}
+
+/// rem-em33 #9: single-slash rule is unchanged (idempotent).
+#[test]
+fn canonicalize_rule_is_noop_on_canonical_form() {
+    use crate::permissions::claude_sync::canonicalize_rule;
+    assert_eq!(canonicalize_rule("Read(/foo/**)"), "Read(/foo/**)");
+}
+
+/// rem-em33 #10: `simulate_apply_rules` treats the legacy double-slash
+/// form as already-present (no `_to_add`, populated `_already_present`).
+#[test]
+fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
+    use crate::permissions::claude_sync::simulate_apply_rules;
+    let (system, anchor) = empty_anchor();
+    let local = anchor.join(".claude/settings.local.json");
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    let prior = json!({
+        "permissions": {
+            // Two legacy formats: triple-slash and double-slash. Both
+            // must be recognised as already present against the
+            // canonical single-slash projected rules.
+            "deny": ["Edit(///r/secret/**)", "Write(//r/secret/**)"],
+            "allow": []
+        }
+    });
+    system.write(&local, prior.to_string().as_bytes()).unwrap();
+
+    let rules = small_rule_set();
+    let sims = simulate_apply_rules(&system, from_ref(&local), &rules).unwrap();
+    let sim = &sims[0];
+    assert!(
+        sim.deny_rules_to_add.is_empty(),
+        "legacy double/triple-slash should collapse to already-present: to_add={:?}",
+        sim.deny_rules_to_add
+    );
+    assert_eq!(sim.deny_rules_already_present.len(), 2);
+}
+
+/// rem-em33 #12 / acceptance: live `apply_rules` against a settings
+/// file with the legacy double-slash form does not duplicate the rule.
+#[test]
+fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
+    let (system, anchor) = empty_anchor();
+    let local = anchor.join(".claude/settings.local.json");
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    let prior = json!({
+        "permissions": {
+            "deny": ["Edit(//r/secret/**)"],
+            "allow": []
+        }
+    });
+    system.write(&local, prior.to_string().as_bytes()).unwrap();
+
+    apply_rules(
+        &system,
+        &anchor,
+        "/r/secret",
+        &small_rule_set(),
+        from_ref(&local),
+        "now",
+    )
+    .unwrap();
+
+    let value = read_settings(&system, &local);
+    let deny = value["permissions"]["deny"].as_array().unwrap();
+    let edit_rules: Vec<&str> = deny
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter(|s| s.contains("Edit(") && s.contains("r/secret"))
+        .collect();
+    assert_eq!(
+        edit_rules.len(),
+        1,
+        "legacy double-slash + canonical projected rule must not duplicate: {edit_rules:?}",
+    );
+    // The pre-existing rule body is preserved verbatim — we don't
+    // rewrite the user's file shape on apply.
+    assert_eq!(edit_rules[0], "Edit(//r/secret/**)");
+}
+
+/// rem-em33 acceptance: `revert_rules` strips a legacy double-slash
+/// rule the projection's canonical form would emit.
+#[test]
+fn revert_rules_strips_legacy_double_slash_rule() {
+    let (system, anchor) = empty_anchor();
+    let local = anchor.join(".claude/settings.local.json");
+    system.create_dir_all(local.parent().unwrap()).unwrap();
+    let prior = json!({
+        "permissions": {
+            // Legacy double-slash deny rules, written by an older
+            // apply. The allow rule is the canonical
+            // `mcp__remargin__*` (no path so no slash drift).
+            "deny": ["Edit(//r/secret/**)", "Write(//r/secret/**)"],
+            "allow": [ALLOW_MCP_REMARGIN]
+        }
+    });
+    system.write(&local, prior.to_string().as_bytes()).unwrap();
+
+    // Hand-write a sidecar entry as if a previous apply had run, so
+    // revert has something to walk. We emit the sidecar's `deny`
+    // entries in canonical form to mirror what the new emitter does.
+    let rules = small_rule_set();
+    let entry = sidecar::SidecarEntry {
+        added_at: String::from("now"),
+        added_to_files: vec![local.clone()],
+        allow: rules.allow.clone(),
+        deny: rules.deny,
+    };
+    sidecar::add_entry(&system, &anchor, "/r/secret", entry).unwrap();
+
+    let report = revert_rules(&system, &anchor, "/r/secret").unwrap();
+    assert!(report.warnings.is_empty(), "{:#?}", report.warnings);
+
+    let value = read_settings(&system, &local);
+    let deny = value["permissions"]["deny"].as_array().unwrap();
+    assert!(
+        !deny.iter().any(|v| {
+            v.as_str()
+                .is_some_and(|s| s.contains("Edit(") || s.contains("Write("))
+        }),
+        "legacy rules should be scrubbed: {deny:?}"
+    );
 }
 
 // ---------------------------------------------------------------------

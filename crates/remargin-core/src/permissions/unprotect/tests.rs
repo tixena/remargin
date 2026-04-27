@@ -78,7 +78,7 @@ fn clean_reverse_restores_state() {
     // Project-scope settings file no longer carries the restrict
     // rule.
     let settings_body = system.read_to_string(&files[0]).unwrap();
-    assert!(!settings_body.contains("Edit(///r/src/secret/**)"));
+    assert!(!settings_body.contains("Edit(/r/src/secret/**)"));
 }
 
 /// Scenario 2: a path that was never restricted yields a warn +
@@ -139,7 +139,7 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
     // Settings still carry the rule because we couldn't know which
     // ones to scrub without the sidecar.
     let body = system.read_to_string(&files[0]).unwrap();
-    assert!(body.contains("Edit(///r/src/secret/**)"));
+    assert!(body.contains("Edit(/r/src/secret/**)"));
 }
 
 /// Scenario 4: YAML missing, sidecar present (inverse hand-edit).
@@ -169,7 +169,7 @@ fn yaml_missing_sidecar_present_reverts_settings_only() {
     // Settings WERE scrubbed because the sidecar told us which
     // rules to remove.
     let body = system.read_to_string(&files[0]).unwrap();
-    assert!(!body.contains("Edit(///r/src/secret/**)"));
+    assert!(!body.contains("Edit(/r/src/secret/**)"));
 }
 
 /// Scenario 5: manual rule deletion between restrict and unprotect
@@ -186,7 +186,7 @@ fn manual_rule_deletion_surfaces_warning() {
     let body = system.read_to_string(&local).unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&body).unwrap();
     let deny = value["permissions"]["deny"].as_array_mut().unwrap();
-    deny.retain(|v| v.as_str() != Some("Edit(///r/src/secret/**)"));
+    deny.retain(|v| v.as_str() != Some("Edit(/r/src/secret/**)"));
     let updated = serde_json::to_string_pretty(&value).unwrap();
     system.write(&local, updated.as_bytes()).unwrap();
 
@@ -200,7 +200,7 @@ fn manual_rule_deletion_surfaces_warning() {
         outcome
             .warnings
             .iter()
-            .any(|w| w.contains("Edit(///r/src/secret/**)") && w.contains("manually removed")),
+            .any(|w| w.contains("Edit(/r/src/secret/**)") && w.contains("manually removed")),
         "expected manual-removal warning, got: {:#?}",
         outcome.warnings
     );
