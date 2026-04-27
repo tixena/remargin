@@ -169,7 +169,12 @@ permissions:
     assert_eq!(resolved.deny_ops[0].ops, vec![String::from("purge")]);
     assert_eq!(resolved.deny_ops[0].source_file, source);
 
-    assert_eq!(resolved.allow_dot_folders, vec![String::from(".github")]);
+    assert_eq!(resolved.allow_dot_folders.len(), 1);
+    assert_eq!(
+        resolved.allow_dot_folders[0].names,
+        vec![String::from(".github")],
+    );
+    assert_eq!(resolved.allow_dot_folders[0].source_file, source);
 }
 
 /// Scenario 4: wildcard `*` resolves to `RestrictPath::Wildcard`
@@ -462,9 +467,27 @@ permissions:
         .unwrap();
 
     let resolved = resolve_permissions(&system, Path::new("/realm/sub")).unwrap();
+    assert_eq!(resolved.allow_dot_folders.len(), 2);
+    // Walk order: deepest file first.
     assert_eq!(
-        resolved.allow_dot_folders,
-        vec![String::from(".cache"), String::from(".git")]
+        resolved.allow_dot_folders[0].names,
+        vec![String::from(".cache")],
+    );
+    assert_eq!(
+        resolved.allow_dot_folders[0].source_file,
+        PathBuf::from("/realm/sub/.remargin.yaml"),
+    );
+    assert_eq!(
+        resolved.allow_dot_folders[1].names,
+        vec![String::from(".git")],
+    );
+    assert_eq!(
+        resolved.allow_dot_folders[1].source_file,
+        PathBuf::from("/realm/.remargin.yaml"),
+    );
+    assert_eq!(
+        resolved.allow_dot_folder_names(),
+        vec![String::from(".cache"), String::from(".git")],
     );
 }
 

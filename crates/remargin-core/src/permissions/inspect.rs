@@ -203,20 +203,17 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
 }
 
 fn group_allow_dot_folders(resolved: &ResolvedPermissions) -> Vec<AllowDotFoldersView> {
-    // The resolver flattens the per-file lists into one Vec<String>;
-    // the show output regroups them under a single anonymous entry so
-    // the existing data shape is preserved without claiming
-    // per-source provenance we no longer have. When source-attributed
-    // dot-folder lists are needed (T29 e2e), this is the place to
-    // extend.
-    if resolved.allow_dot_folders.is_empty() {
-        Vec::new()
-    } else {
-        vec![AllowDotFoldersView {
-            names: resolved.allow_dot_folders.clone(),
-            source_file: PathBuf::new(),
-        }]
-    }
+    // Per rem-qdrw the resolver now preserves one entry per declaring
+    // `.remargin.yaml` so each view's `source_file` mirrors the
+    // provenance already carried by `restrict` and `deny_ops`.
+    resolved
+        .allow_dot_folders
+        .iter()
+        .map(|entry| AllowDotFoldersView {
+            names: entry.names.clone(),
+            source_file: entry.source_file.clone(),
+        })
+        .collect()
 }
 
 fn group_deny_ops(resolved: &ResolvedPermissions) -> Vec<DenyOpsView> {

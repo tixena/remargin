@@ -167,12 +167,10 @@ pub fn check_against_resolved(
             return Err(violation.into());
         }
 
-        if let Some(violation) = find_dot_folder_violation(
-            op,
-            target,
-            &permissions.restrict,
-            &permissions.allow_dot_folders,
-        ) {
+        let allow_dot_folder_names = permissions.allow_dot_folder_names();
+        if let Some(violation) =
+            find_dot_folder_violation(op, target, &permissions.restrict, &allow_dot_folder_names)
+        {
             return Err(violation.into());
         }
     }

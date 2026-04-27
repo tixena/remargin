@@ -73,6 +73,12 @@ permissions:
         out.allow_dot_folders[0].names,
         vec![String::from(".github")]
     );
+    // rem-qdrw: source_file must be populated, mirroring the other
+    // collections.
+    assert_eq!(
+        out.allow_dot_folders[0].source_file,
+        PathBuf::from("/r/.remargin.yaml"),
+    );
 }
 
 /// 3 — `trusted_root` that is a realm: nested `.remargin.yaml` is
@@ -321,4 +327,49 @@ fn check_round_trips_through_json() {
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"restricted\":true"));
     assert!(json.contains("\"kind\":\"restrict\""));
+}
+
+/// rem-qdrw — two stacked yamls, each with `allow_dot_folders`. Each
+/// resulting view points at the file that declared it (testing plan #2).
+#[test]
+fn show_allow_dot_folders_provenance_across_stacked_yamls() {
+    let parent = "permissions:\n  allow_dot_folders: ['.git']\n";
+    let child = "permissions:\n  allow_dot_folders: ['.cache']\n";
+    let system = mock_with(&[
+        ("/r/.remargin.yaml", parent),
+        ("/r/sub/.remargin.yaml", child),
+    ]);
+    let out = show(&system, Path::new("/r/sub")).unwrap();
+
+    assert_eq!(out.allow_dot_folders.len(), 2);
+    // Walk order is deepest-first.
+    assert_eq!(out.allow_dot_folders[0].names, vec![String::from(".cache")],);
+    assert_eq!(
+        out.allow_dot_folders[0].source_file,
+        PathBuf::from("/r/sub/.remargin.yaml"),
+    );
+    assert_eq!(out.allow_dot_folders[1].names, vec![String::from(".git")]);
+    assert_eq!(
+        out.allow_dot_folders[1].source_file,
+        PathBuf::from("/r/.remargin.yaml"),
+    );
+}
+
+/// rem-qdrw — `source_file` survives the JSON encoding (the original
+/// reproduction surfaced the empty value through `permissions show
+/// --json`).
+#[test]
+fn show_allow_dot_folders_source_file_survives_json_roundtrip() {
+    let yaml = "permissions:\n  allow_dot_folders: ['.assets']\n";
+    let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
+    let out = show(&system, Path::new("/r")).unwrap();
+    let json = serde_json::to_string(&out).unwrap();
+    assert!(
+        json.contains("\"source_file\":\"/r/.remargin.yaml\""),
+        "expected source_file in JSON, got:\n{json}",
+    );
+    assert!(
+        !json.contains("\"source_file\":\"\""),
+        "source_file must never be empty for allow_dot_folders entries:\n{json}",
+    );
 }

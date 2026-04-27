@@ -54,6 +54,26 @@ struct PermissionsOnly {
     permissions: Permissions,
 }
 
+/// A grouped `allow_dot_folders` declaration after path resolution.
+///
+/// One entry per declaring `.remargin.yaml` (rem-qdrw): the resolver
+/// used to flatten every file's list into one `Vec<String>`, which lost
+/// the `source_file` provenance that `restrict` / `deny_ops` already
+/// carried. Keeping a per-file group preserves the same shape used by
+/// the rest of the resolved-permissions structure and lets diagnostic
+/// surfaces (e.g. `permissions show --json`) name the file that
+/// contributed each declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ResolvedAllowDotFolders {
+    /// Folder names declared in the source file's
+    /// `allow_dot_folders:` list, in declaration order.
+    pub names: Vec<String>,
+
+    /// `.remargin.yaml` that declared the entry.
+    pub source_file: PathBuf,
+}
+
 /// A `deny_ops` entry after path resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -73,8 +93,11 @@ pub struct ResolvedDenyOps {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedPermissions {
-    /// Dot-folder allow-list. Strings are accumulated as-is.
-    pub allow_dot_folders: Vec<String>,
+    /// Per-file dot-folder allow-list groups in walk order (deepest
+    /// file first). Each [`ResolvedAllowDotFolders`] preserves the
+    /// `.remargin.yaml` that declared it; the flattened name list is
+    /// available through [`ResolvedPermissions::allow_dot_folder_names`].
+    pub allow_dot_folders: Vec<ResolvedAllowDotFolders>,
 
     /// Per-path op denials in walk order (deepest file first).
     pub deny_ops: Vec<ResolvedDenyOps>,
@@ -84,6 +107,20 @@ pub struct ResolvedPermissions {
 
     /// Trusted roots in walk order (deepest file first).
     pub trusted_roots: Vec<TrustedRoot>,
+}
+
+impl ResolvedPermissions {
+    /// Flattened view of every declared dot-folder name across all
+    /// declaring files, preserving walk order. Equivalent to the old
+    /// `allow_dot_folders: Vec<String>` shape; consumers that only
+    /// care about names (e.g. the op guard) call this.
+    #[must_use]
+    pub fn allow_dot_folder_names(&self) -> Vec<String> {
+        self.allow_dot_folders
+            .iter()
+            .flat_map(|entry| entry.names.iter().cloned())
+            .collect()
+    }
 }
 
 /// A `restrict` entry after path resolution.
@@ -178,8 +215,12 @@ fn extend_resolved(
         });
     }
 
-    acc.allow_dot_folders
-        .extend(block.allow_dot_folders.iter().cloned());
+    if !block.allow_dot_folders.is_empty() {
+        acc.allow_dot_folders.push(ResolvedAllowDotFolders {
+            names: block.allow_dot_folders.clone(),
+            source_file: source_file.to_path_buf(),
+        });
+    }
 }
 
 fn parse_permissions_block(raw: &str, source_file: &Path) -> Result<Permissions> {
