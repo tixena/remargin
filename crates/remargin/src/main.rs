@@ -748,6 +748,11 @@ enum Commands {
         /// the original restrict entry), OR the literal `*` for the
         /// realm-wide wildcard restrict.
         path: String,
+        /// Exit non-zero when `<path>` is not currently restricted
+        /// instead of the default warn-and-no-op. For scripts that
+        /// want hard-fail-on-miss semantics.
+        #[arg(long)]
+        strict: bool,
         /// User-scope settings file. Defaults to
         /// `~/.claude/settings.json`. Symmetric with `restrict`'s
         /// flag so hermetic test runs can stay out of the user's
@@ -1882,6 +1887,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
         }
         Commands::Unprotect {
             path,
+            strict,
             user_settings,
             output_args,
         } => {
@@ -1889,6 +1895,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
                 system,
                 cwd,
                 path,
+                *strict,
                 user_settings.as_deref(),
                 output_args.json,
             );
@@ -3145,10 +3152,11 @@ fn cmd_unprotect(
     system: &dyn System,
     cwd: &Path,
     path: &str,
+    strict: bool,
     _user_settings_explicit: Option<&Path>,
     json_mode: bool,
 ) -> Result<()> {
-    let args = permissions_unprotect::UnprotectArgs::new(String::from(path));
+    let args = permissions_unprotect::UnprotectArgs::new(String::from(path)).with_strict(strict);
     let outcome = permissions_unprotect::unprotect(system, cwd, &args)?;
 
     if json_mode {

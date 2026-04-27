@@ -64,6 +64,12 @@ pub struct UnprotectArgs {
     /// reversed (the lookup key for both the YAML editor and the
     /// sidecar).
     pub path: String,
+    /// When `true`, [`unprotect`] returns an error instead of a
+    /// warning when `path` is not currently restricted (no YAML
+    /// entry and no sidecar entry). For scripted callers that want
+    /// hard-fail-on-miss semantics. Default `false` preserves the
+    /// human-friendly warn-and-no-op behaviour.
+    pub strict: bool,
 }
 
 impl UnprotectArgs {
@@ -73,7 +79,17 @@ impl UnprotectArgs {
     /// guarantee.
     #[must_use]
     pub const fn new(path: String) -> Self {
-        Self { path }
+        Self {
+            path,
+            strict: false,
+        }
+    }
+
+    /// Builder-style setter for [`UnprotectArgs::strict`].
+    #[must_use]
+    pub const fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
     }
 }
 
@@ -167,6 +183,8 @@ pub fn unprotect(
             "{} had no sidecar entry; .remargin.yaml entry removed but Claude settings were left untouched",
             args.path
         ));
+    } else if args.strict {
+        anyhow::bail!("{} is not currently restricted (--strict)", args.path);
     } else {
         outcome
             .warnings
@@ -178,8 +196,14 @@ pub fn unprotect(
 
 /// Remove the `permissions.restrict[*]` entry whose `path` field
 /// matches `path_on_disk`. Returns `true` when an entry was found
-/// and removed. Leaves an empty `restrict: []` array in place to
-/// keep the schema stable for the next `restrict` call.
+/// and removed.
+///
+/// After the (possibly-no-op) removal, [`compact_permissions`] prunes
+/// any empty `permissions:` sub-arrays and removes the wrapping
+/// mapping if it ends up empty. The YAML is rewritten when EITHER the
+/// removal OR the compaction produced a change, so hand-edited
+/// `restrict: []` / `deny_ops: []` placeholders left around from
+/// earlier sessions are scrubbed on the next unprotect call.
 fn remove_yaml_entry(system: &dyn System, anchor: &Path, path_on_disk: &str) -> Result<bool> {
     let yaml_path = anchor.join(".remargin.yaml");
     let body = match system.read_to_string(&yaml_path) {
@@ -195,17 +219,37 @@ fn remove_yaml_entry(system: &dyn System, anchor: &Path, path_on_disk: &str) -> 
     let Some(root) = value.as_mapping_mut() else {
         return Ok(false);
     };
+
+    let removed = remove_restrict_path(root, path_on_disk);
+    let compacted = compact_permissions(root);
+
+    if !removed && !compacted {
+        return Ok(false);
+    }
+
+    let updated = serde_yaml::to_string(&value).context("serializing updated .remargin.yaml")?;
+    write_remargin_yaml(system, anchor, &updated)?;
+    Ok(removed)
+}
+
+/// Remove the `permissions.restrict[*]` entry whose `path` field
+/// matches `path_on_disk`. Returns `true` when an entry was actually
+/// removed. Missing `permissions:` or `restrict:` keys are treated as
+/// "nothing to remove".
+fn remove_restrict_path(root: &mut serde_yaml::Mapping, path_on_disk: &str) -> bool {
+    let permissions_key = Value::String(String::from("permissions"));
     let Some(permissions) = root
-        .get_mut(Value::String(String::from("permissions")))
+        .get_mut(&permissions_key)
         .and_then(Value::as_mapping_mut)
     else {
-        return Ok(false);
+        return false;
     };
+    let restrict_key = Value::String(String::from("restrict"));
     let Some(restrict_seq) = permissions
-        .get_mut(Value::String(String::from("restrict")))
+        .get_mut(&restrict_key)
         .and_then(Value::as_sequence_mut)
     else {
-        return Ok(false);
+        return false;
     };
 
     let prior_len = restrict_seq.len();
@@ -216,12 +260,31 @@ fn remove_yaml_entry(system: &dyn System, anchor: &Path, path_on_disk: &str) -> 
             .and_then(Value::as_str)
             .is_none_or(|p| p != path_on_disk)
     });
+    restrict_seq.len() != prior_len
+}
 
-    if restrict_seq.len() == prior_len {
-        return Ok(false);
+/// Prune empty `permissions:` sub-arrays. If the whole `permissions:`
+/// mapping ends up empty, remove it from the document root.
+///
+/// "Empty sub-array" means `Value::Sequence` of length 0. Non-array
+/// values (none today, but defensive) are left alone.
+///
+/// Returns `true` when any change was made (a sub-key was removed
+/// or the wrapping `permissions:` mapping was deleted).
+fn compact_permissions(root: &mut serde_yaml::Mapping) -> bool {
+    let permissions_key = Value::String(String::from("permissions"));
+    let Some(permissions) = root
+        .get_mut(&permissions_key)
+        .and_then(Value::as_mapping_mut)
+    else {
+        return false;
+    };
+    let prior_len = permissions.len();
+    permissions.retain(|_key, val| !matches!(val, Value::Sequence(seq) if seq.is_empty()));
+    let pruned_subkey = permissions.len() != prior_len;
+    if permissions.is_empty() {
+        root.remove(&permissions_key);
+        return true;
     }
-
-    let updated = serde_yaml::to_string(&value).context("serializing updated .remargin.yaml")?;
-    write_remargin_yaml(system, anchor, &updated)?;
-    Ok(true)
+    pruned_subkey
 }

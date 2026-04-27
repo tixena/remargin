@@ -59,11 +59,17 @@ fn clean_reverse_restores_state() {
     assert!(outcome.yaml_entry_removed);
     assert!(outcome.warnings.is_empty(), "{:#?}", outcome.warnings);
 
-    // The .remargin.yaml retains the empty restrict array (schema
-    // stable for the next call).
-    let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let restricts = value["permissions"]["restrict"].as_sequence().unwrap();
-    assert!(restricts.is_empty());
+    // After rem-bimq the empty restrict array (and the wrapping
+    // permissions: block, since it has no other sub-keys) gets
+    // compacted out of the YAML. The body should no longer mention
+    // either key.
+    let yaml_body = system
+        .read_to_string(&anchor.join(".remargin.yaml"))
+        .unwrap();
+    assert!(
+        !yaml_body.contains("permissions:") && !yaml_body.contains("restrict:"),
+        ".remargin.yaml should be compacted after the last restrict is removed: {yaml_body}",
+    );
 
     // Sidecar is empty.
     let sc = sidecar::load(&system, &anchor).unwrap();
@@ -71,8 +77,8 @@ fn clean_reverse_restores_state() {
 
     // Project-scope settings file no longer carries the restrict
     // rule.
-    let body = system.read_to_string(&files[0]).unwrap();
-    assert!(!body.contains("Edit(///r/src/secret/**)"));
+    let settings_body = system.read_to_string(&files[0]).unwrap();
+    assert!(!settings_body.contains("Edit(///r/src/secret/**)"));
 }
 
 /// Scenario 2: a path that was never restricted yields a warn +
@@ -211,9 +217,16 @@ fn wildcard_restrict_and_unprotect_round_trip() {
     assert!(outcome.yaml_entry_removed);
     assert!(outcome.warnings.is_empty(), "{:#?}", outcome.warnings);
 
-    let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let restricts = value["permissions"]["restrict"].as_sequence().unwrap();
-    assert!(restricts.is_empty());
+    // After rem-bimq the wildcard-only realm collapses entirely:
+    // the empty restrict array gets pruned and the now-empty
+    // permissions: block is removed.
+    let body = system
+        .read_to_string(&anchor.join(".remargin.yaml"))
+        .unwrap();
+    assert!(
+        !body.contains("permissions:") && !body.contains("restrict:"),
+        "wildcard unprotect should compact the YAML: {body}",
+    );
 }
 
 /// Scenario 7: no `.claude/` ancestor → clear error.
@@ -284,10 +297,11 @@ fn other_restrict_entries_are_preserved() {
     assert_eq!(restricts[0]["path"], Value::String(String::from("archive")));
 }
 
-/// Scenario 10: removing the only entry leaves an empty
-/// `permissions.restrict: []` array (schema stable).
+/// Scenario 10 (rem-bimq update): removing the only entry compacts
+/// the empty array out of the YAML. Since `permissions:` had no
+/// other sub-keys, the wrapping mapping is also removed.
 #[test]
-fn empty_restrict_array_remains_after_last_removal() {
+fn last_removal_compacts_permissions_block_out_of_yaml() {
     let (system, anchor) = realm_with_claude();
     let files = settings_files(&anchor);
     restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();
@@ -298,11 +312,167 @@ fn empty_restrict_array_remains_after_last_removal() {
         &UnprotectArgs::new(String::from("src/secret")),
     )
     .unwrap();
-    let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
+    let body = system
+        .read_to_string(&anchor.join(".remargin.yaml"))
+        .unwrap();
     assert!(
-        value["permissions"]["restrict"]
-            .as_sequence()
-            .is_some_and(Vec::is_empty)
+        !body.contains("permissions:") && !body.contains("restrict:"),
+        ".remargin.yaml should be compacted: {body}",
+    );
+}
+
+// ---------------------------------------------------------------------
+// rem-bimq scenarios (compaction + --strict).
+// ---------------------------------------------------------------------
+
+/// rem-bimq scenario 3: removing the last `restrict` while
+/// `deny_ops` still has entries prunes only the empty `restrict`,
+/// leaving the rest of the `permissions:` block intact.
+#[test]
+fn last_restrict_removal_keeps_other_permissions_subkeys() {
+    let (system, anchor) = realm_with_claude();
+    let files = settings_files(&anchor);
+    restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();
+
+    // Append a deny_ops sibling by hand.
+    let yaml_path = anchor.join(".remargin.yaml");
+    let body = system.read_to_string(&yaml_path).unwrap();
+    let mut value: Value = serde_yaml::from_str(&body).unwrap();
+    let perms = value
+        .get_mut(Value::String(String::from("permissions")))
+        .unwrap()
+        .as_mapping_mut()
+        .unwrap();
+    let deny_entry: Value = serde_yaml::from_str("path: archive\nops: [purge]\n").unwrap();
+    perms.insert(
+        Value::String(String::from("deny_ops")),
+        Value::Sequence(vec![deny_entry]),
+    );
+    let updated = serde_yaml::to_string(&value).unwrap();
+    restrict::write_remargin_yaml(&system, &anchor, &updated).unwrap();
+
+    unprotect(
+        &system,
+        &anchor,
+        &UnprotectArgs::new(String::from("src/secret")),
+    )
+    .unwrap();
+
+    let final_body = system.read_to_string(&yaml_path).unwrap();
+    assert!(
+        !final_body.contains("restrict:"),
+        "empty restrict array should be pruned: {final_body}",
+    );
+    assert!(
+        final_body.contains("permissions:"),
+        "permissions block should survive: {final_body}",
+    );
+    assert!(
+        final_body.contains("deny_ops:"),
+        "deny_ops sibling should survive: {final_body}",
+    );
+    assert!(
+        final_body.contains("archive"),
+        "deny_ops content should survive: {final_body}",
+    );
+}
+
+/// rem-bimq scenario 4: hand-edited YAML carrying an empty
+/// `restrict: []` next to a populated `deny_ops:` is compacted on
+/// the next unprotect call, even when no entry matches.
+#[test]
+fn next_unprotect_compacts_pre_existing_empty_restrict() {
+    let (system, anchor) = realm_with_claude();
+
+    let body = "permissions:\n  restrict: []\n  deny_ops:\n  - path: archive\n    ops: [purge]\n";
+    restrict::write_remargin_yaml(&system, &anchor, body).unwrap();
+
+    let outcome = unprotect(
+        &system,
+        &anchor,
+        &UnprotectArgs::new(String::from("src/secret")),
+    )
+    .unwrap();
+    // No matching entry, so yaml_entry_removed stays false; the
+    // compaction is a side-effect that still rewrites the file.
+    assert!(!outcome.yaml_entry_removed);
+
+    let final_body = system
+        .read_to_string(&anchor.join(".remargin.yaml"))
+        .unwrap();
+    assert!(
+        !final_body.contains("restrict:"),
+        "pre-existing empty restrict should be compacted: {final_body}",
+    );
+    assert!(
+        final_body.contains("deny_ops:"),
+        "deny_ops should survive: {final_body}",
+    );
+}
+
+/// rem-bimq scenario 5: when every `permissions:` sub-array winds
+/// up empty (e.g. `restrict: []`, `allow_dot_folders: []`) the
+/// whole `permissions:` block is removed.
+#[test]
+fn empty_permissions_block_is_removed_entirely() {
+    let (system, anchor) = realm_with_claude();
+
+    let body = "permissions:\n  restrict: []\n  allow_dot_folders: []\n";
+    restrict::write_remargin_yaml(&system, &anchor, body).unwrap();
+
+    unprotect(
+        &system,
+        &anchor,
+        &UnprotectArgs::new(String::from("src/secret")),
+    )
+    .unwrap();
+
+    let final_body = system
+        .read_to_string(&anchor.join(".remargin.yaml"))
+        .unwrap();
+    assert!(
+        !final_body.contains("permissions:"),
+        "empty permissions block should be removed entirely: {final_body}",
+    );
+}
+
+/// rem-bimq scenario 6: `--strict` against an unrestricted path
+/// returns an error.
+#[test]
+fn strict_unprotect_against_unrestricted_path_errors() {
+    let (system, anchor) = realm_with_claude();
+    let err = unprotect(
+        &system,
+        &anchor,
+        &UnprotectArgs::new(String::from("src/secret")).with_strict(true),
+    )
+    .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("not currently restricted") && msg.contains("--strict"),
+        "expected --strict refusal, got: {msg}",
+    );
+}
+
+/// rem-bimq scenario 7: default (non-strict) unprotect against an
+/// unrestricted path is still a warn-and-no-op (regression check).
+#[test]
+fn default_unprotect_against_unrestricted_path_is_still_warn_noop() {
+    let (system, anchor) = realm_with_claude();
+    let outcome = unprotect(
+        &system,
+        &anchor,
+        &UnprotectArgs::new(String::from("src/secret")),
+    )
+    .unwrap();
+    assert!(!outcome.yaml_entry_removed);
+    assert!(
+        outcome
+            .warnings
+            .iter()
+            .any(|w| w.contains("not currently restricted")),
+        "{:#?}",
+        outcome.warnings,
     );
 }
 

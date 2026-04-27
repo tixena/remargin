@@ -151,6 +151,8 @@ mod tests {
     }
 
     /// Scenario 14: wildcard restrict + wildcard unprotect cycle.
+    /// After rem-bimq the YAML compaction prunes the empty restrict
+    /// array AND the now-empty permissions block.
     #[test]
     fn wildcard_restrict_and_unprotect_cycle() {
         let realm = realm_with_claude();
@@ -161,9 +163,10 @@ mod tests {
         assert_status(&unprotect, 0);
 
         let body = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
-        let value: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
-        let restricts = value["permissions"]["restrict"].as_sequence().unwrap();
-        assert!(restricts.is_empty());
+        assert!(
+            !body.contains("permissions:") && !body.contains("restrict:"),
+            "wildcard unprotect should compact .remargin.yaml: {body}",
+        );
     }
 
     /// Scenario 15: --json output parses to the documented
@@ -335,6 +338,71 @@ mod tests {
         assert!(
             stderr.contains("not currently restricted"),
             "expected idempotent warn, got: {stderr}"
+        );
+    }
+
+    /// rem-bimq: `--strict` against an unrestricted path exits
+    /// non-zero with a clear error. The yaml stays untouched.
+    #[test]
+    fn cli_unprotect_strict_unrestricted_path_fails() {
+        let realm = realm_with_claude();
+        let yaml_path = realm.path().join(".remargin.yaml");
+        let out = run_in(realm.path(), &["unprotect", "src/secret", "--strict"]);
+        assert_ne!(out.status.code(), Some(0_i32));
+        let stderr = str::from_utf8(&out.stderr).unwrap();
+        assert!(
+            stderr.contains("not currently restricted") && stderr.contains("--strict"),
+            "expected strict refusal with --strict in message, got: {stderr}",
+        );
+        assert!(!yaml_path.exists(), "no .remargin.yaml should be created");
+    }
+
+    /// rem-bimq: MCP parity for `strict=true`. Calls the tool
+    /// directly (avoiding the full subprocess pipeline) and
+    /// asserts the JSON-RPC response surfaces the error.
+    #[test]
+    fn mcp_unprotect_strict_unrestricted_path_returns_error() {
+        let realm = realm_with_claude();
+        let system = RealSystem::new();
+        let base = system.canonicalize(realm.path()).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "unprotect",
+                "arguments": { "path": "src/secret", "strict": true }
+            }
+        });
+        let request_str = serde_json::to_string(&request).unwrap();
+        let response_str = mcp::process_request(&system, &base, &config, &request_str)
+            .unwrap()
+            .unwrap();
+        let response: Value = serde_json::from_str(&response_str).unwrap();
+        // MCP tool errors surface either as a JSON-RPC `error` object
+        // or as a result with `isError: true` and a text body. Accept
+        // whichever the server emits and assert the message text.
+        let body = response
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| {
+                let r = response.get("result")?;
+                r.get("content")
+                    .and_then(Value::as_array)
+                    .and_then(|c| c.first())
+                    .and_then(|item| item.get("text"))
+                    .and_then(Value::as_str)
+                    .map(String::from)
+            })
+            .unwrap();
+        assert!(
+            body.contains("not currently restricted") && body.contains("--strict"),
+            "expected MCP error to mention strict refusal, got: {body}",
         );
     }
 }

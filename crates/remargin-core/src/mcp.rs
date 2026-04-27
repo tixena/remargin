@@ -742,11 +742,13 @@ fn desc_unprotect() -> ToolDesc {
         description: "Reverse a previous restrict: remove the matching permissions.restrict entry \
              from the nearest .claude/-bearing ancestor's .remargin.yaml AND scrub the sidecar-tracked \
              rules from both Claude settings files. Idempotent. Surfaces manual-edit divergences as \
-             warnings (never errors).",
+             warnings (never errors). Pass strict=true to fail with an error instead of warn-and-no-op \
+             when the path is not currently restricted.",
         schema: json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Subpath relative to the anchor (matches the on-disk `path` field of the original restrict entry), OR the literal '*' for realm-wide." }
+                "path": { "type": "string", "description": "Subpath relative to the anchor (matches the on-disk `path` field of the original restrict entry), OR the literal '*' for realm-wide." },
+                "strict": { "type": "boolean", "description": "When true, return an error instead of a warning if `path` is not currently restricted. Default false.", "default": false }
             },
             "required": ["path"]
         }),
@@ -2336,7 +2338,12 @@ fn handle_unprotect(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let path_str = required_str(params, "path")?;
-    let args = permissions_unprotect::UnprotectArgs::new(String::from(path_str));
+    let strict = params
+        .get("strict")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let args =
+        permissions_unprotect::UnprotectArgs::new(String::from(path_str)).with_strict(strict);
     let outcome = permissions_unprotect::unprotect(system, base_dir, &args)?;
 
     Ok(json!({
