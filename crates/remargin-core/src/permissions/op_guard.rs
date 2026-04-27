@@ -18,6 +18,38 @@
 //!   blast radius unless the user explicitly opts them in.
 //! - **`.remargin/` always allowed** — remargin owns this folder; the
 //!   dot-folder default-deny never fires on it.
+//!
+//! ## Op classification (read vs write)
+//!
+//! [`OpKind`] is the canonical read-vs-write classifier. Every op the
+//! CLI / MCP surface dispatches to remargin-core MUST be classified by
+//! [`op_kind`]. The classification drives whether `restrict` (and the
+//! dot-folder default-deny) gates the op:
+//!
+//! - [`OpKind::Read`] ops bypass `restrict`. To block a read on a
+//!   restricted path, declare an explicit `deny_ops` entry naming the
+//!   read op. Current read ops: `comments`, `get`, `lint`, `ls`,
+//!   `metadata`, `query`, `search`, `verify`.
+//! - [`OpKind::Write`] ops are gated by `restrict`. Current write ops:
+//!   `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`,
+//!   `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`.
+//!
+//! `deny_ops` is evaluated for every op regardless of kind — that is
+//! the read-side carve-out's escape hatch.
+//!
+//! ## Denial-error wording (pinned)
+//!
+//! The user-visible error text for a denial is documented and pinned by
+//! a unit test:
+//!
+//! - [`RESTRICT_DENIAL_TEMPLATE`] — `op '<op>' on '<target>' is denied
+//!   by 'restrict' rule in <yaml>`.
+//! - [`DENY_OPS_DENIAL_TEMPLATE`] — `op '<op>' on '<target>' is denied
+//!   by 'deny_ops' rule in <yaml>`.
+//!
+//! Templates use backtick-delimited slots in the actual `Display`
+//! impls. Both forms are recognised by the wording test so wording
+//! drift in either direction is caught.
 
 #[cfg(test)]
 mod tests;
@@ -34,6 +66,13 @@ use crate::config::permissions::resolve::{
 
 /// The dot-folder remargin owns. Never default-denied.
 const REMARGIN_DOT_FOLDER: &str = ".remargin";
+
+/// Canonical names of every read-side op recognised by the guard.
+/// Read ops bypass `restrict` and the dot-folder default-deny. They
+/// are still subject to `deny_ops`. Keep alphabetical.
+pub const READ_OPS: &[&str] = &[
+    "comments", "get", "lint", "ls", "metadata", "query", "search", "verify",
+];
 
 /// Canonical names of every mutating op. Membership in this list drives
 /// whether `restrict` applies — `deny_ops` is evaluated for ANY op the
@@ -52,6 +91,36 @@ pub const MUTATING_OPS: &[&str] = &[
     "sign",
     "write",
 ];
+
+/// Documented template for [`OpGuardError::RestrictedPath`].
+///
+/// The actual `Display` impl uses backticks around the slots; this
+/// template uses single quotes to match the wording in design docs
+/// and acceptance criteria. The wording-pin test
+/// (`denial_error_wording_matches_canonical_template`) accepts either
+/// delimiter so neither form can drift without notice.
+pub const RESTRICT_DENIAL_TEMPLATE: &str =
+    "op '{op}' on '{target}' is denied by 'restrict' rule in {source_file}";
+
+/// Documented template for [`OpGuardError::DeniedOp`]. See
+/// [`RESTRICT_DENIAL_TEMPLATE`] for the delimiter convention.
+pub const DENY_OPS_DENIAL_TEMPLATE: &str =
+    "op '{op}' on '{target}' is denied by 'deny_ops' rule in {source_file}";
+
+/// Read-vs-write classification for an op.
+///
+/// Drives whether `restrict` gates the op; `deny_ops` is evaluated
+/// for both kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OpKind {
+    /// Read-side op. Bypasses `restrict` and the dot-folder default-
+    /// deny. Still gated by explicit `deny_ops` entries.
+    Read,
+    /// Write-side op. Gated by `restrict`, the dot-folder default-deny,
+    /// and `deny_ops`.
+    Write,
+}
 
 /// Structured refusals from [`pre_mutate_check`]. Surfaces through the
 /// normal `Result<>` chain into the CLI's error message and the MCP
@@ -99,9 +168,31 @@ pub enum OpGuardError {
 
 /// `true` when `op` is the canonical name of a mutating op (and hence
 /// subject to `restrict`).
+///
+/// Unknown op names default to `true` so a missing classification fails
+/// closed under `restrict`. Callers should ensure new ops are added to
+/// [`READ_OPS`] or [`MUTATING_OPS`].
 #[must_use]
 pub fn is_mutating_op(op: &str) -> bool {
-    MUTATING_OPS.contains(&op)
+    !matches!(op_kind(op), Some(OpKind::Read))
+}
+
+/// Classify `op` as read or write.
+///
+/// Returns `None` for op names the guard does not know about. Callers
+/// that pass an unknown op (e.g. an op handler that forgets to plumb
+/// the canonical name into either [`READ_OPS`] or [`MUTATING_OPS`])
+/// will fall through the `None` arm; [`is_mutating_op`] treats unknown
+/// ops as write-side for safety.
+#[must_use]
+pub fn op_kind(op: &str) -> Option<OpKind> {
+    if READ_OPS.contains(&op) {
+        Some(OpKind::Read)
+    } else if MUTATING_OPS.contains(&op) {
+        Some(OpKind::Write)
+    } else {
+        None
+    }
 }
 
 /// `true` when a [`RestrictPath`] entry covers `target`.

@@ -11,13 +11,10 @@ use os_shim::mock::MockSystem;
 
 use crate::config::permissions::resolve::{ResolvedPermissions, ResolvedRestrict, RestrictPath};
 use crate::permissions::op_guard::{
-    MUTATING_OPS, OpGuardError, check_against_resolved, is_mutating_op, pre_mutate_check,
+    DENY_OPS_DENIAL_TEMPLATE, MUTATING_OPS, OpGuardError, OpKind, READ_OPS,
+    RESTRICT_DENIAL_TEMPLATE, check_against_resolved, is_mutating_op, op_kind, pre_mutate_check,
     restrict_covers,
 };
-
-const READ_OPS: &[&str] = &[
-    "comments", "get", "lint", "ls", "metadata", "query", "search", "verify",
-];
 
 fn realm_with(yaml: &str) -> MockSystem {
     MockSystem::new()
@@ -372,4 +369,102 @@ fn scenario_13_symlink_target_resolves_to_restricted_path() {
         chain.contains("denied by `restrict`"),
         "expected restrict refusal through symlink, got: {chain}"
     );
+}
+
+// ---------------------------------------------------------------------
+// Op classification (read vs write).
+// ---------------------------------------------------------------------
+
+/// Every entry in the public `READ_OPS` constant classifies as
+/// [`OpKind::Read`].
+#[test]
+fn op_kind_classifies_read_ops() {
+    for op in READ_OPS {
+        assert_eq!(op_kind(op), Some(OpKind::Read), "{op} should be Read");
+    }
+}
+
+/// Every entry in the public `MUTATING_OPS` constant classifies as
+/// [`OpKind::Write`].
+#[test]
+fn op_kind_classifies_mutating_ops() {
+    for op in MUTATING_OPS {
+        assert_eq!(op_kind(op), Some(OpKind::Write), "{op} should be Write");
+    }
+}
+
+/// Op names not in either list are returned as `None`. Callers
+/// (specifically `is_mutating_op`) treat that as fail-closed.
+#[test]
+fn op_kind_unknown_op_returns_none() {
+    assert_eq!(op_kind("not-a-real-op"), None);
+    // `is_mutating_op` defaults unknowns to mutating so an unclassified
+    // op fails closed under `restrict`.
+    assert!(is_mutating_op("not-a-real-op"));
+}
+
+/// `READ_OPS` and `MUTATING_OPS` partition the op space — no name
+/// appears in both. Adding an op to the wrong list fails this test.
+#[test]
+fn read_and_mutating_op_lists_are_disjoint() {
+    for read in READ_OPS {
+        assert!(
+            !MUTATING_OPS.contains(read),
+            "{read} appears in both READ_OPS and MUTATING_OPS",
+        );
+    }
+}
+
+// ---------------------------------------------------------------------
+// Denial-error wording (pinned).
+// ---------------------------------------------------------------------
+
+/// Pin the canonical templates for each denial kind. The actual
+/// `Display` impls use backtick delimiters; the documented templates
+/// use single quotes (the wording in the design docs / acceptance
+/// criteria). We accept either delimiter so wording drift in either
+/// direction trips this test.
+#[test]
+fn denial_error_wording_matches_canonical_template() {
+    let restrict = OpGuardError::RestrictedPath {
+        op: String::from("comment"),
+        source_file: PathBuf::from("/r/.remargin.yaml"),
+        target: PathBuf::from("/r/secret/foo.md"),
+    };
+    let restrict_msg = format!("{restrict}");
+    let restrict_expected_backtick =
+        "op `comment` on `/r/secret/foo.md` is denied by `restrict` rule in /r/.remargin.yaml";
+    let restrict_expected_quoted =
+        "op 'comment' on '/r/secret/foo.md' is denied by 'restrict' rule in /r/.remargin.yaml";
+    assert!(
+        restrict_msg == restrict_expected_backtick || restrict_msg == restrict_expected_quoted,
+        "RestrictedPath wording drifted; got: {restrict_msg}",
+    );
+
+    let denied = OpGuardError::DeniedOp {
+        op: String::from("purge"),
+        source_file: PathBuf::from("/r/.remargin.yaml"),
+        target: PathBuf::from("/r/signed/x.md"),
+    };
+    let denied_msg = format!("{denied}");
+    let denied_expected_backtick =
+        "op `purge` on `/r/signed/x.md` is denied by `deny_ops` rule in /r/.remargin.yaml";
+    let denied_expected_quoted =
+        "op 'purge' on '/r/signed/x.md' is denied by 'deny_ops' rule in /r/.remargin.yaml";
+    assert!(
+        denied_msg == denied_expected_backtick || denied_msg == denied_expected_quoted,
+        "DeniedOp wording drifted; got: {denied_msg}",
+    );
+
+    // The template constants document the same shape as the actual
+    // wording (modulo delimiters). Pin a couple of structural
+    // invariants so a typo in either constant trips the test.
+    assert!(RESTRICT_DENIAL_TEMPLATE.contains("'restrict' rule in"));
+    assert!(RESTRICT_DENIAL_TEMPLATE.contains("{op}"));
+    assert!(RESTRICT_DENIAL_TEMPLATE.contains("{target}"));
+    assert!(RESTRICT_DENIAL_TEMPLATE.contains("{source_file}"));
+    assert!(DENY_OPS_DENIAL_TEMPLATE.contains("'deny_ops' rule in"));
+    assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{op}"));
+    assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{target}"));
+    assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{source_file}"));
 }

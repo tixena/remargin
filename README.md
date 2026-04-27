@@ -350,6 +350,32 @@ The single exception to per-op evaluation is `trusted_roots`, which
 defines the MCP server's filesystem sandbox at boot time — the
 sandbox cannot be expanded mid-session.
 
+### Op classification: read vs write
+
+`restrict` and the dot-folder default-deny only gate **write-side**
+ops. Read-side ops bypass `restrict` entirely so a restricted path
+can still be inspected without unprotect/restrict ceremony. To block
+reads on a path, declare an explicit `deny_ops` entry naming the read
+op (`deny_ops` is evaluated for both kinds).
+
+| Kind | Ops |
+|------|-----|
+| Read (bypass `restrict`) | `comments`, `get`, `lint`, `ls`, `metadata`, `query`, `search`, `verify` |
+| Write (gated by `restrict`) | `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write` |
+
+The lists are pinned by `READ_OPS` and `MUTATING_OPS` in
+`remargin_core::permissions::op_guard`. Adding a new op MUST classify
+it at PR time by adding the canonical name to one of those constants;
+unknown ops fail closed (treated as write-side under `restrict`).
+
+The user-visible denial messages are pinned by
+`denial_error_wording_matches_canonical_template` in
+`crates/remargin-core/src/permissions/op_guard/tests.rs`. The
+canonical templates are:
+
+- `op '<op>' on '<target>' is denied by 'restrict' rule in <yaml>`
+- `op '<op>' on '<target>' is denied by 'deny_ops' rule in <yaml>`
+
 ### Commands
 
 ```
