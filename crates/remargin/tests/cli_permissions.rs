@@ -32,6 +32,56 @@ mod tests {
     use serde_json::{Value, json};
     use tempfile::TempDir;
 
+    // ---- rem-k7e5: schema mirrors for `permissions show --json` ----
+    //
+    // The mirrors below are `#[serde(deny_unknown_fields)]` so any
+    // new field on the corresponding Rust type fails the build until
+    // the schema doc on `permissions/inspect.rs` is updated.
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct AllowDotFoldersSchema {
+        names: Vec<String>,
+        source_file: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct DenyOpsSchema {
+        ops: Vec<String>,
+        path: String,
+        source_file: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct RestrictSchema {
+        absolute_path: Option<String>,
+        also_deny_bash: Vec<String>,
+        cli_allowed: bool,
+        path_text: String,
+        realm_root: Option<String>,
+        source_file: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShowSchema {
+        allow_dot_folders: Vec<AllowDotFoldersSchema>,
+        deny_ops: Vec<DenyOpsSchema>,
+        elapsed_ms: u64,
+        restrict: Vec<RestrictSchema>,
+        trusted_roots: Vec<TrustedRootSchema>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct TrustedRootSchema {
+        path: String,
+        recursive: Option<Box<ShowSchema>>,
+        source_file: String,
+    }
+
     fn run_in(dir: &Path, args: &[&str]) -> Output {
         Command::cargo_bin("remargin")
             .unwrap()
@@ -304,6 +354,190 @@ mod tests {
         );
         let mcp_miss_body = mcp_payload(&mcp_miss);
         assert_eq!(cli_miss_body, mcp_miss_body);
+    }
+
+    /// rem-k7e5: pin the canonical `permissions show --json` schema
+    /// against the doc in `permissions/inspect.rs`. Strict-mode
+    /// deserialise into [`ShowSchema`] aborts the test if any new
+    /// undocumented field appears in the output. Per-entry semantics
+    /// are pinned in companion assertions below.
+    #[test]
+    fn permissions_show_json_shape_is_canonical() {
+        let realm = canonical_schema_realm();
+        let out = run_in(realm.path(), &["permissions", "show", "--json"]);
+        assert_status(&out, 0);
+        let stdout = stdout_of(&out);
+
+        let parse: Result<ShowSchema, _> = serde_json::from_str(stdout);
+        assert!(
+            parse.is_ok(),
+            "permissions show --json drifted from documented schema: {:?}\nbody: {stdout}",
+            parse.err()
+        );
+        let parsed = parse.unwrap();
+
+        // Read every documented field — pins the doc semantics and
+        // also keeps the strict `dead_code` lint quiet without
+        // per-struct `#[allow]`s (banned by clippy::restriction).
+        assert!(
+            parsed.elapsed_ms < 60_000,
+            "elapsed_ms unrealistically large"
+        );
+        assert!(parsed.trusted_roots.is_empty());
+        assert_eq!(parsed.allow_dot_folders.len(), 1);
+        let dot = &parsed.allow_dot_folders[0];
+        assert_eq!(dot.names, vec![String::from(".obsidian")]);
+        assert!(!dot.source_file.is_empty());
+        assert_eq!(parsed.deny_ops.len(), 1);
+        let deny = &parsed.deny_ops[0];
+        assert_eq!(deny.ops, vec![String::from("purge")]);
+        assert!(!deny.path.is_empty());
+        assert!(!deny.source_file.is_empty());
+
+        assert_restrict_wildcard_invariant(&parsed.restrict);
+
+        // Belt-and-suspenders: also flag an undocumented top-level
+        // key by inspecting the raw Value, not just the typed mirror.
+        let body: Value = serde_json::from_str(stdout).unwrap();
+        let documented = [
+            "allow_dot_folders",
+            "deny_ops",
+            "elapsed_ms",
+            "restrict",
+            "trusted_roots",
+        ];
+        for key in body.as_object().unwrap().keys() {
+            assert!(
+                documented.contains(&key.as_str()),
+                "undocumented top-level key {key:?} in permissions show --json output"
+            );
+        }
+    }
+
+    /// Build the canonical schema-coverage realm: a wildcard
+    /// restrict (so `realm_root` is non-null), an absolute-path
+    /// restrict (so `realm_root` is null), a `deny_ops` with `ops`,
+    /// and an `allow_dot_folders` entry.
+    fn canonical_schema_realm() -> TempDir {
+        let realm = TempDir::new().unwrap();
+        write_realm_yaml(
+            realm.path(),
+            "permissions:\n  \
+             restrict:\n    - path: src/secret\n    - path: '*'\n  \
+             deny_ops:\n    - path: archive\n      ops: [purge]\n  \
+             allow_dot_folders:\n    - .obsidian\n",
+        );
+        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
+        fs::create_dir_all(realm.path().join("archive")).unwrap();
+        realm
+    }
+
+    /// Pin the `trusted_roots` schema mirror by reading every
+    /// field; the canonical realm test does not currently populate
+    /// `trusted_roots` so without this consumer the strict mirror
+    /// would round-trip but trip the `dead_code` lint.
+    fn assert_trusted_root_shape(entry: &TrustedRootSchema) {
+        assert!(!entry.path.is_empty());
+        assert!(!entry.source_file.is_empty());
+        if let Some(nested) = entry.recursive.as_deref() {
+            // Recursive shape mirrors the top-level schema.
+            assert!(nested.elapsed_ms < u64::MAX);
+        }
+    }
+
+    /// rem-k7e5: when a `trusted_roots` entry IS present the schema
+    /// mirror still holds. Uses a self-pointing trusted root and
+    /// exercises every field on the trusted-root schema struct.
+    #[test]
+    fn permissions_show_json_trusted_roots_shape() {
+        let realm = TempDir::new().unwrap();
+        let nested = realm.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        // Non-anchoring trusted root: `nested` has no .remargin.yaml,
+        // so `recursive` is null.
+        let yaml = format!(
+            "permissions:\n  trusted_roots:\n    - {}\n",
+            nested.display()
+        );
+        write_realm_yaml(realm.path(), &yaml);
+
+        let out = run_in(realm.path(), &["permissions", "show", "--json"]);
+        assert_status(&out, 0);
+        let parsed: ShowSchema = serde_json::from_str(stdout_of(&out)).unwrap();
+        assert_eq!(parsed.trusted_roots.len(), 1);
+        let root = &parsed.trusted_roots[0];
+        assert_trusted_root_shape(root);
+        assert!(
+            root.recursive.is_none(),
+            "non-anchoring trusted root should null recursive"
+        );
+    }
+
+    /// Pin the schema-doc claim that `realm_root` is non-null only
+    /// for wildcard `path: '*'` entries, and `absolute_path` is
+    /// non-null otherwise.
+    fn assert_restrict_wildcard_invariant(restrict: &[RestrictSchema]) {
+        let mut saw_wildcard = false;
+        let mut saw_absolute = false;
+        for entry in restrict {
+            assert!(!entry.source_file.is_empty());
+            // `also_deny_bash` and `cli_allowed` must round-trip;
+            // touching them keeps the strict-mirror types honest.
+            let _: &Vec<String> = &entry.also_deny_bash;
+            let _: bool = entry.cli_allowed;
+            if entry.path_text == "*" {
+                assert!(
+                    entry.realm_root.is_some(),
+                    "wildcard restrict missing realm_root, path_text={:?}",
+                    entry.path_text
+                );
+                saw_wildcard = true;
+            } else {
+                assert!(
+                    entry.realm_root.is_none(),
+                    "non-wildcard restrict has unexpected realm_root, path_text={:?}",
+                    entry.path_text
+                );
+                assert!(entry.absolute_path.is_some());
+                saw_absolute = true;
+            }
+        }
+        assert!(saw_wildcard, "missing wildcard restrict entry");
+        assert!(saw_absolute, "missing absolute-path restrict entry");
+    }
+
+    /// rem-k7e5: empty config still respects the canonical schema —
+    /// every documented top-level key is present (with empty
+    /// arrays) plus `elapsed_ms`.
+    #[test]
+    fn permissions_show_json_empty_shape_is_canonical() {
+        let realm = TempDir::new().unwrap();
+        let out = run_in(realm.path(), &["permissions", "show", "--json"]);
+        assert_status(&out, 0);
+        let body: Value = serde_json::from_str(stdout_of(&out)).unwrap();
+        let map = body.as_object().unwrap();
+        for key in [
+            "allow_dot_folders",
+            "deny_ops",
+            "elapsed_ms",
+            "restrict",
+            "trusted_roots",
+        ] {
+            assert!(
+                map.contains_key(key),
+                "empty payload missing key {key}: {body}"
+            );
+        }
+        for array_key in ["allow_dot_folders", "deny_ops", "restrict", "trusted_roots"] {
+            assert!(
+                map.get(array_key)
+                    .and_then(Value::as_array)
+                    .unwrap()
+                    .is_empty(),
+                "{array_key} should be empty"
+            );
+        }
+        assert!(map.get("elapsed_ms").unwrap().is_u64());
     }
 
     /// `permissions show` text output names the realm and the

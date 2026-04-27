@@ -21,6 +21,54 @@
 //! covered by any `restrict` entry OR by any `deny_ops` entry. With
 //! `--why`, the closest matching rule is named with its source file
 //! and a human-readable rule text.
+//!
+//! ## Canonical `permissions show --json` schema (rem-k7e5)
+//!
+//! The shape below is the contract for `remargin permissions show
+//! --json` and the MCP `permissions_show` tool. The Rust types in
+//! this module ([`ShowOutput`], [`RestrictView`], [`DenyOpsView`],
+//! [`AllowDotFoldersView`], [`TrustedRootView`]) are the
+//! single-source-of-truth — `permissions_show_json_shape_is_canonical`
+//! in `tests/cli_permissions.rs` deserialises real CLI output into
+//! `#[serde(deny_unknown_fields)]` mirrors and fails the build if a
+//! field is added without updating this schema. `elapsed_ms` is
+//! injected at the surface (CLI / MCP wrapper) and is therefore
+//! NOT part of the [`ShowOutput`] struct in this module.
+//!
+//! ```text
+//! ShowOutput
+//!   allow_dot_folders : Array<AllowDotFoldersView>
+//!   deny_ops          : Array<DenyOpsView>
+//!   restrict          : Array<RestrictView>
+//!   trusted_roots     : Array<TrustedRootView>
+//!   elapsed_ms        : number   -- injected by the CLI / MCP layer
+//!
+//! RestrictView
+//!   absolute_path  : string | null   -- canonicalised path; null for `path: '*'`
+//!   also_deny_bash : Array<string>   -- bash-token deny list, defaults to []
+//!   cli_allowed    : boolean         -- whether `remargin` itself is allowed to read
+//!   path_text      : string          -- exact yaml `path:` text ("src/secret" or "*")
+//!   realm_root     : string | null   -- non-null only for the `path: '*'` wildcard
+//!   source_file    : string          -- absolute path of the .remargin.yaml that declared it
+//!
+//! DenyOpsView
+//!   ops         : Array<string>      -- e.g. ["purge", "rm"]
+//!   path        : string             -- canonical path the rule covers
+//!   source_file : string
+//!
+//! AllowDotFoldersView
+//!   names       : Array<string>      -- the dot-folder basenames allowed (".obsidian", ...)
+//!   source_file : string
+//!
+//! TrustedRootView
+//!   path        : string             -- canonical absolute path of the trusted root
+//!   recursive   : ShowOutput | null  -- nested realm permissions; null when not anchored
+//!   source_file : string
+//! ```
+//!
+//! `permissions check --json` returns a separate [`CheckOutput`]
+//! shape (`matching_rule`, `path`, `restricted`) and is documented
+//! on that struct directly.
 
 #[cfg(test)]
 mod tests;

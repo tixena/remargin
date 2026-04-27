@@ -372,6 +372,13 @@ paths and per-machine timestamps don't belong in version control).
 restricted, 1 when not. Pair with `--why` for the matching rule's
 kind, source file, and rule text.
 
+The canonical `permissions show --json` schema (every field, per
+entry kind) is documented as the module-level rustdoc on
+`remargin_core::permissions::inspect` and pinned by a
+`#[serde(deny_unknown_fields)]` schema test in
+`crates/remargin/tests/cli_permissions.rs` — adding a field on the
+Rust types without updating the doc fails the build.
+
 Same surfaces are exposed via MCP as `mcp__remargin__restrict`,
 `mcp__remargin__unprotect`, `mcp__remargin__permissions_show`, and
 `mcp__remargin__permissions_check`.
