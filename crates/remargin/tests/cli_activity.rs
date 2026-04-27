@@ -82,6 +82,10 @@ mod tests {
 
     /// `--pretty` switches to the human-readable timeline; output
     /// goes to stderr so stdout stays clean for CLI piping.
+    /// rem-gb5j: each per-file block opens with a cutoff header so
+    /// the reader can tell which timeline they are looking at; the
+    /// initial-touch fallback (caller has no prior activity in the
+    /// file) renders the explicit "since the beginning" wording.
     #[test]
     fn pretty_output_renders_timeline() {
         let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -100,6 +104,46 @@ mod tests {
         let stderr = str::from_utf8(&out.stderr).unwrap();
         assert!(stderr.contains("comment"), "{stderr}");
         assert!(stderr.contains("c1 by bob"), "{stderr}");
+        assert!(
+            stderr.contains("since the beginning"),
+            "expected initial-touch fallback header in: {stderr}"
+        );
+        assert!(
+            !stderr.contains("YOUR-LAST-ACTION"),
+            "header must not leak the placeholder string: {stderr}"
+        );
+    }
+
+    /// rem-gb5j: explicit `--since` echoes the cutoff in the
+    /// `--pretty` header line so the reader can confirm it.
+    #[test]
+    fn pretty_output_renders_explicit_since_header() {
+        // Use a future-enough cutoff so something is filtered, but
+        // also keep a comment after the cutoff so the per-file
+        // block (and its header) is rendered.
+        let realm = realm_with(&[
+            ("a.md", &doc("c1", "bob", "2026-04-08T12:00:00-04:00")),
+            ("b.md", &doc("c2", "bob", "2026-04-06T12:00:00-04:00")),
+        ]);
+        let out = run_in(
+            realm.path(),
+            &[
+                "activity",
+                "--pretty",
+                "--since",
+                "2026-04-07T00:00:00-04:00",
+                "--identity",
+                "alice",
+                "--type",
+                "human",
+            ],
+        );
+        assert_status(&out, 0);
+        let stderr = str::from_utf8(&out.stderr).unwrap();
+        assert!(
+            stderr.contains("(since 2026-04-07 00:00)"),
+            "expected explicit-since header in: {stderr}"
+        );
     }
 
     /// `--since` parses ISO 8601 and applies as an explicit

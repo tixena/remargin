@@ -63,6 +63,16 @@ pub struct FileChanges {
     /// Sorted ts-ascending; ties broken by `kind` then by id /
     /// `author` so the order is deterministic across runs.
     pub changes: Vec<Change>,
+    /// The cutoff that was actually applied when filtering this
+    /// file's changes. Mirrors what `gather_one_file` ran the
+    /// per-change `past_cutoff` predicate against. When the caller
+    /// passed an explicit `since`, every file shares that cutoff;
+    /// when `since` was `None`, this is the caller's last-action
+    /// timestamp (or `None` for the initial-touch fallback).
+    /// Surfaced so `--pretty` can announce the cutoff to the
+    /// reader and so JSON consumers can mirror it (rem-gb5j).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cutoff_applied: Option<DateTime<FixedOffset>>,
     /// Latest ts across all changes in this file. Mirrors the max
     /// of `changes[*].ts`; surfaced separately so the activity
     /// summary view does not need to fold the changes vec.
@@ -155,6 +165,12 @@ impl Change {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct ActivityResult {
+    /// `true` when the caller passed an explicit `since` cutoff;
+    /// `false` when the per-file caller-last-action default was
+    /// used. Drives the wording of the `--pretty` cutoff header
+    /// (rem-gb5j) — JSON consumers can read it as well to mirror
+    /// the same distinction.
+    pub cutoff_explicit: bool,
     /// Files with at least one change. Sorted by path so the
     /// output is deterministic.
     pub files: Vec<FileChanges>,
@@ -196,7 +212,10 @@ pub fn gather_activity(
 
     let registry = load_registry(system, realm_anchor)?;
     let files = collect_managed_md_files(system, path)?;
-    let mut result = ActivityResult::default();
+    let mut result = ActivityResult {
+        cutoff_explicit: since.is_some(),
+        ..ActivityResult::default()
+    };
     for file_path in files {
         let Some(file_changes) = gather_one_file(
             system,
@@ -298,6 +317,7 @@ fn gather_one_file(
 
     Some(FileChanges {
         changes,
+        cutoff_applied: cutoff,
         newest_ts,
         path: file_path.to_path_buf(),
     })

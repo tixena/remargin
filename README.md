@@ -564,7 +564,12 @@ remargin activity --pretty
 
 The default JSON output is the structured `ActivityResult` shape;
 `--pretty` switches to a per-file timeline rendered to stderr (so
-stdout stays clean for piping). When `--since` is omitted, the
+stdout stays clean for piping). Each per-file block opens with a
+header line that names the cutoff that was applied — `(since
+2026-04-20 00:00)` for explicit `--since`, `(since you last
+touched this file: …)` for the caller-last-action default, and
+`(since the beginning — no prior activity by you in this file)`
+for the initial-touch fallback. When `--since` is omitted, the
 per-file cutoff is the latest of (caller's authored comments,
 caller's acks, caller's sandbox-adds) in that file — files where
 the caller has never acted return everything (the "initial-touch"

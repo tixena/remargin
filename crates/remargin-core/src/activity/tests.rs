@@ -399,6 +399,66 @@ fn sandbox_and_ack_carry_author_type_when_registry_resolves() {
     );
 }
 
+/// rem-gb5j: implicit cutoff for a caller whose most recent
+/// action was an edit pins to `edited_at`, not the original `ts`.
+/// Earlier activity from the same caller is correctly excluded
+/// from the cutoff fold.
+#[test]
+fn cutoff_uses_edited_at_when_caller_last_action_was_an_edit() {
+    let alice_edit = "```remargin\n---\nid: a1\nauthor: alice\ntype: human\nts: 2026-04-06T08:00:00-04:00\nedited_at: 2026-04-06T16:00:00-04:00\nchecksum: sha256:t\n---\nMine.\n```";
+    let bob_between = "```remargin\n---\nid: b1\nauthor: bob\ntype: human\nts: 2026-04-06T13:00:00-04:00\nchecksum: sha256:t\n---\nBefore.\n```";
+    let bob_after = "```remargin\n---\nid: b2\nauthor: bob\ntype: human\nts: 2026-04-06T17:00:00-04:00\nchecksum: sha256:t\n---\nAfter.\n```";
+    let body =
+        format!("---\ntitle: t\n---\n\n# Body\n\n{alice_edit}\n\n{bob_between}\n\n{bob_after}\n");
+    let system = realm_with(&[("/r/note.md", body.as_str())]);
+    let result = gather_activity(&system, Path::new("/r/note.md"), None, "alice").unwrap();
+    let file = &result.files[0];
+    assert_eq!(
+        file.cutoff_applied,
+        Some(ts("2026-04-06T16:00:00-04:00")),
+        "cutoff should be alice's edited_at, got {:?}",
+        file.cutoff_applied
+    );
+    let comment_ids: Vec<&str> = file
+        .changes
+        .iter()
+        .filter_map(|c| match c {
+            Change::Comment { comment_id, .. } => Some(comment_id.as_str()),
+            Change::Ack { .. } | Change::Sandbox { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        comment_ids,
+        vec!["b2"],
+        "only b2 (after the 16:00 cutoff) should surface; got {comment_ids:?}"
+    );
+}
+
+/// rem-gb5j: explicit `--since` propagates `cutoff_explicit=true`
+/// onto the result and the same explicit cutoff lands on every
+/// per-file record.
+#[test]
+fn explicit_since_marks_result_cutoff_explicit() {
+    let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
+    let system = realm_with(&[("/r/note.md", body.as_str())]);
+    let cutoff = ts("2026-04-06T11:00:00-04:00");
+    let result = gather_activity(&system, Path::new("/r/note.md"), Some(cutoff), "alice").unwrap();
+    assert!(result.cutoff_explicit, "expected cutoff_explicit=true");
+    assert_eq!(result.files[0].cutoff_applied, Some(cutoff));
+}
+
+/// rem-gb5j: implicit cutoff with no prior caller activity
+/// surfaces `cutoff_applied=None` (the initial-touch fallback)
+/// and `cutoff_explicit=false`.
+#[test]
+fn implicit_initial_touch_records_no_cutoff() {
+    let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
+    let system = realm_with(&[("/r/note.md", body.as_str())]);
+    let result = gather_activity(&system, Path::new("/r/note.md"), None, "alice").unwrap();
+    assert!(!result.cutoff_explicit);
+    assert_eq!(result.files[0].cutoff_applied, None);
+}
+
 /// Scenario 21: per-file `newest_ts` matches the largest ts in
 /// the changes list.
 #[test]

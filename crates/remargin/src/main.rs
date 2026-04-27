@@ -2770,6 +2770,10 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
     }
     for file in &result.files {
         eprintln!("{}:", file.path.display());
+        eprintln!(
+            "  {}",
+            format_activity_cutoff_header(result.cutoff_explicit, file.cutoff_applied)
+        );
         for change in &file.changes {
             match change {
                 activity::Change::Comment {
@@ -2816,6 +2820,43 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
     }
     if let Some(ts) = result.newest_ts_overall {
         eprintln!("(newest_ts_overall: {})", ts.to_rfc3339());
+    }
+}
+
+/// Render the per-file cutoff header line for `activity --pretty`
+/// (rem-gb5j). The wording reflects which path produced the cutoff:
+///
+/// - explicit `--since`: `(since 2026-04-27 02:09)` so the header
+///   echoes the user's input.
+/// - implicit, with a caller-last-action timestamp: `(since you
+///   last touched this file: 2026-04-27 02:09)` to make it clear
+///   the cutoff came from the caller's own prior activity.
+/// - implicit, no prior activity (initial-touch fallback): `(since
+///   the beginning — no prior activity by you in this file)` so
+///   the reader knows the full timeline is being shown rather than
+///   silently inferring it from the absence of a header.
+fn format_activity_cutoff_header(
+    cutoff_explicit: bool,
+    cutoff: Option<chrono::DateTime<chrono::FixedOffset>>,
+) -> String {
+    if cutoff_explicit {
+        // Explicit `--since` is always `Some(_)`; the `None` arm is
+        // defensive against a future caller path that forgets to
+        // pre-validate.
+        cutoff.map_or_else(
+            || String::from("(since: explicit cutoff missing)"),
+            |ts| format!("(since {})", ts.format("%Y-%m-%d %H:%M")),
+        )
+    } else {
+        cutoff.map_or_else(
+            || String::from("(since the beginning \u{2014} no prior activity by you in this file)"),
+            |ts| {
+                format!(
+                    "(since you last touched this file: {})",
+                    ts.format("%Y-%m-%d %H:%M")
+                )
+            },
+        )
     }
 }
 
@@ -4367,9 +4408,60 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        parse_line_range, registry_participant_json, registry_participant_pretty,
-        resolve_comment_content,
+        format_activity_cutoff_header, parse_line_range, registry_participant_json,
+        registry_participant_pretty, resolve_comment_content,
     };
+
+    fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
+        chrono::DateTime::parse_from_rfc3339(s).unwrap()
+    }
+
+    /// rem-gb5j: implicit cutoff with a caller-last-action ts
+    /// renders as "(since you last touched this file: …)".
+    #[test]
+    fn cutoff_header_implicit_with_last_action() {
+        let header = format_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
+        assert_eq!(
+            header,
+            "(since you last touched this file: 2026-04-27 02:09)"
+        );
+    }
+
+    /// rem-gb5j: implicit cutoff with no prior activity renders
+    /// the initial-touch fallback message.
+    #[test]
+    fn cutoff_header_implicit_initial_touch() {
+        let header = format_activity_cutoff_header(false, None);
+        assert!(
+            header.contains("since the beginning"),
+            "unexpected header: {header}"
+        );
+        assert!(
+            header.contains("no prior activity"),
+            "unexpected header: {header}"
+        );
+    }
+
+    /// rem-gb5j: explicit `--since` echoes the cutoff with the
+    /// "(since …)" wording, matching the user's input.
+    #[test]
+    fn cutoff_header_explicit_since() {
+        let header = format_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
+        assert_eq!(header, "(since 2026-04-27 02:09)");
+    }
+
+    /// rem-gb5j: the placeholder string `YOUR-LAST-ACTION` from
+    /// the design discussion must never reach user-visible output.
+    #[test]
+    fn cutoff_header_never_emits_placeholder() {
+        for explicit in [true, false] {
+            let with_ts =
+                format_activity_cutoff_header(explicit, Some(ts("2026-04-27T02:09:00-04:00")));
+            let without_ts = format_activity_cutoff_header(explicit, None);
+            assert!(!with_ts.contains("YOUR-LAST-ACTION"), "{with_ts}");
+            assert!(!without_ts.contains("YOUR-LAST-ACTION"), "{without_ts}");
+        }
+    }
 
     #[test]
     fn parse_line_range_accepts_simple_pair() {
