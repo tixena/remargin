@@ -85,6 +85,10 @@ impl<'params> CreateCommentParams<'params> {
 /// - Attachment files do not exist
 /// - The file cannot be read or written
 /// - The linter detects structural issues
+#[expect(
+    clippy::too_many_lines,
+    reason = "linear comment-creation pipeline; rem-90tr added the realm-mode floor block at the top"
+)]
 pub fn create_comment(
     system: &dyn System,
     path: &Path,
@@ -94,7 +98,11 @@ pub fn create_comment(
     writer::ensure_not_forbidden_target(path)?;
     pre_mutate_check(system, "comment", path)?;
 
-    let identity = config
+    // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
+    let escalated = config.escalate_for_doc(system, path)?;
+    let cfg = &escalated;
+
+    let identity = cfg
         .identity
         .as_deref()
         .context("identity is required to create a comment")?;
@@ -102,13 +110,13 @@ pub fn create_comment(
     // Registry membership and strict-mode key presence are validated at
     // `ResolvedConfig::resolve` time (rem-xc8x); the op just reads the
     // signing key it needs.
-    let signing_key = config.resolve_signing_key(identity);
+    let signing_key = cfg.resolve_signing_key(identity);
 
     if params.auto_ack && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
     }
 
-    let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
+    let author_type = cfg.author_type.clone().unwrap_or(AuthorType::Human);
 
     let mut doc = parser::parse_file(system, path)?;
 
@@ -136,8 +144,8 @@ pub fn create_comment(
         .reply_to
         .map(|parent_id| resolve_thread(&doc, parent_id));
 
-    let resolved_attachments = copy_attachments(system, path, config, params.attachments)
-        .context("copying attachments")?;
+    let resolved_attachments =
+        copy_attachments(system, path, cfg, params.attachments).context("copying attachments")?;
 
     // Reply invariant: the parent's author is always first in `to:`.
     // Additional recipients passed by the caller are appended in input
@@ -200,7 +208,7 @@ pub fn create_comment(
         });
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
+    frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
     // Atomic comment+sandbox composite write: append the caller's sandbox
     // entry (idempotent) in the same write cycle. This runs *after*
@@ -220,7 +228,7 @@ pub fn create_comment(
     let markdown_after = doc.to_markdown();
     linter::lint_or_fail(&markdown_after).context("document has structural issues after write")?;
 
-    commit_with_verify(&doc, config, |verified_doc| {
+    commit_with_verify(&doc, cfg, |verified_doc| {
         writer::write_document(
             system,
             path,
@@ -442,11 +450,16 @@ pub fn edit_comment(
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
     pre_mutate_check(system, "edit", path)?;
-    let identity = config.identity.as_deref();
+
+    // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
+    let escalated = config.escalate_for_doc(system, path)?;
+    let cfg = &escalated;
+
+    let identity = cfg.identity.as_deref();
 
     // Strict-mode key presence is validated at resolve time (rem-xc8x);
     // the op just reads the key when it needs one.
-    let signing_key = identity.and_then(|author| config.resolve_signing_key(author));
+    let signing_key = identity.and_then(|author| cfg.resolve_signing_key(author));
 
     // Validate replacement kinds before any document mutation so the
     // file stays byte-identical on invalid input.
@@ -497,10 +510,10 @@ pub fn edit_comment(
         }
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
+    frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
     let empty: HashSet<String> = HashSet::new();
-    commit_with_verify(&doc, config, |verified_doc| {
+    commit_with_verify(&doc, cfg, |verified_doc| {
         writer::write_document(system, path, verified_doc, &empty, &empty)
     })?;
 

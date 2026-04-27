@@ -153,16 +153,20 @@ pub fn batch_comment(
     // any I/O.
     pre_mutate_check(system, "batch", path)?;
 
-    let identity = config
+    // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
+    let escalated = config.escalate_for_doc(system, path)?;
+    let cfg = &escalated;
+
+    let identity = cfg
         .identity
         .as_deref()
         .context("identity is required to create comments")?;
 
     // Registry + strict-mode key presence are validated at resolve time
     // (rem-xc8x); this just fetches the signing key when the op needs one.
-    let signing_key = config.resolve_signing_key(identity);
+    let signing_key = cfg.resolve_signing_key(identity);
 
-    let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
+    let author_type = cfg.author_type.clone().unwrap_or(AuthorType::Human);
 
     let mut doc = parser::parse_file(system, path)?;
 
@@ -205,7 +209,7 @@ pub fn batch_comment(
         });
 
         // Copy attachments.
-        let resolved_attachments = copy_attachments(system, path, config, &op.attachments)
+        let resolved_attachments = copy_attachments(system, path, cfg, &op.attachments)
             .with_context(|| format!("batch operation {idx}: copying attachments"))?;
 
         // Auto-populate `to` from the parent comment's author when replying
@@ -289,13 +293,13 @@ pub fn batch_comment(
         created_ids.push(new_id);
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
+    frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
     let markdown_after = doc.to_markdown();
     linter::lint_or_fail(&markdown_after)
         .context("document has structural issues after batch write")?;
 
-    write_batch_result(system, path, config, &doc, &created_ids)?;
+    write_batch_result(system, path, cfg, &doc, &created_ids)?;
 
     Ok(created_ids)
 }
