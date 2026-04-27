@@ -2789,15 +2789,20 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
                         ts.format("%Y-%m-%d %H:%M")
                     );
                 }
-                activity::Change::Ack { ts, comment_id, by } => {
+                activity::Change::Ack {
+                    ts,
+                    comment_id,
+                    author,
+                    ..
+                } => {
                     eprintln!(
-                        "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {by}",
+                        "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {author}",
                         ts.format("%Y-%m-%d %H:%M")
                     );
                 }
-                activity::Change::Sandbox { ts, by } => {
+                activity::Change::Sandbox { ts, author, .. } => {
                     eprintln!(
-                        "  {} \u{00b7} sandbox \u{00b7} {by}",
+                        "  {} \u{00b7} sandbox \u{00b7} {author}",
                         ts.format("%Y-%m-%d %H:%M")
                     );
                 }

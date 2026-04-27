@@ -48,7 +48,8 @@ use chrono::{DateTime, FixedOffset};
 use os_shim::System;
 use serde::Serialize;
 
-use crate::config::load_config_filtered_with_path;
+use crate::config::registry::Registry;
+use crate::config::{load_config_filtered_with_path, load_registry};
 use crate::frontmatter::read_sandbox_entries;
 use crate::parser::{self, Comment, SandboxEntry};
 
@@ -60,7 +61,7 @@ use crate::parser::{self, Comment, SandboxEntry};
 pub struct FileChanges {
     /// One change per surfaced event (comment, ack, sandbox-add).
     /// Sorted ts-ascending; ties broken by `kind` then by id /
-    /// `by` so the order is deterministic across runs.
+    /// `author` so the order is deterministic across runs.
     pub changes: Vec<Change>,
     /// Latest ts across all changes in this file. Mirrors the max
     /// of `changes[*].ts`; surfaced separately so the activity
@@ -72,6 +73,19 @@ pub struct FileChanges {
 }
 
 /// Discriminated change record. `kind` field is the JSON tag.
+///
+/// Every variant exposes the actor under the **same field name**:
+/// `author`. Where the actor's type is knowable, `author_type` is
+/// also surfaced (matching [`crate::parser::AuthorType::as_str`] —
+/// `"human"` or `"agent"`). Field names are uniform on purpose so
+/// JSON consumers can read the actor without case-analysing on
+/// `kind` (rem-k93j).
+///
+/// `author_type` is `Option<String>` on non-comment kinds because
+/// the registry is the source of truth and may not contain every
+/// historical participant; when the registry has no entry for the
+/// actor, the field is omitted from the JSON output rather than
+/// silently defaulting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 #[non_exhaustive]
@@ -79,7 +93,9 @@ pub enum Change {
     /// An ack landed on a comment's roster after the cutoff. One
     /// record per (comment, ack-author) pair.
     Ack {
-        by: String,
+        author: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        author_type: Option<String>,
         comment_id: String,
         ts: DateTime<FixedOffset>,
     },
@@ -101,7 +117,9 @@ pub enum Change {
     /// A sandbox-roster entry landed (or refreshed via rem-g3sy.1)
     /// after the cutoff. One record per (file, identity) pair.
     Sandbox {
-        by: String,
+        author: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        author_type: Option<String>,
         ts: DateTime<FixedOffset>,
     },
 }
@@ -110,7 +128,7 @@ impl Change {
     fn id_for_sort(&self) -> &str {
         match self {
             Self::Ack { comment_id, .. } | Self::Comment { comment_id, .. } => comment_id,
-            Self::Sandbox { by, .. } => by,
+            Self::Sandbox { author, .. } => author,
         }
     }
 
@@ -176,10 +194,17 @@ pub fn gather_activity(
         );
     }
 
+    let registry = load_registry(system, realm_anchor)?;
     let files = collect_managed_md_files(system, path)?;
     let mut result = ActivityResult::default();
     for file_path in files {
-        let Some(file_changes) = gather_one_file(system, &file_path, since, caller_identity) else {
+        let Some(file_changes) = gather_one_file(
+            system,
+            &file_path,
+            since,
+            caller_identity,
+            registry.as_ref(),
+        ) else {
             continue;
         };
         if let Some(file_ts) = file_changes.newest_ts {
@@ -224,6 +249,7 @@ fn gather_one_file(
     file_path: &Path,
     since: Option<DateTime<FixedOffset>>,
     caller_identity: &str,
+    registry: Option<&Registry>,
 ) -> Option<FileChanges> {
     let body = system.read_to_string(file_path).ok()?;
     let doc = parser::parse(&body).ok()?;
@@ -244,7 +270,8 @@ fn gather_one_file(
         for ack in &cm.ack {
             if past_cutoff(ack.ts, cutoff) {
                 changes.push(Change::Ack {
-                    by: ack.author.clone(),
+                    author: ack.author.clone(),
+                    author_type: lookup_author_type(registry, &ack.author),
                     comment_id: cm.id.clone(),
                     ts: ack.ts,
                 });
@@ -255,7 +282,8 @@ fn gather_one_file(
     for entry in &sandbox_entries {
         if past_cutoff(entry.ts, cutoff) {
             changes.push(Change::Sandbox {
-                by: entry.author.clone(),
+                author: entry.author.clone(),
+                author_type: lookup_author_type(registry, &entry.author),
                 ts: entry.ts,
             });
         }
@@ -330,6 +358,18 @@ fn comment_change(cm: &Comment, cutoff: Option<DateTime<FixedOffset>>) -> Option
 
 fn past_cutoff(ts: DateTime<FixedOffset>, cutoff: Option<DateTime<FixedOffset>>) -> bool {
     cutoff.is_none_or(|cut| ts > cut)
+}
+
+/// Resolve `author_type` for a sandbox / ack actor against the
+/// loaded registry. Returns `None` when the registry is absent or
+/// has no entry for `identity` so the JSON output omits the field
+/// rather than guessing — consumers see a clear "unknown" signal
+/// (rem-k93j).
+fn lookup_author_type(registry: Option<&Registry>, identity: &str) -> Option<String> {
+    registry?
+        .participants
+        .get(identity)
+        .map(|p| p.author_type.clone())
 }
 
 fn sort_changes(changes: &mut [Change]) {

@@ -307,6 +307,98 @@ fn comment_without_reply_to_omits_field_in_json() {
     assert!(!json.contains("reply_to"), "{json}");
 }
 
+/// rem-k93j: every change-kind exposes the actor under the field
+/// name `author`. The previous `by` name on `sandbox` and `ack` is
+/// gone — JSON shape is uniform across kinds so consumers can read
+/// the actor without case-analysing on `kind`.
+#[test]
+fn every_change_kind_serialises_actor_as_author() {
+    let prefix = "---\ntitle: t\nsandbox:\n  - bob@2026-04-06T13:00:00-04:00\n---\n\n# Body\n";
+    let comment = "```remargin\n---\nid: c1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:t\nack:\n  - carol@2026-04-06T14:00:00-04:00\n---\nBody.\n```";
+    let body = format!("{prefix}\n{comment}\n");
+    let system = realm_with(&[("/r/note.md", body.as_str())]);
+    let result = gather_activity(&system, Path::new("/r/note.md"), None, "alice").unwrap();
+    let value = serde_json::to_value(&result.files[0].changes).unwrap();
+    let array = value.as_array().unwrap();
+    assert_eq!(array.len(), 3, "expected one of each kind, got {value}");
+    for change in array {
+        let json = change.as_object().unwrap();
+        let kind = json
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+        assert!(
+            json.contains_key("author"),
+            "kind={kind} missing author field: {change}"
+        );
+        assert!(
+            !json.contains_key("by"),
+            "kind={kind} still emits legacy `by` field: {change}"
+        );
+    }
+}
+
+/// rem-k93j: when the registry resolves the actor, sandbox and ack
+/// records carry `author_type`. When the registry is silent, the
+/// field is omitted (skipped on serialise) rather than guessed.
+#[test]
+fn sandbox_and_ack_carry_author_type_when_registry_resolves() {
+    let registry =
+        "participants:\n  bob:\n    type: human\n  carol:\n    type: agent\n    status: active\n";
+    let prefix = "---\ntitle: t\nsandbox:\n  - bob@2026-04-06T13:00:00-04:00\n  - dave@2026-04-06T13:30:00-04:00\n---\n\n# Body\n";
+    let comment = "```remargin\n---\nid: c1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:t\nack:\n  - carol@2026-04-06T14:00:00-04:00\n  - eve@2026-04-06T14:30:00-04:00\n---\nBody.\n```";
+    let body = format!("{prefix}\n{comment}\n");
+    let system = MockSystem::new()
+        .with_file(Path::new("/r/.remargin.yaml"), REALM_YAML.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/r/.remargin-registry.yaml"), registry.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/r/note.md"), body.as_bytes())
+        .unwrap();
+    let result = gather_activity(&system, Path::new("/r/note.md"), None, "alice").unwrap();
+    let mut bob_sandbox: Option<String> = None;
+    let mut dave_sandbox: Option<Option<String>> = None;
+    let mut carol_ack: Option<String> = None;
+    let mut eve_ack: Option<Option<String>> = None;
+    for change in &result.files[0].changes {
+        match change {
+            Change::Sandbox {
+                author,
+                author_type,
+                ..
+            } if author == "bob" => bob_sandbox = author_type.clone(),
+            Change::Sandbox {
+                author,
+                author_type,
+                ..
+            } if author == "dave" => dave_sandbox = Some(author_type.clone()),
+            Change::Ack {
+                author,
+                author_type,
+                ..
+            } if author == "carol" => carol_ack = author_type.clone(),
+            Change::Ack {
+                author,
+                author_type,
+                ..
+            } if author == "eve" => eve_ack = Some(author_type.clone()),
+            Change::Ack { .. } | Change::Comment { .. } | Change::Sandbox { .. } => {}
+        }
+    }
+    assert_eq!(bob_sandbox.as_deref(), Some("human"));
+    assert_eq!(carol_ack.as_deref(), Some("agent"));
+    assert_eq!(
+        dave_sandbox,
+        Some(None),
+        "registry-missing dave should yield None"
+    );
+    assert_eq!(
+        eve_ack,
+        Some(None),
+        "registry-missing eve should yield None"
+    );
+}
+
 /// Scenario 21: per-file `newest_ts` matches the largest ts in
 /// the changes list.
 #[test]
