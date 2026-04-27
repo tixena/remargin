@@ -1588,28 +1588,8 @@ fn handle_identity_create(params: &Map<String, Value>) -> Result<Value> {
 /// Handle the `lint` tool: run structural lint checks.
 fn handle_lint(system: &dyn System, base_dir: &Path, params: &Map<String, Value>) -> Result<Value> {
     let file = required_str(params, "file")?;
-
     let path = base_dir.join(file);
-    let content = system
-        .read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
-
-    let errors = linter::lint(&content)?;
-
-    let results: Vec<Value> = errors
-        .iter()
-        .map(|err| {
-            json!({
-                "line": err.line,
-                "message": err.message
-            })
-        })
-        .collect();
-
-    Ok(json!({
-        "errors": results,
-        "ok": results.is_empty()
-    }))
+    Ok(linter::lint_doc(system, &path)?.to_json())
 }
 
 /// Handle the `ls` tool: list files and directories.

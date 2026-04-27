@@ -3267,34 +3267,18 @@ fn cmd_keygen(system: &dyn System, output: &Path) -> Result<()> {
 
 fn cmd_lint(system: &dyn System, cwd: &Path, file: &str, json_mode: bool) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
-    let content = system
-        .read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
-
-    let errors = linter::lint(&content)?;
+    let report = linter::lint_doc(system, &path)?;
 
     if json_mode {
-        let results: Vec<Value> = errors
-            .iter()
-            .map(|err| json!({ "line": err.line, "message": err.message }))
-            .collect();
-        print_output(
-            true,
-            &json!({ "errors": results, "ok": results.is_empty() }),
-        )?;
-    } else if errors.is_empty() {
-        eprintln!("No lint errors.");
+        print_output(true, &report.to_json())?;
     } else {
-        for err in &errors {
-            eprintln!("line {}: {}", err.line, err.message);
-        }
+        eprint!("{}", report.format_text());
     }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
+    if !report.is_clean() {
         anyhow::bail!("Lint errors found");
     }
+    Ok(())
 }
 
 fn cmd_ls(

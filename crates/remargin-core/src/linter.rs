@@ -8,8 +8,13 @@
 mod tests;
 
 use core::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
+use os_shim::System;
+use serde::Serialize;
+
+use crate::config::permissions::resolve::lint_permissions_in_parents;
 
 /// Required fields in every remargin block's YAML header.
 const REQUIRED_REMARGIN_FIELDS: &[&str] = &["id", "author", "type", "ts", "checksum"];
@@ -22,6 +27,97 @@ pub struct LintError {
     pub line: usize,
     /// Human-readable description of the structural issue.
     pub message: String,
+}
+
+/// Per-doc serialised view of a [`LintError`].
+///
+/// Shared by the CLI's `--json` mode and the MCP `lint` tool result.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LintErrorView {
+    /// 1-indexed line number where the error was detected.
+    pub line: usize,
+    /// Human-readable description of the structural issue.
+    pub message: String,
+}
+
+/// Combined lint result for a single doc.
+///
+/// Structural findings AND permissions-config findings discovered by
+/// walking parents from the doc's directory. Consumers can render to
+/// text or JSON; see [`LintReport::to_json`] and
+/// [`LintReport::format_text`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LintReport {
+    /// Structural lint errors over the doc body.
+    pub errors: Vec<LintErrorView>,
+
+    /// Permissions-config errors (e.g. unknown op names in
+    /// `permissions.deny_ops.ops`) discovered in any `.remargin.yaml`
+    /// on the parent walk from the doc's directory.
+    pub permissions: Vec<PermissionsLintErrorView>,
+}
+
+/// Per-config serialised view of a [`crate::config::permissions::resolve::PermissionsLintError`].
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PermissionsLintErrorView {
+    /// 1-indexed column where the offending value starts; `None`
+    /// when `serde_yaml` did not surface a location.
+    pub column: Option<usize>,
+    /// 1-indexed line where the offending value starts; `None` when
+    /// `serde_yaml` did not surface a location.
+    pub line: Option<usize>,
+    /// User-facing diagnostic.
+    pub message: String,
+    /// Absolute path of the `.remargin.yaml` that failed to parse.
+    pub source_file: PathBuf,
+}
+
+impl LintReport {
+    /// Render the report as the human-facing CLI text.
+    ///
+    /// Returns the "no errors" placeholder when clean.
+    #[must_use]
+    pub fn format_text(&self) -> String {
+        if self.is_clean() {
+            return String::from("No lint errors.\n");
+        }
+        let mut buf = String::new();
+        for err in &self.errors {
+            let _ = writeln!(buf, "line {}: {}", err.line, err.message);
+        }
+        for finding in &self.permissions {
+            let location = match (finding.line, finding.column) {
+                (Some(line), Some(col)) => {
+                    format!("{} (line {line}:{col})", finding.source_file.display())
+                }
+                (Some(line), None) => {
+                    format!("{} (line {line})", finding.source_file.display())
+                }
+                _ => finding.source_file.display().to_string(),
+            };
+            let _ = writeln!(buf, "permissions: {location}: {}", finding.message);
+        }
+        buf
+    }
+
+    /// `true` when neither structural nor permissions findings exist.
+    #[must_use]
+    pub const fn is_clean(&self) -> bool {
+        self.errors.is_empty() && self.permissions.is_empty()
+    }
+
+    /// Render the report as the canonical `lint` JSON payload.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "errors": self.errors,
+            "ok": self.is_clean(),
+            "permissions": self.permissions,
+        })
+    }
 }
 
 /// Run structural lint checks on a markdown document.
@@ -39,6 +135,43 @@ pub fn lint(content: &str) -> Result<Vec<LintError>> {
     check_remargin_blocks(content, &mut errors);
 
     Ok(errors)
+}
+
+/// Run the full lint pipeline for `doc_path`.
+///
+/// Structural lint over the file content + permissions-config lint over
+/// every `.remargin.yaml` from the doc's directory up to `/`.
+///
+/// # Errors
+///
+/// I/O failure reading the doc or walking the parent chain.
+pub fn lint_doc(system: &dyn System, doc_path: &Path) -> Result<LintReport> {
+    let content = system
+        .read_to_string(doc_path)
+        .with_context(|| format!("reading {}", doc_path.display()))?;
+    let structural = lint(&content)?;
+    let walk_anchor = doc_path
+        .parent()
+        .map_or_else(|| doc_path.to_path_buf(), Path::to_path_buf);
+    let permissions = lint_permissions_in_parents(system, &walk_anchor)?;
+    Ok(LintReport {
+        errors: structural
+            .into_iter()
+            .map(|err| LintErrorView {
+                line: err.line,
+                message: err.message,
+            })
+            .collect(),
+        permissions: permissions
+            .into_iter()
+            .map(|finding| PermissionsLintErrorView {
+                column: finding.column,
+                line: finding.line,
+                message: finding.message,
+                source_file: finding.source_file,
+            })
+            .collect(),
+    })
 }
 
 /// Convenience: lint and fail if any errors found.

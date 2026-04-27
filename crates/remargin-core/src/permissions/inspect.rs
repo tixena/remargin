@@ -236,12 +236,12 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
         .iter()
         .find(|entry| canonical == entry.path || canonical.starts_with(&entry.path))
     {
+        let op_names: Vec<&str> = entry.ops.iter().map(|op| op.as_str()).collect();
         return Some(MatchingRule {
             kind: "deny_ops",
             rule_text: format!(
-                "deny_ops {{ path: {}, ops: {:?} }}",
+                "deny_ops {{ path: {}, ops: {op_names:?} }}",
                 entry.path.display(),
-                entry.ops
             ),
             source_file: entry.source_file.clone(),
         });
@@ -269,7 +269,11 @@ fn group_deny_ops(resolved: &ResolvedPermissions) -> Vec<DenyOpsView> {
         .deny_ops
         .iter()
         .map(|entry| DenyOpsView {
-            ops: entry.ops.clone(),
+            ops: entry
+                .ops
+                .iter()
+                .map(|op| String::from(op.as_str()))
+                .collect(),
             path: entry.path.clone(),
             source_file: entry.source_file.clone(),
         })

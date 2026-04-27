@@ -36,6 +36,7 @@ use os_shim::System;
 use serde::Deserialize;
 
 use crate::config::permissions::Permissions;
+use crate::config::permissions::op_name::OpName;
 use crate::path::expand_path;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
@@ -52,6 +53,32 @@ const RESTRICT_WILDCARD: &str = "*";
 struct PermissionsOnly {
     #[serde(default)]
     permissions: Permissions,
+}
+
+/// A single permissions-config parse failure scoped to one `.remargin.yaml`.
+///
+/// Surfaces the offending file, message, and (when available) line / column
+/// from the underlying `serde_yaml` error. Used by
+/// [`lint_permissions_in_parents`] and the public `lint` surfaces
+/// (CLI / MCP).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PermissionsLintError {
+    /// 1-indexed column where the offending value starts; `None`
+    /// when `serde_yaml` did not surface a location.
+    pub column: Option<usize>,
+
+    /// 1-indexed line where the offending value starts; `None` when
+    /// `serde_yaml` did not surface a location.
+    pub line: Option<usize>,
+
+    /// User-facing diagnostic — the raw `serde_yaml` message, which
+    /// already names the offending value and lists the valid ops on
+    /// an unknown-variant failure.
+    pub message: String,
+
+    /// Absolute path of the `.remargin.yaml` that failed to parse.
+    pub source_file: PathBuf,
 }
 
 /// A grouped `allow_dot_folders` declaration after path resolution.
@@ -78,8 +105,9 @@ pub struct ResolvedAllowDotFolders {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedDenyOps {
-    /// Op names to deny on `path`.
-    pub ops: Vec<String>,
+    /// Op names to deny on `path`. Validated at parse time via
+    /// [`OpName`].
+    pub ops: Vec<OpName>,
 
     /// Resolved absolute path.
     pub path: PathBuf,
@@ -240,6 +268,59 @@ fn resolve_relative(system: &dyn System, source_dir: &Path, raw: &str) -> PathBu
         source_dir.join(expanded)
     };
     canonicalize_or_passthrough(system, absolute)
+}
+
+/// Walk parents of `start_dir` and lint each `.remargin.yaml`'s permissions block.
+///
+/// Surfaces any deserialisation errors (including unknown op names in
+/// `permissions.deny_ops.ops`) as a structured list. The walk does NOT
+/// short-circuit on the first failure — every offending file is
+/// reported so the user fixes them in one pass.
+///
+/// I/O failures (e.g. read errors) are propagated up as `Err`; only
+/// parse failures become `PermissionsLintError`s.
+///
+/// # Errors
+///
+/// I/O failure while walking the parent chain or reading any
+/// `.remargin.yaml` on the path.
+pub fn lint_permissions_in_parents(
+    system: &dyn System,
+    start_dir: &Path,
+) -> Result<Vec<PermissionsLintError>> {
+    let mut findings = Vec::new();
+    let mut current = start_dir.to_path_buf();
+
+    loop {
+        let candidate = current.join(CONFIG_FILENAME);
+        let exists = system
+            .exists(&candidate)
+            .with_context(|| format!("checking existence of {}", candidate.display()))?;
+
+        if exists {
+            let raw = system
+                .read_to_string(&candidate)
+                .with_context(|| format!("reading {}", candidate.display()))?;
+            match serde_yaml::from_str::<PermissionsOnly>(&raw) {
+                Ok(_) => {}
+                Err(err) => {
+                    let location = err.location();
+                    findings.push(PermissionsLintError {
+                        column: location.as_ref().map(serde_yaml::Location::column),
+                        line: location.as_ref().map(serde_yaml::Location::line),
+                        message: err.to_string(),
+                        source_file: candidate.clone(),
+                    });
+                }
+            }
+        }
+
+        if !current.pop() {
+            break;
+        }
+    }
+
+    Ok(findings)
 }
 
 /// Walk up from `start_dir`, parse every `.remargin.yaml` found, and

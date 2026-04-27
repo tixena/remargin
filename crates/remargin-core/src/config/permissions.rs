@@ -20,6 +20,7 @@
 //! compat opportunity — fail loudly at parse time so the user sees the
 //! mistake before any op runs.
 
+pub mod op_name;
 pub mod resolve;
 
 #[cfg(test)]
@@ -27,13 +28,17 @@ mod tests;
 
 use serde::{Deserialize, Serialize};
 
+use self::op_name::OpName;
+
 /// A single entry under `permissions.deny_ops`.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DenyOpsEntry {
-    /// Op names to deny on `path` (e.g. `["purge", "delete"]`).
-    pub ops: Vec<String>,
+    /// Op names to deny on `path` (e.g. `[purge, delete]`). Unknown
+    /// op names are rejected at parse time — see [`OpName`] for the
+    /// authoritative list.
+    pub ops: Vec<OpName>,
 
     /// Subpath relative to the `.remargin.yaml` that declared it, OR
     /// an absolute path. Wildcards are NOT accepted here — `deny_ops`

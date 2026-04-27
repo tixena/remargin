@@ -10,7 +10,10 @@ use os_shim::mock::MockSystem;
 
 use crate::config::Config;
 use crate::config::permissions::Permissions;
-use crate::config::permissions::resolve::{ResolvedPermissions, RestrictPath, resolve_permissions};
+use crate::config::permissions::op_name::OpName;
+use crate::config::permissions::resolve::{
+    ResolvedPermissions, RestrictPath, lint_permissions_in_parents, resolve_permissions,
+};
 
 // ---------------------------------------------------------------------
 // Parser-level tests for the on-disk schema.
@@ -56,7 +59,7 @@ permissions:
     assert!(cfg.permissions.restrict[0].cli_allowed);
     assert_eq!(cfg.permissions.deny_ops.len(), 1);
     assert_eq!(cfg.permissions.deny_ops[0].path, "src/secret");
-    assert_eq!(cfg.permissions.deny_ops[0].ops, vec![String::from("purge")]);
+    assert_eq!(cfg.permissions.deny_ops[0].ops, vec![OpName::Purge]);
     assert_eq!(
         cfg.permissions.allow_dot_folders,
         vec![String::from(".github")]
@@ -87,6 +90,77 @@ permissions:
     let result: Result<Config, _> = serde_yaml::from_str(yaml);
     let err = result.unwrap_err().to_string();
     assert!(err.contains("bogus"), "error did not mention key: {err}");
+}
+
+/// rem-welo: an unknown op name in `permissions.deny_ops.ops` is
+/// rejected at parse time. The error names the offending typo and
+/// lists the valid ops.
+#[test]
+fn unknown_op_in_deny_ops_is_rejected() {
+    let yaml = "\
+identity: alice
+permissions:
+  deny_ops:
+    - path: src/secret
+      ops: [purg, delete]
+";
+    let result: Result<Config, _> = serde_yaml::from_str(yaml);
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("purg"), "error did not name typo: {err}");
+    // serde_yaml's "expected one of …" enumerates every valid variant,
+    // which is the user-visible "valid ops" list. Spot-check three.
+    for op in ["purge", "delete", "sandbox-add"] {
+        assert!(
+            err.contains(op),
+            "error did not list valid op `{op}`: {err}"
+        );
+    }
+}
+
+/// rem-welo: every variant in `OpName::ALL` parses successfully when
+/// listed verbatim in a `.remargin.yaml`. Adding a new op variant
+/// without forgetting its kebab-case form keeps this green.
+#[test]
+fn every_op_name_parses_in_deny_ops() {
+    use core::fmt::Write as _;
+
+    let mut ops_yaml = String::new();
+    for op in OpName::ALL {
+        let _ = writeln!(ops_yaml, "        - {}", op.as_str());
+    }
+    let yaml = format!(
+        "identity: alice\npermissions:\n  deny_ops:\n    - path: src\n      ops:\n{ops_yaml}",
+    );
+    let cfg: Config = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(cfg.permissions.deny_ops.len(), 1);
+    assert_eq!(cfg.permissions.deny_ops[0].ops.len(), OpName::ALL.len());
+}
+
+/// rem-welo: a typo in `deny_ops.ops` surfaces an error whose chain
+/// names the source `.remargin.yaml` (acceptance: error message names
+/// the file).
+#[test]
+fn deny_ops_unknown_op_in_resolver_names_source_file() {
+    let yaml = "\
+identity: alice
+permissions:
+  deny_ops:
+    - path: src/secret
+      ops: [purg]
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    let err = resolve_permissions(&system, Path::new("/realm")).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("/realm/.remargin.yaml"),
+        "error did not name file: {chain}"
+    );
+    assert!(chain.contains("purg"), "error did not name typo: {chain}");
 }
 
 // ---------------------------------------------------------------------
@@ -166,7 +240,7 @@ permissions:
         resolved.deny_ops[0].path,
         PathBuf::from("/realm/src/secret")
     );
-    assert_eq!(resolved.deny_ops[0].ops, vec![String::from("purge")]);
+    assert_eq!(resolved.deny_ops[0].ops, vec![OpName::Purge]);
     assert_eq!(resolved.deny_ops[0].source_file, source);
 
     assert_eq!(resolved.allow_dot_folders.len(), 1);
@@ -411,8 +485,8 @@ permissions:
 
     let resolved = resolve_permissions(&system, Path::new("/realm/sub")).unwrap();
     assert_eq!(resolved.deny_ops.len(), 2);
-    assert_eq!(resolved.deny_ops[0].ops, vec![String::from("delete")]);
-    assert_eq!(resolved.deny_ops[1].ops, vec![String::from("purge")]);
+    assert_eq!(resolved.deny_ops[0].ops, vec![OpName::Delete]);
+    assert_eq!(resolved.deny_ops[1].ops, vec![OpName::Purge]);
 }
 
 /// Scenario 13: walk order — closest file first.
@@ -512,6 +586,73 @@ permissions:
         resolved.trusted_roots[0].path,
         PathBuf::from("/does/not/exist")
     );
+}
+
+/// rem-welo: `lint_permissions_in_parents` reports unknown op names
+/// without short-circuiting the walk. A typo in a child `.remargin.yaml`
+/// AND an unrelated typo in the parent both surface in one pass.
+#[test]
+fn lint_permissions_collects_findings_across_parents() {
+    let parent = "\
+identity: alice
+permissions:
+  deny_ops:
+    - path: top
+      ops: [delte]
+";
+    let child = "\
+identity: alice
+permissions:
+  deny_ops:
+    - path: nested
+      ops: [purg]
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm/sub"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), parent.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/realm/sub/.remargin.yaml"), child.as_bytes())
+        .unwrap();
+
+    let findings = lint_permissions_in_parents(&system, Path::new("/realm/sub")).unwrap();
+    assert_eq!(findings.len(), 2);
+    // Walk order: deepest first.
+    assert_eq!(
+        findings[0].source_file,
+        PathBuf::from("/realm/sub/.remargin.yaml")
+    );
+    assert!(findings[0].message.contains("purg"));
+    assert_eq!(
+        findings[1].source_file,
+        PathBuf::from("/realm/.remargin.yaml")
+    );
+    assert!(findings[1].message.contains("delte"));
+    // Locations should be populated by `serde_yaml`.
+    for finding in &findings {
+        assert!(finding.line.is_some(), "missing line: {finding:?}");
+        assert!(finding.column.is_some(), "missing column: {finding:?}");
+    }
+}
+
+/// rem-welo: a clean realm produces zero findings.
+#[test]
+fn lint_permissions_returns_empty_when_clean() {
+    let yaml = "\
+identity: alice
+permissions:
+  deny_ops:
+    - path: src/secret
+      ops: [purge, delete]
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    let findings = lint_permissions_in_parents(&system, Path::new("/realm")).unwrap();
+    assert!(findings.is_empty());
 }
 
 /// Bonus: an absolute `restrict.path` is preserved (rather than being

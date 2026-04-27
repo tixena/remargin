@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use os_shim::mock::MockSystem;
 
+use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::resolve::{ResolvedPermissions, ResolvedRestrict, RestrictPath};
 use crate::permissions::op_guard::{
     DENY_OPS_DENIAL_TEMPLATE, MUTATING_OPS, OpGuardError, OpKind, READ_OPS,
@@ -413,6 +414,26 @@ fn read_and_mutating_op_lists_are_disjoint() {
             "{read} appears in both READ_OPS and MUTATING_OPS",
         );
     }
+}
+
+/// `READ_OPS` mirrors [`OpName::READ`] verbatim — the `deny_ops` parser
+/// validates against `OpName`, the guard classifies via `READ_OPS`, so
+/// drift between the two means an op the parser accepts is unclassified
+/// at runtime (or vice versa).
+#[test]
+fn read_ops_constant_matches_op_name_read() {
+    let from_enum: Vec<&str> = OpName::READ.iter().map(|op| op.as_str()).collect();
+    let from_const: Vec<&str> = READ_OPS.to_vec();
+    assert_eq!(from_const, from_enum);
+}
+
+/// `MUTATING_OPS` mirrors [`OpName::WRITE`] verbatim. See
+/// [`read_ops_constant_matches_op_name_read`] for the rationale.
+#[test]
+fn mutating_ops_constant_matches_op_name_write() {
+    let from_enum: Vec<&str> = OpName::WRITE.iter().map(|op| op.as_str()).collect();
+    let from_const: Vec<&str> = MUTATING_OPS.to_vec();
+    assert_eq!(from_const, from_enum);
 }
 
 // ---------------------------------------------------------------------

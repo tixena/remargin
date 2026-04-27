@@ -70,13 +70,19 @@ const REMARGIN_DOT_FOLDER: &str = ".remargin";
 /// Canonical names of every read-side op recognised by the guard.
 /// Read ops bypass `restrict` and the dot-folder default-deny. They
 /// are still subject to `deny_ops`. Keep alphabetical.
+///
+/// The contents must match [`OpName::READ`] — a parity test in the
+/// adjacent `tests` module enforces this.
 pub const READ_OPS: &[&str] = &[
     "comments", "get", "lint", "ls", "metadata", "query", "search", "verify",
 ];
 
-/// Canonical names of every mutating op. Membership in this list drives
-/// whether `restrict` applies — `deny_ops` is evaluated for ANY op the
-/// caller names.
+/// Canonical names of every mutating op.
+///
+/// Membership in this list drives whether `restrict` applies —
+/// `deny_ops` is evaluated for ANY op the caller names. The contents
+/// must match [`OpName::WRITE`] — a parity test in the adjacent
+/// `tests` module enforces this.
 pub const MUTATING_OPS: &[&str] = &[
     "ack",
     "batch",
@@ -276,7 +282,9 @@ fn find_deny_ops_violation(
 ) -> Option<OpGuardError> {
     deny_ops
         .iter()
-        .find(|entry| path_covers(&entry.path, target) && entry.ops.iter().any(|name| name == op))
+        .find(|entry| {
+            path_covers(&entry.path, target) && entry.ops.iter().any(|name| name.as_str() == op)
+        })
         .map(|entry| OpGuardError::DeniedOp {
             op: String::from(op),
             source_file: entry.source_file.clone(),
