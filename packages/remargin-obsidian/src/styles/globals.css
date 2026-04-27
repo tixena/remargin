@@ -83,3 +83,72 @@
 .remargin-markdown-content hr {
   margin: 4px 0;
 }
+
+/* ----------------------------------------------------------------------
+ * Pretty-print foundation (T36): widget-side classes consumed by the
+ * editor surfaces shipped in T37 (reading mode) and T38 (Live Preview).
+ * ---------------------------------------------------------------------- */
+
+/* Card-like container for the editor-side comment widget. Matches the
+ * sidebar card styling so the visual language is shared across surfaces. */
+.remargin-widget-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+  cursor: pointer;
+}
+
+.remargin-widget-comment__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.remargin-widget-comment__body {
+  margin-top: 4px;
+}
+
+/* Compact chevron button. Stops click propagation so toggling the body
+ * does not also fire the surrounding widget click. */
+.remargin-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  border-radius: 3px;
+}
+
+.remargin-collapse-toggle:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Sidebar focus highlight: brief outline pulse applied for one second
+ * after `plugin.focusComment` lands. Driven by SidebarShell on every
+ * `remargin:focus` event. */
+.remargin-highlight {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+  animation: remargin-flash 1s ease-out;
+}
+
+@keyframes remargin-flash {
+  from {
+    outline-color: var(--interactive-accent);
+  }
+  to {
+    outline-color: transparent;
+  }
+}

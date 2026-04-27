@@ -237,10 +237,18 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     );
   }, [compose, activeFile, handleComposeClose, handleComposeSubmitted]);
 
+  // Plugin → sidebar focus bridge: when a widget click in the editor
+  // requests a comment in a different file, switch the active filter
+  // so the targeted card mounts before SidebarShell scrolls + highlights.
+  const handleFocusFile = useCallback((file: string) => {
+    setActiveFile(file);
+  }, []);
+
   return (
     <SidebarShell
       plugin={plugin}
       activeFile={activeFile}
+      onFocusFile={handleFocusFile}
       refreshKey={refreshKey}
       onInitialized={bumpRefresh}
       onPlusClick={handlePlusClick}

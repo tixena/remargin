@@ -19,8 +19,20 @@ import { detectNewUpdates, type ReleasesFetcher, type UpdateComponent } from "./
 import { snapAfterCommentBlock } from "./lib/line-snap";
 // import { commentWidgetPlugin } from "./editor/commentWidget";
 // import { remarginPostProcessor } from "./editor/readingModeProcessor";
+import { CollapseState } from "./state/collapseState";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
+
+/**
+ * Detail payload for the `remargin:focus` event dispatched by
+ * `RemarginPlugin.focusComment`. Subscribed to by `SidebarShell` so a
+ * widget click in either editor surface can scroll + highlight the
+ * matching sidebar card.
+ */
+export interface RemarginFocusDetail {
+  commentId: string;
+  file: string;
+}
 
 export const VIEW_TYPE_REMARGIN = "remargin-sidebar";
 
@@ -163,6 +175,23 @@ export default class RemarginPlugin extends Plugin {
   backend!: RemarginBackend;
 
   /**
+   * Per-session collapse state for editor-side widget comments. Owned by
+   * the plugin so reading mode (T37) and Live Preview (T38) can both
+   * subscribe and stay in sync. Created in `onload`. Reset on plugin
+   * reload — not persisted to plugin data (per-session scope, T36 spec).
+   */
+  collapseState!: CollapseState;
+
+  /**
+   * Plugin-scoped event bus for sidebar-focus requests. `focusComment`
+   * dispatches `remargin:focus` here, and the React `SidebarShell`
+   * subscribes/unsubscribes on mount/unmount. Picked over the workspace
+   * event surface so the bridge does not leak into other plugins'
+   * namespace. Created in `onload`.
+   */
+  focusEvents!: EventTarget;
+
+  /**
    * Most recently focused markdown view. Used as the stable "active editor"
    * that survives clicks into the sidebar. `getActiveViewOfType(MarkdownView)`
    * flips to null the moment the sidebar leaf becomes active, so the `+`
@@ -198,6 +227,13 @@ export default class RemarginPlugin extends Plugin {
     const adapter = this.app.vault.adapter as unknown as { basePath?: string };
     const vaultPath = adapter.basePath ?? "";
     this.backend = new RemarginBackend(this.settings, vaultPath);
+
+    // Pretty-print foundation (T36): per-session collapse store + focus
+    // bus, both consumed by the editor-side widgets shipped in T37/T38.
+    // Created here so reload semantics match the design (state resets
+    // when the plugin reloads).
+    this.collapseState = new CollapseState();
+    this.focusEvents = new EventTarget();
 
     this.addSettingTab(new RemarginSettingTab(this));
 
@@ -458,6 +494,27 @@ export default class RemarginPlugin extends Plugin {
     } else {
       this.pendingRefresh = true;
     }
+  }
+
+  /**
+   * Ask the sidebar to scroll to (and briefly highlight) the matching
+   * comment card. Fires a `remargin:focus` `CustomEvent` on the plugin's
+   * own `focusEvents` bus; `SidebarShell` is the canonical subscriber
+   * and decides whether to switch the active-file filter, scroll, or
+   * silently drop the request. When nothing is subscribed (sidebar
+   * closed, no view mounted) the dispatch is a no-op — no exception,
+   * no console noise — by EventTarget contract.
+   *
+   * Wired in T36; consumed by T37 (reading-mode widget) and T38 (Live
+   * Preview CM6 widget) when a user clicks an editor-side comment
+   * widget.
+   */
+  focusComment(commentId: string, file: string): void {
+    this.focusEvents.dispatchEvent(
+      new CustomEvent<RemarginFocusDetail>("remargin:focus", {
+        detail: { commentId, file },
+      })
+    );
   }
 
   /**

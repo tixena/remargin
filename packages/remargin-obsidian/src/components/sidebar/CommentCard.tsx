@@ -90,7 +90,12 @@ export function CommentCard({
 
   return (
     <div
-      className={`flex flex-col gap-[5px] px-2.5 py-2 border-b border-bg-border hover:bg-bg-hover ${
+      // `data-comment-id` lets the editor-side widget focus bridge
+      // (T36 `plugin.focusComment`) find the right card to scroll into
+      // view + briefly highlight. Empty ids leave the attribute off so
+      // the selector cannot accidentally match unrelated cards.
+      data-comment-id={comment.id || undefined}
+      className={`flex flex-col gap-[5px] px-2.5 py-2 border-b border-bg-border hover:bg-bg-hover remargin-comment-card ${
         depth > 0 ? "border-l-2 border-l-accent" : ""
       } ${isClickable ? "cursor-pointer" : ""}`}
       style={{ paddingLeft: `${10 + depth * 16}px` }}

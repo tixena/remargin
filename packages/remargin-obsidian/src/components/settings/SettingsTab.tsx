@@ -376,6 +376,35 @@ export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabPro
         <Separator />
 
         <SettingsField
+          label="Editor widgets"
+          description="Pretty-print remargin comment blocks in Live Preview and reading mode (read-only)."
+        >
+          <ToggleGroup
+            type="single"
+            value={current.editorWidgets ? "on" : "off"}
+            onValueChange={(value) => {
+              if (value) update("editorWidgets", value === "on");
+            }}
+            className="w-full"
+          >
+            <ToggleGroupItem
+              value="on"
+              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
+            >
+              On
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="off"
+              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
+            >
+              Off
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </SettingsField>
+
+        <Separator />
+
+        <SettingsField
           label="Check for updates"
           description="Once a day on plugin load, check GitHub for newer Remargin plugin or CLI releases. Surfaces a short Notice when a new version appears. Turn this off to disable all outbound network traffic from the update probe."
         >

@@ -29,6 +29,13 @@ export interface RemarginSettings {
    * and after a reset, which forces the next `onload` to fetch.
    */
   updateCheck?: UpdateCheckState;
+  /**
+   * When true, replace remargin fenced blocks in Live Preview and reading
+   * mode with rich, read-only widgets. Editing always still happens in
+   * the sidebar. Default off; opt-in for the first two releases (T37/T38
+   * each gate behind this flag).
+   */
+  editorWidgets: boolean;
 }
 
 export const DEFAULT_SETTINGS: RemarginSettings = {
@@ -43,4 +50,5 @@ export const DEFAULT_SETTINGS: RemarginSettings = {
   sandboxView: "tree",
   inboxView: "tree",
   checkForUpdates: true,
+  editorWidgets: false,
 };

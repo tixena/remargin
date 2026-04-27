@@ -1,16 +1,26 @@
 import { Inbox, Mail, Terminal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReMarginLogo } from "@/components/icons/ReMarginLogo";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type RemarginPlugin from "@/main";
+import type { RemarginFocusDetail } from "@/main";
 import { FilePathHeader } from "./FilePathHeader";
+import { focusCardInRoot } from "./focusCard";
 import { SectionHeader } from "./SectionHeader";
 
 interface SidebarShellProps {
   plugin: RemarginPlugin;
   activeFile?: string;
+  /**
+   * Called when a focus request from the plugin (`focusComment`) targets
+   * a file other than `activeFile`. The parent should switch the active
+   * filter to `file` so the targeted card mounts before the shell
+   * scrolls + highlights it. When omitted, cross-file focus events are
+   * silently ignored — the scroll path still runs but matches nothing.
+   */
+  onFocusFile?: (file: string) => void;
   sandboxCount?: number;
   inboxCount?: number;
   threadPending?: number;
@@ -57,6 +67,7 @@ interface SidebarShellProps {
 export function SidebarShell({
   plugin,
   activeFile,
+  onFocusFile,
   sandboxCount = 0,
   inboxCount = 0,
   threadPending = 0,
@@ -78,9 +89,50 @@ export function SidebarShell({
   const [sandboxOpen, setSandboxOpen] = useState(true);
   const [inboxOpen, setInboxOpen] = useState(true);
   const [threadOpen, setThreadOpen] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Bridge: subscribe to the plugin's `remargin:focus` event bus so a
+  // widget click in the editor (T37 reading-mode / T38 Live Preview)
+  // can scroll the matching sidebar card into view + briefly highlight
+  // it. When the event names a different file, ask the parent to
+  // switch the filter first — the card will mount on the next render
+  // and the scroll runs in the next animation frame.
+  // The `latestFile` ref keeps the listener stable across `activeFile`
+  // changes; without it, every active-file flip would tear down and
+  // re-attach the listener mid-render.
+  const latestFile = useRef(activeFile);
+  latestFile.current = activeFile;
+  useEffect(() => {
+    const target = plugin.focusEvents;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<RemarginFocusDetail>).detail;
+      if (!detail) return;
+      const { commentId, file } = detail;
+      const sameFile = latestFile.current === file;
+      const focus = () => {
+        const root = rootRef.current ?? (typeof document !== "undefined" ? document : null);
+        if (!root) return;
+        focusCardInRoot(root, commentId);
+      };
+      if (sameFile) {
+        focus();
+        return;
+      }
+      // Switch the filter first; defer the scroll so the new card has
+      // a chance to mount under the updated filter. A microtask is the
+      // smallest delay that reliably runs after React re-renders the
+      // section list.
+      onFocusFile?.(file);
+      Promise.resolve().then(focus);
+    };
+    target.addEventListener("remargin:focus", handler);
+    return () => {
+      target.removeEventListener("remargin:focus", handler);
+    };
+  }, [plugin, onFocusFile]);
 
   return (
-    <div className="flex flex-col h-full min-w-0 bg-bg-primary">
+    <div ref={rootRef} className="flex flex-col h-full min-w-0 bg-bg-primary">
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
           <ReMarginLogo size={22} className="text-accent shrink-0" />
