@@ -922,8 +922,10 @@ a2
 #[test]
 fn migrate_done_marker_and_threading_coexist() {
     // Parent has a `[done:DATE]` AND gets an implicit-from-reply ack.
-    // Both acks land on the parent — same author (`legacy-agent` since
-    // no agent config), different timestamps.
+    // Both acks come from the same author (`legacy-agent` since no agent
+    // config). Per rem-gx9v the writer collapses same-identity acks to a
+    // single entry with the latest timestamp, so what survives in the
+    // on-disk doc is one ack, not two.
     let doc = "\
 ```user comments [done:2026-04-05]
 u
@@ -935,12 +937,12 @@ a
     let comments = migrate_open_default(doc);
     assert_eq!(comments.len(), 2);
     let parent = &comments[0];
-    assert_eq!(parent.ack.len(), 2, "two acks expected: [done:] + reply");
-    assert!(parent.ack.iter().all(|a| a.author == "legacy-agent"));
-    assert!(
-        parent.ack[0].ts != parent.ack[1].ts,
-        "the two acks must have distinct timestamps",
+    assert_eq!(
+        parent.ack.len(),
+        1,
+        "writer dedupes same-identity acks to a single entry",
     );
+    assert_eq!(parent.ack[0].author, "legacy-agent");
 }
 
 #[test]

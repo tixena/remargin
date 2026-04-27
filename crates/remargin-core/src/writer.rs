@@ -9,13 +9,13 @@ mod tests;
 
 use core::fmt::Write as _;
 use core::iter::repeat_n;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
-use crate::parser::{self, Comment, ParsedDocument, Segment, required_fence_depth};
+use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
 use crate::reactions::{ReactionsExt as _, format_reaction_entry_block, quote_emoji_key};
 
 /// Filenames the writer refuses to modify under any circumstances.
@@ -65,6 +65,38 @@ impl InsertPosition {
         }
         after_line.map_or(Self::Append, Self::AfterLine)
     }
+}
+
+/// Collapse an ack list to one entry per identity, preserving the latest
+/// timestamp.
+///
+/// Remargin's invariant (see rem-gx9v): every write produces a document
+/// whose `ack:` lists are deduped per identity. Parsed docs may carry
+/// legacy duplicates (older bug accumulated multiple acks for the same
+/// author when an auto-ack fired more than once); writes call this helper
+/// at the serialization boundary so the on-disk bytes are always clean.
+///
+/// Semantics: the first occurrence of each author is kept; if a later
+/// duplicate carries a strictly newer `ts`, that newer timestamp is
+/// promoted onto the surviving entry. This makes `read -> write -> read`
+/// byte-stable on already-deduped docs and self-healing on duped ones.
+/// Cross-identity acks are left alone -- alice + bob ack stays as two
+/// entries.
+#[must_use]
+pub fn dedupe_acks(acks: &[Acknowledgment]) -> Vec<Acknowledgment> {
+    let mut keep: Vec<Acknowledgment> = Vec::with_capacity(acks.len());
+    let mut seen: HashMap<String, usize> = HashMap::with_capacity(acks.len());
+    for ack in acks {
+        if let Some(&idx) = seen.get(&ack.author) {
+            if ack.ts > keep[idx].ts {
+                keep[idx].ts = ack.ts;
+            }
+        } else {
+            seen.insert(ack.author.clone(), keep.len());
+            keep.push(ack.clone());
+        }
+    }
+    keep
 }
 
 /// Return an error if `path`'s basename matches [`FORBIDDEN_TARGETS`].
@@ -129,9 +161,10 @@ pub fn serialize_comment(comment: &Comment) -> String {
             }
         }
     }
-    if !comment.ack.is_empty() {
+    let deduped_ack = dedupe_acks(&comment.ack);
+    if !deduped_ack.is_empty() {
         out.push_str("ack:\n");
-        for ack_entry in &comment.ack {
+        for ack_entry in &deduped_ack {
             let _ = writeln!(
                 out,
                 "  - {}@{}",

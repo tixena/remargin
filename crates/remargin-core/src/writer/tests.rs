@@ -14,7 +14,8 @@ use crate::parser::{self, Acknowledgment, AuthorType, Comment};
 use crate::reactions::{Reactions, ReactionsExt as _};
 
 use super::{
-    InsertPosition, insert_comment, serialize_comment, verify_preservation, write_document,
+    InsertPosition, dedupe_acks, insert_comment, serialize_comment, verify_preservation,
+    write_document,
 };
 
 /// Build a minimal comment for testing.
@@ -563,5 +564,187 @@ fn round_trip_append_code_block_all_comments_preserved() {
     assert_eq!(
         reparsed.find_comment("deep1").unwrap().content,
         code_content
+    );
+}
+
+// rem-gx9v: writer-side ack dedupe invariant. Every write produces a
+// document whose `ack:` lists carry at most one entry per identity, with
+// the latest timestamp. Reads tolerate legacy duplicates so existing
+// on-disk files do not error; writes self-heal them.
+
+fn ack_at(author: &str, ts_rfc3339: &str) -> Acknowledgment {
+    Acknowledgment {
+        author: String::from(author),
+        ts: DateTime::parse_from_rfc3339(ts_rfc3339).unwrap(),
+    }
+}
+
+#[test]
+fn dedupe_acks_keeps_latest_ts_per_identity() {
+    let acks = vec![
+        ack_at("alice", "2026-04-27T05:01:50+00:00"),
+        ack_at("alice", "2026-04-27T05:02:15+00:00"),
+    ];
+    let out = dedupe_acks(&acks);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].author, "alice");
+    assert_eq!(
+        out[0].ts,
+        DateTime::parse_from_rfc3339("2026-04-27T05:02:15+00:00").unwrap(),
+    );
+}
+
+#[test]
+fn dedupe_acks_keeps_first_when_later_ts_is_older() {
+    let acks = vec![
+        ack_at("alice", "2026-04-27T05:02:15+00:00"),
+        ack_at("alice", "2026-04-27T05:01:50+00:00"),
+    ];
+    let out = dedupe_acks(&acks);
+    assert_eq!(out.len(), 1);
+    assert_eq!(
+        out[0].ts,
+        DateTime::parse_from_rfc3339("2026-04-27T05:02:15+00:00").unwrap(),
+        "later-but-older ts must not overwrite the survivor's ts",
+    );
+}
+
+#[test]
+fn dedupe_acks_preserves_cross_identity_entries() {
+    let acks = vec![
+        ack_at("alice", "2026-04-27T05:01:00+00:00"),
+        ack_at("bob", "2026-04-27T05:02:00+00:00"),
+    ];
+    let out = dedupe_acks(&acks);
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].author, "alice");
+    assert_eq!(out[1].author, "bob");
+}
+
+#[test]
+fn dedupe_acks_preserves_first_appearance_order() {
+    let acks = vec![
+        ack_at("bob", "2026-04-27T05:01:00+00:00"),
+        ack_at("alice", "2026-04-27T05:02:00+00:00"),
+        ack_at("bob", "2026-04-27T05:03:00+00:00"),
+    ];
+    let out = dedupe_acks(&acks);
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].author, "bob", "bob entered first, stays first");
+    assert_eq!(out[1].author, "alice");
+}
+
+#[test]
+fn dedupe_acks_empty_input_returns_empty() {
+    let acks: Vec<Acknowledgment> = Vec::new();
+    assert!(dedupe_acks(&acks).is_empty());
+}
+
+#[test]
+fn serialize_comment_collapses_duplicate_acks() {
+    let mut comment = make_comment("dup", "body");
+    comment.ack = vec![
+        ack_at("eduardo-burgos", "2026-04-27T05:01:50+00:00"),
+        ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
+    ];
+    let output = serialize_comment(&comment);
+    let occurrences = output.matches("- eduardo-burgos@").count();
+    assert_eq!(occurrences, 1, "serialized output must collapse duplicates");
+    assert!(
+        output.contains("- eduardo-burgos@2026-04-27T05:02:15+00:00"),
+        "surviving ack must carry the latest ts:\n{output}"
+    );
+}
+
+/// Build a minimal parsed document containing one comment whose ack
+/// list carries a same-identity duplicate. The comment is built via
+/// `serialize_comment` and the rest of the document is plain markdown
+/// — but we reach in via `&mut` to inject the duplicate that the
+/// writer would never emit. The point is to drive the writer-side
+/// dedupe path with a doc that LOOKS like one parsed off-disk from a
+/// pre-fix file.
+fn doc_with_duplicate_acks() -> parser::ParsedDocument {
+    let mut comment = make_comment("dup", "body");
+    comment.ack = vec![
+        ack_at("eduardo-burgos", "2026-04-27T05:01:50+00:00"),
+        ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
+    ];
+    let serialized = serialize_comment(&comment);
+    // After serialization the ack is already deduped; manually splice
+    // the duplicate back in by re-parsing then mutating in-memory.
+    let mut doc = parser::parse(&serialized).unwrap();
+    let segments = &mut doc.segments;
+    for seg in segments.iter_mut() {
+        if let parser::Segment::Comment(cm) = seg {
+            cm.ack = vec![
+                ack_at("eduardo-burgos", "2026-04-27T05:01:50+00:00"),
+                ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
+            ];
+        }
+    }
+    doc
+}
+
+#[test]
+fn write_document_self_heals_legacy_duplicate_acks() {
+    let system = MockSystem::new().with_dir(Path::new("/docs")).unwrap();
+    let path = Path::new("/docs/dup.md");
+    let doc = doc_with_duplicate_acks();
+    let empty: HashSet<String> = HashSet::new();
+    write_document(&system, path, &doc, &empty, &empty).unwrap();
+    let written = system.read_to_string(path).unwrap();
+    let occurrences = written.matches("- eduardo-burgos@").count();
+    assert_eq!(
+        occurrences, 1,
+        "write_document must collapse duplicate acks before bytes hit disk:\n{written}",
+    );
+    assert!(
+        written.contains("- eduardo-burgos@2026-04-27T05:02:15+00:00"),
+        "survivor must carry the latest ts:\n{written}",
+    );
+}
+
+#[test]
+fn write_then_reparse_then_write_is_byte_stable_for_duped_input() {
+    // Round-trip self-heal scenario: the first write deduplicates, the
+    // second is byte-identical because the input is already clean.
+    let system = MockSystem::new().with_dir(Path::new("/docs")).unwrap();
+    let path = Path::new("/docs/rt.md");
+    let doc = doc_with_duplicate_acks();
+    let empty: HashSet<String> = HashSet::new();
+    write_document(&system, path, &doc, &empty, &empty).unwrap();
+    let first = system.read_to_string(path).unwrap();
+
+    let reparsed = parser::parse(&first).unwrap();
+    write_document(&system, path, &reparsed, &empty, &empty).unwrap();
+    let second = system.read_to_string(path).unwrap();
+
+    assert_eq!(first, second, "second write must be byte-identical");
+}
+
+#[test]
+fn parse_tolerates_legacy_duplicate_acks_on_disk() {
+    // A pre-fix on-disk doc carries duplicate acks. Reads must succeed.
+    let raw = "\
+```remargin
+---
+id: legacy
+author: testuser
+type: human
+ts: 2026-04-06T14:32:00-04:00
+ack:
+  - eduardo-burgos@2026-04-27T05:01:50+00:00
+  - eduardo-burgos@2026-04-27T05:02:15+00:00
+checksum: sha256:abc
+---
+body
+```
+";
+    let doc = parser::parse(raw).unwrap();
+    let cm = doc.find_comment("legacy").unwrap();
+    assert_eq!(
+        cm.ack.len(),
+        2,
+        "parse preserves legacy duplicates verbatim; dedupe is a write-side concern",
     );
 }

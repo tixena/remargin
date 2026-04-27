@@ -1430,6 +1430,63 @@ fn auto_ack_on_reply() {
 }
 
 #[test]
+fn auto_ack_reply_delete_reply_does_not_double_ack_parent() {
+    // rem-gx9v reproduction: a reply auto-acks the parent; deleting the
+    // reply leaves the parent's ack in place; replying a second time
+    // would historically push a second ack from the same author. The
+    // writer-side dedupe collapses to one entry.
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let reply_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: true,
+            content: "first reply",
+            position: &position,
+            remargin_kind: &[],
+            reply_to: Some("abc"),
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    delete_comments(&system, Path::new("/docs/test.md"), &config, &[&reply_id]).unwrap();
+
+    let _second_reply = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: true,
+            content: "second reply",
+            position: &position,
+            remargin_kind: &[],
+            reply_to: Some("abc"),
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert_eq!(
+        parent.ack.len(),
+        1,
+        "auto-ack must not accumulate duplicate entries for the same identity",
+    );
+    assert_eq!(parent.ack[0].author, "eduardo");
+}
+
+#[test]
 fn auto_ack_preserves_reply_to() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();

@@ -18,6 +18,7 @@ use crate::kind::validate_kinds;
 use crate::reactions::{
     ReactionEntry, Reactions, ReactionsExt as _, format_reaction_entry_block, quote_emoji_key,
 };
+use crate::writer::dedupe_acks;
 
 /// An acknowledgment of a comment by another participant.
 #[derive(Debug, Clone, Serialize)]
@@ -390,9 +391,18 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
             }
         }
     }
-    if !cm.ack.is_empty() {
+    // Writer-side dedupe (rem-gx9v): the on-disk ack list always carries
+    // at most one entry per identity, with the latest timestamp. The
+    // helper lives in `crate::writer` because every public write path
+    // funnels through it (`writer::write_document` and the sandbox/purge
+    // closures all call `to_markdown`); this is the single serialization
+    // boundary that pins the invariant. Reads tolerate duped legacy data:
+    // `parse` accepts whatever YAML emits, but no remargin write ever
+    // emits duplicates, so any unrelated edit self-heals the file.
+    let deduped_ack = dedupe_acks(&cm.ack);
+    if !deduped_ack.is_empty() {
         out.push_str("ack:\n");
-        for ack_entry in &cm.ack {
+        for ack_entry in &deduped_ack {
             let _ = writeln!(
                 out,
                 "  - {}@{}",
