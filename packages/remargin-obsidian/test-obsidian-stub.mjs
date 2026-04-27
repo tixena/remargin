@@ -88,8 +88,12 @@ export class ItemView {
 }
 export class MarkdownView {}
 export class MarkdownRenderChild {
-  constructor() {
-    /* obsidian-module no-op stub */
+  // Real Obsidian's MarkdownRenderChild stashes its host element on
+  // `this.containerEl` so subclasses can mount React roots into it
+  // during `onload()`. T37's `ReadingModeCommentChild` relies on this
+  // — keep the behaviour parity in the test stub.
+  constructor(containerEl) {
+    this.containerEl = containerEl;
   }
 }
 export class PluginSettingTab {

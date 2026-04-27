@@ -85,13 +85,16 @@ export async function load(url, context, nextLoad) {
     });
     return { format: "module", shortCircuit: true, source: code };
   }
-  // Selectively transpile `.ts` files that use parameter-property
-  // constructor syntax — node's strip-only TS loader rejects them.
-  // Cheapest signal short of parsing: a `constructor(...)` declaration
-  // with a `private` / `public` / `protected` / `readonly` parameter.
+  // Selectively transpile `.ts` files that use TypeScript syntax
+  // node's strip-only loader rejects:
+  //   - Parameter-property constructors (`constructor(private foo: T)`)
+  //   - `const enum` declarations
+  // Cheapest signal short of parsing: regex match on either pattern.
   if (url.endsWith(".ts") && url.startsWith("file:")) {
     const source = await readFile(new URL(url), "utf8");
-    if (/constructor\s*\([^)]*(private|public|protected|readonly)\b/.test(source)) {
+    const hasParamProps = /constructor\s*\([^)]*(private|public|protected|readonly)\b/.test(source);
+    const hasConstEnum = /\bconst\s+enum\s+\w/.test(source);
+    if (hasParamProps || hasConstEnum) {
       const { code } = await esbuild.transform(source, {
         loader: "ts",
         format: "esm",

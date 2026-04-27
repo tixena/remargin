@@ -12,13 +12,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { RemarginBackend } from "./backend";
 import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
+// import { commentWidgetPlugin } from "./editor/commentWidget";
+import { remarginPostProcessor } from "./editor/readingModeProcessor";
 import { BackendContext } from "./hooks/useBackend";
 import { PluginContext } from "./hooks/usePlugin";
 import { PortalContainerContext } from "./hooks/usePortalContainer";
 import { detectNewUpdates, type ReleasesFetcher, type UpdateComponent } from "./lib/githubReleases";
 import { snapAfterCommentBlock } from "./lib/line-snap";
-// import { commentWidgetPlugin } from "./editor/commentWidget";
-// import { remarginPostProcessor } from "./editor/readingModeProcessor";
 import { CollapseState } from "./state/collapseState";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
@@ -238,7 +238,11 @@ export default class RemarginPlugin extends Plugin {
     this.addSettingTab(new RemarginSettingTab(this));
 
     // this.registerEditorExtension([commentWidgetPlugin]);
-    // this.registerMarkdownPostProcessor(remarginPostProcessor);
+    // T37: pretty-print reading-mode widget. The post-processor reads
+    // `settings.editorWidgets` on every render call, so toggling the
+    // setting at runtime takes effect on the next render — no need to
+    // re-register.
+    this.registerMarkdownPostProcessor(remarginPostProcessor(this));
 
     this.registerView(VIEW_TYPE_REMARGIN, (leaf) => new RemarginView(leaf, this));
 
