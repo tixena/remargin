@@ -38,6 +38,7 @@ use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams}
 use crate::operations::sign::SignSelection;
 use crate::operations::verify::{VerifyReport, verify_document};
 use crate::parser::{self, ParsedDocument};
+use crate::permissions::restrict::{RestrictArgs, RestrictEntryProjection};
 
 /// Serialization-friendly mirror of one row of a [`VerifyReport`].
 ///
@@ -176,6 +177,12 @@ pub struct PlanReport {
     /// Partition of comment ids across the projection. See
     /// [`CommentDiff`].
     pub comments: CommentDiff,
+    /// Config-mutation projection for non-Markdown ops (`restrict`,
+    /// future `unprotect`). `None` for every Markdown op — the
+    /// document-level fields above describe those projections.
+    /// rem-puy5 wires `restrict`; future ops slot here too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_diff: Option<ConfigPlanDiff>,
     /// Which identity the plan was computed under. `would_sign` reports
     /// whether signing would succeed without actually invoking the key.
     pub identity: PlanIdentity,
@@ -194,6 +201,164 @@ pub struct PlanReport {
     /// Aggregate verdict: `true` when the op would land successfully
     /// under the current mode and invariants.
     pub would_commit: bool,
+}
+
+/// Per-file projection emitted by the `plan restrict` op (rem-puy5).
+///
+/// `restrict` is a sanctioned config write that touches four files in
+/// one go: `<anchor>/.remargin.yaml`, the project + user-scope
+/// `.claude/settings(.local).json`, and the
+/// `.claude/.remargin-restrictions.json` sidecar. This struct names
+/// every file, every entry that would be added vs. left alone, and
+/// every detectable conflict, so callers can preview the full mutation
+/// before committing.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct ConfigPlanDiff {
+    /// Canonical absolute restricted path. For the wildcard form,
+    /// this is the anchor root.
+    pub absolute_path: PathBuf,
+    /// `.claude/`-bearing ancestor that anchors the write.
+    pub anchor: PathBuf,
+    /// Detected conflicts. Empty when the projection is clean.
+    /// Conflicts are advisory: `would_commit` stays `true` so the
+    /// caller can apply anyway with full information.
+    pub conflicts: Vec<ConfigConflict>,
+    /// What would happen to `<anchor>/.remargin.yaml`.
+    pub remargin_yaml: RemarginYamlDiff,
+    /// One entry per settings file the synchronizer would touch
+    /// (project-scope first, user-scope second when both are passed).
+    pub settings_files: Vec<SettingsFileDiff>,
+    /// Sidecar projection.
+    pub sidecar: SidecarDiff,
+}
+
+/// Projection of the `<anchor>/.remargin.yaml` write performed by
+/// `restrict`.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct RemarginYamlDiff {
+    /// What the projection would do to the `permissions.restrict`
+    /// entry list: append, overwrite the existing entry for this
+    /// path, or report a noop because the existing entry already
+    /// matches.
+    pub entry_action: EntryAction,
+    /// Resolved on-disk path of the YAML file.
+    pub path: PathBuf,
+    /// On-disk entry that would be replaced. `None` when no existing
+    /// entry matches the projected path. Always populated when
+    /// `entry_action == Updated` so the user can see the full delta;
+    /// also populated when `entry_action == Noop` to make the
+    /// "matches existing" case unambiguous.
+    pub previous_entry: Option<RestrictEntryProjection>,
+    /// Entry that would be written into
+    /// `permissions.restrict`. `None` only on the noop path when there
+    /// is somehow no projected entry to record.
+    pub projected_entry: Option<RestrictEntryProjection>,
+    /// `true` when the YAML file does not exist on disk.
+    pub will_be_created: bool,
+}
+
+/// Projection of one Claude settings file
+/// (`.claude/settings.local.json` for the project scope or
+/// `~/.claude/settings.json` for the user scope) that
+/// `restrict` would write into.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct SettingsFileDiff {
+    /// Allow rules already in `permissions.allow` — the synchronizer
+    /// would skip these.
+    pub allow_rules_already_present: Vec<String>,
+    /// Allow rules the synchronizer would append to
+    /// `permissions.allow`.
+    pub allow_rules_to_add: Vec<String>,
+    /// Deny rules already in `permissions.deny` — the synchronizer
+    /// would skip these.
+    pub deny_rules_already_present: Vec<String>,
+    /// Deny rules the synchronizer would append to
+    /// `permissions.deny`.
+    pub deny_rules_to_add: Vec<String>,
+    /// Resolved on-disk path of the settings file.
+    pub path: PathBuf,
+    /// `true` when the file does not currently exist (the synchronizer
+    /// would create it).
+    pub will_be_created: bool,
+}
+
+/// Projection of `<anchor>/.claude/.remargin-restrictions.json`.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct SidecarDiff {
+    /// What the projection would do to the entry under
+    /// `entries[<absolute_path>]`: append, replace the existing entry,
+    /// or noop because the existing entry already matches.
+    pub entry_action: EntryAction,
+    /// Resolved on-disk path of the sidecar.
+    pub path: PathBuf,
+    /// `true` when the sidecar file does not currently exist.
+    pub will_be_created: bool,
+}
+
+/// Detectable conflict surfaced in [`ConfigPlanDiff::conflicts`].
+///
+/// All variants are advisory — a non-empty `conflicts` array does
+/// not flip `would_commit` to false. Callers decide whether to apply
+/// the projection anyway. Strict / fail-closed modes can branch on
+/// the variant in a wrapper.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ConfigConflict {
+    /// An existing rule in `permissions.allow` exactly matches a rule
+    /// the projection would add to `permissions.deny` in the same
+    /// settings file. The motivating bug for rem-puy5 — Claude's
+    /// settings semantics resolve allow-vs-deny in ways the user may
+    /// not expect, so the conflict is surfaced for review before
+    /// committing.
+    AllowDenyOverlap {
+        /// Existing allow rule string.
+        allow_rule: String,
+        /// Projected deny rule string.
+        projected_deny_rule: String,
+        /// Settings file the conflict was detected in.
+        settings_file: PathBuf,
+    },
+    /// `find_claude_anchor` walked above the caller's `cwd` to find a
+    /// `.claude/`-bearing ancestor. Surfaced because realm boundaries
+    /// have surprised users in the past — the agent thought it was
+    /// restricting `~/.local/realm/secret` but the anchor was actually
+    /// `~/`.
+    AnchorIsAncestor {
+        /// Anchor `find_claude_anchor` resolved to.
+        anchor: PathBuf,
+        /// Caller's `cwd` (canonicalized).
+        cwd: PathBuf,
+    },
+    /// `permissions.restrict` already has an entry for the same path
+    /// but with different `also_deny_bash` / `cli_allowed`. Surfaced
+    /// because the live op silently overwrites (rem-yj1j.5 / rem-aqnn).
+    YamlEntryWouldChange {
+        /// On-disk path of the existing entry.
+        path: String,
+        /// Snapshot of the existing entry.
+        previous: RestrictEntryProjection,
+        /// Snapshot of the entry the projection would write.
+        projected: RestrictEntryProjection,
+    },
+}
+
+/// What [`RemarginYamlDiff`] / [`SidecarDiff`] would do to its target
+/// entry. Mirrors a write-versus-skip decision.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EntryAction {
+    /// New entry would be appended.
+    Added,
+    /// Existing entry already matches the projection. No write.
+    Noop,
+    /// Existing entry would be replaced.
+    Updated,
 }
 
 /// A `plan` request for a single mutating op, normalized so CLI + MCP
@@ -252,6 +417,19 @@ pub enum PlanRequest<'req> {
         /// `true` to remove the reaction; `false` to add.
         remove: bool,
     },
+    /// `plan restrict` — projects a config-mutation `restrict` op
+    /// (rem-puy5). Unlike the document plans above, this variant
+    /// produces a [`ConfigPlanDiff`] in [`PlanReport::config_diff`]
+    /// describing every file the live op would touch.
+    Restrict {
+        /// Caller's working directory; used for anchor discovery.
+        cwd: PathBuf,
+        /// Restrict args (`path`, `also_deny_bash`, `cli_allowed`).
+        args: RestrictArgs,
+        /// Settings files the synchronizer would write into. Adapters
+        /// resolve project + user scope before dispatch.
+        settings_files: Vec<PathBuf>,
+    },
     /// `plan sandbox-add` — projects staging the file in the caller's sandbox.
     SandboxAdd { path: PathBuf },
     /// `plan sandbox-remove` — projects unstaging the file from the caller's sandbox.
@@ -295,6 +473,7 @@ impl PlanRequest<'_> {
             Self::Migrate { .. } => "migrate",
             Self::Purge { .. } => "purge",
             Self::React { .. } => "react",
+            Self::Restrict { .. } => "restrict",
             Self::SandboxAdd { .. } => "sandbox-add",
             Self::SandboxRemove { .. } => "sandbox-remove",
             Self::Sign { .. } => "sign",
@@ -347,6 +526,7 @@ pub fn project_report(
         checksum_after,
         checksum_before,
         comments,
+        config_diff: None,
         identity,
         noop,
         op: String::from(op_label),
@@ -419,6 +599,11 @@ pub fn dispatch(
                 projections::project_react(system, path, cfg, id, emoji, *remove)?;
             Ok(project_report(label, &before, &after, cfg, identity))
         }
+        PlanRequest::Restrict {
+            cwd,
+            args,
+            settings_files,
+        } => dispatch_restrict(system, cfg, identity, cwd, args, settings_files),
         PlanRequest::SandboxAdd { path } => {
             let (before, after) = projections::project_sandbox_add(system, path, cfg)?;
             Ok(project_report(label, &before, &after, cfg, identity))
@@ -440,6 +625,48 @@ pub fn dispatch(
             dispatch_write_projection(&projection, cfg, identity)
         }
     }
+}
+
+/// Build a [`PlanReport`] from the `restrict` projection's verdict
+/// (rem-puy5). Mirrors [`dispatch_write_projection`]'s handling of the
+/// document `Unsupported` arm: a hard reject from
+/// [`projections::project_restrict`] flips `would_commit` to false and
+/// surfaces the carried reason verbatim.
+fn dispatch_restrict(
+    system: &dyn System,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+    cwd: &Path,
+    args: &RestrictArgs,
+    settings_files: &[PathBuf],
+) -> Result<PlanReport> {
+    let projection = projections::restrict::project_restrict(system, cwd, args, settings_files)?;
+    let empty = parser::parse("").context("parsing empty before-document for plan restrict")?;
+    let mut report = project_report("restrict", &empty, &empty, cfg, identity);
+    match projection {
+        projections::restrict::RestrictProjection::Diff(diff) => {
+            report.noop = is_diff_noop(&diff);
+            report.config_diff = Some(*diff);
+        }
+        projections::restrict::RestrictProjection::Reject(reason) => {
+            report.reject_reason = Some(reason);
+            report.would_commit = false;
+        }
+    }
+    Ok(report)
+}
+
+/// Decide whether a [`ConfigPlanDiff`] amounts to a noop. True when
+/// every per-file projection reports `entry_action == Noop` and no
+/// rule would be added to any settings file. Conflicts do not flip
+/// the noop verdict — they're advisory.
+fn is_diff_noop(diff: &ConfigPlanDiff) -> bool {
+    let yaml_noop = matches!(diff.remargin_yaml.entry_action, EntryAction::Noop);
+    let sidecar_noop = matches!(diff.sidecar.entry_action, EntryAction::Noop);
+    let settings_noop = diff.settings_files.iter().all(|sf| {
+        sf.allow_rules_to_add.is_empty() && sf.deny_rules_to_add.is_empty() && !sf.will_be_created
+    });
+    yaml_noop && sidecar_noop && settings_noop
 }
 
 /// Convert a [`WriteProjection`] into a [`PlanReport`]. Shared by every

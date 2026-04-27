@@ -432,12 +432,20 @@ fn desc_migrate() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. All ops are wired: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write.",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. Config ops: restrict (rem-puy5) - surfaces a `config_diff` describing every settings/YAML/sidecar file the live op would touch, plus detected conflicts.",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | sandbox-add | sandbox-remove | sign | write" },
-                "file": { "type": "string", "description": "Path to the document (required for wired ops)" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | restrict | sandbox-add | sandbox-remove | sign | write" },
+                "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
+                "path": { "type": "string", "description": "For restrict: subpath to restrict (or `*` for realm-wide)." },
+                "also_deny_bash": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "For restrict: extra Bash commands to deny on the path."
+                },
+                "cli_allowed": { "type": "boolean", "description": "For restrict: allow `Bash(remargin *)` so the CLI stays usable.", "default": false },
+                "user_settings": { "type": "string", "description": "For restrict: explicit user-scope settings path (defaults to `~/.claude/settings.json`)." },
                 "ids": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -1826,6 +1834,7 @@ fn handle_plan(
         "purge" => plan_ops::PlanRequest::Purge {
             path: base_dir.join(required_str(params, "file")?),
         },
+        "restrict" => build_plan_restrict_request(system, base_dir, params)?,
         "sandbox-add" => plan_ops::PlanRequest::SandboxAdd {
             path: base_dir.join(required_str(params, "file")?),
         },
@@ -1882,6 +1891,42 @@ fn parse_plan_batch_ops(params: &Map<String, Value>) -> Result<Vec<projections::
         ops.push(projections::ProjectBatchOp::from_json_object(obj, idx)?);
     }
     Ok(ops)
+}
+
+/// Translate `plan op="restrict"` MCP params into a
+/// [`plan_ops::PlanRequest::Restrict`] (rem-puy5). Pulled out so
+/// `handle_plan` stays under the adapter LOC cap (rem-wpq).
+///
+/// Anchor-walk failure surfaces via the projection's reject path
+/// rather than bailing here — the dispatcher synthesizes a report
+/// with `would_commit = false` and a populated `reject_reason`.
+fn build_plan_restrict_request<'req>(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<plan_ops::PlanRequest<'req>> {
+    let path_str = required_str(params, "path")?;
+    let cli_allowed = optional_bool(params, "cli_allowed");
+    let also_deny_bash = string_array(params, "also_deny_bash");
+    let user_scope = match optional_str(params, "user_settings") {
+        Some(explicit) => PathBuf::from(explicit),
+        None => expand_path(system, "~/.claude/settings.json")
+            .context("expanding default ~/.claude/settings.json")?,
+    };
+    let project_scope = permissions_restrict::find_claude_anchor(system, base_dir).map_or_else(
+        |_err| base_dir.join(".claude/settings.local.json"),
+        |anchor| anchor.join(".claude/settings.local.json"),
+    );
+    let restrict_args = permissions_restrict::RestrictArgs::new(
+        String::from(path_str),
+        also_deny_bash,
+        cli_allowed,
+    );
+    Ok(plan_ops::PlanRequest::Restrict {
+        args: restrict_args,
+        cwd: base_dir.to_path_buf(),
+        settings_files: vec![project_scope, user_scope],
+    })
 }
 
 /// Parse the `lines` field of a `plan.write` request into a

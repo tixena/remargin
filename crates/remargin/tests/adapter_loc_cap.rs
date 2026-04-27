@@ -74,8 +74,8 @@ mod tests {
         m.insert(
             "cmd_plan",
             (
-                155_usize,
-                "consolidated PlanAction -> PlanRequest match (plan migrate resolves two per-role configs inline)",
+                195_usize,
+                "consolidated PlanAction -> PlanRequest match (plan migrate resolves two per-role configs inline; plan restrict resolves anchor + user/project settings inline, rem-puy5)",
             ),
         );
         // CLI: sandbox top-level command dispatches across four

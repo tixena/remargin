@@ -126,6 +126,42 @@ pub struct RuleSet {
     pub deny: Vec<String>,
 }
 
+/// Per-settings-file projection of [`apply_rules`].
+///
+/// Reports the rules that would be appended vs. the rules already
+/// present, plus whether the file itself would be created. Pure
+/// analysis: no writes. Built by [`simulate_apply_rules`] and
+/// consumed by both the live apply path (which uses the
+/// `to_add` / `already_present` split for diagnostics) and the
+/// `plan restrict` projection (rem-puy5).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SettingsFileSim {
+    /// Allow rules (subset of [`RuleSet::allow`]) already present in
+    /// the settings file's `permissions.allow` array.
+    pub allow_rules_already_present: Vec<String>,
+    /// Allow rules (subset of [`RuleSet::allow`]) that would be
+    /// appended.
+    pub allow_rules_to_add: Vec<String>,
+    /// Deny rules (subset of [`RuleSet::deny`]) already present in
+    /// the settings file's `permissions.deny` array.
+    pub deny_rules_already_present: Vec<String>,
+    /// Deny rules (subset of [`RuleSet::deny`]) that would be
+    /// appended.
+    pub deny_rules_to_add: Vec<String>,
+    /// Allow rules already in the settings file's `permissions.allow`
+    /// array regardless of whether the projection touches them. Used
+    /// by the conflict detector to surface allow-vs-deny overlap.
+    pub existing_allow_rules: Vec<String>,
+    /// Deny rules already in the settings file's `permissions.deny`
+    /// array regardless of whether the projection touches them.
+    pub existing_deny_rules: Vec<String>,
+    /// Settings file path the simulation reports on.
+    pub path: PathBuf,
+    /// `true` when the settings file does not exist on disk.
+    pub will_be_created: bool,
+}
+
 /// Compute the rule set for one resolved restrict entry.
 ///
 /// Pure: no filesystem access. The caller must pass the realm anchor
@@ -193,6 +229,90 @@ pub fn rules_for(
     }
 
     RuleSet { allow, deny }
+}
+
+/// Pure projection of [`apply_rules`]. Per file in `settings_files`,
+/// reports which rules in `rules` would be appended vs. left alone.
+/// Does not mutate disk.
+///
+/// The live [`apply_rules`] path runs this same simulator so the
+/// projection reflects the exact set of writes the live path would
+/// produce.
+///
+/// # Errors
+///
+/// Settings-file read / parse failures (the writer's failure modes
+/// are intentionally not exercised here).
+pub fn simulate_apply_rules(
+    system: &dyn System,
+    settings_files: &[PathBuf],
+    rules: &RuleSet,
+) -> Result<Vec<SettingsFileSim>> {
+    let mut sims: Vec<SettingsFileSim> = Vec::with_capacity(settings_files.len());
+    for settings_file in settings_files {
+        sims.push(simulate_settings_file(system, settings_file, rules)?);
+    }
+    Ok(sims)
+}
+
+fn simulate_settings_file(
+    system: &dyn System,
+    settings_file: &Path,
+    rules: &RuleSet,
+) -> Result<SettingsFileSim> {
+    let body_opt = system.read_to_string(settings_file).ok();
+    let will_be_created = body_opt.is_none();
+    let body = body_opt.unwrap_or_default();
+    let value: Value = if body.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str(&body)
+            .with_context(|| format!("parsing settings JSON at {}", settings_file.display()))?
+    };
+    let existing_deny = read_permission_array(&value, "deny");
+    let existing_allow = read_permission_array(&value, "allow");
+
+    let (deny_rules_already_present, deny_rules_to_add) =
+        partition_rules(&rules.deny, &existing_deny);
+    let (allow_rules_already_present, allow_rules_to_add) =
+        partition_rules(&rules.allow, &existing_allow);
+
+    Ok(SettingsFileSim {
+        allow_rules_already_present,
+        allow_rules_to_add,
+        deny_rules_already_present,
+        deny_rules_to_add,
+        existing_allow_rules: existing_allow,
+        existing_deny_rules: existing_deny,
+        path: settings_file.to_path_buf(),
+        will_be_created,
+    })
+}
+
+fn partition_rules(rules: &[String], existing: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut already: Vec<String> = Vec::new();
+    let mut to_add: Vec<String> = Vec::new();
+    for rule in rules {
+        if existing.iter().any(|e| e == rule) {
+            already.push(rule.clone());
+        } else {
+            to_add.push(rule.clone());
+        }
+    }
+    (already, to_add)
+}
+
+fn read_permission_array(value: &Value, key: &str) -> Vec<String> {
+    let Some(permissions) = value.get("permissions").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some(array) = permissions.get(key).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect()
 }
 
 /// Apply `rules` to every settings file in `settings_files`, updating

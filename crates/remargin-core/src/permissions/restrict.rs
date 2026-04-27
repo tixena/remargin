@@ -80,6 +80,47 @@ impl RestrictArgs {
     }
 }
 
+/// What [`simulate_upsert_remargin_yaml`] would do to the YAML file's
+/// `permissions.restrict` entry list.
+///
+/// The "simulate" half of the upsert path: pure analysis, no writes.
+/// The "commit" half is [`commit_upsert_remargin_yaml`], which simply
+/// persists the projected body via [`write_remargin_yaml`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RemarginYamlSim {
+    /// On-disk entry that would be replaced. `None` when there is no
+    /// existing entry for `path_on_disk` (i.e. the new entry is being
+    /// appended) or when the existing entry is already byte-identical
+    /// to the projected one.
+    pub previous_entry: Option<RestrictEntryProjection>,
+    /// Projected serialized YAML body. The live caller writes this
+    /// verbatim; the projection caller discards it.
+    pub projected_body: String,
+    /// `true` when `<anchor>/.remargin.yaml` does not exist.
+    pub will_be_created: bool,
+    /// `true` when the projected body is byte-identical to the body
+    /// already on disk (i.e. the upsert would be a no-op).
+    pub would_be_noop: bool,
+}
+
+/// Snapshot of one `permissions.restrict` entry, parsed back from the
+/// on-disk YAML.
+///
+/// Used by [`simulate_upsert_remargin_yaml`] (and the `plan restrict`
+/// projection in [`crate::operations::projections`]) to describe an
+/// existing entry that would be overwritten.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[non_exhaustive]
+pub struct RestrictEntryProjection {
+    /// `also_deny_bash` from the on-disk entry. Empty when absent.
+    pub also_deny_bash: Vec<String>,
+    /// `cli_allowed` from the on-disk entry. `false` when absent.
+    pub cli_allowed: bool,
+    /// `path` field from the on-disk entry.
+    pub path: String,
+}
+
 /// Description of what [`restrict`] mutated. Returned to the caller
 /// (CLI prints a human summary; MCP returns the JSON form) so the
 /// user can see exactly which files were touched.
@@ -296,16 +337,30 @@ fn read_allow_dot_folders(system: &dyn System, anchor: &Path) -> Result<Vec<Stri
         .collect())
 }
 
-/// Read `<anchor>/.remargin.yaml`, append-or-merge the restrict
-/// entry, and persist via [`write_remargin_yaml`].
-fn upsert_remargin_yaml(
+/// Pure projection of [`upsert_remargin_yaml`]: read the YAML file,
+/// produce the body the live op would write, and report what would
+/// change. Does not touch disk except for the read.
+///
+/// Shared by the live `restrict` path (which forwards
+/// `projected_body` to [`commit_upsert_remargin_yaml`]) and the
+/// `plan restrict` projection (which discards the body and inspects
+/// the rest of the report).
+///
+/// # Errors
+///
+/// I/O / parse failures from reading the file or interpreting the
+/// existing YAML shape (root mapping, `permissions` mapping,
+/// `permissions.restrict` sequence).
+pub fn simulate_upsert_remargin_yaml(
     system: &dyn System,
     anchor: &Path,
     path_on_disk: &str,
     args: &RestrictArgs,
-) -> Result<bool> {
+) -> Result<RemarginYamlSim> {
     let yaml_path = anchor.join(".remargin.yaml");
     let existing = system.read_to_string(&yaml_path).ok();
+    let will_be_created = existing.is_none();
+    let existing_body = existing.clone().unwrap_or_default();
     let mut value: Value = match existing.as_deref() {
         Some(body) if !body.trim().is_empty() => serde_yaml::from_str(body)
             .with_context(|| format!("parsing existing {}", yaml_path.display()))?,
@@ -338,6 +393,10 @@ fn upsert_remargin_yaml(
             .is_some_and(|p| p == path_on_disk)
     });
 
+    let previous_entry = already
+        .and_then(|idx| restrict_seq.get(idx))
+        .map(|entry| read_restrict_entry(entry, path_on_disk));
+
     let mut entry_map = Mapping::new();
     entry_map.insert(
         Value::String(String::from("path")),
@@ -368,6 +427,77 @@ fn upsert_remargin_yaml(
         restrict_seq.push(new_entry);
     }
 
-    let body = serde_yaml::to_string(&value).context("serializing updated .remargin.yaml")?;
-    write_remargin_yaml(system, anchor, &body)
+    let projected_body =
+        serde_yaml::to_string(&value).context("serializing updated .remargin.yaml")?;
+    let would_be_noop = !will_be_created && projected_body == existing_body;
+
+    Ok(RemarginYamlSim {
+        previous_entry,
+        projected_body,
+        will_be_created,
+        would_be_noop,
+    })
+}
+
+/// Persist the YAML body produced by [`simulate_upsert_remargin_yaml`].
+///
+/// Sanctioned write that bypasses the rem-is4z agent guard. Returns
+/// `true` when the file did not exist before this call.
+///
+/// # Errors
+///
+/// I/O failures from writing the file.
+pub fn commit_upsert_remargin_yaml(
+    system: &dyn System,
+    anchor: &Path,
+    sim: &RemarginYamlSim,
+) -> Result<bool> {
+    write_remargin_yaml(system, anchor, &sim.projected_body)
+}
+
+/// Decode one YAML mapping entry from `permissions.restrict` into
+/// the structured projection used by simulation outputs and conflict
+/// detectors.
+fn read_restrict_entry(entry: &Value, fallback_path: &str) -> RestrictEntryProjection {
+    let mapping = entry.as_mapping();
+    let path = mapping
+        .and_then(|m| m.get(Value::String(String::from("path"))))
+        .and_then(Value::as_str)
+        .map_or_else(|| String::from(fallback_path), String::from);
+    let also_deny_bash = mapping
+        .and_then(|m| m.get(Value::String(String::from("also_deny_bash"))))
+        .and_then(Value::as_sequence)
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let cli_allowed = mapping
+        .and_then(|m| m.get(Value::String(String::from("cli_allowed"))))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    RestrictEntryProjection {
+        also_deny_bash,
+        cli_allowed,
+        path,
+    }
+}
+
+/// Read `<anchor>/.remargin.yaml`, append-or-merge the restrict
+/// entry, and persist via [`write_remargin_yaml`].
+///
+/// Implementation: thin wrapper that runs
+/// [`simulate_upsert_remargin_yaml`] for the merge logic and then
+/// commits the projected body via [`commit_upsert_remargin_yaml`].
+/// Both the live op and the `plan restrict` projection walk through
+/// the same simulator so the two paths cannot drift.
+fn upsert_remargin_yaml(
+    system: &dyn System,
+    anchor: &Path,
+    path_on_disk: &str,
+    args: &RestrictArgs,
+) -> Result<bool> {
+    let sim = simulate_upsert_remargin_yaml(system, anchor, path_on_disk, args)?;
+    commit_upsert_remargin_yaml(system, anchor, &sim)
 }

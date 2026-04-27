@@ -942,6 +942,34 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
+    /// Project a `restrict` op (rem-puy5).
+    ///
+    /// Mirrors `remargin restrict` arg-for-arg: the projection
+    /// describes every file the live op would touch
+    /// (`.remargin.yaml`, project + user settings, sidecar) plus
+    /// any detectable conflicts (allow-vs-deny overlap, anchor
+    /// surprise, YAML entry shape change). No flags are consumed
+    /// or written.
+    Restrict {
+        /// Subpath relative to the anchor, OR the literal `*` for
+        /// realm-wide. Same shape as `remargin restrict`.
+        path: String,
+        /// Extra Bash commands to deny on the restricted path.
+        /// Comma-separated or repeat the flag.
+        #[arg(long = "also-deny-bash", value_delimiter = ',')]
+        also_deny_bash: Vec<String>,
+        /// When set, the projection allows `Bash(remargin *)` on the
+        /// path so the CLI stays usable.
+        #[arg(long)]
+        cli_allowed: bool,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Pin an explicit path for
+        /// hermetic test runs.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
     /// Project a `sandbox add` op (rem-qll).
     SandboxAdd {
         /// Path to the document.
@@ -1469,6 +1497,7 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
         | PlanAction::Migrate { output_args, .. }
         | PlanAction::Purge { output_args, .. }
         | PlanAction::React { output_args, .. }
+        | PlanAction::Restrict { output_args, .. }
         | PlanAction::SandboxAdd { output_args, .. }
         | PlanAction::SandboxRemove { output_args, .. }
         | PlanAction::Sign { output_args, .. }
@@ -3572,6 +3601,36 @@ fn cmd_plan(
             emoji,
             remove: *remove,
         },
+        PlanAction::Restrict {
+            path,
+            also_deny_bash,
+            cli_allowed,
+            user_settings,
+            ..
+        } => {
+            let user_scope = match user_settings {
+                Some(explicit) => expand_cli_pathbuf(system, explicit)?,
+                None => expand_cli_path(system, DEFAULT_USER_SETTINGS)?,
+            };
+            // Anchor-walk failure surfaces via the projection's reject
+            // path; on that path we still produce a report rather than
+            // bail here. The fallback project-scope path is unused on
+            // the reject branch.
+            let project_scope = permissions_restrict::find_claude_anchor(system, cwd).map_or_else(
+                |_err| cwd.join(".claude/settings.local.json"),
+                |anchor| anchor.join(".claude/settings.local.json"),
+            );
+            let restrict_args = permissions_restrict::RestrictArgs::new(
+                path.clone(),
+                also_deny_bash.clone(),
+                *cli_allowed,
+            );
+            plan_ops::PlanRequest::Restrict {
+                args: restrict_args,
+                cwd: cwd.to_path_buf(),
+                settings_files: vec![project_scope, user_scope],
+            }
+        }
         PlanAction::SandboxAdd { path, .. } => plan_ops::PlanRequest::SandboxAdd {
             path: resolve_doc_path(system, cwd, path)?,
         },
@@ -3616,7 +3675,135 @@ fn cmd_plan(
 
     let report = plan_ops::dispatch(system, cwd, config, &request)?;
     let value = serde_json::to_value(&report).context("serializing plan report")?;
+
+    // Config-mutation plans (rem-puy5) get a structured text block in
+    // text mode so the multi-file projection is readable. JSON mode
+    // still emits the full PlanReport payload.
+    if !json_mode && report.config_diff.is_some() {
+        return emit_plan_restrict_text(&report);
+    }
+
     print_output(json_mode, &value)
+}
+
+/// Render a `plan restrict` [`PlanReport`] as a structured text block
+/// (rem-puy5). Mirrors the JSON shape: anchor + `would_commit`/`noop`
+/// header, one section per touched file, then conflicts. Emitted on
+/// stdout via the standard `out` helper so existing pipe-friendly
+/// behaviour is preserved.
+fn emit_plan_restrict_text(report: &plan_ops::PlanReport) -> Result<()> {
+    let Some(diff) = report.config_diff.as_ref() else {
+        return Ok(());
+    };
+    out(&format!("Plan: restrict {}", diff.absolute_path.display()))?;
+    out(&format!("  Anchor: {}", diff.anchor.display()))?;
+    out(&format!(
+        "  noop: {}   would_commit: {}",
+        report.noop, report.would_commit,
+    ))?;
+    if let Some(reason) = &report.reject_reason {
+        out(&format!("  reject_reason: {reason}"))?;
+    }
+    out(&format!(
+        "  .remargin.yaml: {}",
+        diff.remargin_yaml.path.display()
+    ))?;
+    out(&format!(
+        "    will be created: {}",
+        diff.remargin_yaml.will_be_created
+    ))?;
+    out(&format!(
+        "    entry: {}",
+        entry_action_label(diff.remargin_yaml.entry_action),
+    ))?;
+    out(&format!(
+        "  Settings: {} file(s)",
+        diff.settings_files.len()
+    ))?;
+    for sf in &diff.settings_files {
+        out(&format!("    {}", sf.path.display()))?;
+        out(&format!("      will be created: {}", sf.will_be_created))?;
+        out(&format!(
+            "      deny rules: +{} to add, {} already present",
+            sf.deny_rules_to_add.len(),
+            sf.deny_rules_already_present.len(),
+        ))?;
+        out(&format!(
+            "      allow rules: +{} to add, {} already present",
+            sf.allow_rules_to_add.len(),
+            sf.allow_rules_already_present.len(),
+        ))?;
+    }
+    out(&format!(
+        "  Sidecar: {} ({})",
+        diff.sidecar.path.display(),
+        entry_action_label(diff.sidecar.entry_action),
+    ))?;
+    if diff.conflicts.is_empty() {
+        out("  conflicts: 0")?;
+    } else {
+        out(&format!("  conflicts: {}", diff.conflicts.len()))?;
+        for conflict in &diff.conflicts {
+            emit_conflict_line(conflict)?;
+        }
+    }
+    Ok(())
+}
+
+const fn entry_action_label(action: plan_ops::EntryAction) -> &'static str {
+    match action {
+        plan_ops::EntryAction::Added => "added",
+        plan_ops::EntryAction::Noop => "noop",
+        plan_ops::EntryAction::Updated => "updated",
+        // EntryAction is `#[non_exhaustive]`; cover future variants
+        // gracefully without breaking the build.
+        _ => "<unknown>",
+    }
+}
+
+fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
+    match conflict {
+        plan_ops::ConfigConflict::AllowDenyOverlap {
+            allow_rule,
+            projected_deny_rule,
+            settings_file,
+        } => {
+            out(&format!(
+                "    allow_deny_overlap in {}:",
+                settings_file.display()
+            ))?;
+            out(&format!("      existing allow:  {allow_rule}"))?;
+            out(&format!("      projected deny:  {projected_deny_rule}"))?;
+        }
+        plan_ops::ConfigConflict::AnchorIsAncestor { anchor, cwd } => {
+            out(&format!(
+                "    anchor_is_ancestor: cwd={} anchor={}",
+                cwd.display(),
+                anchor.display(),
+            ))?;
+        }
+        plan_ops::ConfigConflict::YamlEntryWouldChange {
+            path,
+            previous,
+            projected,
+        } => {
+            out(&format!("    yaml_entry_would_change: path={path}"))?;
+            out(&format!(
+                "      previous: also_deny_bash={:?} cli_allowed={}",
+                previous.also_deny_bash, previous.cli_allowed,
+            ))?;
+            out(&format!(
+                "      projected: also_deny_bash={:?} cli_allowed={}",
+                projected.also_deny_bash, projected.cli_allowed,
+            ))?;
+        }
+        // ConfigConflict is `#[non_exhaustive]`; cover future variants
+        // gracefully without breaking the build.
+        _ => {
+            out("    <unknown conflict variant>")?;
+        }
+    }
+    Ok(())
 }
 
 /// Read a JSON file (or stdin when `path == "-"`) into a vector of
