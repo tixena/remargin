@@ -1,5 +1,11 @@
-import { type EditorState, RangeSetBuilder, StateField } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { type EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  WidgetType,
+} from "@codemirror/view";
 import { editorInfoField, editorLivePreviewField } from "obsidian";
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
@@ -218,6 +224,21 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
 }
 
 /**
+ * CM6 effect dispatched whenever the shared `CollapseState` flips for
+ * some comment id. The companion `collapseEffectBridge` ViewPlugin
+ * subscribes to the store and dispatches this effect on every change;
+ * the StateField below listens for it in `update` and rebuilds so the
+ * widget snapshots reflect the new collapse state.
+ *
+ * Why an effect rather than reading the store directly inside `update`:
+ * `StateField.update` only runs when something *triggers* a transaction.
+ * `CollapseState.toggle` is a plain JS call — it does NOT produce a CM6
+ * transaction on its own. The bridge plugin is what adapts the
+ * subscription into a transaction so the field has a chance to react.
+ */
+export const collapseEffect = StateEffect.define<{ id: string }>();
+
+/**
  * CM6 StateField factory. Returns a fresh StateField per
  * `RemarginPlugin` instance so the widget has a stable plugin
  * reference for collapse-state and focus-bridge calls.
@@ -235,16 +256,58 @@ export function commentWidgetPlugin(plugin: RemarginPlugin) {
       return buildDecorations(state, plugin);
     },
     update(decorations, tr) {
-      // Critical perf fix vs. v1: rebuild ONLY when the document
-      // changed. Selection-only and viewport-only updates never
-      // produce widget content changes, so they should not touch
-      // the decoration set — just remap existing ranges through
-      // the (empty) change set so offsets stay coherent.
+      // Rebuild ONLY when the document changed OR a collapse effect
+      // crossed this transaction. Selection-only and viewport-only
+      // updates never produce widget content changes, so they should
+      // not touch the decoration set — just remap existing ranges
+      // through the (empty) change set so offsets stay coherent.
+      //
+      // The collapse-effect branch is the rem-jq30 Bug B fix: without
+      // it, toggling a widget's chevron flipped the in-memory store but
+      // never re-snapshotted the widget — the visual stayed pinned
+      // until the next docChanged transaction forced a rebuild.
       if (tr.docChanged) {
         return buildDecorations(tr.state, plugin);
+      }
+      for (const e of tr.effects) {
+        if (e.is(collapseEffect)) {
+          return buildDecorations(tr.state, plugin);
+        }
       }
       return decorations.map(tr.changes);
     },
     provide: (f) => EditorView.decorations.from(f),
   });
+}
+
+/**
+ * Companion ViewPlugin that bridges the plugin-wide `CollapseState`
+ * store to the CM6 StateField above. On construction it subscribes to
+ * the store; every time the store fires (i.e. someone called
+ * `collapseState.toggle(id)`) it dispatches a `collapseEffect` carrying
+ * the toggled id so the StateField can rebuild. On `destroy` it
+ * unsubscribes — without this, every closed editor leaks one listener
+ * per registered StateField.
+ *
+ * This plugin produces NO decorations of its own, so the CM6
+ * "block decorations from a per-view plugin" prohibition is not
+ * violated (rem-3dra). The StateField above remains the sole
+ * decoration source.
+ */
+export function collapseEffectBridge(plugin: RemarginPlugin) {
+  return ViewPlugin.fromClass(
+    class {
+      private readonly unsubscribe: () => void;
+
+      constructor(view: EditorView) {
+        this.unsubscribe = plugin.collapseState.subscribe((id) => {
+          view.dispatch({ effects: collapseEffect.of({ id }) });
+        });
+      }
+
+      destroy(): void {
+        this.unsubscribe();
+      }
+    }
+  );
 }

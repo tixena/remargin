@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { type EditorState, StateField } from "@codemirror/state";
+import { type EditorState, StateEffect, StateField } from "@codemirror/state";
 import type { WidgetType } from "@codemirror/view";
 import { editorInfoField, editorLivePreviewField } from "obsidian";
 import { WidgetCommentView } from "../components/widget/WidgetCommentView.tsx";
@@ -12,6 +12,8 @@ import { DEFAULT_SETTINGS } from "../types.ts";
 import {
   __setCreateRootForTests,
   buildDecorations,
+  collapseEffect,
+  collapseEffectBridge,
   commentWidgetPlugin,
   RemarginWidget,
 } from "./commentWidget.ts";
@@ -353,6 +355,10 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
         }
       ) as unknown as EditorState,
       changes: { __sentinel: "changes" },
+      // Real CM6 `Transaction.effects` is always a readonly array
+      // (defaults to `[]`). The rem-jq30 Bug B fix iterates this
+      // array, so the test stub must also expose it as iterable.
+      effects: [] as unknown[],
     };
     const next = spec.update(previous, tr);
     assert.equal(mapCalls, 1, "non-docChanged update must call decorations.map exactly once");
@@ -585,6 +591,169 @@ describe("commentWidgetPlugin shape", () => {
     );
     const candidate = field as unknown as { extension: unknown };
     assert.notEqual(candidate.extension, undefined, "StateField must expose an `extension`");
+  });
+});
+
+describe("collapseEffectBridge (rem-jq30 Bug B)", () => {
+  /**
+   * Build a minimal `EditorView` stub: production code only touches
+   * `view.dispatch` on this code path. The dispatched transaction
+   * specs are captured for assertion.
+   */
+  function makeStubView(): {
+    dispatch: (...args: unknown[]) => void;
+    __dispatched: unknown[];
+  } {
+    const dispatched: unknown[] = [];
+    return {
+      dispatch: (...args: unknown[]) => {
+        dispatched.push(args[0]);
+      },
+      __dispatched: dispatched,
+    };
+  }
+
+  /**
+   * Drive the bridge ViewPlugin through its public CM6 contract
+   * without standing up a real EditorView: `viewPlugin.create(view)`
+   * is the same call CM6's PluginInstance makes internally to
+   * instantiate the wrapped class. Returns the freshly constructed
+   * value so tests can call `destroy()` on it directly.
+   */
+  function instantiateBridge(plugin: unknown, view: unknown): { destroy: () => void } {
+    const vp = collapseEffectBridge(plugin as RemarginPlugin);
+    // Public surface from `@codemirror/view`'s `ViewPlugin` runtime.
+    return (vp as unknown as { create: (view: unknown) => { destroy: () => void } }).create(view);
+  }
+
+  // AC test #15: toggling collapseState dispatches a `collapseEffect`
+  // carrying the toggled id.
+  it("test #15: toggle dispatches a collapseEffect carrying the toggled id", () => {
+    const plugin = makePlugin(true);
+    const view = makeStubView();
+
+    instantiateBridge(plugin, view);
+
+    plugin.collapseState.toggle("c-toggled");
+
+    assert.equal(view.__dispatched.length, 1, "dispatch must be called exactly once per toggle");
+    const tr = view.__dispatched[0] as { effects?: unknown };
+    const effects = (Array.isArray(tr.effects) ? tr.effects : [tr.effects]) as Array<{
+      is: (t: unknown) => boolean;
+      value: { id: string };
+    }>;
+    assert.equal(effects.length, 1, "transaction must carry exactly one effect");
+    assert.equal(effects[0].is(collapseEffect), true, "effect must be a collapseEffect");
+    assert.equal(effects[0].value.id, "c-toggled", "effect must carry the toggled id");
+  });
+
+  // AC test #17: destroy() unsubscribes — no dispatch after destroy.
+  it("test #17: destroy() unsubscribes; subsequent toggles do NOT dispatch", () => {
+    const plugin = makePlugin(true);
+    const view = makeStubView();
+
+    const instance = instantiateBridge(plugin, view);
+
+    plugin.collapseState.toggle("a");
+    assert.equal(view.__dispatched.length, 1, "first toggle dispatches");
+
+    instance.destroy();
+
+    plugin.collapseState.toggle("b");
+    assert.equal(view.__dispatched.length, 1, "post-destroy toggle must NOT dispatch");
+  });
+});
+
+describe("commentWidgetPlugin StateField rebuild on collapseEffect (rem-jq30 Bug B)", () => {
+  // Mirror the helper from the earlier StateField suite. We keep a
+  // local copy rather than hoisting because both suites rely on the
+  // same private-slot dance and a future refactor that breaks one
+  // signal should leave the other intact for triage.
+  function specFromField(field: unknown): {
+    create: (state: EditorState) => unknown;
+    update: (value: unknown, tr: unknown) => unknown;
+  } {
+    const f = field as { createF?: unknown; updateF?: unknown };
+    return {
+      create: f.createF as (state: EditorState) => unknown,
+      update: f.updateF as (value: unknown, tr: unknown) => unknown,
+    };
+  }
+
+  // AC test #16: a transaction with `docChanged: false` but carrying
+  // a `collapseEffect` causes the StateField's `update` to rebuild.
+  it("test #16: docChanged=false + collapseEffect → rebuild via buildDecorations", () => {
+    const plugin = makePlugin(true);
+    const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
+    const spec = specFromField(field);
+
+    const initialState = makeState({ doc: VALID_BLOCK, livePreview: true });
+    const initial = spec.create(initialState as unknown as EditorState) as { size: number };
+    assert.equal(initial.size, 1, "initial create produces 1 decoration");
+
+    // The post-toggle transaction: doc is unchanged, but a collapse
+    // effect is in flight. The `state` it points at carries TWO valid
+    // blocks, so a true rebuild is observable as `next.size === 2`.
+    // A bug where `update` falls through to `decorations.map(changes)`
+    // would leave size at 1.
+    const nextState = makeState({
+      doc: `${VALID_BLOCK}\n${VALID_BLOCK_2}`,
+      livePreview: true,
+    });
+    const tr = {
+      docChanged: false,
+      state: nextState as unknown as EditorState,
+      changes: { mapPos: (pos: number) => pos },
+      effects: [collapseEffect.of({ id: "c1" })],
+    };
+    const next = spec.update(initial, tr) as { size: number };
+    assert.equal(
+      next.size,
+      2,
+      "collapseEffect must trigger a full rebuild (size must reflect the new state's blocks)"
+    );
+  });
+
+  // Defensive: a non-collapse effect on an otherwise non-docChanged
+  // transaction must NOT rebuild — the same remap-only path test #6
+  // pinned, only with a stray effect added.
+  it("test #16b: docChanged=false + unrelated effect → still remap-only", () => {
+    const plugin = makePlugin(true);
+    const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
+    const spec = specFromField(field);
+
+    let mapCalls = 0;
+    const remapSentinel = Symbol("remapped-decorations");
+    const previous = {
+      size: 1,
+      map: (_changes: unknown) => {
+        mapCalls += 1;
+        return remapSentinel;
+      },
+    };
+
+    // A different StateEffect type — the `is(collapseEffect)` filter
+    // must reject it.
+    const unrelatedEffect = StateEffect.define<number>();
+
+    const tr = {
+      docChanged: false,
+      state: new Proxy(
+        {},
+        {
+          get(_t, prop) {
+            throw new Error(
+              `tr.state should not be read on remap-only branch (got: ${String(prop)})`
+            );
+          },
+        }
+      ) as unknown as EditorState,
+      changes: { __sentinel: "changes" },
+      effects: [unrelatedEffect.of(42)],
+    };
+    const next = spec.update(previous, tr);
+    assert.equal(mapCalls, 1, "unrelated effect must take the remap path");
+    assert.equal(next, remapSentinel, "remap path returns .map() result verbatim");
   });
 });
 
