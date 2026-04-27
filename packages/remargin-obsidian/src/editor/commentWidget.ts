@@ -311,8 +311,11 @@ export function commentWidgetPlugin(plugin: RemarginPlugin) {
  */
 export function collapseEffectBridge(plugin: RemarginPlugin) {
   return ViewPlugin.fromClass(
+    // The class is exported via `ViewPlugin.fromClass`'s inferred return
+    // type. TS4094 forbids `private`/`protected` members on anonymous
+    // exported classes, so `unsubscribe` is plain (still readonly).
     class {
-      private readonly unsubscribe: () => void;
+      readonly unsubscribe: () => void;
 
       constructor(view: EditorView) {
         this.unsubscribe = plugin.collapseState.subscribe((id) => {
