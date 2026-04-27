@@ -47,33 +47,30 @@ describe("SettingsTab — editor widgets toggle (T36 AC #13)", () => {
     );
   });
 
-  // Verifies the toggle reflects `settings.editorWidgets === false`. The
-  // ToggleGroup renders `data-state="on"` on whichever option is active.
-  // Default settings have editorWidgets=false, so 'off' must be active.
+  // Verifies the toggle reflects `settings.editorWidgets === false`.
+  // After commit 3f49304 the editor-widgets toggle is a single Radix
+  // Toggle button (not a ToggleGroup of On/Off pills). The button
+  // renders `aria-pressed="false"` + `data-state="off"` and shows
+  // the label "Disabled" when editorWidgets is false (the default).
   it("toggle reflects editorWidgets=false (the default)", () => {
     const html = render({ ...DEFAULT_SETTINGS, editorWidgets: false }, noopSave);
-    // The 'On' button is rendered first, 'Off' second. We need to find
-    // the segment between the editor widgets section and the next
-    // separator and check which has data-state=on. The simplest
-    // assertion: the rendered DOM contains an Off button with
-    // data-state="on" inside the editor-widgets row.
     const widgetsBlock = sliceBlock(html, "Editor widgets", "Check for updates");
     assert.match(
       widgetsBlock,
-      /<button[^>]*data-state="on"[^>]*>\s*Off\s*<\/button>/,
-      `expected Off to be active when editorWidgets is false, got: ${widgetsBlock}`
+      /<button[^>]*aria-pressed="false"[^>]*data-state="off"[^>]*>\s*Disabled\s*<\/button>/,
+      `expected unpressed Disabled button when editorWidgets is false, got: ${widgetsBlock}`
     );
   });
 
-  // And the inverse: with editorWidgets=true, the 'On' button is the
-  // active toggle.
+  // And the inverse: with editorWidgets=true the toggle is pressed
+  // (`aria-pressed="true"` + `data-state="on"`) and shows "Enabled".
   it("toggle reflects editorWidgets=true", () => {
     const html = render({ ...DEFAULT_SETTINGS, editorWidgets: true }, noopSave);
     const widgetsBlock = sliceBlock(html, "Editor widgets", "Check for updates");
     assert.match(
       widgetsBlock,
-      /<button[^>]*data-state="on"[^>]*>\s*On\s*<\/button>/,
-      `expected On to be active when editorWidgets is true, got: ${widgetsBlock}`
+      /<button[^>]*aria-pressed="true"[^>]*data-state="on"[^>]*>\s*Enabled\s*<\/button>/,
+      `expected pressed Enabled button when editorWidgets is true, got: ${widgetsBlock}`
     );
   });
 });
