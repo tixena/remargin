@@ -208,6 +208,21 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
   const builder = new RangeSetBuilder<Decoration>();
   for (const block of blocks) {
     if (!block.valid || !block.comment.id) continue;
+    // TEMPORARY rem-jq30 Bug A diagnostic — must be removed before the
+    // final commit on this ticket. Captures the parser's chosen
+    // start/end offsets for each block plus the characters at those
+    // offsets so we can tell whether the empty bar above the widget is
+    // an off-by-one in the parser's bookkeeping or a layering artifact
+    // from Obsidian's own fenced-code decoration.
+    // biome-ignore lint/suspicious/noConsole: temporary diagnostic for rem-jq30 Bug A
+    console.debug({
+      remarginDiagnostic: "rem-jq30-buildDecorations",
+      id: block.comment.id,
+      startOffset: block.startOffset,
+      endOffset: block.endOffset,
+      charAtStart: text[block.startOffset],
+      charAtEnd: text[block.endOffset - 1],
+    });
     const widget = new RemarginWidget(block, plugin, sourcePath);
     builder.add(
       block.startOffset,
