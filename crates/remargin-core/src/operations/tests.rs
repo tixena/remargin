@@ -2905,6 +2905,7 @@ fn batch_refuses_forbidden_targets() {
 
         let ops = vec![BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -3255,6 +3256,7 @@ fn batch_refused_when_target_under_restrict() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -3264,6 +3266,7 @@ fn batch_refused_when_target_under_restrict() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -3284,6 +3287,7 @@ fn batch_refused_when_deny_ops_lists_batch() {
     let config = open_config();
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: false,
@@ -3308,6 +3312,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -3317,6 +3322,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -3326,6 +3332,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,

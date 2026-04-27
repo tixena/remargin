@@ -34,6 +34,10 @@ use crate::writer::{self, InsertPosition};
 pub struct BatchCommentOp {
     /// ID of a comment this should appear after (position).
     pub after_comment: Option<String>,
+    /// Heading-anchored insertion point (rem-5oqx). `>`-separated path
+    /// of prefix segments resolved against ATX headings at write time.
+    /// Mutually exclusive with `after_comment` and `after_line`.
+    pub after_heading: Option<String>,
     /// Line number to insert after (1-indexed position).
     pub after_line: Option<usize>,
     /// Attachment file paths.
@@ -70,15 +74,35 @@ impl BatchCommentOp {
             .and_then(Value::as_str)
             .with_context(|| format!("batch op[{idx}]: missing required field `content`"))?;
 
+        let after_comment = obj
+            .get("after_comment")
+            .and_then(Value::as_str)
+            .map(String::from);
+        let after_heading = obj
+            .get("after_heading")
+            .and_then(Value::as_str)
+            .map(String::from);
+        let after_line = obj
+            .get("after_line")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+
+        // rem-5oqx: at most one position anchor per op. The three
+        // fields share storage at write time; passing more than one
+        // is a hard error before any byte hits disk.
+        let anchor_count = usize::from(after_comment.is_some())
+            + usize::from(after_heading.is_some())
+            + usize::from(after_line.is_some());
+        if anchor_count > 1 {
+            anyhow::bail!(
+                "batch op[{idx}]: at most one of `after_comment`, `after_heading`, `after_line` may be set"
+            );
+        }
+
         Ok(Self {
-            after_comment: obj
-                .get("after_comment")
-                .and_then(Value::as_str)
-                .map(String::from),
-            after_line: obj
-                .get("after_line")
-                .and_then(Value::as_u64)
-                .and_then(|n| usize::try_from(n).ok()),
+            after_comment,
+            after_heading,
+            after_line,
             attachments: obj
                 .get("attachments")
                 .and_then(Value::as_array)
@@ -116,6 +140,7 @@ impl BatchCommentOp {
     pub const fn new(content: String) -> Self {
         Self {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -334,7 +359,9 @@ fn write_batch_result(
 /// `line_shifts` contains `(original_target_line, lines_added)` from
 /// prior `AfterLine` insertions in this batch.  Any new `AfterLine`
 /// whose target is >= a prior target gets shifted by that insertion's
-/// line count.
+/// line count. `AfterHeading` does not need a shift table — the
+/// resolver runs against the document's current state at insertion
+/// time, so prior body shifts are picked up transparently (rem-5oqx).
 fn resolve_position_adjusted(
     op: &BatchCommentOp,
     line_shifts: &[(usize, usize)],
@@ -345,6 +372,9 @@ fn resolve_position_adjusted(
     }
     if let Some(after_comment) = &op.after_comment {
         return InsertPosition::AfterComment(after_comment.clone());
+    }
+    if let Some(after_heading) = &op.after_heading {
+        return InsertPosition::AfterHeading(after_heading.clone());
     }
     if let Some(target) = op.after_line {
         let mut adjusted = target;

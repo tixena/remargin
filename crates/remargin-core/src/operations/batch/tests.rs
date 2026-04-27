@@ -68,6 +68,7 @@ fn simple_batch() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -77,6 +78,7 @@ fn simple_batch() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -86,6 +88,7 @@ fn simple_batch() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -112,6 +115,7 @@ fn batch_with_reply() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -130,6 +134,7 @@ fn batch_with_reply() {
     // Now create a reply batch.
     let reply_ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: false,
@@ -157,6 +162,7 @@ fn batch_failure_rolls_back() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -166,6 +172,7 @@ fn batch_failure_rolls_back() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: vec![PathBuf::from("/nonexistent/file.png")],
             auto_ack: false,
@@ -210,6 +217,7 @@ Existing comment.
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: false,
@@ -237,6 +245,7 @@ fn batch_two_after_line_comments_both_placed_correctly() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
             auto_ack: false,
@@ -246,6 +255,7 @@ fn batch_two_after_line_comments_both_placed_correctly() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(13), // after "Line three."
             attachments: Vec::new(),
             auto_ack: false,
@@ -296,6 +306,7 @@ fn batch_after_line_reverse_order() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(13), // after "Line three." (higher)
             attachments: Vec::new(),
             auto_ack: false,
@@ -305,6 +316,7 @@ fn batch_after_line_reverse_order() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(9), // after "Line one." (lower)
             attachments: Vec::new(),
             auto_ack: false,
@@ -342,6 +354,7 @@ fn batch_three_after_line_same_region() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
             auto_ack: false,
@@ -351,6 +364,7 @@ fn batch_three_after_line_same_region() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(11), // after "Line two."
             attachments: Vec::new(),
             auto_ack: false,
@@ -360,6 +374,7 @@ fn batch_three_after_line_same_region() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(13), // after "Line three."
             attachments: Vec::new(),
             auto_ack: false,
@@ -404,6 +419,7 @@ fn batch_mixed_after_line_and_append() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
             auto_ack: false,
@@ -413,6 +429,7 @@ fn batch_mixed_after_line_and_append() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None, // append
             attachments: Vec::new(),
             auto_ack: false,
@@ -422,6 +439,7 @@ fn batch_mixed_after_line_and_append() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(13), // after "Line three."
             attachments: Vec::new(),
             auto_ack: false,
@@ -487,6 +505,7 @@ Line after comment.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(19), // after "Line after comment."
             attachments: Vec::new(),
             auto_ack: false,
@@ -496,6 +515,7 @@ Line after comment.
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -535,6 +555,7 @@ fn batch_two_after_same_line() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(9), // after "Line one."
             attachments: Vec::new(),
             auto_ack: false,
@@ -544,6 +565,7 @@ fn batch_two_after_same_line() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(9), // also after "Line one."
             attachments: Vec::new(),
             auto_ack: false,
@@ -579,6 +601,7 @@ fn batch_after_line_beyond_document_length() {
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: Some(9999), // way beyond document length — clamps to append
         attachments: Vec::new(),
         auto_ack: false,
@@ -603,6 +626,7 @@ fn batch_after_line_zero() {
     // Line 0 is before the first line — should insert at the very top.
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: Some(0),
         attachments: Vec::new(),
         auto_ack: false,
@@ -656,6 +680,7 @@ fn batch_auto_ack_single_op() {
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: true,
@@ -683,6 +708,7 @@ fn batch_auto_ack_mixed_ops() {
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -692,6 +718,7 @@ fn batch_auto_ack_mixed_ops() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: true,
@@ -701,6 +728,7 @@ fn batch_auto_ack_mixed_ops() {
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: false,
@@ -734,6 +762,7 @@ fn batch_auto_ack_forward_reference() {
     // First, create the parent.
     let parent_ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: false,
@@ -748,6 +777,7 @@ fn batch_auto_ack_forward_reference() {
     // Now reply with auto_ack.
     let reply_ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: true,
@@ -807,6 +837,7 @@ Line after comment.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: true,
@@ -816,6 +847,7 @@ Line after comment.
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(8), // after "Line before comment." (before the comment)
             attachments: Vec::new(),
             auto_ack: false,
@@ -889,6 +921,7 @@ End text.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: true,
@@ -898,6 +931,7 @@ End text.
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachments: Vec::new(),
             auto_ack: true,
@@ -907,6 +941,7 @@ End text.
         },
         BatchCommentOp {
             after_comment: None,
+            after_heading: None,
             after_line: Some(31), // after "End text." in original doc
             attachments: Vec::new(),
             auto_ack: false,
@@ -959,6 +994,7 @@ fn batch_auto_ack_without_reply_to_errors() {
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: true,
@@ -991,6 +1027,7 @@ fn batch_reply_auto_populates_to() {
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: false,
@@ -1018,6 +1055,7 @@ fn batch_reply_explicit_to() {
 
     let ops = vec![BatchCommentOp {
         after_comment: None,
+        after_heading: None,
         after_line: None,
         attachments: Vec::new(),
         auto_ack: false,

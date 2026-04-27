@@ -221,6 +221,7 @@ fn desc_batch() -> ToolDesc {
                             "attachments": { "type": "array", "items": { "type": "string" }, "default": [] },
                             "after_line": { "type": "integer" },
                             "after_comment": { "type": "string" },
+                            "after_heading": { "type": "string", "description": "ATX heading path (rem-5oqx); resolved at write time. Mutually exclusive with after_line/after_comment." },
                             "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying", "default": false }
                         },
                         "required": ["content"]
@@ -259,6 +260,7 @@ fn desc_comment() -> ToolDesc {
                 },
                 "after_line": { "type": "integer", "description": "Insert after this line number (1-indexed)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID" },
+                "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path (rem-5oqx). Mutually exclusive with after_line/after_comment." },
                 "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false },
                 "remargin_kind": {
                     "type": "array",
@@ -451,6 +453,7 @@ fn desc_plan() -> ToolDesc {
                 },
                 "reply_to": { "type": "string", "description": "Parent comment ID (used by comment)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID (used by comment)" },
+                "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path (used by comment, rem-5oqx)" },
                 "after_line": { "type": "integer", "description": "Insert after this 1-indexed line (used by comment)" },
                 "attach_names": {
                     "type": "array",
@@ -463,13 +466,14 @@ fn desc_plan() -> ToolDesc {
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
                 "ops": {
                     "type": "array",
-                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_line, attach_names, auto_ack, to.",
+                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, to.",
                     "items": {
                         "type": "object",
                         "properties": {
                             "content": { "type": "string" },
                             "reply_to": { "type": "string" },
                             "after_comment": { "type": "string" },
+                            "after_heading": { "type": "string" },
                             "after_line": { "type": "integer" },
                             "attach_names": { "type": "array", "items": { "type": "string" } },
                             "auto_ack": { "type": "boolean" },
@@ -1159,6 +1163,7 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
     InsertPosition::from_hints(
         reply_to,
         optional_str(params, "after_comment"),
+        optional_str(params, "after_heading"),
         optional_usize(params, "after_line"),
     )
 }

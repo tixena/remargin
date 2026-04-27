@@ -131,6 +131,31 @@ Original comment.
 Body paragraph two.
 ";
 
+/// rem-5oqx: doc with two top-level sections each containing a sibling
+/// heading whose label collides — used to exercise the path-disambiguation
+/// resolver and the multi-anchor `batch` flow.
+const DOC_WITH_HEADINGS: &str = "\
+---
+title: Headings
+---
+
+# Activity epic tests
+
+## A10. MCP / CLI parity
+
+Body for A10.
+
+# Permissions epic tests
+
+## P11. MCP / CLI parity
+
+Body for P11.
+
+## P3. deny_ops
+
+Body for P3.
+";
+
 /// Create a default config for testing.
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -3430,4 +3455,213 @@ fn mcp_edit_with_kind_replaces_stored_list() {
     let raw = system.read_to_string(&base.join("doc.md")).unwrap();
     assert!(raw.contains("remargin_kind: [todo]"));
     assert!(!raw.contains("remargin_kind: [question]"));
+}
+
+#[test]
+fn mcp_comment_after_heading_resolves_section_path() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_HEADINGS);
+    let config = test_config();
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Anchored after the P3 heading.",
+                    "after_heading": "P3."
+                }
+            }
+        }),
+    );
+    assert!(!is_tool_error(&resp), "{resp:?}");
+    let new_id = String::from(extract_tool_text(&resp)["id"].as_str().unwrap());
+
+    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let lines: Vec<&str> = raw.lines().collect();
+    let p3_line = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## P3."))
+        .unwrap();
+    let new_block_line = lines
+        .iter()
+        .position(|l| l.contains(&format!("id: {new_id}")))
+        .unwrap();
+    // Comment block lands strictly after the P3 heading line.
+    assert!(
+        new_block_line > p3_line,
+        "expected new comment block (line {new_block_line}) after P3 heading (line {p3_line})"
+    );
+}
+
+#[test]
+fn mcp_comment_after_heading_path_disambiguates_duplicate_subheadings() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_HEADINGS);
+    let config = test_config();
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Anchored after Activity > A10.",
+                    "after_heading": "Activity epic tests > A10."
+                }
+            }
+        }),
+    );
+    assert!(!is_tool_error(&resp), "{resp:?}");
+    let new_id = String::from(extract_tool_text(&resp)["id"].as_str().unwrap());
+
+    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let lines: Vec<&str> = raw.lines().collect();
+    let a10_line = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## A10."))
+        .unwrap();
+    let p11_line = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## P11."))
+        .unwrap();
+    let new_block_line = lines
+        .iter()
+        .position(|l| l.contains(&format!("id: {new_id}")))
+        .unwrap();
+    assert!(new_block_line > a10_line);
+    assert!(new_block_line < p11_line);
+}
+
+#[test]
+fn mcp_comment_after_heading_no_match_errors_without_writing() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_HEADINGS);
+    let config = test_config();
+
+    let before = system.read_to_string(&base.join("doc.md")).unwrap();
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Should not be written.",
+                    "after_heading": "Z9. nonexistent"
+                }
+            }
+        }),
+    );
+    assert!(is_tool_error(&resp));
+    let after = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert_eq!(before, after, "doc must be unchanged on resolver failure");
+}
+
+#[test]
+fn mcp_batch_after_heading_inserts_each_op_at_its_anchor() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_HEADINGS);
+    let config = test_config();
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "batch",
+                "arguments": {
+                    "file": "doc.md",
+                    "operations": [
+                        { "content": "after A10",
+                          "after_heading": "Activity epic tests > A10." },
+                        { "content": "after P3",
+                          "after_heading": "P3." }
+                    ]
+                }
+            }
+        }),
+    );
+    assert!(!is_tool_error(&resp), "{resp:?}");
+    let ids = extract_tool_text(&resp)["ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| String::from(v.as_str().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 2);
+
+    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let lines: Vec<&str> = raw.lines().collect();
+    let position_of_id = |id: &str| {
+        lines
+            .iter()
+            .position(|l| l.contains(&format!("id: {id}")))
+            .unwrap()
+    };
+    let a10_line = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## A10."))
+        .unwrap();
+    let p3_line = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## P3."))
+        .unwrap();
+    let id0_line = position_of_id(&ids[0]);
+    let id1_line = position_of_id(&ids[1]);
+    assert!(id0_line > a10_line);
+    assert!(id1_line > p3_line);
+}
+
+#[test]
+fn mcp_batch_rejects_multiple_anchors_per_op() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_HEADINGS);
+    let config = test_config();
+
+    let resp = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "batch",
+                "arguments": {
+                    "file": "doc.md",
+                    "operations": [
+                        { "content": "x",
+                          "after_heading": "P3.",
+                          "after_line": 5_i32 }
+                    ]
+                }
+            }
+        }),
+    );
+    assert!(is_tool_error(&resp));
 }

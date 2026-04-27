@@ -250,10 +250,15 @@ enum Commands {
         #[arg(allow_hyphen_values = true)]
         content: Option<String>,
         /// Insert after this comment ID.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["after_heading", "after_line"])]
         after_comment: Option<String>,
+        /// Insert after the ATX heading addressed by this `>`-separated
+        /// path (rem-5oqx). Setext (underline) headings are NOT
+        /// supported in v1.
+        #[arg(long, conflicts_with_all = ["after_comment", "after_line"])]
+        after_heading: Option<String>,
         /// Insert after this line number (1-indexed).
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["after_comment", "after_heading"])]
         after_line: Option<usize>,
         /// Attachments to include.
         #[arg(long)]
@@ -841,10 +846,15 @@ enum PlanAction {
         /// Comment body text (read from stdin if omitted).
         content: Option<String>,
         /// Insert after this comment ID.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["after_heading", "after_line"])]
         after_comment: Option<String>,
+        /// Project insertion after the ATX heading addressed by this
+        /// `>`-separated path (rem-5oqx). Setext (underline) headings
+        /// are NOT supported in v1.
+        #[arg(long, conflicts_with_all = ["after_comment", "after_line"])]
+        after_heading: Option<String>,
         /// Insert after this line number (1-indexed).
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["after_comment", "after_heading"])]
         after_line: Option<usize>,
         /// Attachment basenames to record on the projected comment.
         /// Bytes are *not* copied — `plan` stays side-effect-free. The
@@ -1135,6 +1145,7 @@ enum ObsidianAction {
 
 struct CommentParams<'cmd> {
     after_comment: Option<&'cmd str>,
+    after_heading: Option<&'cmd str>,
     after_line: Option<usize>,
     attachments: &'cmd [PathBuf],
     auto_ack: bool,
@@ -1962,6 +1973,7 @@ fn dispatch_with_config(
             file,
             content,
             after_comment,
+            after_heading,
             after_line,
             attach,
             auto_ack,
@@ -1977,6 +1989,7 @@ fn dispatch_with_config(
                 resolve_comment_content(system, cwd, content.as_ref(), comment_file.as_ref())?;
             let cp = CommentParams {
                 after_comment: after_comment.as_deref(),
+                after_heading: after_heading.as_deref(),
                 after_line: *after_line,
                 attachments: attach,
                 auto_ack: *auto_ack,
@@ -2307,9 +2320,10 @@ fn cmd_batch(
 fn resolve_comment_position(
     reply_to: Option<&str>,
     after_comment: Option<&str>,
+    after_heading: Option<&str>,
     after_line: Option<usize>,
 ) -> InsertPosition {
-    InsertPosition::from_hints(reply_to, after_comment, after_line)
+    InsertPosition::from_hints(reply_to, after_comment, after_heading, after_line)
 }
 
 fn cmd_comment(
@@ -2321,7 +2335,12 @@ fn cmd_comment(
     let path = resolve_doc_path(system, cwd, cp.file)?;
 
     // Replies always go after their parent — explicit placement is ignored.
-    let position = resolve_comment_position(cp.reply_to, cp.after_comment, cp.after_line);
+    let position = resolve_comment_position(
+        cp.reply_to,
+        cp.after_comment,
+        cp.after_heading,
+        cp.after_line,
+    );
 
     let mut params = operations::CreateCommentParams::new(cp.content, &position);
     params.attachments = cp.attachments;
@@ -3436,6 +3455,7 @@ fn cmd_plan(
             path,
             content,
             after_comment,
+            after_heading,
             after_line,
             attach_names,
             auto_ack,
@@ -3452,6 +3472,7 @@ fn cmd_plan(
             position = resolve_comment_position(
                 reply_to.as_deref(),
                 after_comment.as_deref(),
+                after_heading.as_deref(),
                 *after_line,
             );
             attach_refs = attach_names.iter().map(String::as_str).collect();

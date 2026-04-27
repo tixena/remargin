@@ -1,5 +1,7 @@
 //! Comment block parser: extract remargin blocks from markdown.
 
+pub mod heading;
+
 extern crate alloc;
 
 use alloc::collections::BTreeMap;

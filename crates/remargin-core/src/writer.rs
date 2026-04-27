@@ -15,6 +15,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
+use crate::parser::heading::resolve_heading_path;
 use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
 use crate::reactions::{ReactionsExt as _, format_reaction_entry_block, quote_emoji_key};
 
@@ -35,6 +36,11 @@ pub const FORBIDDEN_TARGETS: &[&str] = &[".remargin.yaml", ".remargin-registry.y
 pub enum InsertPosition {
     /// Place after the comment with this ID.
     AfterComment(String),
+    /// Place after the ATX heading addressed by this `>`-separated path
+    /// (rem-5oqx). The resolver runs at write time against the current
+    /// document state; `--after-heading` is a lookup convenience and
+    /// the comment's stored `line` field still holds the resolved line.
+    AfterHeading(String),
     /// Place after this line number (1-indexed).
     AfterLine(usize),
     /// Place at the end of the document.
@@ -43,18 +49,20 @@ pub enum InsertPosition {
 
 impl InsertPosition {
     /// Canonical priority-based builder used by every adapter (CLI + MCP)
-    /// to turn the three placement knobs (`reply_to`, `after_comment`,
-    /// `after_line`) into an [`InsertPosition`] (rem-3a2).
+    /// to turn the four placement knobs (`reply_to`, `after_comment`,
+    /// `after_heading`, `after_line`) into an [`InsertPosition`]
+    /// (rem-3a2 / rem-5oqx).
     ///
     /// Precedence: replies always go after their parent (explicit
     /// placement is ignored for replies); `after_comment` beats
-    /// `after_line`; absence of all three falls back to
-    /// [`InsertPosition::Append`]. Keeping the rule in one place prevents
-    /// adapter-layer drift on insertion semantics.
+    /// `after_heading` beats `after_line`; absence of all four falls
+    /// back to [`InsertPosition::Append`]. Keeping the rule in one
+    /// place prevents adapter-layer drift on insertion semantics.
     #[must_use]
     pub fn from_hints(
         reply_to: Option<&str>,
         after_comment: Option<&str>,
+        after_heading: Option<&str>,
         after_line: Option<usize>,
     ) -> Self {
         if let Some(parent_id) = reply_to {
@@ -62,6 +70,9 @@ impl InsertPosition {
         }
         if let Some(after_id) = after_comment {
             return Self::AfterComment(String::from(after_id));
+        }
+        if let Some(path) = after_heading {
+            return Self::AfterHeading(String::from(path));
         }
         after_line.map_or(Self::Append, Self::AfterLine)
     }
@@ -205,6 +216,17 @@ pub fn insert_comment(
     comment: Comment,
     position: &InsertPosition,
 ) -> Result<()> {
+    // rem-5oqx: resolve heading-anchored placement up front and recurse
+    // with the concrete line. Resolution walks the document's current
+    // markdown, so prior batch insertions that shifted the body are
+    // picked up transparently — heading anchors do not need their own
+    // line-shift table.
+    if let InsertPosition::AfterHeading(path) = position {
+        let line = resolve_heading_path(doc, path)
+            .with_context(|| format!("after_heading: failed to resolve heading path {path:?}"))?;
+        return insert_comment(doc, comment, &InsertPosition::AfterLine(line));
+    }
+
     let segment = Segment::Comment(Box::new(comment));
 
     match position {
@@ -220,14 +242,14 @@ pub fn insert_comment(
         }
 
         InsertPosition::AfterComment(target_id) => {
-            let position_idx = doc
+            let target_idx = doc
                 .segments
                 .iter()
                 .position(|seg| matches!(seg, Segment::Comment(cm) if cm.id == *target_id))
                 .with_context(|| format!("comment with id {target_id:?} not found"))?;
 
             // Insert after the target comment.
-            let insert_at = position_idx + 1;
+            let insert_at = target_idx + 1;
             doc.segments
                 .insert(insert_at, Segment::Body(String::from("\n")));
             doc.segments.insert(insert_at + 1, segment);
@@ -235,6 +257,13 @@ pub fn insert_comment(
                 .insert(insert_at + 2, Segment::Body(String::from("\n")));
         }
 
+        InsertPosition::AfterHeading(_) => {
+            // Handled above by the early-return rewrite to
+            // [`InsertPosition::AfterLine`]. Falling through here would
+            // mean the rewrite was bypassed, which would be a real bug
+            // — surface it as an error rather than panicking.
+            anyhow::bail!("AfterHeading should have been resolved before reaching this match");
+        }
         InsertPosition::AfterLine(target_line) => {
             let markdown = doc.to_markdown();
             let lines: Vec<&str> = markdown.split('\n').collect();

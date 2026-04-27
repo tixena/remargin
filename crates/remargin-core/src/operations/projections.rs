@@ -46,6 +46,9 @@ use crate::writer::{self, InsertPosition};
 #[non_exhaustive]
 pub struct ProjectBatchOp {
     pub after_comment: Option<String>,
+    /// Heading-anchored insertion (rem-5oqx). Mutually exclusive with
+    /// `after_comment` and `after_line`.
+    pub after_heading: Option<String>,
     pub after_line: Option<usize>,
     /// File names (not paths) to record on the projected comment. Plan
     /// never copies bytes — the caller supplies the basenames it expects
@@ -79,15 +82,34 @@ impl ProjectBatchOp {
             .and_then(serde_json::Value::as_str)
             .with_context(|| format!("plan batch op[{idx}]: missing required field `content`"))?;
 
+        let after_comment = obj
+            .get("after_comment")
+            .and_then(serde_json::Value::as_str)
+            .map(String::from);
+        let after_heading = obj
+            .get("after_heading")
+            .and_then(serde_json::Value::as_str)
+            .map(String::from);
+        let after_line = obj
+            .get("after_line")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+
+        // rem-5oqx: at most one position anchor per op (matches
+        // [`crate::operations::batch::BatchCommentOp::from_json_object`]).
+        let anchor_count = usize::from(after_comment.is_some())
+            + usize::from(after_heading.is_some())
+            + usize::from(after_line.is_some());
+        if anchor_count > 1 {
+            anyhow::bail!(
+                "plan batch op[{idx}]: at most one of `after_comment`, `after_heading`, `after_line` may be set"
+            );
+        }
+
         Ok(Self {
-            after_comment: obj
-                .get("after_comment")
-                .and_then(serde_json::Value::as_str)
-                .map(String::from),
-            after_line: obj
-                .get("after_line")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|n| usize::try_from(n).ok()),
+            after_comment,
+            after_heading,
+            after_line,
             attachment_filenames: obj
                 .get("attach_names")
                 .and_then(serde_json::Value::as_array)
@@ -126,6 +148,7 @@ impl ProjectBatchOp {
     pub const fn new(content: String) -> Self {
         Self {
             after_comment: None,
+            after_heading: None,
             after_line: None,
             attachment_filenames: Vec::new(),
             auto_ack: false,
@@ -977,6 +1000,9 @@ fn resolve_batch_position(op: &ProjectBatchOp, line_shifts: &[(usize, usize)]) -
     }
     if let Some(after_comment) = &op.after_comment {
         return InsertPosition::AfterComment(after_comment.clone());
+    }
+    if let Some(after_heading) = &op.after_heading {
+        return InsertPosition::AfterHeading(after_heading.clone());
     }
     if let Some(target) = op.after_line {
         let mut adjusted = target;
