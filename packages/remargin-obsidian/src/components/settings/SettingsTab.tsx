@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useBackend } from "@/hooks/useBackend";
 import { expandPath } from "@/lib/expandPath";
@@ -379,27 +380,15 @@ export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabPro
           label="Editor widgets"
           description="Pretty-print remargin comment blocks in Live Preview and reading mode (read-only)."
         >
-          <ToggleGroup
-            type="single"
-            value={current.editorWidgets ? "on" : "off"}
-            onValueChange={(value) => {
-              if (value) update("editorWidgets", value === "on");
-            }}
-            className="w-full"
+          <Toggle
+            variant="outline"
+            pressed={current.editorWidgets}
+            onPressedChange={(pressed) => update("editorWidgets", pressed)}
+            aria-label="Toggle editor widgets"
+            className="w-32 justify-center text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
           >
-            <ToggleGroupItem
-              value="on"
-              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
-            >
-              On
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="off"
-              className="flex-1 text-sm font-medium data-[state=on]:bg-accent data-[state=on]:text-white"
-            >
-              Off
-            </ToggleGroupItem>
-          </ToggleGroup>
+            {current.editorWidgets ? "Enabled" : "Disabled"}
+          </Toggle>
         </SettingsField>
 
         <Separator />
