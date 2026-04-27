@@ -219,6 +219,108 @@ mod tests {
         assert_eq!(payload["yaml_entry_removed"], json!(true));
     }
 
+    /// rem-s669: when rules have been hand-deleted from BOTH the
+    /// realm-local and the user-scope settings file between `restrict`
+    /// and `unprotect`, the warning emitter must surface both — one
+    /// warning per file — and the rest of the unprotect work
+    /// (yaml + sidecar) must complete cleanly.
+    #[test]
+    fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
+        let realm = realm_with_claude();
+        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
+        run_restrict(&realm, "src/secret");
+
+        let realm_local = realm.path().join(".claude/settings.local.json");
+        let user_scope = user_settings_arg(&realm);
+
+        // Read the resolved deny rules so we know exactly which one
+        // to hand-delete from each file (the canonical-path rule
+        // depends on TempDir's exact prefix).
+        let local_value: Value =
+            serde_json::from_str(&fs::read_to_string(&realm_local).unwrap()).unwrap();
+        let target_rule: String = local_value["permissions"]["deny"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|v| {
+                v.as_str()
+                    .filter(|s| s.starts_with("Edit(") && s.contains("src/secret"))
+                    .map(String::from)
+            })
+            .unwrap();
+
+        // Hand-delete the same rule from both settings files, mirroring
+        // what a user would do if they manually scrubbed entries.
+        for file in [&realm_local, &user_scope] {
+            let mut value: Value =
+                serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
+            value["permissions"]["deny"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|v| v.as_str() != Some(&target_rule));
+            fs::write(
+                file,
+                serde_json::to_string_pretty(&value).unwrap().as_bytes(),
+            )
+            .unwrap();
+        }
+
+        let out = run_in(realm.path(), &["unprotect", "src/secret"]);
+        assert_status(&out, 0);
+        let stderr = str::from_utf8(&out.stderr).unwrap();
+
+        // Two warnings expected: one per file, each referencing the
+        // missing rule. The phrasing is owned by `revert_rules` —
+        // matching on `not present in` keeps the assertion stable
+        // against minor wording changes.
+        let warning_count = stderr.matches("not present in").count();
+        assert_eq!(
+            warning_count, 2,
+            "expected one not-present warning per settings file, got {warning_count}\nstderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(".claude/settings.local.json"),
+            "stderr should name the realm-local file: {stderr}"
+        );
+        assert!(
+            stderr.contains("hermetic-user-settings.json"),
+            "stderr should name the user-scope file: {stderr}"
+        );
+
+        // Yaml entry was removed.
+        let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
+        assert!(
+            !yaml.contains("src/secret"),
+            "restrict entry should have been removed from yaml: {yaml}"
+        );
+
+        // Sidecar entry was removed.
+        let sidecar_body =
+            fs::read_to_string(realm.path().join(".claude/.remargin-restrictions.json")).unwrap();
+        let sidecar: Value = serde_json::from_str(&sidecar_body).unwrap();
+        assert!(
+            sidecar["entries"].as_object().unwrap().is_empty(),
+            "sidecar entries should be empty after unprotect: {sidecar}"
+        );
+
+        // The rest of the rules should still have been scrubbed from
+        // both settings files, even though the Edit() rule was
+        // hand-deleted. Both files end up with no `src/secret`-anchored
+        // deny rule remaining.
+        for file in [&realm_local, &user_scope] {
+            let value: Value = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
+            let any_secret_left = value["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.as_str().is_some_and(|s| s.contains("src/secret")));
+            assert!(
+                !any_secret_left,
+                "{file:?} still contains a src/secret rule after unprotect: {value:#?}"
+            );
+        }
+    }
+
     /// Idempotency on the CLI surface: a second `unprotect` is a
     /// warn + no-op (exit 0).
     #[test]
