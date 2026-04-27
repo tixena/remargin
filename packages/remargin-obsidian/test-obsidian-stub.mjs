@@ -119,6 +119,14 @@ export class Setting {
 // only needs to exist as a placeholder symbol.
 export const editorInfoField = {};
 
+// `editorLivePreviewField` is Obsidian's CM6 StateField<boolean> —
+// `true` while the editor is in Live Preview, `false` in Source Mode.
+// The CM6 widget reads it via `state.field(editorLivePreviewField,
+// false)` to gate decoration emission. Tests pass their own
+// `state.field` implementation keyed on this sentinel object, so it
+// only needs to exist as an identity-stable placeholder symbol.
+export const editorLivePreviewField = {};
+
 // `setting`/`workspace`-shaped helpers some components reference.
 // Empty stubs are safe because no static-render path consumes them.
 export const moment = (input) => ({ valueOf: () => Date.now(), input });

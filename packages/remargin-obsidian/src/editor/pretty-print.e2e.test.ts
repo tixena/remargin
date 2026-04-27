@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import type { EditorView } from "@codemirror/view";
+import type { EditorState } from "@codemirror/state";
+import { editorInfoField, editorLivePreviewField } from "obsidian";
 import RemarginPlugin, { type RemarginFocusDetail } from "../main.ts";
 import { CollapseState } from "../state/collapseState.ts";
 import { DEFAULT_SETTINGS } from "../types.ts";
@@ -38,18 +39,19 @@ import {
  *    directly. This is the same pattern T37 + T38 use — the test
  *    stack has no happy-dom dependency, so we cannot mount a real
  *    React tree.
- *  - `@codemirror/view`'s `EditorView` is mocked at the surface area
- *    `buildDecorations` actually consumes (`view.state.doc.toString`,
- *    `view.dom.closest`, `view.state.field`). Same mock pattern that
- *    `commentWidget.test.ts` lands; reused here unchanged so the e2e
- *    layer stays consistent with the unit layer.
+ *  - `@codemirror/state`'s `EditorState` is mocked at the surface area
+ *    `buildDecorations` actually consumes (`state.doc.toString`,
+ *    `state.field(editorLivePreviewField, false)`,
+ *    `state.field(editorInfoField, false)`). Same mock pattern that
+ *    `commentWidget.test.ts` lands post rem-3dra; reused here so the
+ *    e2e layer stays consistent with the unit layer.
  *
  * Trade-off documented in the T38 close-out note: until happy-dom (or
  * another DOM polyfill) is added to this package's devDependencies,
- * a "real" `EditorView.create` cannot be instantiated headlessly. The
+ * a "real" `EditorState.create` cannot be instantiated headlessly. The
  * surface-area mock covers every method `buildDecorations` and the
- * `ViewPlugin.create` path actually call, so the production code is
- * exercised on its real path while the runtime DOM is faked.
+ * `StateField` create/update path actually call, so the production
+ * code is exercised on its real path while the runtime DOM is faked.
  */
 
 const VALID_BLOCK_C1 = [
@@ -190,53 +192,37 @@ function makeCtx(sourcePath = "notes/test.md"): MockCtx {
 }
 
 /**
- * Mock `EditorView` matching the surface area `buildDecorations` and
- * `commentWidgetPlugin`'s `ViewPlugin.create` path actually consume.
- * Identical shape to the one in `commentWidget.test.ts` so the e2e
- * stays in lock-step with the unit-level test.
+ * Mock `EditorState` matching the surface area `buildDecorations` and
+ * `commentWidgetPlugin`'s `StateField` create/update path actually
+ * consume. Identical shape to the one in `commentWidget.test.ts` so
+ * the e2e stays in lock-step with the unit-level test.
+ *
+ * The two `state.field` reads the production code performs are keyed
+ * on `editorLivePreviewField` (mode probe) and `editorInfoField`
+ * (source-path resolver). Both sentinel objects come from the
+ * `obsidian` test stub.
  */
-interface MockHostElement {
-  classes: Set<string>;
-  classList: { contains(name: string): boolean };
+interface MockEditorState {
+  doc: { toString(): string };
+  field<T>(field: unknown, required: false): T | undefined;
 }
 
-interface MockClosestRoot {
-  closest(selector: string): MockHostElement | null;
-}
-
-interface MockEditorView {
-  dom: MockClosestRoot;
-  state: {
-    doc: { toString(): string };
-    field<T>(field: unknown, required: false): T | undefined;
-  };
-}
-
-function makeEditorView(opts: {
+function makeEditorState(opts: {
   doc: string;
   livePreview: boolean;
   sourcePath?: string;
-}): MockEditorView {
-  const classes = new Set<string>(
-    opts.livePreview ? ["markdown-source-view", "is-live-preview"] : ["markdown-source-view"]
-  );
-  const ancestor: MockHostElement = {
-    classes,
-    classList: { contains: (name: string) => classes.has(name) },
-  };
+}): MockEditorState {
   return {
-    dom: {
-      closest(selector) {
-        if (selector === ".markdown-source-view") return ancestor;
-        return null;
-      },
-    },
-    state: {
-      doc: { toString: () => opts.doc },
-      field<T>(_field: unknown, _required: false): T | undefined {
+    doc: { toString: () => opts.doc },
+    field<T>(field: unknown, _required: false): T | undefined {
+      if (field === editorLivePreviewField) {
+        return opts.livePreview as unknown as T;
+      }
+      if (field === editorInfoField) {
         if (opts.sourcePath === undefined) return undefined;
         return { file: { path: opts.sourcePath } } as unknown as T;
-      },
+      }
+      return undefined;
     },
   };
 }
@@ -343,13 +329,13 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
   // Live Preview.
   it("scenario 2: editorWidgets=true + Live Preview -> CM6 builds 1 decoration", () => {
     const plugin = makePlugin(true);
-    const view = makeEditorView({
+    const state = makeEditorState({
       doc: VALID_BLOCK_C1,
       livePreview: true,
       sourcePath: "notes/test.md",
     });
 
-    const decorations = buildDecorations(view as unknown as EditorView, plugin);
+    const decorations = buildDecorations(state as unknown as EditorState, plugin);
     assert.equal(decorations.size, 1, "exactly one decoration");
   });
 
@@ -366,8 +352,8 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     assert.equal(code.parentElement.replaced, false, "<pre> stays untouched");
     assert.equal(ctx.__children.length, 0, "ctx.addChild not called");
 
-    const view = makeEditorView({ doc: VALID_BLOCK_C1, livePreview: true });
-    const decorations = buildDecorations(view as unknown as EditorView, plugin);
+    const state = makeEditorState({ doc: VALID_BLOCK_C1, livePreview: true });
+    const decorations = buildDecorations(state as unknown as EditorState, plugin);
     assert.equal(decorations.size, 0, "CM6 emits no decorations when toggle off");
   });
 
@@ -412,14 +398,14 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     // through the production constructor path. We could equivalently
     // walk the build()-produced RangeSet, but constructing directly
     // gives us a stable handle to call toDOM() on.
-    const view = makeEditorView({
+    const state = makeEditorState({
       doc: VALID_BLOCK_C1,
       livePreview: true,
       sourcePath: "notes/y.md",
     });
-    const decorations = buildDecorations(view as unknown as EditorView, plugin);
+    const decorations = buildDecorations(state as unknown as EditorState, plugin);
     let widget: RemarginWidget | null = null;
-    decorations.between(0, view.state.doc.toString().length, (_f, _t, value) => {
+    decorations.between(0, state.doc.toString().length, (_f, _t, value) => {
       if (!widget) widget = (value as { spec: { widget: RemarginWidget } }).spec.widget;
     });
     assert.ok(widget, "expected one widget in the decoration set");
@@ -451,10 +437,10 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     child.onload();
 
     // 2. Capture the CM6 widget BEFORE the toggle.
-    const view = makeEditorView({ doc: VALID_BLOCK_C1, livePreview: true });
-    const before = buildDecorations(view as unknown as EditorView, plugin);
+    const state = makeEditorState({ doc: VALID_BLOCK_C1, livePreview: true });
+    const before = buildDecorations(state as unknown as EditorState, plugin);
     let widgetBefore: RemarginWidget | null = null;
-    before.between(0, view.state.doc.toString().length, (_f, _t, value) => {
+    before.between(0, state.doc.toString().length, (_f, _t, value) => {
       if (!widgetBefore) widgetBefore = (value as { spec: { widget: RemarginWidget } }).spec.widget;
     });
     assert.ok(widgetBefore);
@@ -465,9 +451,9 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     plugin.collapseState.toggle("c1");
 
     // 4. Capture the CM6 widget AFTER the toggle.
-    const after = buildDecorations(view as unknown as EditorView, plugin);
+    const after = buildDecorations(state as unknown as EditorState, plugin);
     let widgetAfter: RemarginWidget | null = null;
-    after.between(0, view.state.doc.toString().length, (_f, _t, value) => {
+    after.between(0, state.doc.toString().length, (_f, _t, value) => {
       if (!widgetAfter) widgetAfter = (value as { spec: { widget: RemarginWidget } }).spec.widget;
     });
     assert.ok(widgetAfter);
@@ -483,12 +469,12 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     child.onunload();
   });
 
-  // Scenario 7: Source Mode (no `is-live-preview` ancestor class) ->
+  // Scenario 7: Source Mode (livePreview field === false) ->
   // CM6 emits zero decorations regardless of the toggle.
   it("scenario 7: Source Mode -> CM6 emits no decorations", () => {
     const plugin = makePlugin(true);
-    const view = makeEditorView({ doc: VALID_BLOCK_C1, livePreview: false });
-    const decorations = buildDecorations(view as unknown as EditorView, plugin);
+    const state = makeEditorState({ doc: VALID_BLOCK_C1, livePreview: false });
+    const decorations = buildDecorations(state as unknown as EditorState, plugin);
     assert.equal(decorations.size, 0);
   });
 
@@ -513,12 +499,12 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     // assert exactly two decorations come out (one per valid block,
     // none for the malformed one in the middle).
     const doc = `${VALID_BLOCK_C1}\n${INVALID_BLOCK_NO_ID}\n${VALID_BLOCK_C2}`;
-    const view = makeEditorView({ doc, livePreview: true });
-    const decorations = buildDecorations(view as unknown as EditorView, plugin);
+    const state = makeEditorState({ doc, livePreview: true });
+    const decorations = buildDecorations(state as unknown as EditorState, plugin);
     assert.equal(decorations.size, 2, "exactly two decorations: c1 and c2");
 
     const ids: string[] = [];
-    decorations.between(0, view.state.doc.toString().length, (_f, _t, value) => {
+    decorations.between(0, state.doc.toString().length, (_f, _t, value) => {
       const widget = (value as { spec: { widget: RemarginWidget } }).spec.widget;
       // RemarginWidget exposes its id privately; round-trip via toDOM
       // is the only public hook. We installed the fake createRoot

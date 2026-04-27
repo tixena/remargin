@@ -1,13 +1,6 @@
-import { RangeSetBuilder } from "@codemirror/state";
-import {
-  Decoration,
-  type DecorationSet,
-  type EditorView,
-  ViewPlugin,
-  type ViewUpdate,
-  WidgetType,
-} from "@codemirror/view";
-import { editorInfoField } from "obsidian";
+import { type EditorState, RangeSetBuilder, StateField } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { editorInfoField, editorLivePreviewField } from "obsidian";
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
 import { WidgetCommentView } from "@/components/widget/WidgetCommentView";
@@ -27,14 +20,22 @@ export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): 
 }
 
 /**
- * Resolve the editor's mode from the host element's class list. Live
- * Preview adds `is-live-preview` to the `.markdown-source-view`
- * ancestor; Source Mode does not. This is the locked contract from the
- * ticket — chosen over `editorInfoField` because it is deterministic
- * from DOM and unit-testable without a runtime probe.
+ * Resolve the editor's mode from the `editorLivePreviewField` StateField
+ * exported by Obsidian. It is the public, contract-stable signal for
+ * Live-Preview-vs-Source-Mode and — critically — is readable from
+ * inside another StateField, which the older host-DOM ancestor lookup
+ * was not.
+ *
+ * The wider host change (state-field-based decorations) is forced by
+ * CM6's rule that block decorations must come from a state field, not
+ * a per-view plugin; this helper is the matching state-side mode probe.
  */
-function isLivePreview(view: EditorView): boolean {
-  return view.dom.closest(".markdown-source-view")?.classList.contains("is-live-preview") ?? false;
+function isLivePreviewState(state: EditorState): boolean {
+  try {
+    return state.field(editorLivePreviewField, /* require */ false) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -45,9 +46,9 @@ function isLivePreview(view: EditorView): boolean {
  * tests), fall back to an empty string — the click handler still
  * fires, just without a file context.
  */
-function resolveSourcePath(view: EditorView): string {
+function resolveSourcePath(state: EditorState): string {
   try {
-    const info = view.state.field(editorInfoField, /* require */ false);
+    const info = state.field(editorInfoField, /* require */ false);
     return info?.file?.path ?? "";
   } catch {
     return "";
@@ -178,18 +179,18 @@ export class RemarginWidget extends WidgetType {
 }
 
 /**
- * Build the decoration set for the current view. Skipped (returns
+ * Build the decoration set for the current state. Skipped (returns
  * `Decoration.none`) when the feature toggle is off OR the editor is
  * in Source Mode — same fall-through to the raw fence as the
  * reading-mode widget (T37).
  */
-export function buildDecorations(view: EditorView, plugin: RemarginPlugin): DecorationSet {
+export function buildDecorations(state: EditorState, plugin: RemarginPlugin): DecorationSet {
   if (!plugin.settings.editorWidgets) return Decoration.none;
-  if (!isLivePreview(view)) return Decoration.none;
+  if (!isLivePreviewState(state)) return Decoration.none;
 
-  const text = view.state.doc.toString();
+  const text = state.doc.toString();
   const blocks = parseRemarginBlocks(text);
-  const sourcePath = resolveSourcePath(view);
+  const sourcePath = resolveSourcePath(state);
   const builder = new RangeSetBuilder<Decoration>();
   for (const block of blocks) {
     if (!block.valid || !block.comment.id) continue;
@@ -209,30 +210,33 @@ export function buildDecorations(view: EditorView, plugin: RemarginPlugin): Deco
 }
 
 /**
- * CM6 ViewPlugin factory. Returns a fresh ViewPlugin closure per
+ * CM6 StateField factory. Returns a fresh StateField per
  * `RemarginPlugin` instance so the widget has a stable plugin
  * reference for collapse-state and focus-bridge calls.
+ *
+ * MUST be a StateField: block decorations are forbidden from
+ * per-view plugin instances by CM6 — the runtime check throws
+ * `RangeError: Block decorations may not be specified via plugins`
+ * (see ticket rem-3dra). Block decorations alter document layout
+ * (line heights), which CM6 cannot reflow within a single
+ * view-level transaction.
  */
 export function commentWidgetPlugin(plugin: RemarginPlugin) {
-  return ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet;
-      constructor(view: EditorView) {
-        this.decorations = buildDecorations(view, plugin);
-      }
-      // Critical perf fix vs. v1: rebuild ONLY when the document
-      // changed. v1 also rebuilt on `update.viewportChanged`, so
-      // every scroll triggered a full reparse. Selection-only and
-      // viewport-only updates never produce widget content changes,
-      // so they should not touch the decoration set.
-      update(update: ViewUpdate) {
-        if (update.docChanged) {
-          this.decorations = buildDecorations(update.view, plugin);
-        }
-      }
+  return StateField.define<DecorationSet>({
+    create(state) {
+      return buildDecorations(state, plugin);
     },
-    {
-      decorations: (v) => v.decorations,
-    }
-  );
+    update(decorations, tr) {
+      // Critical perf fix vs. v1: rebuild ONLY when the document
+      // changed. Selection-only and viewport-only updates never
+      // produce widget content changes, so they should not touch
+      // the decoration set — just remap existing ranges through
+      // the (empty) change set so offsets stay coherent.
+      if (tr.docChanged) {
+        return buildDecorations(tr.state, plugin);
+      }
+      return decorations.map(tr.changes);
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
 }

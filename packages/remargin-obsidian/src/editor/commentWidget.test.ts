@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import type { EditorView, WidgetType } from "@codemirror/view";
+import { type EditorState, StateField } from "@codemirror/state";
+import type { WidgetType } from "@codemirror/view";
+import { editorInfoField, editorLivePreviewField } from "obsidian";
 import type RemarginPlugin from "../main.ts";
 import { type ParsedBlock, parseRemarginBlocks } from "../parser/parseRemarginBlocks.ts";
 import { CollapseState } from "../state/collapseState.ts";
@@ -13,67 +15,47 @@ import {
 } from "./commentWidget.ts";
 
 /**
- * The CM6 `EditorView` and `ViewPlugin` machinery require a real DOM
- * to construct. The `node --test` harness here doesn't provide one
- * (no happy-dom installed), so we mock the surface area the
- * production code actually touches: `view.state.doc.toString()`,
- * `view.state.field(editorInfoField, false)`, and the
- * `view.dom.closest(".markdown-source-view")` chain used by the
- * Source-Mode-vs-Live-Preview detector.
+ * The CM6 `EditorView` machinery requires a real DOM to construct, and
+ * the `node --test` harness here doesn't provide one (no happy-dom
+ * installed). The post-rem-3dra host is a `StateField`, so tests no
+ * longer need a fake `view.dom.closest(...)` chain — they just need a
+ * minimal `EditorState` shape exposing the two surfaces production
+ * code touches: `state.doc.toString()` and `state.field(field, false)`.
  *
- * This is exactly the trade-off the ticket's "Mocks authorized" rule
- * permits: when a DOM API has no headless equivalent, mock it and
- * keep the AC closable.
+ * The `field()` impl is a per-test record keyed on the sentinel field
+ * objects exported from the `obsidian` test stub
+ * (`editorLivePreviewField`, `editorInfoField`). This is exactly the
+ * trade-off the ticket's "Mocks authorized" rule permits.
  */
-interface MockHostElement {
-  classes: Set<string>;
-  classList: { contains(name: string): boolean };
+interface MockEditorState {
+  doc: { toString(): string };
+  field<T>(field: unknown, required: false): T | undefined;
 }
 
-interface MockClosestRoot {
-  closest(selector: string): MockHostElement | null;
-}
-
-interface MockEditorView {
-  dom: MockClosestRoot;
-  state: {
-    doc: { toString(): string };
-    field<T>(field: unknown, required: false): T | undefined;
-  };
-}
-
-function makeView(opts: {
+interface MakeStateOpts {
   doc: string;
-  livePreview: boolean;
-  /** Overrides the source-path returned by editorInfoField. */
+  /**
+   * Value to return for `state.field(editorLivePreviewField, false)`.
+   * `undefined` simulates the field being absent (the `try`/`catch`
+   * fallback returns `false`).
+   */
+  livePreview: boolean | undefined;
+  /** Overrides the source-path returned by `editorInfoField`. */
   sourcePath?: string;
-  /** When true, the `.markdown-source-view` ancestor is missing entirely. */
-  noSourceViewAncestor?: boolean;
-}): MockEditorView {
-  let ancestor: MockHostElement | null = null;
-  if (!opts.noSourceViewAncestor) {
-    const classes = new Set<string>(
-      opts.livePreview ? ["markdown-source-view", "is-live-preview"] : []
-    );
-    ancestor = {
-      classes,
-      classList: { contains: (name: string) => classes.has(name) },
-    };
-  }
+}
 
+function makeState(opts: MakeStateOpts): MockEditorState {
   return {
-    dom: {
-      closest(selector) {
-        if (selector === ".markdown-source-view") return ancestor;
-        return null;
-      },
-    },
-    state: {
-      doc: { toString: () => opts.doc },
-      field<T>(_field: unknown, _required: false): T | undefined {
+    doc: { toString: () => opts.doc },
+    field<T>(field: unknown, _required: false): T | undefined {
+      if (field === editorLivePreviewField) {
+        return opts.livePreview as unknown as T | undefined;
+      }
+      if (field === editorInfoField) {
         if (opts.sourcePath === undefined) return undefined;
         return { file: { path: opts.sourcePath } } as unknown as T;
-      },
+      }
+      return undefined;
     },
   };
 }
@@ -107,6 +89,18 @@ const VALID_BLOCK = [
   "ts: 2026-04-25T12:00:00-04:00",
   "---",
   "hello widget",
+  "```",
+].join("\n");
+
+const VALID_BLOCK_2 = [
+  "```remargin",
+  "---",
+  "id: c2",
+  "author: bob",
+  "author_type: human",
+  "ts: 2026-04-25T13:00:00-04:00",
+  "---",
+  "second widget",
   "```",
 ].join("\n");
 
@@ -156,9 +150,9 @@ afterEach(() => {
  * `Decoration.none` and any future "empty RangeSet" returned by the
  * builder, since they share that contract.
  */
-function assertNoDecorations(view: MockEditorView, plugin: MockPlugin) {
+function assertNoDecorations(state: MockEditorState, plugin: MockPlugin) {
   const decorations = buildDecorations(
-    view as unknown as EditorView,
+    state as unknown as EditorState,
     plugin as unknown as RemarginPlugin
   );
   assert.equal(decorations.size, 0, "expected zero decorations");
@@ -168,39 +162,69 @@ describe("commentWidget buildDecorations", () => {
   // AC: build() returns Decoration.none when editorWidgets === false.
   it("test #1: setting off → Decoration.none", () => {
     const plugin = makePlugin(false);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: true });
-    assertNoDecorations(view, plugin);
+    const state = makeState({ doc: VALID_BLOCK, livePreview: true });
+    assertNoDecorations(state, plugin);
   });
 
   // AC: build() returns Decoration.none when in Source Mode.
-  it("test #2: source mode (no is-live-preview class) → Decoration.none", () => {
+  it("test #2: source mode (livePreview field === false) → Decoration.none", () => {
     const plugin = makePlugin(true);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: false });
-    assertNoDecorations(view, plugin);
+    const state = makeState({ doc: VALID_BLOCK, livePreview: false });
+    assertNoDecorations(state, plugin);
   });
 
-  // Defensive companion: the .markdown-source-view ancestor is missing
-  // outright (e.g. an unrooted editor) — still bails out cleanly.
-  it("test #2b: missing .markdown-source-view ancestor → Decoration.none", () => {
+  // AC: isLivePreviewState reads editorLivePreviewField. The helper
+  // is module-private; we exercise it transitively through
+  // buildDecorations, which is the only caller in production. The
+  // three sub-tests cover the truth-table the ticket spelled out.
+  it("test #2a: livePreview field === true → buildDecorations gates open", () => {
     const plugin = makePlugin(true);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: false, noSourceViewAncestor: true });
-    assertNoDecorations(view, plugin);
+    const state = makeState({ doc: VALID_BLOCK, livePreview: true });
+    const decorations = buildDecorations(
+      state as unknown as EditorState,
+      plugin as unknown as RemarginPlugin
+    );
+    assert.equal(decorations.size, 1, "live preview true must produce a decoration");
+  });
+
+  it("test #2b: livePreview field === false → buildDecorations gates closed", () => {
+    const plugin = makePlugin(true);
+    const state = makeState({ doc: VALID_BLOCK, livePreview: false });
+    const decorations = buildDecorations(
+      state as unknown as EditorState,
+      plugin as unknown as RemarginPlugin
+    );
+    assert.equal(decorations.size, 0, "live preview false must NOT produce a decoration");
+  });
+
+  it("test #2c: livePreview field absent → defaults to false (no throw, no decorations)", () => {
+    const plugin = makePlugin(true);
+    const state = makeState({ doc: VALID_BLOCK, livePreview: undefined });
+    const decorations = buildDecorations(
+      state as unknown as EditorState,
+      plugin as unknown as RemarginPlugin
+    );
+    assert.equal(decorations.size, 0, "absent field must default to false → 0 decorations");
   });
 
   // AC: Live Preview + valid block → Decoration.replace with block:true,
   // inclusive:false.
   it("test #3: live preview + valid block → 1 replace decoration with block/inclusive flags", () => {
     const plugin = makePlugin(true);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: true, sourcePath: "notes/test.md" });
+    const state = makeState({
+      doc: VALID_BLOCK,
+      livePreview: true,
+      sourcePath: "notes/test.md",
+    });
     const decorations = buildDecorations(
-      view as unknown as EditorView,
+      state as unknown as EditorState,
       plugin as unknown as RemarginPlugin
     );
     assert.equal(decorations.size, 1, "exactly one decoration expected");
 
     // Walk the produced RangeSet to fish out the spec.
     const collected: Array<{ from: number; to: number; spec: unknown }> = [];
-    decorations.between(0, view.state.doc.toString().length, (from, to, value) => {
+    decorations.between(0, state.doc.toString().length, (from, to, value) => {
       collected.push({ from, to, spec: (value as { spec: unknown }).spec });
     });
     assert.equal(collected.length, 1);
@@ -222,72 +246,119 @@ describe("commentWidget buildDecorations", () => {
   it("test #4: 1 valid + 1 malformed → exactly 1 decoration (the valid one)", () => {
     const plugin = makePlugin(true);
     const doc = `${VALID_BLOCK}\n${INVALID_BLOCK_NO_ID}`;
-    const view = makeView({ doc, livePreview: true });
+    const state = makeState({ doc, livePreview: true });
     const decorations = buildDecorations(
-      view as unknown as EditorView,
+      state as unknown as EditorState,
       plugin as unknown as RemarginPlugin
     );
     assert.equal(decorations.size, 1);
   });
 });
 
-describe("commentWidgetPlugin update lifecycle", () => {
+describe("commentWidgetPlugin StateField update lifecycle", () => {
+  // Helper: pull the StateFieldSpec out of the StateField the
+  // factory returns. CM6's StateField stores its create/update
+  // callbacks on private `createF` / `updateF` slots; we don't
+  // reach in there. Instead, drive the field through CM6's public
+  // contract — `extension` plugged into a real EditorState — and
+  // observe `state.field(field)` before and after a transaction.
+  //
+  // For unit-test purposes we call create/update via the spec stash
+  // exposed on the StateField instance. CM6 doesn't publicize this,
+  // but the StateField object also IS the field key, so we can use
+  // it both as the lookup key and as the spec carrier through the
+  // simple test shim below.
+  function specFromField(field: unknown): {
+    create: (state: EditorState) => unknown;
+    update: (value: unknown, tr: unknown) => unknown;
+  } {
+    // The StateField class stores create/update on private slots
+    // named `createF` / `updateF` (visible on the prototype's
+    // closure). Read them off via known property names.
+    const f = field as { createF?: unknown; updateF?: unknown };
+    return {
+      create: f.createF as (state: EditorState) => unknown,
+      update: f.updateF as (value: unknown, tr: unknown) => unknown,
+    };
+  }
+
   // AC: update() rebuilds ONLY on docChanged. Viewport / selection
-  // updates do NOT rebuild.
-  it("test #5: viewport-only update → build() not called", () => {
+  // updates do NOT rebuild — they remap the existing decorations.
+  it("test #5: docChanged update → buildDecorations called (re-parse)", () => {
     const plugin = makePlugin(true);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: true });
-    const extension = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
+    const state = makeState({ doc: VALID_BLOCK, livePreview: true });
+    const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
+    const spec = specFromField(field);
 
-    // CM6's ViewPlugin spec exposes the inner class via `.create(view)`
-    // which is the same code path CM6 itself uses to instantiate the
-    // plugin. We can drive `update` on the resulting instance without
-    // a real EditorView because our mock view satisfies every
-    // `state.doc.toString()` and `dom.closest(...)` access the build
-    // path performs.
-    const instance = (
-      extension as unknown as { create: (v: unknown) => { update: (u: unknown) => void } }
-    ).create(view);
+    const initial = spec.create(state as unknown as EditorState) as {
+      size: number;
+    };
+    assert.equal(initial.size, 1, "initial create produces 1 decoration");
 
-    let buildCalls = 0;
-    const originalDecorations = (instance as unknown as { decorations: unknown }).decorations;
-    Object.defineProperty(instance, "decorations", {
-      configurable: true,
-      get() {
-        return originalDecorations;
-      },
-      set(_value: unknown) {
-        buildCalls += 1;
-      },
+    // Simulate a docChanged transaction that swaps in a different
+    // valid block. The update path re-runs buildDecorations against
+    // the new state — we observe the rebuild by counting decorations
+    // against the new doc.
+    const nextState = makeState({
+      doc: `${VALID_BLOCK}\n${VALID_BLOCK_2}`,
+      livePreview: true,
     });
-
-    // Simulate a viewport-only update — docChanged is false.
-    instance.update({ docChanged: false, viewportChanged: true, view });
-    assert.equal(buildCalls, 0, "viewport-only update must NOT rebuild");
+    const tr = {
+      docChanged: true,
+      state: nextState as unknown as EditorState,
+      changes: { mapPos: (pos: number) => pos },
+    };
+    const next = spec.update(initial, tr) as { size: number };
+    assert.equal(next.size, 2, "docChanged rebuild produces 2 decorations against the new doc");
   });
 
-  it("test #6: docChanged update → build() called once", () => {
+  it("test #6: non-docChanged update → existing decorations remapped, NOT rebuilt", () => {
     const plugin = makePlugin(true);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: true });
-    const extension = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
-    const instance = (
-      extension as unknown as { create: (v: unknown) => { update: (u: unknown) => void } }
-    ).create(view);
+    const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
+    const spec = specFromField(field);
 
-    let buildCalls = 0;
-    const originalDecorations = (instance as unknown as { decorations: unknown }).decorations;
-    Object.defineProperty(instance, "decorations", {
-      configurable: true,
-      get() {
-        return originalDecorations;
+    // Use a sentinel "previous decorations" object whose only
+    // surface is `.map(changes)`. If production goes through the
+    // remap branch it will call this spy; if it falls into the
+    // rebuild branch it will reach for buildDecorations and IGNORE
+    // the sentinel. Returning a distinct sentinel value from the
+    // spy lets us assert both that .map was called AND that the
+    // production code returned the spy's output verbatim (i.e.
+    // didn't re-parse).
+    let mapCalls = 0;
+    const remapSentinel = Symbol("remapped-decorations");
+    const previous = {
+      size: 1,
+      map: (_changes: unknown) => {
+        mapCalls += 1;
+        return remapSentinel;
       },
-      set(_value: unknown) {
-        buildCalls += 1;
-      },
-    });
+    };
 
-    instance.update({ docChanged: true, viewportChanged: false, view });
-    assert.equal(buildCalls, 1, "docChanged update rebuilds once");
+    const tr = {
+      docChanged: false,
+      // `state` is unused on the non-docChanged branch; pass a
+      // throw-on-touch sentinel to make any accidental access
+      // crash loudly.
+      state: new Proxy(
+        {},
+        {
+          get(_t, prop) {
+            throw new Error(
+              `tr.state should not be read on non-docChanged branch (got: ${String(prop)})`
+            );
+          },
+        }
+      ) as unknown as EditorState,
+      changes: { __sentinel: "changes" },
+    };
+    const next = spec.update(previous, tr);
+    assert.equal(mapCalls, 1, "non-docChanged update must call decorations.map exactly once");
+    assert.equal(
+      next,
+      remapSentinel,
+      "non-docChanged update must return the .map() result verbatim"
+    );
   });
 });
 
@@ -393,20 +464,20 @@ describe("RemarginWidget", () => {
   // that eq-differs from the previous one for that id.
   it("test #13: collapse toggle makes the next-built widget !eq the previous", () => {
     const plugin = makePlugin(true);
-    const view = makeView({ doc: VALID_BLOCK, livePreview: true });
+    const state = makeState({ doc: VALID_BLOCK, livePreview: true });
     const before = buildDecorations(
-      view as unknown as EditorView,
+      state as unknown as EditorState,
       plugin as unknown as RemarginPlugin
     );
     plugin.collapseState.toggle("c1");
     const after = buildDecorations(
-      view as unknown as EditorView,
+      state as unknown as EditorState,
       plugin as unknown as RemarginPlugin
     );
 
     function pickWidget(set: ReturnType<typeof buildDecorations>): WidgetType {
       let found: WidgetType | null = null;
-      set.between(0, view.state.doc.toString().length, (_f, _t, value) => {
+      set.between(0, state.doc.toString().length, (_f, _t, value) => {
         if (found) return;
         found = (value as { spec: { widget: WidgetType } }).spec.widget;
       });
@@ -420,6 +491,30 @@ describe("RemarginWidget", () => {
       false,
       "post-toggle widget must differ from pre-toggle widget"
     );
+  });
+});
+
+describe("commentWidgetPlugin shape", () => {
+  // AC: commentWidgetPlugin returns a StateField extension (NOT a
+  // ViewPlugin). The strongest check is `instanceof StateField` —
+  // CM6 enforces this at runtime, and a ViewPlugin would never
+  // satisfy it (ViewPlugin lives in @codemirror/view and has its
+  // own class). We also assert the `extension` getter is present
+  // (the public surface used to plug the field into EditorState).
+  //
+  // Why this matters: block decorations are forbidden from
+  // ViewPlugin instances by CM6 (RangeError: "Block decorations
+  // may not be specified via plugins" — see ticket rem-3dra). If
+  // this test ever fails, the runtime crash returns.
+  it("test #14: commentWidgetPlugin returns a CM6 StateField (NOT a ViewPlugin)", () => {
+    const plugin = makePlugin(true);
+    const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
+    assert.ok(
+      field instanceof StateField,
+      "commentWidgetPlugin must return a StateField — block decorations cannot come from a ViewPlugin"
+    );
+    const candidate = field as unknown as { extension: unknown };
+    assert.notEqual(candidate.extension, undefined, "StateField must expose an `extension`");
   });
 });
 
