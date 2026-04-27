@@ -21,6 +21,25 @@ import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlo
 let createRootImpl: typeof defaultCreateRoot = defaultCreateRoot;
 
 /**
+ * Re-wrap the stripped inner content of a `<pre><code class="language-remargin">`
+ * block with synthesized fences before delegating to the document-level
+ * `parseRemarginBlocks`. Obsidian's markdown renderer hands us only the
+ * inner content (no `` ``` `` markers), but the parser is a fence-aware
+ * state machine that requires them to enter the YAML/Content states.
+ *
+ * Trade-off: the synthesized text is NOT byte-equal to the source on disk,
+ * so `block.startOffset` / `endOffset` are offsets in the synthesized
+ * string. The post-processor doesn't read those offsets — it only checks
+ * `valid` and `comment.id` — so this is sound. If a future caller needs
+ * source-mapping, file a follow-up to extract a `parseRemarginInner` API
+ * (Path B from rem-hghw).
+ */
+export function parseFromInnerContent(inner: string): ReturnType<typeof parseRemarginBlocks> {
+  const wrapped = `\`\`\`remargin\n${inner.replace(/\n*$/, "")}\n\`\`\`\n`;
+  return parseRemarginBlocks(wrapped);
+}
+
+/**
  * Test-only seam: replace the `createRoot` factory so tests can
  * exercise `ReadingModeCommentChild.onload` / `onunload` without a
  * real DOM. NOT exported via the package barrel; only the unit test
@@ -60,7 +79,7 @@ export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProce
       const pre = code.parentElement;
       if (!pre) continue;
 
-      const parsed = parseRemarginBlocks(code.textContent ?? "");
+      const parsed = parseFromInnerContent(code.textContent ?? "");
       // Skip when the fence wasn't a single, well-formed comment block.
       // We need exactly one valid parsed block with an id — anything else
       // (zero, multiple, or invalid) falls through to the raw `<pre>`.

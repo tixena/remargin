@@ -54,6 +54,11 @@ import {
  * code is exercised on its real path while the runtime DOM is faked.
  */
 
+/**
+ * Full-fence form of c1, used as the `doc` body for CM6 / `makeEditorState`
+ * paths. CM6 sees the on-disk markdown source verbatim, so fences are
+ * required for the parser to recognize the block.
+ */
 const VALID_BLOCK_C1 = [
   "```remargin",
   "---",
@@ -64,6 +69,22 @@ const VALID_BLOCK_C1 = [
   "---",
   "first comment",
   "```",
+].join("\n");
+
+/**
+ * Bare YAML+content form of c1, matching what `code.textContent` returns
+ * in reading mode after Obsidian's markdown renderer strips the outer
+ * fences. The post-processor re-wraps via `parseFromInnerContent` before
+ * parsing — see rem-hghw.
+ */
+const VALID_BLOCK_C1_INNER = [
+  "---",
+  "id: c1",
+  "author: alice",
+  "author_type: human",
+  "ts: 2026-04-25T12:00:00-04:00",
+  "---",
+  "first comment",
 ].join("\n");
 
 const VALID_BLOCK_C2 = [
@@ -86,6 +107,15 @@ const INVALID_BLOCK_NO_ID = [
   "---",
   "missing id",
   "```",
+].join("\n");
+
+/** Bare-inner form of the missing-id fixture, for reading-mode tests. */
+const INVALID_BLOCK_NO_ID_INNER = [
+  "---",
+  "author: alice",
+  "ts: 2026-04-25T12:00:00-04:00",
+  "---",
+  "missing id",
 ].join("\n");
 
 /**
@@ -326,7 +356,7 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
   it("scenario 1: editorWidgets=true -> reading-mode widget replaces <pre>", () => {
     const plugin = makePlugin(true);
     captureReadingModeOnClicks();
-    const code = makeCode(VALID_BLOCK_C1);
+    const code = makeCode(VALID_BLOCK_C1_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx();
 
@@ -370,7 +400,7 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
   // place.
   it("scenario 3: editorWidgets=false -> reading-mode no-op AND CM6 emits no decorations", () => {
     const plugin = makePlugin(false);
-    const code = makeCode(VALID_BLOCK_C1);
+    const code = makeCode(VALID_BLOCK_C1_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx();
 
@@ -393,7 +423,7 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     const captured = captureReadingModeOnClicks();
     const focusDetails = captureFocusEvents(plugin);
 
-    const code = makeCode(VALID_BLOCK_C1);
+    const code = makeCode(VALID_BLOCK_C1_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx("notes/x.md");
     const processor = remarginPostProcessor(plugin);
@@ -456,7 +486,7 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     //    the bridge; the toggle-flow it owns is symmetric across
     //    surfaces, so the assertion that follows holds whichever
     //    surface initiated.)
-    const code = makeCode(VALID_BLOCK_C1);
+    const code = makeCode(VALID_BLOCK_C1_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx();
     remarginPostProcessor(plugin)(el, ctx as never);
@@ -513,7 +543,7 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
 
     // Reading-mode side: post-processor must skip the malformed code
     // element entirely.
-    const code = makeCode(INVALID_BLOCK_NO_ID);
+    const code = makeCode(INVALID_BLOCK_NO_ID_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx();
     remarginPostProcessor(plugin)(el, ctx as never);

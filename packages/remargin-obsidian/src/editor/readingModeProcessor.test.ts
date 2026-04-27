@@ -8,6 +8,7 @@ import { CollapseState } from "../state/collapseState.ts";
 import { DEFAULT_SETTINGS } from "../types.ts";
 import {
   __setCreateRootForTests,
+  parseFromInnerContent,
   ReadingModeCommentChild,
   remarginPostProcessor,
 } from "./readingModeProcessor.ts";
@@ -133,9 +134,55 @@ function makePlugin(editorWidgets: boolean): MockPlugin {
   return plugin;
 }
 
-/** A well-formed remargin block as it appears inside a `<pre><code>`. */
+/**
+ * A well-formed remargin block as it appears inside `<pre><code>` in
+ * reading mode — i.e. AFTER markdown rendering has stripped the outer
+ * `` ``` `` fences. This is exactly the shape `code.textContent` returns
+ * in production. The post-processor delegates to `parseFromInnerContent`,
+ * which re-wraps before parsing.
+ */
 const VALID_BLOCK = [
-  "```remargin",
+  "---",
+  "id: c1",
+  "author: alice",
+  "author_type: human",
+  "ts: 2026-04-25T12:00:00-04:00",
+  "---",
+  "hello widget",
+].join("\n");
+
+const VALID_BLOCK_2 = [
+  "---",
+  "id: c2",
+  "author: bob",
+  "author_type: human",
+  "ts: 2026-04-25T12:01:00-04:00",
+  "---",
+  "second comment",
+].join("\n");
+
+const INVALID_BLOCK_NO_ID = [
+  "---",
+  "author: alice",
+  "ts: 2026-04-25T12:00:00-04:00",
+  "---",
+  "no id here",
+].join("\n");
+
+/**
+ * A fixture whose synthesized-fence wrap (see `parseFromInnerContent`)
+ * yields TWO complete blocks, exercising the post-processor's
+ * `parsed.length !== 1` guard. The shape: bare YAML+content for block
+ * one, then a literal closing fence `` ``` `` (which the wrapper's outer
+ * `` ```remargin `` opener will close on), then a second `` ```remargin ``
+ * fence introducing block two. The wrapper appends its own closing
+ * fence after this body, but block two has already self-closed before
+ * that.
+ *
+ * In practice this is a malformed `<pre><code>` body and isn't expected
+ * in real usage; the test is here to lock in the guard's behaviour.
+ */
+const TWO_BLOCKS_IN_ONE_FENCE = [
   "---",
   "id: c1",
   "author: alice",
@@ -144,9 +191,6 @@ const VALID_BLOCK = [
   "---",
   "hello widget",
   "```",
-].join("\n");
-
-const VALID_BLOCK_2 = [
   "```remargin",
   "---",
   "id: c2",
@@ -157,18 +201,6 @@ const VALID_BLOCK_2 = [
   "second comment",
   "```",
 ].join("\n");
-
-const INVALID_BLOCK_NO_ID = [
-  "```remargin",
-  "---",
-  "author: alice",
-  "ts: 2026-04-25T12:00:00-04:00",
-  "---",
-  "no id here",
-  "```",
-].join("\n");
-
-const TWO_BLOCKS_IN_ONE_FENCE = `${VALID_BLOCK}\n${VALID_BLOCK_2}`;
 
 /**
  * Override the `document` global so the post-processor's
@@ -198,6 +230,31 @@ afterEach(() => {
   } else {
     (globalThis as { document?: unknown }).document = originalDocument;
   }
+});
+
+describe("parseFromInnerContent", () => {
+  // AC (rem-hghw): the helper accepts the bare YAML+content shape that
+  // `<pre><code class="language-remargin">…</code></pre>` exposes via
+  // `code.textContent` (markdown rendering strips the outer fences) and
+  // returns exactly one valid parsed block. This is the regression that
+  // kept reading-mode pretty widgets from rendering.
+  it("test #2-helper: bare YAML+content (no fences) → exactly one valid block", () => {
+    const inner = [
+      "---",
+      "id: abc",
+      "author: x",
+      "author_type: human",
+      "ts: 2026-01-01T00:00:00Z",
+      "---",
+      "body",
+    ].join("\n");
+
+    const parsed = parseFromInnerContent(inner);
+
+    assert.equal(parsed.length, 1, "helper must return exactly one block");
+    assert.equal(parsed[0].valid, true, "block must be valid");
+    assert.equal(parsed[0].comment.id, "abc", "block id must round-trip from YAML");
+  });
 });
 
 describe("remarginPostProcessor", () => {
@@ -322,12 +379,12 @@ describe("ReadingModeCommentChild", () => {
       };
     };
 
-    // Build the parsed block by running the real parser. If the
-    // parser's output shape changes incompatibly, this test should
-    // break loudly rather than silently miscoerce.
-    const parsed = (await import("../parser/parseRemarginBlocks.ts")).parseRemarginBlocks(
-      VALID_BLOCK
-    )[0];
+    // Build the parsed block by running the helper that re-wraps
+    // bare YAML+content with synthesized fences (matching the production
+    // call site in `remarginPostProcessor`). If the parser's output
+    // shape changes incompatibly, this test should break loudly rather
+    // than silently miscoerce.
+    const parsed = parseFromInnerContent(VALID_BLOCK)[0];
     assert.ok(parsed?.valid, "test fixture must be a valid block");
 
     // Inject a fake `createRoot` so we don't need a real DOM. The mock
@@ -374,10 +431,12 @@ describe("ReadingModeCommentChild", () => {
   // AC: Toggling collapse re-renders only the matching child.
   it("test #7: collapseState toggle re-renders only the matching id", async () => {
     const plugin = makePlugin(true);
-    const parseRemarginBlocks = (await import("../parser/parseRemarginBlocks.ts"))
-      .parseRemarginBlocks;
-    const parsedA = parseRemarginBlocks(VALID_BLOCK)[0];
-    const parsedB = parseRemarginBlocks(VALID_BLOCK_2)[0];
+    // VALID_BLOCK / VALID_BLOCK_2 are bare YAML+content (matching the
+    // shape Obsidian's renderer hands the post-processor); use the
+    // helper so they pass through the same fence-synthesis path as
+    // production. See note on test #6.
+    const parsedA = parseFromInnerContent(VALID_BLOCK)[0];
+    const parsedB = parseFromInnerContent(VALID_BLOCK_2)[0];
 
     // Spy on every render so we can assert per-child render counts.
     // Each child gets its own fake root — `__setCreateRootForTests`
@@ -438,9 +497,7 @@ describe("ReadingModeCommentChild", () => {
   // AC: Click on the host fires plugin.focusComment(id, sourcePath).
   it("test #8: widget onClick prop forwards to plugin.focusComment(id, sourcePath)", async () => {
     const plugin = makePlugin(true);
-    const parsed = (await import("../parser/parseRemarginBlocks.ts")).parseRemarginBlocks(
-      VALID_BLOCK
-    )[0];
+    const parsed = parseFromInnerContent(VALID_BLOCK)[0];
 
     // Capture the React element the child renders so we can fish out
     // the wired `onClick` prop and invoke it directly. The wrapper is
@@ -489,9 +546,7 @@ describe("ReadingModeCommentChild", () => {
   // BackendContext.Provider" — so this assertion guards the runtime fix.
   it("test #9: render wraps WidgetCommentView in WidgetProviders with plugin + host", async () => {
     const plugin = makePlugin(true);
-    const parsed = (await import("../parser/parseRemarginBlocks.ts")).parseRemarginBlocks(
-      VALID_BLOCK
-    )[0];
+    const parsed = parseFromInnerContent(VALID_BLOCK)[0];
 
     let capturedElement: unknown;
     let capturedHost: unknown;
