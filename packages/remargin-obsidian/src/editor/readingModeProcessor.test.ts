@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type MarkdownPostProcessorContext, MarkdownRenderChild } from "obsidian";
+import { WidgetCommentView } from "../components/widget/WidgetCommentView.tsx";
+import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
 import type RemarginPlugin from "../main.ts";
 import { CollapseState } from "../state/collapseState.ts";
 import { DEFAULT_SETTINGS } from "../types.ts";
@@ -228,7 +230,18 @@ describe("remarginPostProcessor", () => {
     assert.equal(code.parentElement.replaced, true, "<pre> must be replaced");
     assert.equal(createdHosts.length, 1, "exactly one host element should be created");
     const host = createdHosts[0];
-    assert.equal(host.className, "remargin-reading-host");
+    // Host className must carry both the structural class AND
+    // `remargin-container` so Tailwind utilities scoped via
+    // tailwind.config.ts's `important: ".remargin-container"` apply
+    // inside the widget. See ticket rem-ob35.
+    assert.ok(
+      host.className.split(/\s+/).includes("remargin-reading-host"),
+      `expected host className to include remargin-reading-host, got: "${host.className}"`
+    );
+    assert.ok(
+      host.className.split(/\s+/).includes("remargin-container"),
+      `expected host className to include remargin-container, got: "${host.className}"`
+    );
     assert.equal(host.dataset.remarginId, "c1");
     assert.equal(code.parentElement.replacement, host, "host is the replacement node");
     assert.equal(ctx.__children.length, 1, "ctx.addChild fired once");
@@ -430,16 +443,19 @@ describe("ReadingModeCommentChild", () => {
     )[0];
 
     // Capture the React element the child renders so we can fish out
-    // the wired `onClick` prop and invoke it directly. This mirrors
-    // the inspection pattern WidgetCommentView.test.ts uses for its
-    // own onClick assertion (no DOM available, so we rely on React
-    // element introspection).
+    // the wired `onClick` prop and invoke it directly. The wrapper is
+    // `WidgetProviders` (added by ticket rem-ob35); the child is the
+    // `WidgetCommentView` element where `onClick` lives. Descend one
+    // level via `props.children` to reach it.
     let capturedOnClick: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
-        const node = element as { props?: { onClick?: (id: string, file: string) => void } };
-        if (typeof node.props?.onClick === "function") {
-          capturedOnClick = node.props.onClick;
+        const wrapper = element as {
+          props?: { children?: { props?: { onClick?: (id: string, file: string) => void } } };
+        };
+        const inner = wrapper.props?.children;
+        if (typeof inner?.props?.onClick === "function") {
+          capturedOnClick = inner.props.onClick;
         }
       },
       unmount: () => {
@@ -459,6 +475,68 @@ describe("ReadingModeCommentChild", () => {
       assert.ok(capturedOnClick, "expected the rendered widget to receive an onClick prop");
       capturedOnClick("c1", "notes/test.md");
       assert.deepStrictEqual(plugin.__focusCalls, [["c1", "notes/test.md"]]);
+
+      child.onunload();
+    } finally {
+      __setCreateRootForTests(null);
+    }
+  });
+
+  // AC (rem-ob35): the rendered React element must be a `WidgetProviders`
+  // wrapping a `WidgetCommentView`, and `WidgetProviders` must receive
+  // the plugin + the host element as its portal container. Without the
+  // wrapper, mounting crashes with "useBackend must be used within a
+  // BackendContext.Provider" — so this assertion guards the runtime fix.
+  it("test #9: render wraps WidgetCommentView in WidgetProviders with plugin + host", async () => {
+    const plugin = makePlugin(true);
+    const parsed = (await import("../parser/parseRemarginBlocks.ts")).parseRemarginBlocks(
+      VALID_BLOCK
+    )[0];
+
+    let capturedElement: unknown;
+    let capturedHost: unknown;
+    __setCreateRootForTests(((host: unknown) => {
+      capturedHost = host;
+      return {
+        render: (element: unknown) => {
+          capturedElement = element;
+        },
+        unmount: () => {
+          /* test-only no-op */
+        },
+      };
+    }) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
+
+    try {
+      const host = makeHost() as unknown as HTMLElement;
+      const child = new ReadingModeCommentChild(
+        host,
+        parsed,
+        "notes/test.md",
+        plugin as unknown as RemarginPlugin
+      );
+      child.onload();
+
+      const wrapper = capturedElement as {
+        type: unknown;
+        props: {
+          plugin: unknown;
+          portalContainer: unknown;
+          children: { type: unknown };
+        };
+      };
+      assert.equal(wrapper.type, WidgetProviders, "outer element must be WidgetProviders");
+      assert.equal(wrapper.props.plugin, plugin, "plugin prop must be the plugin instance");
+      assert.equal(
+        wrapper.props.portalContainer,
+        capturedHost,
+        "portalContainer prop must be the same host the React root mounts into"
+      );
+      assert.equal(
+        wrapper.props.children.type,
+        WidgetCommentView,
+        "wrapper child must be the WidgetCommentView element"
+      );
 
       child.onunload();
     } finally {

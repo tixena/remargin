@@ -259,6 +259,21 @@ afterEach(() => {
 });
 
 /**
+ * Pull the `onClick` prop from the wrapped widget tree both editor
+ * surfaces produce. After ticket rem-ob35, both sides render
+ * `<WidgetProviders>` wrapping `<WidgetCommentView>`. The provider
+ * wrapper has no `onClick`; the inner `WidgetCommentView` does.
+ * Descend one level via `props.children` to reach it.
+ */
+function findInnerOnClick(element: unknown): ((id: string, file: string) => void) | undefined {
+  const wrapper = element as {
+    props?: { children?: { props?: { onClick?: (id: string, file: string) => void } } };
+  };
+  const inner = wrapper.props?.children;
+  return typeof inner?.props?.onClick === "function" ? inner.props.onClick : undefined;
+}
+
+/**
  * Helper: install a fake `createRoot` for the reading-mode side that
  * captures every rendered React element's `onClick` prop. Returns the
  * captured-callback array (newest at the end).
@@ -267,8 +282,8 @@ function captureReadingModeOnClicks(): Array<(id: string, file: string) => void>
   const captured: Array<(id: string, file: string) => void> = [];
   __setReadingModeCreateRoot(((_el: unknown) => ({
     render(element: unknown) {
-      const node = element as { props?: { onClick?: (id: string, file: string) => void } };
-      if (typeof node.props?.onClick === "function") captured.push(node.props.onClick);
+      const onClick = findInnerOnClick(element);
+      if (onClick) captured.push(onClick);
     },
     unmount() {
       /* test-only no-op */
@@ -285,8 +300,8 @@ function captureCm6WidgetOnClicks(): Array<(id: string, file: string) => void> {
   const captured: Array<(id: string, file: string) => void> = [];
   __setCommentWidgetCreateRoot(((_el: unknown) => ({
     render(element: unknown) {
-      const node = element as { props?: { onClick?: (id: string, file: string) => void } };
-      if (typeof node.props?.onClick === "function") captured.push(node.props.onClick);
+      const onClick = findInnerOnClick(element);
+      if (onClick) captured.push(onClick);
     },
     unmount() {
       /* test-only no-op */
@@ -320,7 +335,19 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
 
     assert.equal(code.parentElement.replaced, true, "<pre> was replaced");
     assert.equal(createdHosts.length, 1, "exactly one reading-mode host element");
-    assert.equal(createdHosts[0].className, "remargin-reading-host");
+    // Host className must carry both the structural class AND
+    // `remargin-container` (added by ticket rem-ob35) so Tailwind
+    // utilities scoped via the `important: ".remargin-container"` rule
+    // apply inside the widget subtree.
+    const classes = createdHosts[0].className.split(/\s+/);
+    assert.ok(
+      classes.includes("remargin-reading-host"),
+      `expected host className to include remargin-reading-host, got: "${createdHosts[0].className}"`
+    );
+    assert.ok(
+      classes.includes("remargin-container"),
+      `expected host className to include remargin-container, got: "${createdHosts[0].className}"`
+    );
     assert.equal(createdHosts[0].dataset.remarginId, "c1");
     assert.equal(ctx.__children.length, 1, "ctx.addChild fired once");
   });

@@ -4,6 +4,7 @@ import { editorInfoField, editorLivePreviewField } from "obsidian";
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
 import { WidgetCommentView } from "@/components/widget/WidgetCommentView";
+import { WidgetProviders } from "@/components/widget/WidgetProviders";
 import type { Comment } from "@/generated";
 import type RemarginPlugin from "@/main";
 import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
@@ -136,7 +137,10 @@ export class RemarginWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const host = document.createElement("div");
-    host.className = "remargin-widget-host";
+    // `remargin-container` makes Tailwind utilities scoped via
+    // tailwind.config.ts's `important: ".remargin-container"` apply
+    // to this widget's subtree (tooltips and all). See ticket rem-ob35.
+    host.className = "remargin-widget-host remargin-container";
     host.dataset.remarginId = this.id;
     const root = createRootImpl(host);
     // Stash the root on the host so `destroy(dom)` can find it without
@@ -144,22 +148,26 @@ export class RemarginWidget extends WidgetType {
     // hands the same DOM node back to `destroy`.
     (host as HTMLElement & { __remarginRoot?: Root }).__remarginRoot = root;
     root.render(
-      createElement(WidgetCommentView, {
-        // The build path filters for `parsed.valid` so the cast to a
-        // full `Comment` is sound; missing optional fields default
-        // gracefully inside the header/body components.
-        comment: this.parsed.comment as Comment,
-        sourcePath: this.sourcePath,
-        // Use the snapshot from construction time. CM6 only calls
-        // `toDOM` when this widget is being mounted for the first
-        // time (or after `eq` returned false → rebuild), so the
-        // snapshot is the right value to render against.
-        collapsed: this.collapsedAtBuildTime,
-        onToggle: () => this.plugin.collapseState.toggle(this.id),
-        onClick: (cid, file) => {
-          this.plugin.focusComment(cid, file);
-        },
-      })
+      createElement(
+        WidgetProviders,
+        { plugin: this.plugin, portalContainer: host },
+        createElement(WidgetCommentView, {
+          // The build path filters for `parsed.valid` so the cast to a
+          // full `Comment` is sound; missing optional fields default
+          // gracefully inside the header/body components.
+          comment: this.parsed.comment as Comment,
+          sourcePath: this.sourcePath,
+          // Use the snapshot from construction time. CM6 only calls
+          // `toDOM` when this widget is being mounted for the first
+          // time (or after `eq` returned false → rebuild), so the
+          // snapshot is the right value to render against.
+          collapsed: this.collapsedAtBuildTime,
+          onToggle: () => this.plugin.collapseState.toggle(this.id),
+          onClick: (cid, file) => {
+            this.plugin.focusComment(cid, file);
+          },
+        })
+      )
     );
     return host;
   }

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { type EditorState, StateField } from "@codemirror/state";
 import type { WidgetType } from "@codemirror/view";
 import { editorInfoField, editorLivePreviewField } from "obsidian";
+import { WidgetCommentView } from "../components/widget/WidgetCommentView.tsx";
+import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
 import type RemarginPlugin from "../main.ts";
 import { type ParsedBlock, parseRemarginBlocks } from "../parser/parseRemarginBlocks.ts";
 import { CollapseState } from "../state/collapseState.ts";
@@ -431,7 +433,18 @@ describe("RemarginWidget", () => {
     const dom = widget.toDOM();
     assert.equal(createRootCalls, 1);
     assert.equal(renderCalls, 1, "render must run once on mount");
-    assert.equal((dom as MockHost).className, "remargin-widget-host");
+    // Host must carry both the structural class AND `remargin-container`
+    // so Tailwind utilities scoped via the `important` selector apply
+    // inside the widget. See ticket rem-ob35.
+    const classes = (dom as MockHost).className.split(/\s+/);
+    assert.ok(
+      classes.includes("remargin-widget-host"),
+      `expected host className to include remargin-widget-host, got: "${(dom as MockHost).className}"`
+    );
+    assert.ok(
+      classes.includes("remargin-container"),
+      `expected host className to include remargin-container, got: "${(dom as MockHost).className}"`
+    );
     assert.equal((dom as MockHost).dataset.remarginId, "c1");
 
     widget.destroy(dom);
@@ -442,11 +455,16 @@ describe("RemarginWidget", () => {
   it("test #12: widget onClick prop forwards to plugin.focusComment", () => {
     const plugin = makePlugin(true);
 
+    // Wrapper is `WidgetProviders` (added by ticket rem-ob35); the inner
+    // child is `WidgetCommentView`, which carries the `onClick` prop.
     let captured: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
-        const node = element as { props?: { onClick?: (id: string, file: string) => void } };
-        if (typeof node.props?.onClick === "function") captured = node.props.onClick;
+        const wrapper = element as {
+          props?: { children?: { props?: { onClick?: (id: string, file: string) => void } } };
+        };
+        const inner = wrapper.props?.children;
+        if (typeof inner?.props?.onClick === "function") captured = inner.props.onClick;
       },
       unmount: () => {
         /* test-only no-op */
@@ -458,6 +476,58 @@ describe("RemarginWidget", () => {
     assert.ok(captured, "expected an onClick prop on the rendered widget");
     captured("c1", "notes/x.md");
     assert.deepStrictEqual(plugin.__focusCalls, [["c1", "notes/x.md"]]);
+  });
+
+  // AC (rem-ob35): toDOM must wrap WidgetCommentView in WidgetProviders,
+  // passing `plugin: this.plugin` and `portalContainer: host`. Without
+  // the wrapper, the React mount throws on first render with
+  // "useBackend must be used within a BackendContext.Provider". The
+  // wrapper presence is the structural fix this test guards.
+  it("test #12a: toDOM wraps WidgetCommentView in WidgetProviders with plugin + host as portal container", () => {
+    const plugin = makePlugin(true);
+
+    let capturedElement: unknown;
+    let capturedHost: unknown;
+    __setCreateRootForTests(((host: unknown) => {
+      capturedHost = host;
+      return {
+        render: (element: unknown) => {
+          capturedElement = element;
+        },
+        unmount: () => {
+          /* test-only no-op */
+        },
+      };
+    }) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
+
+    const widget = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "notes/x.md");
+    const dom = widget.toDOM();
+
+    const wrapper = capturedElement as {
+      type: unknown;
+      props: {
+        plugin: unknown;
+        portalContainer: unknown;
+        children: { type: unknown };
+      };
+    };
+    assert.equal(wrapper.type, WidgetProviders, "outer element must be WidgetProviders");
+    assert.equal(wrapper.props.plugin, plugin, "plugin prop must be the plugin instance");
+    assert.equal(
+      wrapper.props.portalContainer,
+      capturedHost,
+      "portalContainer prop must be the same host the React root mounts into"
+    );
+    assert.equal(
+      wrapper.props.portalContainer,
+      dom,
+      "portalContainer prop must be the host element toDOM returns"
+    );
+    assert.equal(
+      wrapper.props.children.type,
+      WidgetCommentView,
+      "wrapper child must be the WidgetCommentView element"
+    );
   });
 
   // AC: Toggling collapse forces the next build() to produce a widget

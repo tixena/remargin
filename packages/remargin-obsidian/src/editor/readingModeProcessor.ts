@@ -6,6 +6,7 @@ import {
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
 import { WidgetCommentView } from "@/components/widget/WidgetCommentView";
+import { WidgetProviders } from "@/components/widget/WidgetProviders";
 import type { Comment } from "@/generated";
 import type RemarginPlugin from "@/main";
 import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
@@ -68,7 +69,10 @@ export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProce
       if (!block.valid || !block.comment.id) continue;
 
       const host = document.createElement("div");
-      host.className = "remargin-reading-host";
+      // `remargin-container` makes Tailwind utilities scoped via
+      // tailwind.config.ts's `important: ".remargin-container"` apply
+      // to this widget's subtree (tooltips and all). See ticket rem-ob35.
+      host.className = "remargin-reading-host remargin-container";
       host.dataset.remarginId = block.comment.id;
       pre.replaceWith(host);
 
@@ -122,21 +126,25 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     const id = this.parsed.comment.id;
     if (!id) return;
     this.root.render(
-      createElement(WidgetCommentView, {
-        // The widget expects a full `Comment`. The parser returns
-        // `Partial<Comment>` because malformed blocks may miss fields —
-        // but at this point we've already filtered to `valid && id`,
-        // so the cast is sound. The header/body components handle
-        // missing optional fields gracefully (defaults to empty
-        // string / array).
-        comment: this.parsed.comment as Comment,
-        sourcePath: this.sourcePath,
-        collapsed: this.plugin.collapseState.isCollapsed(id),
-        onToggle: () => this.plugin.collapseState.toggle(id),
-        onClick: (cid, file) => {
-          this.plugin.focusComment(cid, file);
-        },
-      })
+      createElement(
+        WidgetProviders,
+        { plugin: this.plugin, portalContainer: this.containerEl },
+        createElement(WidgetCommentView, {
+          // The widget expects a full `Comment`. The parser returns
+          // `Partial<Comment>` because malformed blocks may miss fields —
+          // but at this point we've already filtered to `valid && id`,
+          // so the cast is sound. The header/body components handle
+          // missing optional fields gracefully (defaults to empty
+          // string / array).
+          comment: this.parsed.comment as Comment,
+          sourcePath: this.sourcePath,
+          collapsed: this.plugin.collapseState.isCollapsed(id),
+          onToggle: () => this.plugin.collapseState.toggle(id),
+          onClick: (cid, file) => {
+            this.plugin.focusComment(cid, file);
+          },
+        })
+      )
     );
   }
 }
