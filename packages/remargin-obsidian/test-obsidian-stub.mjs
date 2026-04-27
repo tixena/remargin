@@ -112,6 +112,13 @@ export class Setting {
   }
 }
 
+// `editorInfoField` is Obsidian's CM6 StateField that exposes the
+// surrounding markdown view's file/editor/etc. The CM6 widget reads
+// it via `state.field(editorInfoField, false)` to resolve the source
+// path. Tests pass their own `state.field` implementation, so this
+// only needs to exist as a placeholder symbol.
+export const editorInfoField = {};
+
 // `setting`/`workspace`-shaped helpers some components reference.
 // Empty stubs are safe because no static-render path consumes them.
 export const moment = (input) => ({ valueOf: () => Date.now(), input });

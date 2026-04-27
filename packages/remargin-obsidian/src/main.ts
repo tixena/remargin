@@ -12,7 +12,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { RemarginBackend } from "./backend";
 import { RemarginSidebar } from "./components/RemarginSidebar";
 import { SettingsTab } from "./components/settings/SettingsTab";
-// import { commentWidgetPlugin } from "./editor/commentWidget";
+import { commentWidgetPlugin } from "./editor/commentWidget";
 import { remarginPostProcessor } from "./editor/readingModeProcessor";
 import { BackendContext } from "./hooks/useBackend";
 import { PluginContext } from "./hooks/usePlugin";
@@ -237,7 +237,11 @@ export default class RemarginPlugin extends Plugin {
 
     this.addSettingTab(new RemarginSettingTab(this));
 
-    // this.registerEditorExtension([commentWidgetPlugin]);
+    // T38: pretty-print Live Preview widget. The plugin closure reads
+    // `settings.editorWidgets` and the live-preview class on every
+    // `build()`, so toggling the setting or flipping editor modes
+    // takes effect on the next document change.
+    this.registerEditorExtension(commentWidgetPlugin(this));
     // T37: pretty-print reading-mode widget. The post-processor reads
     // `settings.editorWidgets` on every render call, so toggling the
     // setting at runtime takes effect on the next render — no need to

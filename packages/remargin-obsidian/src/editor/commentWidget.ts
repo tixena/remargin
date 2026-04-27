@@ -7,122 +7,232 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { type ParsedBlock, parseRemarginBlocks } from "@/parser";
+import { editorInfoField } from "obsidian";
+import { createElement } from "react";
+import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
+import { WidgetCommentView } from "@/components/widget/WidgetCommentView";
+import type { Comment } from "@/generated";
+import type RemarginPlugin from "@/main";
+import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
 
-class CommentBlockWidget extends WidgetType {
-  constructor(
-    readonly block: ParsedBlock,
-    readonly collapsed: boolean
-  ) {
-    super();
-  }
-
-  toDOM(): HTMLElement {
-    const wrapper = document.createElement("div");
-    wrapper.className = "remargin-comment-widget";
-
-    const header = document.createElement("div");
-    header.className = "remargin-comment-header";
-
-    const badge = document.createElement("span");
-    badge.className = `remargin-badge remargin-badge-${
-      this.block.comment.author_type === "agent" ? "agent" : "human"
-    }`;
-    badge.textContent = this.block.comment.author_type === "agent" ? "AI" : "H";
-    header.appendChild(badge);
-
-    const author = document.createElement("span");
-    author.className = "remargin-author";
-    author.textContent = this.block.comment.author ?? "unknown";
-    header.appendChild(author);
-
-    if (this.block.comment.ack?.length === 0) {
-      const pending = document.createElement("span");
-      pending.className = "remargin-pending-dot";
-      header.appendChild(pending);
-    }
-
-    const time = document.createElement("span");
-    time.className = "remargin-time";
-    time.textContent = formatRelative(this.block.comment.ts);
-    header.appendChild(time);
-
-    wrapper.appendChild(header);
-
-    if (!this.collapsed) {
-      const content = document.createElement("div");
-      content.className = "remargin-comment-content";
-      content.textContent = this.block.comment.content?.split("\n")[0] ?? "";
-      wrapper.appendChild(content);
-    }
-
-    return wrapper;
-  }
-
-  eq(other: CommentBlockWidget): boolean {
-    return (
-      this.block.startOffset === other.block.startOffset &&
-      this.block.endOffset === other.block.endOffset &&
-      this.collapsed === other.collapsed
-    );
-  }
-
-  ignoreEvent(): boolean {
-    return false;
-  }
+/**
+ * Test seam for `react-dom/client`'s `createRoot`. Production code uses
+ * the default React 19 implementation; unit tests swap it for a mock so
+ * `toDOM` / `destroy` lifecycle assertions can run without a real DOM.
+ * Mirrors the pattern in `readingModeProcessor.ts`.
+ */
+let createRootImpl: typeof defaultCreateRoot = defaultCreateRoot;
+export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): void {
+  createRootImpl = impl ?? defaultCreateRoot;
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-  const doc = view.state.doc;
-  const text = doc.toString();
-  const blocks = parseRemarginBlocks(text);
-
-  for (const block of blocks) {
-    if (!block.valid) continue;
-
-    const from = block.startOffset;
-    const to = Math.min(block.endOffset, doc.length);
-
-    if (from >= to) continue;
-
-    const widget = new CommentBlockWidget(block, false);
-    builder.add(from, to, Decoration.replace({ widget, block: true }));
-  }
-
-  return builder.finish();
+/**
+ * Resolve the editor's mode from the host element's class list. Live
+ * Preview adds `is-live-preview` to the `.markdown-source-view`
+ * ancestor; Source Mode does not. This is the locked contract from the
+ * ticket — chosen over `editorInfoField` because it is deterministic
+ * from DOM and unit-testable without a runtime probe.
+ */
+function isLivePreview(view: EditorView): boolean {
+  return view.dom.closest(".markdown-source-view")?.classList.contains("is-live-preview") ?? false;
 }
 
-export const commentWidgetPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = buildDecorations(view);
-    }
-
-    update(update: ViewUpdate) {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = buildDecorations(update.view);
-      }
-    }
-  },
-  {
-    decorations: (v) => v.decorations,
-  }
-);
-
-function formatRelative(ts?: string): string {
-  if (!ts) return "";
+/**
+ * Resolve the source-file path the widget should pass to the click
+ * bridge. CM6 itself has no notion of "the file"; Obsidian exposes the
+ * surrounding context through the `editorInfoField` StateField. When
+ * the field is absent (e.g. an editor stood up outside Obsidian for
+ * tests), fall back to an empty string — the click handler still
+ * fires, just without a file context.
+ */
+function resolveSourcePath(view: EditorView): string {
   try {
-    const diff = Date.now() - new Date(ts).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "now";
-    if (mins < 60) return `${mins}m`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h`;
-    return `${Math.floor(hours / 24)}d`;
+    const info = view.state.field(editorInfoField, /* require */ false);
+    return info?.file?.path ?? "";
   } catch {
     return "";
   }
+}
+
+/**
+ * Cheap, non-cryptographic hash for the parsed block's raw text. Used
+ * by `WidgetType.eq` to detect "same id, but content changed" (e.g. a
+ * reaction added, an edit applied) so CM6 will tear the widget down
+ * and rebuild it. Cryptographic strength is unnecessary — collisions
+ * just cause an extra rebuild, never a correctness bug.
+ */
+function hashRaw(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+/**
+ * CM6 widget that mounts the shared `WidgetCommentView` React tree in
+ * place of a remargin fenced block while in Live Preview.
+ *
+ * Critical fixes vs. the v1 attempt (commit 25a612a, reverted in
+ * 67ef39d):
+ *
+ *  - `ignoreEvent()` returns `true` so typing/selection inside or
+ *    adjacent to the replaced range is not eaten by the widget. The
+ *    widget's own click is wired through React, not CM6's event path.
+ *  - `eq()` compares id + collapsed state + raw-text hash. v1 only
+ *    compared offsets, which yielded "stale data because the offset
+ *    didn't move" misses whenever a comment was edited in place.
+ *  - `toDOM()` mounts a React root and `destroy()` unmounts it — the
+ *    React subtree gets a real lifecycle, not the leaky bare-DOM
+ *    swap v1 used.
+ */
+export class RemarginWidget extends WidgetType {
+  /** Cached id (always present — caller filters for `block.valid`). */
+  private readonly id: string;
+  /** Cached body hash so `eq` doesn't recompute on every comparison. */
+  private readonly contentHash: number;
+  /**
+   * Collapsed state captured at *construction* time. Snapshotting here
+   * (rather than reading `plugin.collapseState.isCollapsed` inside
+   * `eq`) is the contract that lets the next `build()` produce a
+   * widget that `eq`-differs from the previous one for that id —
+   * otherwise both widgets would read the same current state and CM6
+   * would skip the rebuild we explicitly want.
+   */
+  private readonly collapsedAtBuildTime: boolean;
+
+  constructor(
+    private readonly parsed: ParsedBlock,
+    private readonly plugin: RemarginPlugin,
+    private readonly sourcePath: string
+  ) {
+    super();
+    // The build path filters for `parsed.valid && parsed.comment.id`;
+    // the non-null assertion is sound but we still default to "" if
+    // some future caller forgets — better to render an unfocused
+    // widget than to throw inside CM6's decoration pipeline.
+    this.id = parsed.comment.id ?? "";
+    this.contentHash = hashRaw(parsed.raw);
+    this.collapsedAtBuildTime = plugin.collapseState.isCollapsed(this.id);
+  }
+
+  /**
+   * `eq` decides whether CM6 can reuse the existing DOM. Returning
+   * `false` forces a `destroy` + `toDOM` cycle, which is what we want
+   * whenever the widget's *visible* content could have changed.
+   *
+   * We compare the snapshot collapsed state, NOT the live value — see
+   * `collapsedAtBuildTime` for why.
+   */
+  eq(other: WidgetType): boolean {
+    if (!(other instanceof RemarginWidget)) return false;
+    return (
+      this.id === other.id &&
+      this.collapsedAtBuildTime === other.collapsedAtBuildTime &&
+      this.contentHash === other.contentHash
+    );
+  }
+
+  toDOM(): HTMLElement {
+    const host = document.createElement("div");
+    host.className = "remargin-widget-host";
+    host.dataset.remarginId = this.id;
+    const root = createRootImpl(host);
+    // Stash the root on the host so `destroy(dom)` can find it without
+    // an external map. The cast is intentional — CM6's WidgetType API
+    // hands the same DOM node back to `destroy`.
+    (host as HTMLElement & { __remarginRoot?: Root }).__remarginRoot = root;
+    root.render(
+      createElement(WidgetCommentView, {
+        // The build path filters for `parsed.valid` so the cast to a
+        // full `Comment` is sound; missing optional fields default
+        // gracefully inside the header/body components.
+        comment: this.parsed.comment as Comment,
+        sourcePath: this.sourcePath,
+        // Use the snapshot from construction time. CM6 only calls
+        // `toDOM` when this widget is being mounted for the first
+        // time (or after `eq` returned false → rebuild), so the
+        // snapshot is the right value to render against.
+        collapsed: this.collapsedAtBuildTime,
+        onToggle: () => this.plugin.collapseState.toggle(this.id),
+        onClick: (cid, file) => {
+          this.plugin.focusComment(cid, file);
+        },
+      })
+    );
+    return host;
+  }
+
+  destroy(dom: HTMLElement): void {
+    const root = (dom as HTMLElement & { __remarginRoot?: Root }).__remarginRoot;
+    root?.unmount();
+  }
+
+  ignoreEvent(): boolean {
+    // True means "let CM6 handle this event normally" — i.e. don't
+    // swallow keystrokes/selection inside the widget. The widget's
+    // own click bridge is wired at the React layer; this flag is
+    // about the surrounding editor's caret handling.
+    return true;
+  }
+}
+
+/**
+ * Build the decoration set for the current view. Skipped (returns
+ * `Decoration.none`) when the feature toggle is off OR the editor is
+ * in Source Mode — same fall-through to the raw fence as the
+ * reading-mode widget (T37).
+ */
+export function buildDecorations(view: EditorView, plugin: RemarginPlugin): DecorationSet {
+  if (!plugin.settings.editorWidgets) return Decoration.none;
+  if (!isLivePreview(view)) return Decoration.none;
+
+  const text = view.state.doc.toString();
+  const blocks = parseRemarginBlocks(text);
+  const sourcePath = resolveSourcePath(view);
+  const builder = new RangeSetBuilder<Decoration>();
+  for (const block of blocks) {
+    if (!block.valid || !block.comment.id) continue;
+    const widget = new RemarginWidget(block, plugin, sourcePath);
+    builder.add(
+      block.startOffset,
+      block.endOffset,
+      // `block: true` makes the widget take a full block in CM6's
+      // layout (the line is replaced wholesale, not inlined).
+      // `inclusive: false` keeps the caret distinct from the inside
+      // of the widget — necessary so arrowing across the fence
+      // boundary lands cleanly on either side.
+      Decoration.replace({ widget, block: true, inclusive: false })
+    );
+  }
+  return builder.finish();
+}
+
+/**
+ * CM6 ViewPlugin factory. Returns a fresh ViewPlugin closure per
+ * `RemarginPlugin` instance so the widget has a stable plugin
+ * reference for collapse-state and focus-bridge calls.
+ */
+export function commentWidgetPlugin(plugin: RemarginPlugin) {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = buildDecorations(view, plugin);
+      }
+      // Critical perf fix vs. v1: rebuild ONLY when the document
+      // changed. v1 also rebuilt on `update.viewportChanged`, so
+      // every scroll triggered a full reparse. Selection-only and
+      // viewport-only updates never produce widget content changes,
+      // so they should not touch the decoration set.
+      update(update: ViewUpdate) {
+        if (update.docChanged) {
+          this.decorations = buildDecorations(update.view, plugin);
+        }
+      }
+    },
+    {
+      decorations: (v) => v.decorations,
+    }
+  );
 }
