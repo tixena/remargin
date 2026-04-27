@@ -632,9 +632,12 @@ enum Commands {
         /// Subpath relative to the anchor, OR the literal `*` for
         /// realm-wide.
         path: String,
-        /// Extra Bash commands to deny on the restricted path. Pass
-        /// repeatedly: `--also-deny-bash curl --also-deny-bash wget`.
-        #[arg(long = "also-deny-bash")]
+        /// Extra Bash commands to deny on the restricted path.
+        /// Comma-separated or repeat the flag:
+        /// `--also-deny-bash curl,wget` or
+        /// `--also-deny-bash curl --also-deny-bash wget`.
+        /// Both forms are equivalent (rem-ss9s).
+        #[arg(long = "also-deny-bash", value_delimiter = ',')]
         also_deny_bash: Vec<String>,
         /// When set, allow `Bash(remargin *)` on the path so the CLI
         /// stays usable. The MCP / agent surfaces are still blocked.

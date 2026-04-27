@@ -266,6 +266,80 @@ mod tests {
         );
     }
 
+    /// rem-ss9s: helper that runs `restrict src/secret` with the
+    /// given `--also-deny-bash` argv and returns the resulting
+    /// `permissions.restrict[0].also_deny_bash` list parsed from
+    /// `.remargin.yaml`.
+    fn also_deny_bash_for(extra_args: &[&str]) -> Vec<String> {
+        let realm = realm_with_claude();
+        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
+        let user_settings = user_settings_arg(&realm);
+        let mut args: Vec<&str> = vec![
+            "restrict",
+            "src/secret",
+            "--user-settings",
+            user_settings.to_str().unwrap(),
+        ];
+        args.extend_from_slice(extra_args);
+        let out = run_in(realm.path(), &args);
+        assert_status(&out, 0);
+
+        let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
+        let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        value["permissions"]["restrict"][0]["also_deny_bash"]
+            .as_sequence()
+            .map(|s| s.iter().map(|v| v.as_str().unwrap().to_owned()).collect())
+            .unwrap_or_default()
+    }
+
+    /// rem-ss9s scenario 1: repeated `--also-deny-bash` flags emit
+    /// each token (regression check).
+    #[test]
+    fn also_deny_bash_repeated_flags() {
+        let tokens = also_deny_bash_for(&["--also-deny-bash", "curl", "--also-deny-bash", "wget"]);
+        assert_eq!(tokens, vec!["curl".to_owned(), "wget".to_owned()]);
+    }
+
+    /// rem-ss9s scenario 2: comma-separated values are split
+    /// equivalently to repeated flags.
+    #[test]
+    fn also_deny_bash_comma_separated() {
+        let tokens = also_deny_bash_for(&["--also-deny-bash", "curl,wget"]);
+        assert_eq!(tokens, vec!["curl".to_owned(), "wget".to_owned()]);
+    }
+
+    /// rem-ss9s scenario 3: mixing comma-separated values and
+    /// repeated flags concatenates in argv order.
+    #[test]
+    fn also_deny_bash_mixed_csv_and_repeated() {
+        let tokens =
+            also_deny_bash_for(&["--also-deny-bash", "curl,wget", "--also-deny-bash", "sed"]);
+        assert_eq!(
+            tokens,
+            vec!["curl".to_owned(), "wget".to_owned(), "sed".to_owned()],
+        );
+    }
+
+    /// rem-ss9s scenario 4: when the flag is absent the yaml
+    /// has no `also_deny_bash` key (or an empty list, depending on
+    /// serializer; check both forms).
+    #[test]
+    fn also_deny_bash_absent_omits_or_empties_field() {
+        let tokens = also_deny_bash_for(&[]);
+        assert!(
+            tokens.is_empty(),
+            "expected no extra deny tokens, got: {tokens:?}"
+        );
+    }
+
+    /// rem-ss9s scenario 5: a single token still parses cleanly
+    /// (no delimiter triggers).
+    #[test]
+    fn also_deny_bash_single_value() {
+        let tokens = also_deny_bash_for(&["--also-deny-bash", "curl"]);
+        assert_eq!(tokens, vec!["curl".to_owned()]);
+    }
+
     /// Idempotency: re-running CLI restrict produces the same final
     /// state. Sidecar still has one entry; settings-file rule count
     /// stays constant.
