@@ -45,11 +45,17 @@
 //! the broader deny — Claude's permission resolution gives the more-
 //! specific allow precedence.
 //!
-//! ## `.remargin/` is always allowed
+//! ## `.remargin/` is NOT auto-allowed for native tools
 //!
-//! Remargin owns the `.remargin/` folder (its own state directory).
-//! Even if `allow_dot_folders` does not list it, this module emits an
-//! explicit re-allow for `.remargin/` so the runtime keeps working.
+//! Earlier versions auto-emitted `Edit/Write/Read/NotebookEdit` allows
+//! for `.remargin/**` so an out-of-band Claude session could peek at
+//! the state directory. That carve-out is gone (rem-2plr): remargin's
+//! runtime drives `.remargin/` through `mcp__remargin__*` (which is
+//! still always-allowed) and the native-tool allows were only useful
+//! for inspection — surface area we do not need. Users who want
+//! native-tool reach into `.remargin/` can opt in by adding `.remargin`
+//! to `allow_dot_folders`; the explicit-list path still emits the
+//! per-tool re-allow rules below.
 //!
 //! ## No filesystem access
 //!
@@ -69,10 +75,6 @@ use serde_json::{Map, Value};
 
 use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
 use crate::permissions::sidecar::{self, SidecarEntry};
-
-/// The dot-folder remargin owns. Always re-allowed regardless of the
-/// caller's `allow_dot_folders` list.
-const REMARGIN_DOT_FOLDER: &str = ".remargin";
 
 /// Editor-side Claude tools touched by the base path-deny and the
 /// dot-folder default-deny. Order matches the spec's example output
@@ -179,17 +181,12 @@ pub fn rules_for(
     }
 
     // 6. Allow list. The MCP allow is always present; per-dot-folder
-    //    re-allows override the default-deny for explicitly opted-in
-    //    folders, plus the always-allowed `.remargin/`.
+    //    re-allows override the default-deny ONLY for folders the user
+    //    explicitly listed in `allow_dot_folders` (rem-2plr — no
+    //    implicit `.remargin/` carve-out, MCP covers remargin's own
+    //    runtime needs).
     let mut allow: Vec<String> = vec![String::from(ALLOW_MCP_REMARGIN)];
-    let mut allowed: Vec<&str> = Vec::with_capacity(allow_dot_folders.len() + 1);
-    allowed.push(REMARGIN_DOT_FOLDER);
-    for entry_name in allow_dot_folders {
-        if entry_name != REMARGIN_DOT_FOLDER {
-            allowed.push(entry_name.as_str());
-        }
-    }
-    for folder in &allowed {
+    for folder in allow_dot_folders {
         for tool in EDITOR_TOOLS {
             allow.push(format!("{tool}(//{glob_root}/{folder}/**)"));
         }

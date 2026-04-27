@@ -70,12 +70,14 @@ fn subpath_no_extras_emits_full_default_set() {
     // remargin-cli deny because cli_allowed = false.
     assert_eq!(rules.deny[14], "Bash(remargin * ///a/b/**)");
 
-    // Allow set: MCP allow + .remargin re-allow rules (one per editor tool).
+    // Allow set: only the MCP allow (rem-2plr removed the implicit
+    // `.remargin/` editor-tool re-allow — `mcp__remargin__*` is the
+    // single allow that keeps remargin's runtime working).
+    assert_eq!(rules.allow.len(), 1, "{:#?}", rules.allow);
     assert_eq!(rules.allow[0], ALLOW_MCP_REMARGIN);
-    assert_eq!(rules.allow.len(), 1 + 4); // mcp + .remargin × 4 tools
     assert!(
-        rules.allow.iter().any(|r| r == "Edit(///a/b/.remargin/**)"),
-        "expected .remargin re-allow in: {:#?}",
+        !rules.allow.iter().any(|r| r.contains(".remargin")),
+        "rem-2plr: no implicit .remargin/ re-allow expected, got: {:#?}",
         rules.allow
     );
 }
@@ -143,8 +145,7 @@ fn also_deny_bash_extras_appended() {
 }
 
 /// Scenario 5 — `allow_dot_folders` re-allows the named folders on top
-/// of the wildcard deny. `.remargin/` is always allowed; explicit
-/// listing is a no-op (no double allow).
+/// of the wildcard deny. `.remargin/` is NOT auto-allowed (rem-2plr).
 #[test]
 fn allow_dot_folders_emits_re_allows() {
     let entry = restrict_subpath("/a/b", &[], false);
@@ -166,15 +167,15 @@ fn allow_dot_folders_emits_re_allows() {
         .filter(|rule| rule.contains(".remargin"))
         .count();
     assert_eq!(
-        remargin_allow_count, 4,
-        ".remargin must always be re-allowed exactly once per editor tool"
+        remargin_allow_count, 0,
+        "rem-2plr: .remargin must NOT be auto-allowed unless explicitly listed"
     );
 }
 
-/// `.remargin/` listed explicitly in `allow_dot_folders` does NOT
-/// duplicate the always-on re-allow.
+/// rem-2plr: `.remargin/` listed explicitly in `allow_dot_folders` IS
+/// honoured — the explicit-list path still emits per-tool re-allows.
 #[test]
-fn explicit_remargin_in_allow_list_does_not_duplicate() {
+fn explicit_remargin_in_allow_list_emits_re_allows() {
     let entry = restrict_subpath("/a/b", &[], false);
     let rules = rules_for(&entry, Path::new("/a"), &[String::from(".remargin")]);
 
@@ -184,6 +185,28 @@ fn explicit_remargin_in_allow_list_does_not_duplicate() {
         .filter(|rule| rule.contains(".remargin"))
         .count();
     assert_eq!(count, 4, "{:#?}", rules.allow);
+}
+
+/// rem-2plr negative-presence guard: by default, neither settings array
+/// (deny/allow) contains the four native-tool `.remargin/**` allows.
+#[test]
+fn no_implicit_remargin_native_allows_emitted() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    for tool in ["Edit", "Write", "Read", "NotebookEdit"] {
+        let needle = format!("{tool}(///a/b/.remargin/**)");
+        assert!(
+            !rules.allow.iter().any(|r| r == &needle),
+            "rem-2plr: {needle} must not appear in allow, got: {:#?}",
+            rules.allow
+        );
+        assert!(
+            !rules.deny.iter().any(|r| r == &needle),
+            "rem-2plr: {needle} must not appear in deny either, got: {:#?}",
+            rules.deny
+        );
+    }
 }
 
 /// `RuleSet` round-trips through serde so the sidecar (slice 2) can
