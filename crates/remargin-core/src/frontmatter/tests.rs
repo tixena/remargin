@@ -160,6 +160,92 @@ fn pending_for() {
 }
 
 #[test]
+fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
+    // rem-ytbc test plan #1: only an unaddressed pending comment.
+    let cm = make_comment("u", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["<unassigned>"]);
+}
+
+#[test]
+fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
+    // rem-ytbc test plan #2: addressed + unaddressed mixed; sorted.
+    // `<unassigned>` < `eduardo` lexicographically (`<` is U+003C,
+    // before any ASCII letter), so the sentinel comes first.
+    let addressed = make_comment(
+        "a",
+        "2026-04-06T12:00:00-04:00",
+        vec![String::from("eduardo")],
+        Vec::new(),
+    );
+    let unaddressed = make_comment("u", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
+    let comments: Vec<&Comment> = vec![&addressed, &unaddressed];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["<unassigned>", "eduardo"]);
+}
+
+#[test]
+fn pending_for_two_unaddressed_dedupes_sentinel() {
+    // rem-ytbc test plan #3: two unaddressed unacked comments produce
+    // a single `<unassigned>` entry.
+    let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
+    let cm2 = make_comment("b", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
+    let comments: Vec<&Comment> = vec![&cm1, &cm2];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["<unassigned>"]);
+}
+
+#[test]
+fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
+    // rem-ytbc test plan #4: unaddressed but acked is no longer
+    // pending; `<unassigned>` does not appear.
+    let cm = make_comment(
+        "a",
+        "2026-04-06T12:00:00-04:00",
+        Vec::new(),
+        vec![Acknowledgment {
+            author: String::from("anyone"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+        }],
+    );
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let seq = pending_for.as_sequence().unwrap();
+    assert!(seq.is_empty(), "acked unaddressed must not surface");
+}
+
+#[test]
 fn last_activity() {
     let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let cm2 = make_comment(

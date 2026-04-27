@@ -227,10 +227,24 @@ pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
     // Count pending (comments with no ack entries).
     let pending_count = comments.iter().filter(|cm| cm.ack.is_empty()).count();
 
-    // Collect unique "to" recipients on unacked comments.
+    // Collect unique "to" recipients on unacked comments. An unacked
+    // comment with no recipients (`to: []`) surfaces under the literal
+    // sentinel `<unassigned>` (rem-ytbc) so triage tooling sees the
+    // pending entry instead of an invisibly-empty bucket. The angle
+    // brackets keep the sentinel unambiguously distinguishable from
+    // any registered identity (the registry rejects identities that
+    // contain `<`).
     let mut pending_for: Vec<String> = Vec::new();
+    let unassigned_sentinel = String::from("<unassigned>");
     for cm in comments {
-        if cm.ack.is_empty() {
+        if !cm.ack.is_empty() {
+            continue;
+        }
+        if cm.to.is_empty() {
+            if !pending_for.contains(&unassigned_sentinel) {
+                pending_for.push(unassigned_sentinel.clone());
+            }
+        } else {
             for recipient in &cm.to {
                 if !pending_for.contains(recipient) {
                     pending_for.push(recipient.clone());
