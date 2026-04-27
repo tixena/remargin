@@ -63,6 +63,7 @@
 //! `Vec<String>` only. That keeps it trivially testable with
 //! `MockSystem` not even needed — pure data in, pure data out.
 
+pub mod rule_shape;
 #[cfg(test)]
 mod tests;
 

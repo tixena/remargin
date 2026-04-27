@@ -40,6 +40,7 @@ use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
 use crate::operations::plan::{
     ConfigConflict, ConfigPlanDiff, EntryAction, RemarginYamlDiff, SettingsFileDiff, SidecarDiff,
 };
+use crate::permissions::claude_sync::rule_shape::{RuleShape, rules_overlap};
 use crate::permissions::claude_sync::{self, RuleSet, rules_for};
 use crate::permissions::restrict::{
     self as permissions_restrict, RestrictArgs, RestrictEntryProjection,
@@ -200,29 +201,16 @@ fn detect_conflicts(
     cwd: &Path,
     anchor: &Path,
 ) {
-    // Allow/deny overlap: any existing allow rule that exactly matches
-    // a projected deny rule (rem-puy5 acceptance #9). Initial scope:
-    // exact-string match on the rule body inside the parentheses;
-    // pattern-overlap detection is a follow-up if it bites.
-    for sim in settings_sims {
-        for projected_deny in &sim.deny_rules_to_add {
-            let Some(deny_pattern) = rule_body(projected_deny) else {
-                continue;
-            };
-            for existing_allow in &sim.existing_allow_rules {
-                let Some(allow_pattern) = rule_body(existing_allow) else {
-                    continue;
-                };
-                if allow_pattern == deny_pattern {
-                    diff.conflicts.push(ConfigConflict::AllowDenyOverlap {
-                        allow_rule: existing_allow.clone(),
-                        projected_deny_rule: projected_deny.clone(),
-                        settings_file: sim.path.clone(),
-                    });
-                }
-            }
-        }
-    }
+    // Allow/deny overlap: structural `(tool, path-glob)` comparison
+    // (rem-aovx). Replaces the original exact-string body match
+    // (rem-puy5) which silently missed format-equivalent rules — a
+    // hand-edited rule, a legacy `//` prefix, a trailing-slash
+    // difference. The structural parser collapses runs of `/`,
+    // resolves `.` / `..`, and treats `/**` as the recursive-subtree
+    // sentinel; cross-tool pairs (`Read` vs `Edit`) are kept distinct;
+    // component-confused paths (`/foo` vs `/foobar`) are correctly
+    // rejected.
+    detect_allow_deny_overlap(diff, settings_sims);
 
     // YAML entry would change with different shape (rem-puy5 acceptance
     // #7). Skip the overwrite-with-identical-args case (caught by
@@ -336,19 +324,43 @@ fn resolve_path(system: &dyn System, anchor: &Path, args: &RestrictArgs) -> Resu
     })
 }
 
-/// Extract the substring inside the outermost parentheses of a Claude
-/// permission rule string (e.g. `Read(/p/**)` -> `/p/**`,
-/// `Bash(curl * /p/**)` -> `curl * /p/**`). Returns `None` when the
-/// rule does not have the canonical `Tool(<body>)` shape; the caller
-/// treats unmatched rules as opaque and skips them in conflict
-/// detection.
-fn rule_body(rule: &str) -> Option<&str> {
-    let open = rule.find('(')?;
-    let close = rule.rfind(')')?;
-    if close <= open {
-        return None;
+/// Path-aware allow/deny overlap detector (rem-aovx).
+///
+/// For every projected deny rule, parses the rule into a [`RuleShape`]
+/// and walks every existing allow rule on the same settings file
+/// looking for a structural overlap. Pushes one
+/// [`ConfigConflict::AllowDenyOverlap`] per `(allow, deny)` overlap
+/// pair, tagged with the [`claude_sync::OverlapKind`] that describes
+/// the relationship.
+///
+/// Naive O(deny × allow). Both lists are small (tens of rules per
+/// file) and the work is per-file, so indexing is unnecessary.
+fn detect_allow_deny_overlap(
+    diff: &mut ConfigPlanDiff,
+    settings_sims: &[claude_sync::SettingsFileSim],
+) {
+    for sim in settings_sims {
+        for projected_deny in &sim.deny_rules_to_add {
+            let deny_shape = RuleShape::parse(projected_deny);
+            for existing_allow in &sim.existing_allow_rules {
+                let allow_shape = RuleShape::parse(existing_allow);
+                // The overlap classifier in `rule_shape` is written
+                // from the allow side's perspective, so call it with
+                // `(allow, deny)` order to keep the
+                // `AllowShadowedByBroaderDeny` /
+                // `DenyShadowedByBroaderAllow` semantics correct.
+                let Some(kind) = rules_overlap(&allow_shape, &deny_shape) else {
+                    continue;
+                };
+                diff.conflicts.push(ConfigConflict::AllowDenyOverlap {
+                    allow_rule: existing_allow.clone(),
+                    overlap_kind: kind,
+                    projected_deny_rule: projected_deny.clone(),
+                    settings_file: sim.path.clone(),
+                });
+            }
+        }
     }
-    rule.get(open + 1..close)
 }
 
 fn settings_diff_from_sim(sim: &claude_sync::SettingsFileSim) -> SettingsFileDiff {

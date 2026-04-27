@@ -38,6 +38,7 @@ use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams}
 use crate::operations::sign::SignSelection;
 use crate::operations::verify::{VerifyReport, verify_document};
 use crate::parser::{self, ParsedDocument};
+use crate::permissions::claude_sync::rule_shape::OverlapKind;
 use crate::permissions::restrict::{RestrictArgs, RestrictEntryProjection};
 
 /// Serialization-friendly mirror of one row of a [`VerifyReport`].
@@ -309,15 +310,21 @@ pub struct SidecarDiff {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ConfigConflict {
-    /// An existing rule in `permissions.allow` exactly matches a rule
-    /// the projection would add to `permissions.deny` in the same
-    /// settings file. The motivating bug for rem-puy5 — Claude's
-    /// settings semantics resolve allow-vs-deny in ways the user may
-    /// not expect, so the conflict is surfaced for review before
+    /// An existing rule in `permissions.allow` overlaps a rule the
+    /// projection would add to `permissions.deny` in the same settings
+    /// file. The motivating bug for rem-puy5 — Claude's settings
+    /// semantics resolve allow-vs-deny in ways the user may not
+    /// expect, so the conflict is surfaced for review before
     /// committing.
+    ///
+    /// `overlap_kind` distinguishes exact matches from prefix /
+    /// subtree overlap (rem-aovx) so callers can tailor the message.
     AllowDenyOverlap {
         /// Existing allow rule string.
         allow_rule: String,
+        /// Relationship between the existing allow and the projected
+        /// deny.
+        overlap_kind: OverlapKind,
         /// Projected deny rule string.
         projected_deny_rule: String,
         /// Settings file the conflict was detected in.

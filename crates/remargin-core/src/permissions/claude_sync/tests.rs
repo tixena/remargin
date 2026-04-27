@@ -12,6 +12,9 @@ use os_shim::mock::MockSystem;
 use serde_json::{Value, json};
 
 use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
+use crate::permissions::claude_sync::rule_shape::{
+    OverlapKind, PathGlob, RuleShape, rules_overlap,
+};
 use crate::permissions::claude_sync::{
     ALLOW_MCP_REMARGIN, RuleSet, apply_rules, revert_rules, rules_for,
 };
@@ -562,4 +565,203 @@ fn sidecar_records_resolved_settings_file_paths() {
     let sidecar = sidecar::load(&system, &anchor).unwrap();
     assert_eq!(sidecar.entries["/r/secret"].added_to_files, files);
     let _path = sidecar_path(&anchor);
+}
+
+// ---------------------------------------------------------------------
+// rule_shape: PathGlob / RuleShape / overlap (rem-aovx)
+// ---------------------------------------------------------------------
+
+/// `PathGlob` #1: canonical recursive glob.
+#[test]
+fn path_glob_parse_canonical_recursive() {
+    let p = PathGlob::parse("/foo/**");
+    assert_eq!(p.components, vec![String::from("foo")]);
+    assert!(p.recursive);
+}
+
+/// `PathGlob` #2: extra leading slashes collapse — the rem-em33 case.
+#[test]
+fn path_glob_parse_collapses_runs_of_slash() {
+    let p = PathGlob::parse("///foo/**");
+    assert_eq!(p.components, vec![String::from("foo")]);
+    assert!(p.recursive);
+}
+
+/// `PathGlob` #3: trailing slash strips, no recursive flag.
+#[test]
+fn path_glob_parse_trailing_slash_is_not_recursive() {
+    let p = PathGlob::parse("/foo/");
+    assert_eq!(p.components, vec![String::from("foo")]);
+    assert!(!p.recursive);
+}
+
+/// `PathGlob` #4: dot-prefixed components are kept verbatim.
+#[test]
+fn path_glob_parse_keeps_dot_prefixed_components() {
+    let p = PathGlob::parse("/foo/.bar/baz");
+    assert_eq!(
+        p.components,
+        vec![
+            String::from("foo"),
+            String::from(".bar"),
+            String::from("baz")
+        ]
+    );
+    assert!(!p.recursive);
+}
+
+/// `PathGlob` #5: lexical resolution of `..`.
+#[test]
+fn path_glob_parse_resolves_parent_dir_lexically() {
+    let p = PathGlob::parse("/foo/../bar");
+    assert_eq!(p.components, vec![String::from("bar")]);
+    assert!(!p.recursive);
+}
+
+/// `PathGlob` overlap #6: identical recursive globs overlap (Exact).
+#[test]
+fn path_glob_overlap_exact_recursive() {
+    let a = PathGlob::parse("/foo/**");
+    let b = PathGlob::parse("/foo/**");
+    assert!(a.overlaps(&b));
+    assert_eq!(a.classify_overlap(&b), Some(OverlapKind::Exact));
+}
+
+/// `PathGlob` overlap #7: prefix recursive shadows the longer path.
+#[test]
+fn path_glob_overlap_prefix_recursive() {
+    let broad = PathGlob::parse("/foo/**");
+    let specific = PathGlob::parse("/foo/sub");
+    assert!(broad.overlaps(&specific));
+    assert!(specific.overlaps(&broad));
+    assert_eq!(
+        broad.classify_overlap(&specific),
+        Some(OverlapKind::DenyShadowedByBroaderAllow)
+    );
+    assert_eq!(
+        specific.classify_overlap(&broad),
+        Some(OverlapKind::AllowShadowedByBroaderDeny)
+    );
+}
+
+/// `PathGlob` overlap #8: same-prefix neither recursive — only equal
+/// paths overlap. `/foo` vs `/foo/sub` (both non-recursive) → no
+/// overlap.
+#[test]
+fn path_glob_overlap_neither_recursive_disjoint_lengths() {
+    let a = PathGlob::parse("/foo");
+    let b = PathGlob::parse("/foo/sub");
+    assert!(!a.overlaps(&b));
+    assert!(!b.overlaps(&a));
+    assert_eq!(a.classify_overlap(&b), None);
+}
+
+/// `PathGlob` overlap #9: disjoint paths never overlap.
+#[test]
+fn path_glob_overlap_disjoint() {
+    let a = PathGlob::parse("/foo");
+    let b = PathGlob::parse("/bar");
+    assert!(!a.overlaps(&b));
+    assert_eq!(a.classify_overlap(&b), None);
+}
+
+/// `PathGlob` overlap #10: component-confusion guard — `/foo` does NOT
+/// overlap `/foobar`.
+#[test]
+fn path_glob_overlap_component_confusion_rejected() {
+    let a = PathGlob::parse("/foo/**");
+    let b = PathGlob::parse("/foobar/**");
+    assert!(!a.overlaps(&b));
+    assert_eq!(a.classify_overlap(&b), None);
+}
+
+/// `RuleShape` #11: canonical Read.
+#[test]
+fn rule_shape_parse_read_tool() {
+    let shape = RuleShape::parse("Read(/foo/**)");
+    let expected = RuleShape::Tool {
+        path_glob: PathGlob {
+            components: vec![String::from("foo")],
+            recursive: true,
+        },
+        tool: String::from("Read"),
+    };
+    assert_eq!(shape, expected);
+}
+
+/// `RuleShape` #12: Bash with cmd tokens preserved verbatim.
+#[test]
+fn rule_shape_parse_bash_with_cmd_tokens() {
+    let shape = RuleShape::parse("Bash(curl * /foo/**)");
+    let expected = RuleShape::Bash {
+        cmd_tokens: vec![String::from("curl"), String::from("*")],
+        path_glob: PathGlob {
+            components: vec![String::from("foo")],
+            recursive: true,
+        },
+    };
+    assert_eq!(shape, expected);
+}
+
+/// `RuleShape` #13: `mcp__remargin__*` is opaque (no parens).
+#[test]
+fn rule_shape_parse_mcp_remargin_is_opaque() {
+    let shape = RuleShape::parse("mcp__remargin__*");
+    assert!(matches!(shape, RuleShape::Opaque(_)));
+}
+
+/// `RuleShape` #14: `WebFetch(domain:…)` is opaque (not a path body).
+#[test]
+fn rule_shape_parse_webfetch_is_opaque() {
+    // `WebFetch` is not a known editor tool; the parser falls through
+    // to Opaque rather than misinterpreting the domain literal as a
+    // path glob.
+    let shape = RuleShape::parse("WebFetch(domain:github.com)");
+    assert!(matches!(shape, RuleShape::Opaque(_)));
+}
+
+/// `RuleShape` #15: cross-tool no overlap — `Read(/foo)` allow vs
+/// `Edit(/foo)` deny does not fire.
+#[test]
+fn rules_overlap_cross_tool_returns_none() {
+    let allow = RuleShape::parse("Read(/foo)");
+    let deny = RuleShape::parse("Edit(/foo)");
+    assert_eq!(rules_overlap(&allow, &deny), None);
+}
+
+/// Format-drift tolerance: legacy `///` deny vs single-slash allow
+/// canonicalize to the same path-glob and overlap (Exact).
+#[test]
+fn rules_overlap_handles_legacy_triple_slash_prefix() {
+    let allow = RuleShape::parse("Read(/foo/**)");
+    let deny = RuleShape::parse("Read(///foo/**)");
+    assert_eq!(rules_overlap(&allow, &deny), Some(OverlapKind::Exact));
+}
+
+/// Whitespace tolerance inside the rule body.
+#[test]
+fn rules_overlap_handles_internal_whitespace() {
+    let allow = RuleShape::parse("Read( /foo/** )");
+    let deny = RuleShape::parse("Read(/foo/**)");
+    assert_eq!(rules_overlap(&allow, &deny), Some(OverlapKind::Exact));
+}
+
+/// Bash overlap: identical cmd tokens + overlapping path glob fires.
+#[test]
+fn rules_overlap_bash_identical_cmd_tokens_overlap() {
+    let allow = RuleShape::parse("Bash(curl * /foo/**)");
+    let deny = RuleShape::parse("Bash(curl * /foo/sub/**)");
+    assert_eq!(
+        rules_overlap(&allow, &deny),
+        Some(OverlapKind::DenyShadowedByBroaderAllow)
+    );
+}
+
+/// Bash overlap: different cmd tokens never overlap, even with
+/// matching path glob.
+#[test]
+fn rules_overlap_bash_different_cmd_tokens_no_overlap() {
+    let allow = RuleShape::parse("Bash(cp * /foo/**)");
+    let deny = RuleShape::parse("Bash(mv * /foo/**)");
+    assert_eq!(rules_overlap(&allow, &deny), None);
 }

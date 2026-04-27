@@ -11,6 +11,7 @@ use crate::operations::plan::{
     ConfigConflict, ConfigPlanDiff, EntryAction, RemarginYamlDiff, SidecarDiff,
 };
 use crate::operations::projections::restrict::{RestrictProjection, project_restrict};
+use crate::permissions::claude_sync::rule_shape::OverlapKind;
 use crate::permissions::restrict::{RestrictArgs, restrict};
 
 /// Realm fixture: `<r>/.claude/` exists, no `.remargin.yaml`, no
@@ -252,13 +253,159 @@ fn allow_deny_overlap_surfaces_when_existing_allow_matches_projected_deny() {
     let saw_overlap = diff.conflicts.iter().any(|c| {
         matches!(
             c,
-            ConfigConflict::AllowDenyOverlap { settings_file, .. } if settings_file == &user
+            ConfigConflict::AllowDenyOverlap {
+                overlap_kind: OverlapKind::Exact,
+                settings_file,
+                ..
+            } if settings_file == &user
         )
     });
     assert!(
         saw_overlap,
-        "expected AllowDenyOverlap on user-scope file. conflicts: {:?}, sims: {:?}",
+        "expected AllowDenyOverlap (Exact) on user-scope file. conflicts: {:?}, sims: {:?}",
         diff.conflicts, diff.settings_files,
+    );
+}
+
+/// rem-aovx scenario 17: format-drift tolerance — a user-scope allow
+/// with the legacy single-slash prefix still surfaces as an overlap
+/// against the projection's `///`-prefixed deny rules.
+#[test]
+fn allow_deny_overlap_handles_legacy_single_slash_format() {
+    let (system, realm, project, user) = fresh_realm();
+    let secret_glob = format!("{}/src/secret/**", realm.display());
+    let body = serde_json::json!({
+        "permissions": {
+            "allow": [format!("Read({secret_glob})")],
+            "deny": []
+        }
+    });
+    let seeded = write_settings_file(system, &user, &body.to_string());
+
+    let args = restrict_args("src/secret");
+    let projection = project_restrict(&seeded, &realm, &args, &[project, user.clone()]).unwrap();
+    let diff = diff_or_fail(projection);
+
+    let saw_overlap = diff.conflicts.iter().any(|c| {
+        matches!(
+            c,
+            ConfigConflict::AllowDenyOverlap {
+                settings_file,
+                ..
+            } if settings_file == &user
+        )
+    });
+    assert!(
+        saw_overlap,
+        "expected format-drift overlap on user-scope file. conflicts: {:?}",
+        diff.conflicts,
+    );
+}
+
+/// rem-aovx scenario 18: a more-specific allow shadowed by the
+/// realm-wide projected deny (subtree shadow) is reported as
+/// `AllowShadowedByBroaderDeny`.
+#[test]
+fn allow_deny_overlap_subtree_shadow_kind() {
+    let (system, realm, project, user) = fresh_realm();
+    // Allow a strict subpath, then restrict the whole realm — the
+    // wildcard deny shadows the safe-area allow.
+    let safe_path = format!("{}/safe", realm.display());
+    let body = serde_json::json!({
+        "permissions": {
+            "allow": [format!("Read({safe_path})")],
+            "deny": []
+        }
+    });
+    let seeded = write_settings_file(system, &user, &body.to_string());
+
+    let args = restrict_args("*");
+    let projection = project_restrict(&seeded, &realm, &args, &[project, user.clone()]).unwrap();
+    let diff = diff_or_fail(projection);
+
+    let saw_shadow = diff.conflicts.iter().any(|c| {
+        matches!(
+            c,
+            ConfigConflict::AllowDenyOverlap {
+                overlap_kind: OverlapKind::AllowShadowedByBroaderDeny,
+                settings_file,
+                ..
+            } if settings_file == &user
+        )
+    });
+    assert!(
+        saw_shadow,
+        "expected AllowShadowedByBroaderDeny in {:?}",
+        diff.conflicts
+    );
+}
+
+/// rem-aovx scenario 19 negative: an existing `Edit` allow does not
+/// produce an overlap against the projected `Read` denies — tools are
+/// kept distinct in the comparison key.
+#[test]
+fn allow_deny_overlap_cross_tool_does_not_fire() {
+    let (system, realm, project, user) = fresh_realm();
+    let secret_glob = format!("{}/src/secret/**", realm.display());
+    // Seed an `Edit` allow only — none of the projection's `Edit`
+    // denies should match the realm allow body, but we want to
+    // confirm that even when the path matches, a different *tool*
+    // never produces an overlap. Use `WebFetch` (an unsupported tool)
+    // so we are sure no editor-tool deny would match.
+    let body = serde_json::json!({
+        "permissions": {
+            "allow": [format!("WebFetch(//{secret_glob})")],
+            "deny": []
+        }
+    });
+    let seeded = write_settings_file(system, &user, &body.to_string());
+
+    let args = restrict_args("src/secret");
+    let projection = project_restrict(&seeded, &realm, &args, &[project, user.clone()]).unwrap();
+    let diff = diff_or_fail(projection);
+
+    let any_user_overlap = diff.conflicts.iter().any(|c| {
+        matches!(
+            c,
+            ConfigConflict::AllowDenyOverlap { settings_file, .. } if settings_file == &user
+        )
+    });
+    assert!(
+        !any_user_overlap,
+        "cross-tool allow must not produce an overlap: {:?}",
+        diff.conflicts
+    );
+}
+
+/// rem-aovx scenario 20: component-confusion guard — an allow on
+/// `/realm-extra/**` does NOT overlap a restrict that targets
+/// `/realm`.
+#[test]
+fn allow_deny_overlap_rejects_component_confusion() {
+    let (system, realm, project, user) = fresh_realm();
+    let confusing_glob = format!("{}-extra/**", realm.display());
+    let body = serde_json::json!({
+        "permissions": {
+            "allow": [format!("Read(//{confusing_glob})")],
+            "deny": []
+        }
+    });
+    let seeded = write_settings_file(system, &user, &body.to_string());
+
+    let args = restrict_args("*");
+    let projection = project_restrict(&seeded, &realm, &args, &[project, user.clone()]).unwrap();
+    let diff = diff_or_fail(projection);
+
+    let any_user_overlap = diff.conflicts.iter().any(|c| {
+        matches!(
+            c,
+            ConfigConflict::AllowDenyOverlap { settings_file, .. } if settings_file == &user
+        )
+    });
+    assert!(
+        !any_user_overlap,
+        "component-confused path must not produce an overlap: {:?}",
+        diff.conflicts
     );
 }
 

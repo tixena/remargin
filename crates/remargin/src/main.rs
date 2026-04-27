@@ -38,6 +38,7 @@ use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
 use remargin_core::parser;
 use remargin_core::path::expand_path;
+use remargin_core::permissions::claude_sync::rule_shape::OverlapKind;
 use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::permissions::restrict as permissions_restrict;
 use remargin_core::permissions::unprotect as permissions_unprotect;
@@ -3765,11 +3766,22 @@ fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
     match conflict {
         plan_ops::ConfigConflict::AllowDenyOverlap {
             allow_rule,
+            overlap_kind,
             projected_deny_rule,
             settings_file,
         } => {
+            let kind_label = match overlap_kind {
+                OverlapKind::AllowShadowedByBroaderDeny => {
+                    "existing allow is shadowed by broader projected deny"
+                }
+                OverlapKind::DenyShadowedByBroaderAllow => {
+                    "projected deny is shadowed by broader existing allow"
+                }
+                OverlapKind::Exact => "exact",
+                _ => "unknown overlap kind",
+            };
             out(&format!(
-                "    allow_deny_overlap in {}:",
+                "    allow_deny_overlap in {} ({kind_label}):",
                 settings_file.display()
             ))?;
             out(&format!("      existing allow:  {allow_rule}"))?;

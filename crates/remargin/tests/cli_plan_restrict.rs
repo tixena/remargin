@@ -176,6 +176,93 @@ mod tests {
         );
     }
 
+    /// rem-aovx scenario 16: the original `eburgos_notes` case — a
+    /// user-scope `Read(/realm/**)` allow already on disk in single-
+    /// slash form must surface as an overlap against the projection's
+    /// `///`-prefixed denies. This guards against the format-drift
+    /// regression that motivated rem-aovx.
+    #[test]
+    fn plan_overlap_seeded_with_single_slash_allow_still_fires() {
+        let realm = realm_with_claude();
+        let user_settings = user_settings_arg(&realm);
+        // Resolve the canonical realm path so the test is robust to
+        // macOS `/private/var/folders/...` symlinks.
+        let canonical = fs::canonicalize(realm.path()).unwrap();
+        // Single-slash form, no `//` prefix — the format-drift case.
+        let body = json!({
+            "permissions": {
+                "allow": [format!("Read({}/**)", canonical.display())],
+                "deny": []
+            }
+        });
+        fs::write(&user_settings, body.to_string()).unwrap();
+
+        let out = run_in(
+            realm.path(),
+            &[
+                "plan",
+                "restrict",
+                "*",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert_status(&out, 0);
+        let report = parse_json(&out);
+        let conflicts = report["config_diff"]["conflicts"].as_array().unwrap();
+        let saw_overlap = conflicts.iter().any(|c| {
+            c["kind"] == "allow_deny_overlap"
+                && c["allow_rule"].as_str().unwrap_or("").contains("Read(")
+        });
+        assert!(
+            saw_overlap,
+            "expected single-slash allow to still surface overlap: {conflicts:?}"
+        );
+    }
+
+    /// rem-aovx scenario 18 (CLI): subtree-shadow overlap surfaces
+    /// `kind=allow_deny_overlap` and reports `overlap_kind` =
+    /// `allow_shadowed_by_broader_deny` so the formatter / parser can
+    /// tailor the message.
+    #[test]
+    fn plan_overlap_subtree_shadow_reports_kind() {
+        let realm = realm_with_claude();
+        let user_settings = user_settings_arg(&realm);
+        let canonical = fs::canonicalize(realm.path()).unwrap();
+        // Specific allow inside the realm.
+        let body = json!({
+            "permissions": {
+                "allow": [format!("Read({}/safe)", canonical.display())],
+                "deny": []
+            }
+        });
+        fs::write(&user_settings, body.to_string()).unwrap();
+
+        let out = run_in(
+            realm.path(),
+            &[
+                "plan",
+                "restrict",
+                "*",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert_status(&out, 0);
+        let report = parse_json(&out);
+        let conflicts = report["config_diff"]["conflicts"].as_array().unwrap();
+        let saw_shadow = conflicts.iter().any(|c| {
+            c["kind"] == "allow_deny_overlap"
+                && c["overlap_kind"] == "allow_shadowed_by_broader_deny"
+        });
+        assert!(
+            saw_shadow,
+            "expected allow_shadowed_by_broader_deny: {conflicts:?}"
+        );
+    }
+
     /// Scenario 20: anchor surprise surfaces when running from a
     /// subdirectory deeper than the realm anchor.
     #[test]
