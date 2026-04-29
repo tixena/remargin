@@ -208,31 +208,23 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
   const builder = new RangeSetBuilder<Decoration>();
   for (const block of blocks) {
     if (!block.valid || !block.comment.id) continue;
-    // TEMPORARY rem-jq30 Bug A diagnostic — must be removed before the
-    // final commit on this ticket. Captures the parser's chosen
-    // start/end offsets for each block plus the characters at those
-    // offsets so we can tell whether the empty bar above the widget is
-    // an off-by-one in the parser's bookkeeping or a layering artifact
-    // from Obsidian's own fenced-code decoration.
-    // biome-ignore lint/suspicious/noConsole: temporary diagnostic for rem-jq30 Bug A
-    console.debug({
-      remarginDiagnostic: "rem-jq30-buildDecorations",
-      id: block.comment.id,
-      startOffset: block.startOffset,
-      endOffset: block.endOffset,
-      charAtStart: text[block.startOffset],
-      charAtEnd: text[block.endOffset - 1],
-    });
     const widget = new RemarginWidget(block, plugin, sourcePath);
     builder.add(
       block.startOffset,
       block.endOffset,
       // `block: true` makes the widget take a full block in CM6's
       // layout (the line is replaced wholesale, not inlined).
-      // `inclusive: false` keeps the caret distinct from the inside
-      // of the widget — necessary so arrowing across the fence
-      // boundary lands cleanly on either side.
-      Decoration.replace({ widget, block: true, inclusive: false })
+      // `inclusive: true` lets the replaced range absorb its
+      // bounding cursor positions — without this flag CM6 reserves a
+      // boundary cursor zone above the widget, which Obsidian's Live
+      // Preview renders as an empty dark-gray bar (rem-jq30 Bug A).
+      // Diagnostic capture (2026-04-28) confirmed the range itself is
+      // correct: charAtStart is the opening backtick, charAtEnd-1 is
+      // the closing fence's terminating newline. The full-line
+      // `block: true` decoration already keeps the caret outside the
+      // widget, so `inclusive: false`'s caret-distinct semantics are
+      // redundant here.
+      Decoration.replace({ widget, block: true, inclusive: true })
     );
   }
   return builder.finish();
