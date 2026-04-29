@@ -17,6 +17,7 @@
 extern crate alloc;
 
 pub mod restrict;
+pub mod unprotect;
 
 use std::collections::HashSet;
 use std::path::Path;

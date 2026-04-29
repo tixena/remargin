@@ -432,13 +432,13 @@ fn desc_migrate() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. Config ops: restrict (rem-puy5) - surfaces a `config_diff` describing every settings/YAML/sidecar file the live op would touch, plus detected conflicts.",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. Config ops: restrict (rem-puy5) - surfaces a `config_diff` describing every settings/YAML/sidecar file the live op would touch, plus detected conflicts. unprotect (rem-6eop) - surfaces an `unprotect_diff` describing every file the reverse op would touch, plus drift conflicts (manual edits, missing entries).",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | restrict | sandbox-add | sandbox-remove | sign | write" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | restrict | sandbox-add | sandbox-remove | sign | unprotect | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
-                "path": { "type": "string", "description": "For restrict: subpath to restrict (or `*` for realm-wide)." },
+                "path": { "type": "string", "description": "For restrict / unprotect: subpath (or `*` for realm-wide)." },
                 "also_deny_bash": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -1845,6 +1845,7 @@ fn handle_plan(
             path: base_dir.join(required_str(params, "file")?),
             selection: build_sign_selection(params, "plan sign")?,
         },
+        "unprotect" => build_plan_unprotect_request(base_dir, params)?,
         "write" => {
             let file = required_str(params, "file")?;
             let content = required_str(params, "content")?;
@@ -1926,6 +1927,23 @@ fn build_plan_restrict_request<'req>(
         args: restrict_args,
         cwd: base_dir.to_path_buf(),
         settings_files: vec![project_scope, user_scope],
+    })
+}
+
+/// Translate `plan op="unprotect"` MCP params into a
+/// [`plan_ops::PlanRequest::Unprotect`] (rem-6eop / T43). Symmetric
+/// mirror of [`build_plan_restrict_request`] for the reverse
+/// direction. Anchor-walk failure surfaces via the projection's
+/// reject path rather than bailing here.
+fn build_plan_unprotect_request<'req>(
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<plan_ops::PlanRequest<'req>> {
+    let path_str = required_str(params, "path")?;
+    let unprotect_args = permissions_unprotect::UnprotectArgs::new(String::from(path_str));
+    Ok(plan_ops::PlanRequest::Unprotect {
+        args: unprotect_args,
+        cwd: base_dir.to_path_buf(),
     })
 }
 

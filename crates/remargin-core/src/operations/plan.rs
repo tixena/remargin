@@ -40,6 +40,7 @@ use crate::operations::verify::{VerifyReport, verify_document};
 use crate::parser::{self, ParsedDocument};
 use crate::permissions::claude_sync::rule_shape::OverlapKind;
 use crate::permissions::restrict::{RestrictArgs, RestrictEntryProjection};
+use crate::permissions::unprotect::UnprotectArgs;
 
 /// Serialization-friendly mirror of one row of a [`VerifyReport`].
 ///
@@ -178,10 +179,10 @@ pub struct PlanReport {
     /// Partition of comment ids across the projection. See
     /// [`CommentDiff`].
     pub comments: CommentDiff,
-    /// Config-mutation projection for non-Markdown ops (`restrict`,
-    /// future `unprotect`). `None` for every Markdown op — the
-    /// document-level fields above describe those projections.
-    /// rem-puy5 wires `restrict`; future ops slot here too.
+    /// Config-mutation projection for the `restrict` op (rem-puy5).
+    /// `None` for every Markdown op (the document-level fields above
+    /// describe those) AND for `unprotect` (which carries a typed
+    /// reverse projection in [`PlanReport::unprotect_diff`] instead).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_diff: Option<ConfigPlanDiff>,
     /// Which identity the plan was computed under. `would_sign` reports
@@ -196,6 +197,15 @@ pub struct PlanReport {
     /// the projection would commit cleanly. Specific enough to act on
     /// (which comment, which invariant).
     pub reject_reason: Option<String>,
+    /// Reverse projection emitted by the `plan unprotect` op. Names
+    /// every file the live `unprotect` would touch (`.remargin.yaml`,
+    /// project + user settings, sidecar) plus every detectable
+    /// drift conflict (manual edits, missing entries). `None` for
+    /// every other op — restrict carries its own forward projection
+    /// in [`PlanReport::config_diff`], document ops use the
+    /// document-level fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unprotect_diff: Option<UnprotectConfigDiff>,
     /// Full post-op verify report computed against the projected
     /// document under the active mode.
     pub verify_after: PlanVerifyReport,
@@ -368,6 +378,141 @@ pub enum EntryAction {
     Updated,
 }
 
+/// Reverse projection emitted by the `plan unprotect` op (rem-6eop / T43).
+///
+/// Symmetric mirror of [`ConfigPlanDiff`] for the reverse direction.
+/// `unprotect` is the explicit, sanctioned reversal of a previous
+/// `restrict`: it removes the matching `permissions.restrict` entry
+/// from `<anchor>/.remargin.yaml`, scrubs the sidecar-tracked rules
+/// from each Claude settings file the original `apply_rules` recorded,
+/// and finally drops the sidecar entry. This struct names every file,
+/// every entry that would be removed vs. left alone, and every
+/// detectable drift conflict, so callers can preview the full
+/// reversal before committing.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct UnprotectConfigDiff {
+    /// Canonical absolute path that would be unprotected. For the
+    /// wildcard form, this is the anchor root.
+    pub absolute_path: PathBuf,
+    /// `.claude/`-bearing ancestor that anchors the reversal.
+    pub anchor: PathBuf,
+    /// Detected drift conflicts. Empty when the projection is clean.
+    /// Conflicts are advisory: `would_commit` stays `true` so the
+    /// caller can apply anyway with full information.
+    pub conflicts: Vec<UnprotectConflict>,
+    /// What would happen to `<anchor>/.remargin.yaml`.
+    pub remargin_yaml: UnprotectYamlDiff,
+    /// One entry per settings file the reversal would touch, sourced
+    /// from the sidecar's `added_to_files` list. Empty when no
+    /// sidecar entry exists for the target path.
+    pub settings_files: Vec<UnprotectSettingsDiff>,
+    /// Sidecar projection.
+    pub sidecar: UnprotectSidecarDiff,
+}
+
+/// Projection of the `<anchor>/.remargin.yaml` write performed by
+/// `unprotect` — mirror of [`RemarginYamlDiff`] for the reverse
+/// direction.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct UnprotectYamlDiff {
+    /// What the projection would do to the matching
+    /// `permissions.restrict` entry: remove it, or report no-op
+    /// because no entry currently matches the path.
+    pub entry_action: UnprotectEntryAction,
+    /// Resolved on-disk path of the YAML file.
+    pub path: PathBuf,
+    /// On-disk entry that would be removed. `None` when no existing
+    /// entry matches the projected path. Always populated when
+    /// `entry_action == WouldBeRemoved`.
+    pub previous_entry: Option<RestrictEntryProjection>,
+}
+
+/// Projection of one Claude settings file that `unprotect` would
+/// scrub — mirror of [`SettingsFileDiff`] for the reverse direction.
+///
+/// Covers both the project-scope `.claude/settings.local.json` and
+/// the user-scope `~/.claude/settings.json`. The actual list of
+/// targets is sourced from the sidecar's `added_to_files` array
+/// captured at apply time.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct UnprotectSettingsDiff {
+    /// Resolved on-disk path of the settings file. Sourced from the
+    /// sidecar's `added_to_files` list.
+    pub path: PathBuf,
+    /// Rules the sidecar tracked but that are no longer present in
+    /// the file (manual-edit drift). Each rule here also surfaces as
+    /// a [`UnprotectConflict::RuleAlreadyAbsent`] conflict.
+    pub rules_already_absent: Vec<String>,
+    /// Rules the reversal would scrub from `permissions.allow` /
+    /// `permissions.deny`.
+    pub rules_to_remove: Vec<String>,
+}
+
+/// Projection of `<anchor>/.claude/.remargin-restrictions.json` —
+/// mirror of [`SidecarDiff`] for the reverse direction.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct UnprotectSidecarDiff {
+    /// What the projection would do to the entry under
+    /// `entries[<absolute_path>]`: remove it, or report no-op because
+    /// no entry currently exists.
+    pub entry_action: UnprotectEntryAction,
+    /// Resolved on-disk path of the sidecar.
+    pub path: PathBuf,
+}
+
+/// What [`UnprotectYamlDiff`] / [`UnprotectSidecarDiff`] would do to
+/// its target entry. Mirrors a remove-versus-skip decision.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum UnprotectEntryAction {
+    /// No matching entry exists; nothing would happen here.
+    Absent,
+    /// Existing entry would be removed.
+    WouldBeRemoved,
+}
+
+/// Detectable drift conflict surfaced in
+/// [`UnprotectConfigDiff::conflicts`].
+///
+/// All variants are advisory — a non-empty `conflicts` array does
+/// not flip `would_commit` to false. Callers decide whether to
+/// apply the projection anyway.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum UnprotectConflict {
+    /// A rule the sidecar lists for `settings_file` is no longer
+    /// present in that file (the user manually deleted it between
+    /// `restrict` and `unprotect`). Surfaced per-rule per-file.
+    RuleAlreadyAbsent {
+        /// The rule string the sidecar expected to find.
+        rule: String,
+        /// Settings file the rule was supposed to live in.
+        settings_file: PathBuf,
+    },
+    /// The sidecar has no entry for the target path. The YAML
+    /// removal would still proceed but the Claude settings files
+    /// won't be touched (the reversal cannot guess which rules to
+    /// scrub).
+    SidecarEntryMissing {
+        /// Canonical absolute path the projection looked up in the
+        /// sidecar.
+        path: PathBuf,
+    },
+    /// The YAML file has no `permissions.restrict` entry matching
+    /// the requested path. The sidecar removal would still proceed
+    /// but `.remargin.yaml` won't be touched.
+    YamlEntryMissing {
+        /// Resolved on-disk path of the YAML file.
+        path: PathBuf,
+    },
+}
+
 /// A `plan` request for a single mutating op, normalized so CLI + MCP
 /// can share one dispatch path (rem-oqv / rem-3a2).
 ///
@@ -453,6 +598,17 @@ pub enum PlanRequest<'req> {
         /// `sign` op.
         selection: SignSelection,
     },
+    /// `plan unprotect` — projects a config-mutation `unprotect` op
+    /// (rem-6eop). Symmetric mirror of [`PlanRequest::Restrict`] for
+    /// the reverse direction. Produces an [`UnprotectConfigDiff`] in
+    /// [`PlanReport::unprotect_diff`] describing every file the live
+    /// op would touch and every drift conflict it would surface.
+    Unprotect {
+        /// Caller's working directory; used for anchor discovery.
+        cwd: PathBuf,
+        /// Unprotect args (`path`, `strict`).
+        args: UnprotectArgs,
+    },
     /// `plan write` — projects a whole-file / partial-range write.
     ///
     /// `path` is passed as-is to [`document::project_write`] so the
@@ -484,6 +640,7 @@ impl PlanRequest<'_> {
             Self::SandboxAdd { .. } => "sandbox-add",
             Self::SandboxRemove { .. } => "sandbox-remove",
             Self::Sign { .. } => "sign",
+            Self::Unprotect { .. } => "unprotect",
             Self::Write { .. } => "write",
         }
     }
@@ -538,6 +695,7 @@ pub fn project_report(
         noop,
         op: String::from(op_label),
         reject_reason,
+        unprotect_diff: None,
         verify_after,
         would_commit,
     }
@@ -623,6 +781,9 @@ pub fn dispatch(
             let (before, after) = projections::project_sign(system, path, cfg, selection)?;
             Ok(project_report(label, &before, &after, cfg, identity))
         }
+        PlanRequest::Unprotect { cwd, args } => {
+            dispatch_unprotect(system, cfg, identity, cwd, args)
+        }
         PlanRequest::Write {
             path,
             content,
@@ -661,6 +822,52 @@ fn dispatch_restrict(
         }
     }
     Ok(report)
+}
+
+/// Build a [`PlanReport`] from the `unprotect` projection's verdict
+/// (rem-6eop). Symmetric mirror of [`dispatch_restrict`] for the
+/// reverse direction: a hard reject from
+/// [`projections::project_unprotect`] flips `would_commit` to false
+/// and surfaces the carried reason verbatim.
+fn dispatch_unprotect(
+    system: &dyn System,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+    cwd: &Path,
+    args: &UnprotectArgs,
+) -> Result<PlanReport> {
+    let projection = projections::unprotect::project_unprotect(system, cwd, args)?;
+    let empty = parser::parse("").context("parsing empty before-document for plan unprotect")?;
+    let mut report = project_report("unprotect", &empty, &empty, cfg, identity);
+    match projection {
+        projections::unprotect::UnprotectProjection::Diff(diff) => {
+            report.noop = is_unprotect_diff_noop(&diff);
+            report.would_commit = !report.noop;
+            report.unprotect_diff = Some(*diff);
+        }
+        projections::unprotect::UnprotectProjection::Reject(reason) => {
+            report.reject_reason = Some(reason);
+            report.would_commit = false;
+        }
+    }
+    Ok(report)
+}
+
+/// Decide whether an [`UnprotectConfigDiff`] amounts to a noop. True
+/// when both the YAML entry and the sidecar entry are absent AND no
+/// rule would be removed from any settings file. Conflicts do not
+/// flip the noop verdict — they're advisory.
+fn is_unprotect_diff_noop(diff: &UnprotectConfigDiff) -> bool {
+    let yaml_noop = matches!(
+        diff.remargin_yaml.entry_action,
+        UnprotectEntryAction::Absent
+    );
+    let sidecar_noop = matches!(diff.sidecar.entry_action, UnprotectEntryAction::Absent);
+    let settings_noop = diff
+        .settings_files
+        .iter()
+        .all(|sf| sf.rules_to_remove.is_empty());
+    yaml_noop && sidecar_noop && settings_noop
 }
 
 /// Decide whether a [`ConfigPlanDiff`] amounts to a noop. True when

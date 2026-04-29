@@ -1005,6 +1005,30 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
+    /// Project an `unprotect` op (rem-6eop / T43).
+    ///
+    /// Symmetric mirror of `plan restrict` for the reverse direction:
+    /// describes every file the live op would touch
+    /// (`.remargin.yaml`, project + user settings, sidecar) plus
+    /// every detectable drift conflict (manual edits, missing
+    /// entries). No flags are consumed or written.
+    Unprotect {
+        /// Subpath relative to the anchor (matches the on-disk
+        /// `path` field of the original restrict entry), OR the
+        /// literal `*` for realm-wide. Same shape as `remargin
+        /// unprotect`.
+        path: String,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Symmetric with `restrict` /
+        /// `unprotect` for hermetic test runs. Accepted for
+        /// surface symmetry but not consulted by the projection
+        /// (the sidecar's `added_to_files` list pins the actual
+        /// targets).
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
     /// Project a `write` op (rem-imc).
     Write {
         /// Path to the file.
@@ -1508,6 +1532,7 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
         | PlanAction::SandboxAdd { output_args, .. }
         | PlanAction::SandboxRemove { output_args, .. }
         | PlanAction::Sign { output_args, .. }
+        | PlanAction::Unprotect { output_args, .. }
         | PlanAction::Write { output_args, .. } => output_args,
     }
 }
@@ -3653,6 +3678,13 @@ fn cmd_plan(
             path: resolve_doc_path(system, cwd, path)?,
             selection: build_sign_selection(*all_mine, ids)?,
         },
+        PlanAction::Unprotect { path, .. } => {
+            let unprotect_args = permissions_unprotect::UnprotectArgs::new(path.clone());
+            plan_ops::PlanRequest::Unprotect {
+                args: unprotect_args,
+                cwd: cwd.to_path_buf(),
+            }
+        }
         PlanAction::Write {
             path,
             content,
@@ -3683,11 +3715,16 @@ fn cmd_plan(
     let report = plan_ops::dispatch(system, cwd, config, &request)?;
     let value = serde_json::to_value(&report).context("serializing plan report")?;
 
-    // Config-mutation plans (rem-puy5) get a structured text block in
-    // text mode so the multi-file projection is readable. JSON mode
-    // still emits the full PlanReport payload.
-    if !json_mode && report.config_diff.is_some() {
-        return emit_plan_restrict_text(&report);
+    // Config-mutation plans (rem-puy5 / rem-6eop) get a structured
+    // text block in text mode so the multi-file projection is
+    // readable. JSON mode still emits the full PlanReport payload.
+    if !json_mode {
+        if report.config_diff.is_some() {
+            return emit_plan_restrict_text(&report);
+        }
+        if report.unprotect_diff.is_some() {
+            return emit_plan_unprotect_text(&report);
+        }
     }
 
     print_output(json_mode, &value)
@@ -3817,6 +3854,95 @@ fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
         }
         // ConfigConflict is `#[non_exhaustive]`; cover future variants
         // gracefully without breaking the build.
+        _ => {
+            out("    <unknown conflict variant>")?;
+        }
+    }
+    Ok(())
+}
+
+/// Render a `plan unprotect` [`PlanReport`] as a structured text block
+/// (rem-6eop / T43). Symmetric mirror of [`emit_plan_restrict_text`]
+/// for the reverse direction: anchor + `would_commit`/`noop` header,
+/// one section per touched file, then drift conflicts.
+fn emit_plan_unprotect_text(report: &plan_ops::PlanReport) -> Result<()> {
+    let Some(diff) = report.unprotect_diff.as_ref() else {
+        return Ok(());
+    };
+    out(&format!("Plan: unprotect {}", diff.absolute_path.display()))?;
+    out(&format!("  Anchor: {}", diff.anchor.display()))?;
+    out(&format!(
+        "  noop: {}   would_commit: {}",
+        report.noop, report.would_commit,
+    ))?;
+    if let Some(reason) = &report.reject_reason {
+        out(&format!("  reject_reason: {reason}"))?;
+    }
+    out(&format!(
+        "  .remargin.yaml: {}",
+        diff.remargin_yaml.path.display()
+    ))?;
+    out(&format!(
+        "    entry: {}",
+        unprotect_entry_action_label(diff.remargin_yaml.entry_action),
+    ))?;
+    out(&format!(
+        "  Settings: {} file(s)",
+        diff.settings_files.len()
+    ))?;
+    for sf in &diff.settings_files {
+        out(&format!("    {}", sf.path.display()))?;
+        out(&format!(
+            "      rules: -{} to remove, {} already absent",
+            sf.rules_to_remove.len(),
+            sf.rules_already_absent.len(),
+        ))?;
+    }
+    out(&format!(
+        "  Sidecar: {} ({})",
+        diff.sidecar.path.display(),
+        unprotect_entry_action_label(diff.sidecar.entry_action),
+    ))?;
+    if diff.conflicts.is_empty() {
+        out("  conflicts: 0")?;
+    } else {
+        out(&format!("  conflicts: {}", diff.conflicts.len()))?;
+        for conflict in &diff.conflicts {
+            emit_unprotect_conflict_line(conflict)?;
+        }
+    }
+    Ok(())
+}
+
+const fn unprotect_entry_action_label(action: plan_ops::UnprotectEntryAction) -> &'static str {
+    match action {
+        plan_ops::UnprotectEntryAction::Absent => "absent",
+        plan_ops::UnprotectEntryAction::WouldBeRemoved => "would_be_removed",
+        // UnprotectEntryAction is `#[non_exhaustive]`; cover future
+        // variants gracefully without breaking the build.
+        _ => "<unknown>",
+    }
+}
+
+fn emit_unprotect_conflict_line(conflict: &plan_ops::UnprotectConflict) -> Result<()> {
+    match conflict {
+        plan_ops::UnprotectConflict::RuleAlreadyAbsent {
+            rule,
+            settings_file,
+        } => {
+            out(&format!(
+                "    rule_already_absent in {}: {rule}",
+                settings_file.display()
+            ))?;
+        }
+        plan_ops::UnprotectConflict::SidecarEntryMissing { path } => {
+            out(&format!("    sidecar_entry_missing: {}", path.display()))?;
+        }
+        plan_ops::UnprotectConflict::YamlEntryMissing { path } => {
+            out(&format!("    yaml_entry_missing: {}", path.display()))?;
+        }
+        // UnprotectConflict is `#[non_exhaustive]`; cover future
+        // variants gracefully without breaking the build.
         _ => {
             out("    <unknown conflict variant>")?;
         }
