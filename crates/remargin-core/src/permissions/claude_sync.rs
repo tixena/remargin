@@ -26,12 +26,14 @@
 //!   Write(<path>/.*/**)              suppressed when allow_dot_folders
 //!   NotebookEdit(<path>/.*/**)       names every dot-folder)
 //!   <per allow_dot_folders entry, RE-allow rules>
-//!   Bash(cp * <path>/**)            ← write-side bash mutators
-//!   Bash(mv * <path>/**)
-//!   Bash(tee <path>/**)
-//!   Bash(sed -i * <path>/**)
-//!   Bash(truncate * <path>/**)
-//!   Bash(touch <path>/**)
+//!   Bash(<cmd> [*] <path>/**)       ← every entry from BASH_MUTATORS,
+//!                                     covering the file-modifying
+//!                                     command surface (delete, create,
+//!                                     link, metadata, editors,
+//!                                     scriptable interpreters,
+//!                                     archives, sync/copy, patch,
+//!                                     downloads, shells, VCS/build,
+//!                                     disk/write — see the constant)
 //!   <per also_deny_bash entry, Bash(<cmd> * <path>/**)>
 //!   Bash(remargin * <path>/**)      ← only when cli_allowed=false
 //!
@@ -89,10 +91,113 @@ use crate::permissions::sidecar::{self, SidecarEntry};
 /// the way users expect.
 const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit"];
 
-/// Write-side Bash mutators that need their own deny rules to keep
-/// shell-out paths from sneaking around the editor-tool denies.
-/// Listed in the order the spec calls out.
-const BASH_MUTATORS: &[&str] = &["cp *", "mv *", "tee", "sed -i *", "truncate *", "touch"];
+/// Default-deny Bash command tokens for the restricted path
+/// (rem-p74a). Every entry expands to `Bash(<token> {glob_root}/**)`,
+/// so a token of `cp *` becomes `Bash(cp * /path/**)` while a bare
+/// `tee` becomes `Bash(tee /path/**)`. The trailing `*` (or its
+/// absence) is part of the token by design — the format string in
+/// [`rules_for`] does NOT inject one.
+///
+/// The list is broad on purpose: every entry below can read, modify,
+/// create, delete, or otherwise mutate a file on disk, which would
+/// defeat the MCP-only contract `restrict` is supposed to enforce.
+/// Users can layer extra denies on top via `--also-deny-bash`; the
+/// purpose of THIS list is to make the defaults safe-by-default so an
+/// agent cannot trivially bypass the restriction with a forgotten
+/// command.
+///
+/// Ordering: original write-side mutators first (preserves
+/// rule-emission order with older settings files), then the new
+/// categories grouped by intent. Within each category, order is
+/// alphabetical-ish for human scanability, not load-bearing.
+///
+/// `sed` appears twice on purpose: legacy `sed -i *` is preserved so
+/// repeat runs do not shuffle rule order or churn the sidecar, and
+/// plain `sed *` is added alongside to cover redirection-based writes
+/// (`sed ... > /restricted/file`) that escape `-i`.
+pub(crate) const BASH_MUTATORS: &[&str] = &[
+    // Write-side mutators (original surface).
+    "cp *",
+    "mv *",
+    "tee",
+    "tee *",
+    "sed -i *",
+    "sed *",
+    "truncate *",
+    "touch",
+    "touch *",
+    // Delete.
+    "rm *",
+    "rmdir *",
+    "unlink *",
+    // Create / link.
+    "install *",
+    "ln *",
+    "mkdir *",
+    "mkfifo *",
+    "mknod *",
+    // Metadata / permissions.
+    "chattr *",
+    "chgrp *",
+    "chmod *",
+    "chown *",
+    "setfacl *",
+    // Interactive editors.
+    "ed *",
+    "emacs *",
+    "micro *",
+    "nano *",
+    "nvim *",
+    "vi *",
+    "vim *",
+    // Scriptable interpreters (can write any file).
+    "awk *",
+    "lua *",
+    "node *",
+    "perl *",
+    "php *",
+    "python *",
+    "python3 *",
+    "ruby *",
+    // Archives.
+    "7z *",
+    "bunzip2 *",
+    "bzip2 *",
+    "gunzip *",
+    "gzip *",
+    "tar *",
+    "unxz *",
+    "unzip *",
+    "xz *",
+    "zip *",
+    "zstd *",
+    // Sync / remote copy.
+    "rsync *",
+    "scp *",
+    "sftp *",
+    // Patch.
+    "patch *",
+    // Network downloads.
+    "curl *",
+    "wget *",
+    // Shells (can do anything).
+    "bash *",
+    "dash *",
+    "fish *",
+    "ksh *",
+    "sh *",
+    "zsh *",
+    // VCS / build.
+    "cmake *",
+    "git *",
+    "make *",
+    // Disk / write.
+    "csplit *",
+    "dd *",
+    "script *",
+    "sort *",
+    "split *",
+];
 
 /// Allow rule that pins remargin's MCP tools as always-callable so a
 /// blanket `restrict` rule does not lock the user out of the very

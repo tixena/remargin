@@ -347,7 +347,10 @@ mod tests {
     }
 
     /// E16: `also_deny_bash` lands in the Claude settings as
-    /// `Bash(<cmd> * //...)` denies.
+    /// `Bash(<cmd> * //...)` denies. Uses commands that are NOT in
+    /// the default deny list (rem-p74a expanded the defaults to cover
+    /// `curl` / `wget` and friends, so the original test would pass
+    /// even if `--also-deny-bash` was a no-op).
     #[test]
     fn also_deny_bash_propagates_into_settings() {
         let realm = realm_with_claude();
@@ -355,20 +358,20 @@ mod tests {
         restrict_in(
             &realm,
             "src/secret",
-            &["--also-deny-bash", "curl", "--also-deny-bash", "wget"],
+            &["--also-deny-bash", "aria2c", "--also-deny-bash", "nc"],
         );
 
         let settings = read_local_settings(&realm);
         let deny = settings["permissions"]["deny"].as_array().unwrap();
         assert!(
             deny.iter()
-                .any(|v| v.as_str().is_some_and(|s| s.starts_with("Bash(curl"))),
-            "expected Bash(curl ...) deny, got: {deny:#?}"
+                .any(|v| v.as_str().is_some_and(|s| s.starts_with("Bash(aria2c"))),
+            "expected Bash(aria2c ...) deny, got: {deny:#?}"
         );
         assert!(
             deny.iter()
-                .any(|v| v.as_str().is_some_and(|s| s.starts_with("Bash(wget"))),
-            "expected Bash(wget ...) deny, got: {deny:#?}"
+                .any(|v| v.as_str().is_some_and(|s| s.starts_with("Bash(nc"))),
+            "expected Bash(nc ...) deny, got: {deny:#?}"
         );
     }
 

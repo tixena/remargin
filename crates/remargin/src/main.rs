@@ -633,7 +633,12 @@ enum Commands {
         /// Subpath relative to the anchor, OR the literal `*` for
         /// realm-wide.
         path: String,
-        /// Extra Bash commands to deny on the restricted path.
+        /// Extra Bash commands to deny on the restricted path. The
+        /// default deny list already covers every common
+        /// file-modifying command surface (`rm`, `chmod`, editors,
+        /// scriptable interpreters, archivers, shells, VCS, etc. —
+        /// see `BASH_MUTATORS` in `claude_sync.rs`); this flag is for
+        /// project-specific extras the defaults do not catch.
         /// Comma-separated or repeat the flag:
         /// `--also-deny-bash curl,wget` or
         /// `--also-deny-bash curl --also-deny-bash wget`.
@@ -955,7 +960,8 @@ enum PlanAction {
         /// Subpath relative to the anchor, OR the literal `*` for
         /// realm-wide. Same shape as `remargin restrict`.
         path: String,
-        /// Extra Bash commands to deny on the restricted path.
+        /// Extra Bash commands to deny on the restricted path,
+        /// layered on top of the broad default deny list (rem-p74a).
         /// Comma-separated or repeat the flag.
         #[arg(long = "also-deny-bash", value_delimiter = ',')]
         also_deny_bash: Vec<String>,

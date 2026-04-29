@@ -16,7 +16,7 @@ use crate::permissions::claude_sync::rule_shape::{
     OverlapKind, PathGlob, RuleShape, rules_overlap,
 };
 use crate::permissions::claude_sync::{
-    ALLOW_MCP_REMARGIN, RuleSet, apply_rules, revert_rules, rules_for,
+    ALLOW_MCP_REMARGIN, BASH_MUTATORS, RuleSet, apply_rules, revert_rules, rules_for,
 };
 use crate::permissions::sidecar::{self, sidecar_path};
 
@@ -46,9 +46,10 @@ fn subpath_no_extras_emits_full_default_set() {
     let entry = restrict_subpath("/a/b", &[], false);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    // deny: 4 editor-tool path denies + 4 dot-folder wildcards + 6
-    // bash mutators + 1 remargin-cli deny = 15 entries.
-    assert_eq!(rules.deny.len(), 15, "{:#?}", rules.deny);
+    // deny: 4 editor-tool path denies + 4 dot-folder wildcards +
+    // BASH_MUTATORS.len() bash mutators + 1 remargin-cli deny.
+    let expected = 4 + 4 + BASH_MUTATORS.len() + 1;
+    assert_eq!(rules.deny.len(), expected, "{:#?}", rules.deny);
 
     // Editor-tool denies in spec order.
     assert_eq!(rules.deny[0], "Edit(/a/b/**)");
@@ -62,16 +63,103 @@ fn subpath_no_extras_emits_full_default_set() {
     assert_eq!(rules.deny[6], "Read(/a/b/.*/**)");
     assert_eq!(rules.deny[7], "NotebookEdit(/a/b/.*/**)");
 
-    // Bash mutators.
+    // Bash mutators: original write-side surface anchors at index 8
+    // and is preserved verbatim so older settings files do not churn
+    // on re-runs.
     assert_eq!(rules.deny[8], "Bash(cp * /a/b/**)");
     assert_eq!(rules.deny[9], "Bash(mv * /a/b/**)");
     assert_eq!(rules.deny[10], "Bash(tee /a/b/**)");
-    assert_eq!(rules.deny[11], "Bash(sed -i * /a/b/**)");
-    assert_eq!(rules.deny[12], "Bash(truncate * /a/b/**)");
-    assert_eq!(rules.deny[13], "Bash(touch /a/b/**)");
+
+    // rem-p74a expanded the default deny list to cover every
+    // file-modifying command surface. Spot-check one entry per
+    // category to guard against accidental list shrinkage. Membership
+    // (not exact index) so reordering inside BASH_MUTATORS does not
+    // break the test.
+    let must_contain = [
+        // Plain `sed *` (rem-p74a special case).
+        "Bash(sed * /a/b/**)",
+        // Delete.
+        "Bash(rm * /a/b/**)",
+        "Bash(rmdir * /a/b/**)",
+        "Bash(unlink * /a/b/**)",
+        // Create / link.
+        "Bash(mkdir * /a/b/**)",
+        "Bash(mkfifo * /a/b/**)",
+        "Bash(mknod * /a/b/**)",
+        "Bash(ln * /a/b/**)",
+        "Bash(install * /a/b/**)",
+        // Metadata / permissions.
+        "Bash(chmod * /a/b/**)",
+        "Bash(chown * /a/b/**)",
+        "Bash(chgrp * /a/b/**)",
+        "Bash(setfacl * /a/b/**)",
+        "Bash(chattr * /a/b/**)",
+        // Editors.
+        "Bash(vim * /a/b/**)",
+        "Bash(nvim * /a/b/**)",
+        "Bash(nano * /a/b/**)",
+        "Bash(emacs * /a/b/**)",
+        "Bash(ed * /a/b/**)",
+        "Bash(vi * /a/b/**)",
+        "Bash(micro * /a/b/**)",
+        // Scriptable interpreters.
+        "Bash(awk * /a/b/**)",
+        "Bash(perl * /a/b/**)",
+        "Bash(python * /a/b/**)",
+        "Bash(python3 * /a/b/**)",
+        "Bash(ruby * /a/b/**)",
+        "Bash(node * /a/b/**)",
+        "Bash(php * /a/b/**)",
+        "Bash(lua * /a/b/**)",
+        // Archives.
+        "Bash(tar * /a/b/**)",
+        "Bash(zip * /a/b/**)",
+        "Bash(unzip * /a/b/**)",
+        "Bash(gzip * /a/b/**)",
+        "Bash(gunzip * /a/b/**)",
+        "Bash(bzip2 * /a/b/**)",
+        "Bash(bunzip2 * /a/b/**)",
+        "Bash(xz * /a/b/**)",
+        "Bash(unxz * /a/b/**)",
+        "Bash(7z * /a/b/**)",
+        "Bash(zstd * /a/b/**)",
+        // Sync / remote copy.
+        "Bash(rsync * /a/b/**)",
+        "Bash(scp * /a/b/**)",
+        "Bash(sftp * /a/b/**)",
+        // Patch.
+        "Bash(patch * /a/b/**)",
+        // Network downloads.
+        "Bash(curl * /a/b/**)",
+        "Bash(wget * /a/b/**)",
+        // Shells.
+        "Bash(bash * /a/b/**)",
+        "Bash(sh * /a/b/**)",
+        "Bash(zsh * /a/b/**)",
+        "Bash(fish * /a/b/**)",
+        "Bash(dash * /a/b/**)",
+        "Bash(ksh * /a/b/**)",
+        // VCS / build.
+        "Bash(git * /a/b/**)",
+        "Bash(make * /a/b/**)",
+        "Bash(cmake * /a/b/**)",
+        // Disk / write.
+        "Bash(dd * /a/b/**)",
+        "Bash(script * /a/b/**)",
+        "Bash(split * /a/b/**)",
+        "Bash(csplit * /a/b/**)",
+        "Bash(sort * /a/b/**)",
+    ];
+    for needle in must_contain {
+        assert!(
+            rules.deny.iter().any(|rule| rule == needle),
+            "rem-p74a default deny list missing {needle:?}\nfull deny: {:#?}",
+            rules.deny
+        );
+    }
 
     // remargin-cli deny because cli_allowed = false.
-    assert_eq!(rules.deny[14], "Bash(remargin * /a/b/**)");
+    assert_eq!(rules.deny[expected - 1], "Bash(remargin * /a/b/**)");
 
     // Allow set: only the MCP allow (rem-2plr removed the implicit
     // `.remargin/` editor-tool re-allow — `mcp__remargin__*` is the
@@ -112,26 +200,34 @@ fn cli_allowed_skips_remargin_cli_deny() {
         "cli_allowed=true must omit Bash(remargin ...) deny, got: {:#?}",
         rules.deny
     );
-    // 4 editor + 4 dot-folder + 6 bash mutators = 14 (one fewer).
-    assert_eq!(rules.deny.len(), 14);
+    // 4 editor + 4 dot-folder + BASH_MUTATORS.len() (one fewer than
+    // when cli_allowed=false: the `Bash(remargin *)` deny is dropped).
+    let expected = 4 + 4 + BASH_MUTATORS.len();
+    assert_eq!(rules.deny.len(), expected);
 }
 
 /// Scenario 4 — `also_deny_bash` adds extra Bash denies right after
-/// the standard mutators.
+/// the standard mutators. Uses commands NOT in the default
+/// [`BASH_MUTATORS`] list so the test exercises the extras path even
+/// after rem-p74a expanded the defaults to cover most common
+/// file-modifying commands.
 #[test]
 fn also_deny_bash_extras_appended() {
-    let entry = restrict_subpath("/a/b", &["curl", "wget"], false);
+    // `aria2c` (download tool) and `nc` (netcat) are not in the
+    // default deny list, so their presence below uniquely proves the
+    // extras path is exercised.
+    let entry = restrict_subpath("/a/b", &["aria2c", "nc"], false);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    let curl_idx = rules
+    let aria_idx = rules
         .deny
         .iter()
-        .position(|r| r == "Bash(curl * /a/b/**)")
+        .position(|r| r == "Bash(aria2c * /a/b/**)")
         .unwrap();
-    let wget_idx = rules
+    let nc_idx = rules
         .deny
         .iter()
-        .position(|r| r == "Bash(wget * /a/b/**)")
+        .position(|r| r == "Bash(nc * /a/b/**)")
         .unwrap();
     // Extras appear before the cli deny so the surface stays human-
     // readable: standard mutators, callers' extras, then the
@@ -142,8 +238,8 @@ fn also_deny_bash_extras_appended() {
         .position(|r| r.starts_with("Bash(remargin"))
         .unwrap();
     assert!(
-        curl_idx < cli_idx && wget_idx < cli_idx,
-        "extras should land before the remargin-cli deny: curl={curl_idx}, wget={wget_idx}, cli={cli_idx}"
+        aria_idx < cli_idx && nc_idx < cli_idx,
+        "extras should land before the remargin-cli deny: aria2c={aria_idx}, nc={nc_idx}, cli={cli_idx}"
     );
 }
 

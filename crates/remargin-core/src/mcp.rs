@@ -442,7 +442,7 @@ fn desc_plan() -> ToolDesc {
                 "also_deny_bash": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "For restrict: extra Bash commands to deny on the path."
+                    "description": "For restrict: extra Bash commands to deny on the path, layered on top of the broad default deny list (rem-p74a) which already covers every common file-modifying command (rm, chmod, editors, scriptable interpreters, archivers, shells, VCS, etc.)."
                 },
                 "cli_allowed": { "type": "boolean", "description": "For restrict: allow `Bash(remargin *)` so the CLI stays usable.", "default": false },
                 "user_settings": { "type": "string", "description": "For restrict: explicit user-scope settings path (defaults to `~/.claude/settings.json`)." },
@@ -725,7 +725,7 @@ fn desc_restrict() -> ToolDesc {
                 "also_deny_bash": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Extra Bash command names to deny on the restricted path.",
+                    "description": "Extra Bash command names to deny on the restricted path, layered on top of the broad default deny list (rem-p74a) which already blocks every common file-modifying command (rm, chmod, editors, scriptable interpreters, archivers, shells, VCS, etc.).",
                     "default": []
                 },
                 "cli_allowed": {
