@@ -256,7 +256,7 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 29_usize);
+    assert_eq!(tools.len(), 30_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -275,6 +275,7 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"get"));
     assert!(names.contains(&"write"));
     assert!(names.contains(&"metadata"));
+    assert!(names.contains(&"mv"));
     assert!(names.contains(&"permissions_show"));
     assert!(names.contains(&"permissions_check"));
     assert!(names.contains(&"plan"));
@@ -3664,4 +3665,151 @@ fn mcp_batch_rejects_multiple_anchors_per_op() {
         }),
     );
     assert!(is_tool_error(&resp));
+}
+
+/// `mv` MCP tool moves a file and reports the documented outcome
+/// shape (rem-0j2x / T44).
+#[test]
+fn mcp_mv_renames_file() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_file(base.join("a.md"), b"hello mcp")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "mv",
+                "arguments": {
+                    "src": "a.md",
+                    "dst": "b.md"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["bytes_moved"].as_u64().unwrap(), 9_u64);
+    assert!(!result["overwritten"].as_bool().unwrap());
+    assert!(!result["noop_same_path"].as_bool().unwrap());
+    assert!(!result["fallback_copy"].as_bool().unwrap());
+}
+
+/// `mv` MCP tool refuses an existing destination without `force`.
+#[test]
+fn mcp_mv_refuses_existing_destination_without_force() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_file(base.join("a.md"), b"src")
+        .unwrap()
+        .with_file(base.join("b.md"), b"dst")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "mv",
+                "arguments": {
+                    "src": "a.md",
+                    "dst": "b.md"
+                }
+            }
+        }),
+    );
+    assert!(is_tool_error(&response));
+}
+
+/// `mv` MCP tool with `force = true` overwrites an existing
+/// destination and reports `overwritten = true`.
+#[test]
+fn mcp_mv_force_overwrites_destination() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_file(base.join("a.md"), b"new")
+        .unwrap()
+        .with_file(base.join("b.md"), b"old")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "mv",
+                "arguments": {
+                    "src": "a.md",
+                    "dst": "b.md",
+                    "force": true
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert!(result["overwritten"].as_bool().unwrap());
+}
+
+/// `plan mv` MCP tool surfaces the documented `mv_diff` shape with
+/// `would_commit = true` for a clean projection.
+#[test]
+fn mcp_plan_mv_emits_mv_diff() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_file(base.join("a.md"), b"plan me")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "mv",
+                    "src": "a.md",
+                    "dst": "b.md"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["op"].as_str().unwrap(), "mv");
+    assert!(result["would_commit"].as_bool().unwrap());
+    let mv_diff = &result["mv_diff"];
+    assert!(mv_diff["src_exists"].as_bool().unwrap());
+    assert!(!mv_diff["dst_exists"].as_bool().unwrap());
+    assert!(!mv_diff["noop_same_path"].as_bool().unwrap());
 }

@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod migrate;
+pub mod mv;
 pub mod plan;
 pub mod projections;
 pub mod purge;

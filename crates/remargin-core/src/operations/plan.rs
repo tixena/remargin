@@ -188,6 +188,13 @@ pub struct PlanReport {
     /// Which identity the plan was computed under. `would_sign` reports
     /// whether signing would succeed without actually invoking the key.
     pub identity: PlanIdentity,
+    /// File-relocation projection emitted by the `plan mv` op
+    /// (rem-0j2x / T44). `None` for every other op. The document-level
+    /// fields (`comments`, `changed_line_ranges`, `checksum_*`,
+    /// `verify_after`) are vacuously empty for `mv` — the bytes do not
+    /// change, only the file's location.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mv_diff: Option<MvDiff>,
     /// `true` when the projected content is byte-identical to the source
     /// content (`checksum_before == checksum_after`).
     pub noop: bool,
@@ -513,6 +520,44 @@ pub enum UnprotectConflict {
     },
 }
 
+/// File-relocation projection emitted by the `plan mv` op
+/// (rem-0j2x / T44).
+///
+/// Mirrors the read-only side of [`crate::operations::mv::mv`]: names
+/// the canonical src/dst, whether the destination already exists (and
+/// would therefore require `--force` to overwrite), and whether the
+/// call would be a same-path no-op or an idempotent re-run after a
+/// previous successful move.
+///
+/// The four boolean fields are each surfaced in the documented JSON
+/// shape (`dst_exists`, `idempotent_already_settled`, `noop_same_path`,
+/// `src_exists`); collapsing them would lose API surface.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is a documented JSON output field (rem-0j2x)"
+)]
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct MvDiff {
+    /// Canonical absolute destination path. Matches
+    /// [`crate::operations::mv::MvOutcome::dst_absolute`].
+    pub dst_absolute: PathBuf,
+    /// `true` when the destination currently exists. The live op
+    /// requires `--force` (or the equivalent MCP flag) to overwrite.
+    pub dst_exists: bool,
+    /// `true` when the source is missing and the destination already
+    /// exists at the requested path. The live op would settle as a
+    /// `bytes_moved = 0` success.
+    pub idempotent_already_settled: bool,
+    /// `true` when src and dst resolve to the same canonical path.
+    pub noop_same_path: bool,
+    /// Canonical absolute source path. When the source is missing
+    /// this is the lexical join of `base_dir` + the requested path.
+    pub src_absolute: PathBuf,
+    /// `true` when the source path resolves to an existing file.
+    pub src_exists: bool,
+}
+
 /// A `plan` request for a single mutating op, normalized so CLI + MCP
 /// can share one dispatch path (rem-oqv / rem-3a2).
 ///
@@ -558,6 +603,21 @@ pub enum PlanRequest<'req> {
         /// `MigrateIdentities::default()` to keep the historical
         /// `legacy-user` / `legacy-agent` placeholder behaviour.
         identities: MigrateIdentities,
+    },
+    /// `plan mv` — projects a file relocation (rem-0j2x / T44).
+    /// Produces an [`MvDiff`] in [`PlanReport::mv_diff`] describing
+    /// the resolved src/dst paths, whether the destination already
+    /// exists, and whether the live op would settle as a no-op.
+    Mv {
+        /// Source path as supplied by the caller (relative to
+        /// `base_dir` or absolute). Resolution mirrors
+        /// [`crate::operations::mv::mv`].
+        src: PathBuf,
+        /// Destination path as supplied by the caller.
+        dst: PathBuf,
+        /// `true` to project the `--force` semantics (the live op
+        /// would overwrite an existing destination).
+        force: bool,
     },
     /// `plan purge` — projects removal of all comments.
     Purge { path: PathBuf },
@@ -634,6 +694,7 @@ impl PlanRequest<'_> {
             Self::Delete { .. } => "delete",
             Self::Edit { .. } => "edit",
             Self::Migrate { .. } => "migrate",
+            Self::Mv { .. } => "mv",
             Self::Purge { .. } => "purge",
             Self::React { .. } => "react",
             Self::Restrict { .. } => "restrict",
@@ -692,6 +753,7 @@ pub fn project_report(
         comments,
         config_diff: None,
         identity,
+        mv_diff: None,
         noop,
         op: String::from(op_label),
         reject_reason,
@@ -749,6 +811,9 @@ pub fn dispatch(
         PlanRequest::Migrate { path, identities } => {
             let (before, after) = projections::project_migrate(system, path, cfg, identities)?;
             Ok(project_report(label, &before, &after, cfg, identity))
+        }
+        PlanRequest::Mv { src, dst, force } => {
+            dispatch_mv(system, base_dir, cfg, identity, src, dst, *force)
         }
         PlanRequest::Purge { path } => {
             let (before, after) = projections::project_purge(system, path, cfg)?;
@@ -850,6 +915,126 @@ fn dispatch_unprotect(
             report.would_commit = false;
         }
     }
+    Ok(report)
+}
+
+/// Build a [`PlanReport`] for the `mv` op (rem-0j2x / T44).
+///
+/// Pure: no disk writes, no identity load. Resolves both endpoints
+/// through the same sandbox boundary the live op uses, surfaces a
+/// `reject_reason` plus `would_commit = false` for hard preflight
+/// failures (path escape, forbidden basename, restrict-guard violation,
+/// source-and-dest both missing, source-or-dest is a directory), and
+/// otherwise returns a populated [`MvDiff`] with `would_commit = true`.
+fn dispatch_mv(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+    src: &Path,
+    dst: &Path,
+    force: bool,
+) -> Result<PlanReport> {
+    use crate::document::allowlist;
+    use crate::permissions::op_guard::pre_mutate_check;
+    use crate::writer::ensure_not_forbidden_target;
+
+    let empty = parser::parse("").context("parsing empty before-document for plan mv")?;
+    let mut report = project_report("mv", &empty, &empty, cfg, identity);
+
+    // Wrap every preflight that the live op would perform; a failing
+    // check flips `would_commit` and surfaces the message verbatim.
+    let projection = (|| -> Result<MvDiff> {
+        ensure_not_forbidden_target(src)?;
+        ensure_not_forbidden_target(dst)?;
+
+        let dst_lexical = if dst.is_absolute() {
+            dst.to_path_buf()
+        } else {
+            base_dir.join(dst)
+        };
+        if system.is_dir(&dst_lexical).unwrap_or(false) {
+            anyhow::bail!(
+                "destination is a directory: {} (this op moves a single file; pass an explicit destination path)",
+                dst.display()
+            );
+        }
+
+        let src_lexical = if src.is_absolute() {
+            src.to_path_buf()
+        } else {
+            base_dir.join(src)
+        };
+        let src_exists = system.exists(&src_lexical).unwrap_or(false);
+
+        let src_resolved = if src_exists {
+            allowlist::resolve_sandboxed(system, base_dir, src, cfg.unrestricted)?
+        } else {
+            allowlist::resolve_sandboxed_create(system, base_dir, src, cfg.unrestricted)?
+        };
+
+        let dst_resolved =
+            allowlist::resolve_sandboxed_create(system, base_dir, dst, cfg.unrestricted)?;
+        ensure_not_forbidden_target(&dst_resolved)?;
+
+        let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
+        let noop_same_path = src_exists && src_resolved == dst_resolved;
+        let idempotent_already_settled = !src_exists && dst_exists;
+
+        if src_exists && system.is_dir(&src_resolved).unwrap_or(false) {
+            anyhow::bail!(
+                "source is a directory: {} (single-file moves only)",
+                src.display()
+            );
+        }
+
+        if !src_exists && !dst_exists {
+            anyhow::bail!(
+                "source not found: {} (and destination does not exist either)",
+                src.display()
+            );
+        }
+
+        if src_exists {
+            pre_mutate_check(system, "mv", &src_resolved)?;
+        }
+        pre_mutate_check(system, "mv", &dst_resolved)?;
+
+        if dst_exists && !noop_same_path && !idempotent_already_settled && !force {
+            anyhow::bail!(
+                "destination exists: {} (pass --force to overwrite)",
+                dst.display()
+            );
+        }
+
+        Ok(MvDiff {
+            dst_absolute: dst_resolved,
+            dst_exists,
+            idempotent_already_settled,
+            noop_same_path,
+            src_absolute: if src_exists {
+                src_resolved
+            } else {
+                src_lexical
+            },
+            src_exists,
+        })
+    })();
+
+    match projection {
+        Ok(diff) => {
+            // Same-path no-op and the idempotent already-settled
+            // branch both leave the filesystem untouched.
+            report.noop = diff.noop_same_path || diff.idempotent_already_settled;
+            report.would_commit = true;
+            report.mv_diff = Some(diff);
+        }
+        Err(err) => {
+            report.reject_reason = Some(format!("{err:#}"));
+            report.would_commit = false;
+        }
+    }
+
     Ok(report)
 }
 

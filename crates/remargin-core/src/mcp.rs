@@ -28,6 +28,7 @@ use crate::mcp::sandbox::McpSandbox;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
 use crate::operations::migrate;
+use crate::operations::mv as mv_op;
 use crate::operations::plan as plan_ops;
 use crate::operations::projections;
 use crate::operations::purge;
@@ -65,7 +66,7 @@ const SERVER_NAME: &str = "remargin";
 /// `config_path` and `key` are the per-tool identity-declaration fields
 /// (rem-x2bw / rem-zlx3): they are pre-expanded here so the identity resolver sees the
 /// same already-canonical paths the CLI feeds to [`resolve_identity`].
-const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "file", "key", "path"];
+const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "dst", "file", "key", "path", "src"];
 
 /// Array-valued path fields — each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
@@ -428,16 +429,36 @@ fn desc_migrate() -> ToolDesc {
     }
 }
 
+/// Build the `mv` tool descriptor (rem-0j2x / T44).
+fn desc_mv() -> ToolDesc {
+    ToolDesc {
+        name: "mv",
+        description: "Move or rename a single tracked file. Atomic same-FS rename, copy+remove fallback on cross-filesystem (EXDEV). Both endpoints flow through the same sandbox / forbidden-target / restrict-guard checks every other mutating op uses. Idempotent: same-path no-op; src missing AND dst already in place returns success with bytes_moved=0.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "src": { "type": "string", "description": "Source path." },
+                "dst": { "type": "string", "description": "Destination path." },
+                "force": { "type": "boolean", "description": "Overwrite an existing destination.", "default": false }
+            },
+            "required": ["src", "dst"]
+        }),
+    }
+}
+
 /// Build the plan tool descriptor.
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. Config ops: restrict (rem-puy5) - surfaces a `config_diff` describing every settings/YAML/sidecar file the live op would touch, plus detected conflicts. unprotect (rem-6eop) - surfaces an `unprotect_diff` describing every file the reverse op would touch, plus drift conflicts (manual edits, missing entries).",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv (rem-0j2x / T44) - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops: restrict (rem-puy5) - surfaces a `config_diff` describing every settings/YAML/sidecar file the live op would touch, plus detected conflicts. unprotect (rem-6eop) - surfaces an `unprotect_diff` describing every file the reverse op would touch, plus drift conflicts (manual edits, missing entries).",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | purge | restrict | sandbox-add | sandbox-remove | sign | unprotect | write" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | mv | purge | restrict | sandbox-add | sandbox-remove | sign | unprotect | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
+                "src": { "type": "string", "description": "For mv: source path (rem-0j2x)." },
+                "dst": { "type": "string", "description": "For mv: destination path (rem-0j2x)." },
+                "force": { "type": "boolean", "description": "For mv: project the --force overwrite semantics.", "default": false },
                 "path": { "type": "string", "description": "For restrict / unprotect: subpath (or `*` for realm-wide)." },
                 "also_deny_bash": {
                     "type": "array",
@@ -852,6 +873,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_ls(),
         desc_metadata(),
         desc_migrate(),
+        desc_mv(),
         desc_permissions_check(),
         desc_permissions_show(),
         desc_plan(),
@@ -1222,6 +1244,7 @@ fn dispatch_tool(
         "ls" => handle_ls(system, base_dir, config, p),
         "metadata" => handle_metadata(system, base_dir, p),
         "migrate" => handle_migrate(system, base_dir, config, p),
+        "mv" => handle_mv(system, base_dir, config, p),
         "permissions_check" => handle_permissions_check(system, base_dir, p),
         "permissions_show" => handle_permissions_show(system, base_dir),
         "plan" => handle_plan(system, base_dir, config, p),
@@ -1831,6 +1854,11 @@ fn handle_plan(
                 identities,
             }
         }
+        "mv" => plan_ops::PlanRequest::Mv {
+            src: PathBuf::from(required_str(params, "src")?),
+            dst: PathBuf::from(required_str(params, "dst")?),
+            force: optional_bool(params, "force"),
+        },
         "purge" => plan_ops::PlanRequest::Purge {
             path: base_dir.join(required_str(params, "file")?),
         },
@@ -2163,6 +2191,30 @@ fn handle_rm(
     Ok(json!({
         "deleted": path_str,
         "existed": result.existed,
+    }))
+}
+
+/// Handle the `mv` tool (rem-0j2x / T44): move or rename a tracked file.
+fn handle_mv(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let src = required_str(params, "src")?;
+    let dst = required_str(params, "dst")?;
+    let force = optional_bool(params, "force");
+
+    let args = mv_op::MvArgs::new(PathBuf::from(src), PathBuf::from(dst)).with_force(force);
+    let outcome = mv_op::mv(system, base_dir, config, &args)?;
+
+    Ok(json!({
+        "bytes_moved": outcome.bytes_moved,
+        "dst_absolute": outcome.dst_absolute.display().to_string(),
+        "fallback_copy": outcome.fallback_copy,
+        "noop_same_path": outcome.noop_same_path,
+        "overwritten": outcome.overwritten,
+        "src_absolute": outcome.src_absolute.display().to_string(),
     }))
 }
 

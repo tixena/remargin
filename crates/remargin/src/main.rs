@@ -30,6 +30,7 @@ use remargin_core::mcp;
 use remargin_core::operations;
 use remargin_core::operations::batch::BatchCommentOp;
 use remargin_core::operations::migrate;
+use remargin_core::operations::mv as mv_op;
 use remargin_core::operations::plan as plan_ops;
 use remargin_core::operations::projections;
 use remargin_core::operations::purge;
@@ -471,6 +472,33 @@ enum Commands {
         identity_args: IdentityArgs,
         #[command(flatten)]
         output_args: OutputArgs,
+    },
+    /// Move or rename a single tracked file (rem-0j2x / T44).
+    ///
+    /// Same-FS moves use an atomic filesystem rename. Cross-FS moves
+    /// fall back to copy + remove (the source is removed only after
+    /// the destination write returns Ok). Both endpoints flow through
+    /// the same sandbox / forbidden-target / per-op-guard checks every
+    /// other mutating op uses, so a `restrict` entry covering either
+    /// side refuses the call.
+    ///
+    /// Idempotent: `remargin mv a a` is a no-op; re-running after a
+    /// successful move (`src` missing, `dst` already in place) returns
+    /// success with `bytes_moved = 0`.
+    Mv {
+        /// Source path.
+        src: String,
+        /// Destination path.
+        dst: String,
+        /// Overwrite an existing destination.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// Install or uninstall the embedded Obsidian plugin in a vault.
     #[cfg(feature = "obsidian")]
@@ -927,6 +955,25 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
+    /// Project an `mv` op (rem-0j2x / T44).
+    ///
+    /// Surfaces the canonical src/dst, whether the destination exists
+    /// (and would therefore require `--force`), and whether the live
+    /// op would settle as a no-op (same canonical path) or
+    /// idempotently as a no-op (src missing, dst already in place).
+    /// No bytes are moved, no markdown is rewritten — `mv` does not
+    /// change document content.
+    Mv {
+        /// Source path.
+        src: String,
+        /// Destination path.
+        dst: String,
+        /// Project the `--force` semantics.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
     /// Project a `purge` op (rem-qll).
     Purge {
         /// Path to the document.
@@ -1298,6 +1345,14 @@ struct WriteParams<'cmd> {
     path: &'cmd str,
 }
 
+/// Bundled CLI inputs for the [`cmd_mv`] handler.
+struct MvParams<'cmd> {
+    dst: &'cmd str,
+    force: bool,
+    json_mode: bool,
+    src: &'cmd str,
+}
+
 fn out(msg: &str) -> Result<()> {
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{msg}").context("writing to stdout")
@@ -1484,6 +1539,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Mcp { output_args, .. }
         | Commands::Metadata { output_args, .. }
         | Commands::Migrate { output_args, .. }
+        | Commands::Mv { output_args, .. }
         | Commands::Purge { output_args, .. }
         | Commands::Query { output_args, .. }
         | Commands::React { output_args, .. }
@@ -1526,6 +1582,7 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
         | PlanAction::Delete { output_args, .. }
         | PlanAction::Edit { output_args, .. }
         | PlanAction::Migrate { output_args, .. }
+        | PlanAction::Mv { output_args, .. }
         | PlanAction::Purge { output_args, .. }
         | PlanAction::React { output_args, .. }
         | PlanAction::Restrict { output_args, .. }
@@ -1705,6 +1762,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Mcp { .. }
         | Commands::Metadata { .. }
         | Commands::Migrate { .. }
+        | Commands::Mv { .. }
         | Commands::Plan { .. }
         | Commands::Purge { .. }
         | Commands::Query { .. }
@@ -1736,6 +1794,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Identity { identity_args, .. }
         | Commands::Mcp { identity_args, .. }
         | Commands::Migrate { identity_args, .. }
+        | Commands::Mv { identity_args, .. }
         | Commands::Plan { identity_args, .. }
         | Commands::Purge { identity_args, .. }
         | Commands::Query { identity_args, .. }
@@ -1783,6 +1842,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Mcp { .. }
         | Commands::Metadata { .. }
         | Commands::Migrate { .. }
+        | Commands::Mv { .. }
         | Commands::Permissions { .. }
         | Commands::Plan { .. }
         | Commands::Purge { .. }
@@ -1836,6 +1896,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Lint { .. }
         | Commands::Mcp { .. }
         | Commands::Migrate { .. }
+        | Commands::Mv { .. }
         | Commands::Permissions { .. }
         | Commands::Plan { .. }
         | Commands::Purge { .. }
@@ -2161,6 +2222,21 @@ fn dispatch_with_config(
                 &identities,
                 output_args.json,
             )
+        }
+        Commands::Mv {
+            src,
+            dst,
+            force,
+            output_args,
+            ..
+        } => {
+            let p = MvParams {
+                dst: dst.as_str(),
+                force: *force,
+                json_mode: output_args.json,
+                src: src.as_str(),
+            };
+            cmd_mv(system, cwd, config, &p)
         }
         Commands::Plan { action, .. } => {
             cmd_plan(system, cwd, config, action, plan_action_output(action).json)
@@ -3618,6 +3694,13 @@ fn cmd_plan(
                 identities,
             }
         }
+        PlanAction::Mv {
+            src, dst, force, ..
+        } => plan_ops::PlanRequest::Mv {
+            src: expand_cli_path(system, src)?,
+            dst: expand_cli_path(system, dst)?,
+            force: *force,
+        },
         PlanAction::Purge { path, .. } => plan_ops::PlanRequest::Purge {
             path: resolve_doc_path(system, cwd, path)?,
         },
@@ -4351,6 +4434,54 @@ fn strip_prefix_display(path: &Path, base: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+fn cmd_mv(
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    params: &MvParams<'_>,
+) -> Result<()> {
+    let src = expand_cli_path(system, params.src)?;
+    let dst = expand_cli_path(system, params.dst)?;
+
+    let args = mv_op::MvArgs::new(src, dst).with_force(params.force);
+    let outcome = mv_op::mv(system, cwd, config, &args)?;
+
+    if params.json_mode {
+        out_json(&json!({
+            "bytes_moved": outcome.bytes_moved,
+            "dst_absolute": outcome.dst_absolute.display().to_string(),
+            "fallback_copy": outcome.fallback_copy,
+            "noop_same_path": outcome.noop_same_path,
+            "overwritten": outcome.overwritten,
+            "src_absolute": outcome.src_absolute.display().to_string(),
+        }))
+    } else if outcome.noop_same_path {
+        out(&format!("no-op: {} (same canonical path)", params.src))
+    } else if outcome.bytes_moved == 0 {
+        out(&format!(
+            "already moved: {} -> {} ({} bytes)",
+            params.src, params.dst, outcome.bytes_moved
+        ))
+    } else {
+        out(&format!(
+            "moved: {} -> {} ({} bytes{}{})",
+            params.src,
+            params.dst,
+            outcome.bytes_moved,
+            if outcome.overwritten {
+                ", overwrote destination"
+            } else {
+                ""
+            },
+            if outcome.fallback_copy {
+                ", cross-filesystem copy"
+            } else {
+                ""
+            }
+        ))
+    }
 }
 
 fn cmd_rm(

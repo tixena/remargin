@@ -339,6 +339,19 @@ pub fn rules_for(
         deny.push(format!("Bash({cmd} {glob_root}/**)"));
     }
 
+    // 3a. Source-side `mv` coverage (rem-0j2x / T44). The `mv *`
+    //     template above only emits the destination-side pattern
+    //     (`Bash(mv * /path/**)`). The remaining shapes — bare
+    //     single-arg, source-side, and both-sides — close the
+    //     exfiltration / accidental-source-move surface. Agents that
+    //     legitimately need to move a tracked file under a restricted
+    //     realm route through `mcp__remargin__mv` (always allowed via
+    //     [`ALLOW_MCP_REMARGIN`]); humans with `cli_allowed: true`
+    //     fall back to `remargin mv`.
+    deny.push(format!("Bash(mv {glob_root}/**)"));
+    deny.push(format!("Bash(mv {glob_root}/** *)"));
+    deny.push(format!("Bash(mv {glob_root}/** {glob_root}/**)"));
+
     // 4. Caller-supplied bash extras, e.g. `also_deny_bash: [curl]`.
     for cmd in &entry.also_deny_bash {
         deny.push(format!("Bash({cmd} * {glob_root}/**)"));

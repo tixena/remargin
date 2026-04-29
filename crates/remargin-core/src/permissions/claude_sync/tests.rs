@@ -47,8 +47,9 @@ fn subpath_no_extras_emits_full_default_set() {
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
     // deny: 4 editor-tool path denies + 4 dot-folder wildcards +
-    // BASH_MUTATORS.len() bash mutators + 1 remargin-cli deny.
-    let expected = 4 + 4 + BASH_MUTATORS.len() + 1;
+    // BASH_MUTATORS.len() bash mutators + 3 source-side mv shapes
+    // (rem-0j2x / T44) + 1 remargin-cli deny.
+    let expected = 4 + 4 + BASH_MUTATORS.len() + 3 + 1;
     assert_eq!(rules.deny.len(), expected, "{:#?}", rules.deny);
 
     // Editor-tool denies in spec order.
@@ -156,6 +157,13 @@ fn subpath_no_extras_emits_full_default_set() {
         "Bash(cd * /a/b/**)",
         "Bash(pushd /a/b/**)",
         "Bash(pushd * /a/b/**)",
+        // Source-side mv coverage (rem-0j2x / T44). The `mv *`
+        // template emits the destination-side shape via BASH_MUTATORS;
+        // these three close the source-side hole the original list
+        // missed.
+        "Bash(mv /a/b/**)",
+        "Bash(mv /a/b/** *)",
+        "Bash(mv /a/b/** /a/b/**)",
     ];
     for needle in must_contain {
         assert!(
@@ -207,9 +215,10 @@ fn cli_allowed_skips_remargin_cli_deny() {
         "cli_allowed=true must omit Bash(remargin ...) deny, got: {:#?}",
         rules.deny
     );
-    // 4 editor + 4 dot-folder + BASH_MUTATORS.len() (one fewer than
-    // when cli_allowed=false: the `Bash(remargin *)` deny is dropped).
-    let expected = 4 + 4 + BASH_MUTATORS.len();
+    // 4 editor + 4 dot-folder + BASH_MUTATORS.len() + 3 source-side
+    // mv shapes (rem-0j2x / T44). One fewer than when
+    // cli_allowed=false: the `Bash(remargin *)` deny is dropped.
+    let expected = 4 + 4 + BASH_MUTATORS.len() + 3;
     assert_eq!(rules.deny.len(), expected);
 }
 
