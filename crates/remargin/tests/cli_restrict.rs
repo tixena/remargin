@@ -340,6 +340,200 @@ mod tests {
         assert_eq!(tokens, vec!["curl".to_owned()]);
     }
 
+    /// rem-e6yd / T42: `restrict` installs default `cd` / `pushd`
+    /// denies in both project and user settings, plus the sidecar
+    /// records them. Closes the `cd /restricted && rm file`
+    /// shell-relative bypass.
+    #[test]
+    fn cd_pushd_denies_emitted_by_default() {
+        let realm = realm_with_claude();
+        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
+        let user_settings = user_settings_arg(&realm);
+
+        let out = run_in(
+            realm.path(),
+            &[
+                "restrict",
+                "src/secret",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+            ],
+        );
+        assert_status(&out, 0);
+
+        let canonical = fs::canonicalize(realm.path().join("src/secret")).unwrap();
+        let glob = format!("{}/**", canonical.display());
+        let expected: [String; 4] = [
+            format!("Bash(cd {glob})"),
+            format!("Bash(cd * {glob})"),
+            format!("Bash(pushd {glob})"),
+            format!("Bash(pushd * {glob})"),
+        ];
+
+        // Project-scope settings file landed with all four rules.
+        let project_scope = realm.path().join(".claude/settings.local.json");
+        let project_body = fs::read_to_string(&project_scope).unwrap();
+        let project_value: Value = serde_json::from_str(&project_body).unwrap();
+        let project_deny = project_value["permissions"]["deny"].as_array().unwrap();
+        for needle in &expected {
+            assert!(
+                project_deny
+                    .iter()
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "project-scope settings missing {needle}, got {project_deny:?}"
+            );
+        }
+
+        // User-scope file too.
+        let user_body = fs::read_to_string(&user_settings).unwrap();
+        let user_value: Value = serde_json::from_str(&user_body).unwrap();
+        let user_deny = user_value["permissions"]["deny"].as_array().unwrap();
+        for needle in &expected {
+            assert!(
+                user_deny
+                    .iter()
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "user-scope settings missing {needle}, got {user_deny:?}"
+            );
+        }
+
+        // Sidecar records every rule, including the cd/pushd four.
+        let sidecar_body =
+            fs::read_to_string(realm.path().join(".claude/.remargin-restrictions.json")).unwrap();
+        let sidecar: Value = serde_json::from_str(&sidecar_body).unwrap();
+        let entry = sidecar["entries"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        let sidecar_deny = entry["deny"].as_array().unwrap();
+        for needle in &expected {
+            assert!(
+                sidecar_deny
+                    .iter()
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "sidecar entry missing {needle}, got {sidecar_deny:?}"
+            );
+        }
+    }
+
+    /// rem-e6yd / T42: round-trip — `restrict` then `unprotect` cleanly
+    /// removes the cd/pushd defaults via the existing sidecar
+    /// mechanism (no special-casing needed).
+    #[test]
+    fn cd_pushd_denies_round_trip_through_unprotect() {
+        let realm = realm_with_claude();
+        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
+        let user_settings = user_settings_arg(&realm);
+
+        let restrict = run_in(
+            realm.path(),
+            &[
+                "restrict",
+                "src/secret",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+            ],
+        );
+        assert_status(&restrict, 0);
+
+        let unprotect = run_in(
+            realm.path(),
+            &[
+                "unprotect",
+                "src/secret",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+            ],
+        );
+        assert_status(&unprotect, 0);
+
+        let canonical = fs::canonicalize(realm.path().join("src/secret")).unwrap();
+        let glob = format!("{}/**", canonical.display());
+        let expected: [String; 4] = [
+            format!("Bash(cd {glob})"),
+            format!("Bash(cd * {glob})"),
+            format!("Bash(pushd {glob})"),
+            format!("Bash(pushd * {glob})"),
+        ];
+
+        // Project-scope settings file no longer carries any of them.
+        let project_scope = realm.path().join(".claude/settings.local.json");
+        let project_body = fs::read_to_string(&project_scope).unwrap();
+        let project_value: Value = serde_json::from_str(&project_body).unwrap();
+        let project_deny = project_value["permissions"]["deny"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for needle in &expected {
+            assert!(
+                !project_deny
+                    .iter()
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "expected {needle} to be scrubbed from project-scope, got {project_deny:?}"
+            );
+        }
+
+        // User-scope settings file no longer carries any of them.
+        let user_body = fs::read_to_string(&user_settings).unwrap();
+        let user_value: Value = serde_json::from_str(&user_body).unwrap();
+        let user_deny = user_value["permissions"]["deny"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for needle in &expected {
+            assert!(
+                !user_deny
+                    .iter()
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "expected {needle} to be scrubbed from user-scope, got {user_deny:?}"
+            );
+        }
+    }
+
+    /// rem-e6yd / T42: `plan restrict` symmetry — the projection
+    /// reflects the new cd/pushd defaults in `deny_rules_to_add`,
+    /// since plan re-uses the same emitter.
+    #[test]
+    fn plan_restrict_reflects_cd_pushd_defaults() {
+        let realm = realm_with_claude();
+        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
+        let user_settings = user_settings_arg(&realm);
+
+        let out = run_in(
+            realm.path(),
+            &[
+                "plan",
+                "restrict",
+                "src/secret",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert_status(&out, 0);
+        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let canonical = fs::canonicalize(realm.path().join("src/secret")).unwrap();
+        let glob = format!("{}/**", canonical.display());
+        let expected: [String; 4] = [
+            format!("Bash(cd {glob})"),
+            format!("Bash(cd * {glob})"),
+            format!("Bash(pushd {glob})"),
+            format!("Bash(pushd * {glob})"),
+        ];
+        for sf in report["config_diff"]["settings_files"].as_array().unwrap() {
+            let to_add = sf["deny_rules_to_add"].as_array().unwrap();
+            for needle in &expected {
+                assert!(
+                    to_add.iter().any(|v| v.as_str() == Some(needle.as_str())),
+                    "plan restrict's deny_rules_to_add missing {needle} for {}, got {to_add:?}",
+                    sf["path"].as_str().unwrap_or("<unknown>")
+                );
+            }
+        }
+    }
+
     /// Idempotency: re-running CLI restrict produces the same final
     /// state. Sidecar still has one entry; settings-file rule count
     /// stays constant.

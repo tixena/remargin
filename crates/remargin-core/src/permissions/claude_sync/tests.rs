@@ -149,6 +149,13 @@ fn subpath_no_extras_emits_full_default_set() {
         "Bash(split * /a/b/**)",
         "Bash(csplit * /a/b/**)",
         "Bash(sort * /a/b/**)",
+        // Directory navigation (rem-e6yd / T42). Closes the
+        // `cd /restricted && rm file` shell-relative bypass. Both
+        // bare and with-flag forms must be denied.
+        "Bash(cd /a/b/**)",
+        "Bash(cd * /a/b/**)",
+        "Bash(pushd /a/b/**)",
+        "Bash(pushd * /a/b/**)",
     ];
     for needle in must_contain {
         assert!(

@@ -98,13 +98,16 @@ const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit"];
 /// absence) is part of the token by design — the format string in
 /// [`rules_for`] does NOT inject one.
 ///
-/// The list is broad on purpose: every entry below can read, modify,
+/// The list is broad on purpose: most entries below can read, modify,
 /// create, delete, or otherwise mutate a file on disk, which would
 /// defeat the MCP-only contract `restrict` is supposed to enforce.
-/// Users can layer extra denies on top via `--also-deny-bash`; the
-/// purpose of THIS list is to make the defaults safe-by-default so an
-/// agent cannot trivially bypass the restriction with a forgotten
-/// command.
+/// `cd` / `pushd` (rem-e6yd / T42) are non-mutating but close the
+/// shell-relative bypass — `cd /restricted && rm file` would
+/// otherwise route around every other rule because `rm`'s argv would
+/// no longer carry the restricted path. Users can layer extra denies
+/// on top via `--also-deny-bash`; the purpose of THIS list is to
+/// make the defaults safe-by-default so an agent cannot trivially
+/// bypass the restriction with a forgotten command.
 ///
 /// Ordering: original write-side mutators first (preserves
 /// rule-emission order with older settings files), then the new
@@ -115,6 +118,11 @@ const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit"];
 /// repeat runs do not shuffle rule order or churn the sidecar, and
 /// plain `sed *` is added alongside to cover redirection-based writes
 /// (`sed ... > /restricted/file`) that escape `-i`.
+///
+/// `cd` / `pushd` each appear twice (`cd` and `cd *`) to match both
+/// the bare form (`cd /path/notes`) and the with-flag form
+/// (`cd -P /path/notes`), since the matcher needs the path to land in
+/// the trailing position with no fixed-token prefix.
 pub(crate) const BASH_MUTATORS: &[&str] = &[
     // Write-side mutators (original surface).
     "cp *",
@@ -197,6 +205,14 @@ pub(crate) const BASH_MUTATORS: &[&str] = &[
     "script *",
     "sort *",
     "split *",
+    // Directory navigation (rem-e6yd / T42). Closes the
+    // shell-relative bypass: `cd /restricted && rm file` would
+    // otherwise dodge every Bash deny because `rm`'s argv carries
+    // only `file`. Both bare and with-flag forms emitted.
+    "cd",
+    "cd *",
+    "pushd",
+    "pushd *",
 ];
 
 /// Allow rule that pins remargin's MCP tools as always-callable so a
