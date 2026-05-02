@@ -1624,7 +1624,10 @@ fn main() -> ExitCode {
         }
     };
 
-    let exit = match run(&cli, &system, &cwd) {
+    // Non-JSON mode does not emit a timing footer on any stream (rem-26w):
+    // stdout stays pure command output and stderr stays clean. The timing
+    // value survives as `elapsed_ms` inside the JSON payload (rem-4ay).
+    match run(&cli, &system, &cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             let err_msg = format!("{err:#}");
@@ -1646,13 +1649,7 @@ fn main() -> ExitCode {
             }
             ExitCode::from(exit_code)
         }
-    };
-
-    // Non-JSON mode does not emit a timing footer on any stream (rem-26w):
-    // stdout stays pure command output and stderr stays clean. The timing
-    // value survives as `elapsed_ms` inside the JSON payload (rem-4ay).
-
-    exit
+    }
 }
 
 fn classify_error(err: &anyhow::Error) -> u8 {
