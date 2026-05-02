@@ -18,6 +18,17 @@
 //!   blast radius unless the user explicitly opts them in.
 //! - **`.remargin/` always allowed** — remargin owns this folder; the
 //!   dot-folder default-deny never fires on it.
+//! - **`trusted_roots` carve out outer restricts** — when a target is
+//!   inside a `trusted_root` whose path is at-or-below a `restrict`
+//!   entry's anchor, that restrict (and its associated dot-folder
+//!   default-deny) is bypassed for that target. This enables the
+//!   allowlist pattern: declare `restrict '*'` at a parent realm
+//!   (e.g. `~/.remargin.yaml`) and list the writable subtrees in
+//!   `trusted_roots`. Restricts declared *inside* a trusted root still
+//!   fire — they are the more specific opt-out and win, because the
+//!   trusted root is no longer at-or-below their anchor. `deny_ops` is
+//!   never affected; it always fires regardless of `trusted_roots`, so
+//!   it remains the right primitive for "block this op everywhere".
 //!
 //! ## Op classification (read vs write)
 //!
@@ -61,7 +72,8 @@ use os_shim::System;
 use thiserror::Error;
 
 use crate::config::permissions::resolve::{
-    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath, resolve_permissions,
+    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath, TrustedRoot,
+    resolve_permissions,
 };
 
 /// The dot-folder remargin owns. Never default-denied.
@@ -260,14 +272,23 @@ pub fn check_against_resolved(
     }
 
     if is_mutating_op(op) {
-        if let Some(violation) = find_restrict_violation(op, target, &permissions.restrict) {
+        if let Some(violation) = find_restrict_violation(
+            op,
+            target,
+            &permissions.restrict,
+            &permissions.trusted_roots,
+        ) {
             return Err(violation.into());
         }
 
         let allow_dot_folder_names = permissions.allow_dot_folder_names();
-        if let Some(violation) =
-            find_dot_folder_violation(op, target, &permissions.restrict, &allow_dot_folder_names)
-        {
+        if let Some(violation) = find_dot_folder_violation(
+            op,
+            target,
+            &permissions.restrict,
+            &permissions.trusted_roots,
+            &allow_dot_folder_names,
+        ) {
             return Err(violation.into());
         }
     }
@@ -296,14 +317,15 @@ fn find_dot_folder_violation(
     op: &str,
     target: &Path,
     restrict: &[ResolvedRestrict],
+    trusted_roots: &[TrustedRoot],
     allow_dot_folders: &[String],
 ) -> Option<OpGuardError> {
     for entry in restrict {
-        let realm_anchor = match &entry.path {
-            RestrictPath::Absolute(path) => path.as_path(),
-            RestrictPath::Wildcard { realm_root } => realm_root.as_path(),
-        };
+        let realm_anchor = restrict_anchor(entry);
         if !path_covers(realm_anchor, target) {
+            continue;
+        }
+        if trusted_roots_carve_out(realm_anchor, target, trusted_roots) {
             continue;
         }
         if let Some(folder) = first_disallowed_dot_folder(realm_anchor, target, allow_dot_folders) {
@@ -322,15 +344,49 @@ fn find_restrict_violation(
     op: &str,
     target: &Path,
     restrict: &[ResolvedRestrict],
+    trusted_roots: &[TrustedRoot],
 ) -> Option<OpGuardError> {
     restrict
         .iter()
-        .find(|entry| restrict_covers(&entry.path, target))
+        .find(|entry| {
+            restrict_covers(&entry.path, target)
+                && !trusted_roots_carve_out(restrict_anchor(entry), target, trusted_roots)
+        })
         .map(|entry| OpGuardError::RestrictedPath {
             op: String::from(op),
             source_file: entry.source_file.clone(),
             target: target.to_path_buf(),
         })
+}
+
+/// The anchor path of a `restrict` entry — the absolute path for an
+/// `Absolute` entry, or the realm root for a `Wildcard` entry.
+fn restrict_anchor(entry: &ResolvedRestrict) -> &Path {
+    match &entry.path {
+        RestrictPath::Absolute(path) => path.as_path(),
+        RestrictPath::Wildcard { realm_root } => realm_root.as_path(),
+    }
+}
+
+/// `true` when any `trusted_root` carves `target` out of the `restrict`
+/// entry anchored at `restrict_anchor`.
+///
+/// A trusted root T carves out a restrict R for target X when:
+/// - T's path is at-or-below R's anchor (so R would otherwise cover T), AND
+/// - X is at-or-below T's path (so X is in the carved-out region).
+///
+/// This means restricts *inside* a trusted root still fire — those
+/// restrict anchors live below the trusted root, so the at-or-below
+/// check fails and no carve-out applies. They are the more specific
+/// opt-out and win.
+fn trusted_roots_carve_out(
+    restrict_anchor: &Path,
+    target: &Path,
+    trusted_roots: &[TrustedRoot],
+) -> bool {
+    trusted_roots
+        .iter()
+        .any(|tr| path_covers(restrict_anchor, &tr.path) && path_covers(&tr.path, target))
 }
 
 /// Walk `target`'s components beneath `realm_anchor` looking for the

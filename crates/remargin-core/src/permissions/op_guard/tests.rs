@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use os_shim::mock::MockSystem;
 
 use crate::config::permissions::op_name::OpName;
-use crate::config::permissions::resolve::{ResolvedPermissions, ResolvedRestrict, RestrictPath};
+use crate::config::permissions::resolve::{
+    ResolvedPermissions, ResolvedRestrict, RestrictPath, TrustedRoot,
+};
 use crate::permissions::op_guard::{
     DENY_OPS_DENIAL_TEMPLATE, MUTATING_OPS, OpGuardError, OpKind, READ_OPS,
     RESTRICT_DENIAL_TEMPLATE, check_against_resolved, is_mutating_op, op_kind, pre_mutate_check,
@@ -262,6 +264,163 @@ fn scenario_19_source_file_in_every_refusal() {
         chain.contains("/r/.remargin.yaml"),
         "error did not include source file path: {chain}"
     );
+}
+
+// ---------------------------------------------------------------------
+// trusted_roots × restrict carve-out (rem-yj1j.x)
+// ---------------------------------------------------------------------
+
+/// Helper — build a `ResolvedPermissions` whose realm root carries a
+/// `restrict '*'` and a list of trusted roots. Source file is
+/// `<realm>/.remargin.yaml`.
+fn allowlist_realm(realm: &str, trusted: &[&str]) -> ResolvedPermissions {
+    let source_file = PathBuf::from(format!("{realm}/.remargin.yaml"));
+    ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: Vec::new(),
+        restrict: vec![ResolvedRestrict {
+            also_deny_bash: Vec::new(),
+            cli_allowed: false,
+            path: RestrictPath::Wildcard {
+                realm_root: PathBuf::from(realm),
+            },
+            source_file: source_file.clone(),
+        }],
+        trusted_roots: trusted
+            .iter()
+            .map(|p| TrustedRoot {
+                path: PathBuf::from(p),
+                source_file: source_file.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// Scenario 20 — outer `restrict '*'` is carved out for targets inside
+/// a `trusted_root`. Mutating ops on those targets succeed.
+#[test]
+fn scenario_20_trusted_root_carves_out_outer_wildcard_restrict() {
+    let resolved = allowlist_realm("/home/user", &["/home/user/notes"]);
+    check_against_resolved("write", Path::new("/home/user/notes/foo.md"), &resolved).unwrap();
+}
+
+/// Scenario 21 — outer `restrict '*'` still blocks targets outside any
+/// `trusted_root`.
+#[test]
+fn scenario_21_trusted_root_does_not_unrestrict_outside_paths() {
+    let resolved = allowlist_realm("/home/user", &["/home/user/notes"]);
+    let err = check_against_resolved("write", Path::new("/home/user/secret/foo.md"), &resolved)
+        .unwrap_err();
+    assert!(restricted_match(&err, "write", "/home/user/.remargin.yaml"));
+}
+
+/// Scenario 22 — a `restrict` declared *inside* a trusted root still
+/// fires. The inner restrict's anchor lives below the trusted root, so
+/// the trusted root is not at-or-below it and no carve-out applies.
+#[test]
+fn scenario_22_inner_restrict_inside_trusted_root_still_fires() {
+    let outer_source = PathBuf::from("/home/user/.remargin.yaml");
+    let inner_source = PathBuf::from("/home/user/notes/.remargin.yaml");
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: Vec::new(),
+        restrict: vec![
+            // Inner restrict declared inside the trusted root.
+            ResolvedRestrict {
+                also_deny_bash: Vec::new(),
+                cli_allowed: false,
+                path: RestrictPath::Absolute(PathBuf::from("/home/user/notes/secret")),
+                source_file: inner_source,
+            },
+            // Outer wildcard restrict at the parent realm.
+            ResolvedRestrict {
+                also_deny_bash: Vec::new(),
+                cli_allowed: false,
+                path: RestrictPath::Wildcard {
+                    realm_root: PathBuf::from("/home/user"),
+                },
+                source_file: outer_source,
+            },
+        ],
+        trusted_roots: vec![TrustedRoot {
+            path: PathBuf::from("/home/user/notes"),
+            source_file: PathBuf::from("/home/user/.remargin.yaml"),
+        }],
+    };
+
+    // Inside the trusted root but also inside the inner restrict — inner wins.
+    let err = check_against_resolved(
+        "write",
+        Path::new("/home/user/notes/secret/foo.md"),
+        &resolved,
+    )
+    .unwrap_err();
+    assert!(restricted_match(
+        &err,
+        "write",
+        "/home/user/notes/.remargin.yaml"
+    ));
+
+    // Inside the trusted root but outside the inner restrict — bypass works.
+    check_against_resolved(
+        "write",
+        Path::new("/home/user/notes/public/foo.md"),
+        &resolved,
+    )
+    .unwrap();
+}
+
+/// Scenario 23 — `deny_ops` is not affected by `trusted_roots`. A
+/// `deny_ops [purge]` rule fires even on targets inside a trusted root.
+#[test]
+fn scenario_23_deny_ops_is_not_carved_out_by_trusted_roots() {
+    use crate::config::permissions::resolve::ResolvedDenyOps;
+
+    let source_file = PathBuf::from("/home/user/.remargin.yaml");
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: vec![ResolvedDenyOps {
+            ops: vec![OpName::Purge],
+            path: PathBuf::from("/home/user"),
+            source_file: source_file.clone(),
+        }],
+        restrict: vec![ResolvedRestrict {
+            also_deny_bash: Vec::new(),
+            cli_allowed: false,
+            path: RestrictPath::Wildcard {
+                realm_root: PathBuf::from("/home/user"),
+            },
+            source_file: source_file.clone(),
+        }],
+        trusted_roots: vec![TrustedRoot {
+            path: PathBuf::from("/home/user/notes"),
+            source_file,
+        }],
+    };
+
+    // write inside trusted root: allowed (restrict carved out).
+    check_against_resolved("write", Path::new("/home/user/notes/foo.md"), &resolved).unwrap();
+
+    // purge inside trusted root: still denied by deny_ops.
+    let err = check_against_resolved("purge", Path::new("/home/user/notes/foo.md"), &resolved)
+        .unwrap_err();
+    assert!(denied_op_match(&err, "purge", "/home/user/.remargin.yaml"));
+}
+
+/// Scenario 24 — dot-folder default-deny under a wildcard restrict is
+/// carved out by `trusted_roots`. Targets inside `<trusted>/.git/x` are
+/// writable when the trusted root is at-or-below the wildcard's anchor.
+/// (The "outside-trust still blocked" complement is covered by
+/// scenario 21 / 09c — wildcard restrict beats dot-folder there.)
+#[test]
+fn scenario_24_trusted_root_carves_out_dot_folder_default_deny() {
+    let resolved = allowlist_realm("/home/user", &["/home/user/notes"]);
+    check_against_resolved(
+        "write",
+        Path::new("/home/user/notes/.git/foo.md"),
+        &resolved,
+    )
+    .unwrap();
 }
 
 // ---------------------------------------------------------------------

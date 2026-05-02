@@ -23,7 +23,16 @@
 //! `trusted_roots` mid-session does not change the active sandbox —
 //! the user must restart the MCP. (Per-op re-evaluation of the
 //! `restrict` / `deny_ops` blocks still happens through the existing
-//! `op_guard` parent walk; that is intentional and orthogonal.)
+//! `op_guard` parent walk.)
+//!
+//! # Interaction with `restrict`
+//!
+//! At the op-guard layer, `trusted_roots` also carve outer `restrict`
+//! entries out for any target inside them — see
+//! [`crate::permissions::op_guard`] for the full rule. The two layers
+//! are not orthogonal: `trusted_roots` simultaneously gates the MCP
+//! file-access boundary (this module) and acts as a write-allowlist
+//! exception against parent-realm restricts.
 //!
 //! # No transitive trust
 //!
@@ -50,8 +59,8 @@ use crate::config::permissions::resolve::resolve_permissions;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct McpSandbox {
-    /// Canonical absolute paths the MCP is authorised to serve. Sorted
-    /// + deduped; never empty after [`McpSandbox::from_walk`].
+    /// Canonical absolute paths the MCP is authorised to serve.
+    /// Sorted + deduped; never empty after [`McpSandbox::from_walk`].
     pub roots: Vec<PathBuf>,
 }
 
