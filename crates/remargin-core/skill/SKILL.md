@@ -14,6 +14,66 @@ A **realm** is any directory tree containing a `.remargin.yaml` (discovered by w
 
 ---
 
+## If you hit a permission denial, read this first
+
+If a native tool (`Read` / `Edit` / `Write` / `NotebookEdit` / `Bash`)
+is denied on a `.md` file or any file under a `.remargin.yaml` realm:
+**this is by design.** Switch to the equivalent `mcp__remargin__*` op
+(`get`, `write`, `comment`, `delete`, `metadata`, `query`, ...) and
+proceed. **Do NOT ask the user**, do NOT propose alternatives, do NOT
+surface the denial as a blocker. The skill exists precisely so this
+question doesn't need to be asked.
+
+EXCEPTION — if the denial cites a `restrict` or `deny_ops` rule, the
+user has declared this path off-limits. Surface the denial. **Always
+ask before `unprotect`** — never call `remargin unprotect` (or any
+other path that would reverse a user-declared restriction) on your own
+initiative. That is the worst failure mode of the permissions system.
+Wait for explicit consent before any action that would clear the
+obstacle.
+
+### Compound-denial priority order
+
+When a denial mentions multiple reasons, evaluate in this order and
+stop at the first match:
+
+1. **`restrict` or `deny_ops` rule named** → surface the denial to the
+   user. Never auto-recover. **Ask before `unprotect`.**
+2. **`path escapes sandbox`** → configuration issue (insufficient
+   `trusted_roots` for the MCP). Surface to the user; do not retry.
+3. **Otherwise (managed-file native-tool denial)** → switch to the
+   equivalent `mcp__remargin__*` op and proceed silently.
+
+### Symptom -> action map
+
+| Symptom | Action |
+|---|---|
+| `Read` denied on a `.md` file | `mcp__remargin__get` |
+| `Edit` / `Write` denied on a `.md` file | `mcp__remargin__write` (or `comment` if it's a thread reply) |
+| `Bash(cat ...)` / `Bash(sed ...)` / `Bash(rm ...)` denied | `mcp__remargin__get` / `mcp__remargin__write` / `mcp__remargin__delete` |
+| `NotebookEdit` denied on a `.md` file | `mcp__remargin__write` |
+| Op denied with **`restrict`** rule | surface the denial; **ask before `unprotect`**; do not call `remargin unprotect` |
+| Op denied with **`deny_ops`** rule | surface the denial; user has explicitly disallowed this op on this path |
+| `path escapes sandbox` from MCP | configuration issue (insufficient `trusted_roots`); surface to user; do not retry |
+
+### Anti-patterns
+
+- **Anti-pattern: stopping on a permission denial and asking the user
+  "should I try a different tool?"** — the answer is always "yes, use
+  remargin." The skill exists precisely so this question doesn't need
+  to be asked. Switch to the MCP equivalent and proceed silently
+  (see the recovery directive above).
+- **Anti-pattern: do not call `remargin unprotect` to clear a
+  `restrict` denial.** `restrict` is user intent. Reversing it without
+  explicit consent is the worst failure mode of the permissions
+  system. **Ask before `unprotect`.** This rule applies regardless of
+  surface: MCP doesn't expose the tool (rem-888p removed it), but the
+  Bash subprocess path to the CLI is still reachable — and the
+  prohibition stands there too. The fence is your behavior, not the
+  surface.
+
+---
+
 ## Critical rules (read first, scan often)
 
 1. **Realm scope.** Every `.md` inside a realm is managed. NEVER use `Read` / `Edit` / `Write` / `Bash` (`cat`, `sed`, `awk`, `cp`, `mv`, `tee`, redirection) on a managed file. Always go through remargin tools.
