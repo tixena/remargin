@@ -1165,11 +1165,11 @@ fn dispatch_tool(
         "comments" => handle_comments(system, base_dir, p),
         "delete" => handle_delete(system, base_dir, config, p),
         "edit" => handle_edit(system, base_dir, config, p),
-        "get" => handle_get(system, base_dir, p),
+        "get" => handle_get(system, base_dir, config, p),
         "identity_create" => handle_identity_create(p),
         "lint" => handle_lint(system, base_dir, p),
         "ls" => handle_ls(system, base_dir, config, p),
-        "metadata" => handle_metadata(system, base_dir, p),
+        "metadata" => handle_metadata(system, base_dir, config, p),
         "migrate" => handle_migrate(system, base_dir, config, p),
         "mv" => handle_mv(system, base_dir, config, p),
         "permissions_check" => handle_permissions_check(system, base_dir, p),
@@ -1474,7 +1474,12 @@ fn handle_edit(
 /// core helper (symmetric with CLI `get --binary`) and returned base64-
 /// encoded alongside size + mime. Markdown files are rejected in this mode
 /// so comment-preservation is never bypassed (rem-cdr).
-fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>) -> Result<Value> {
+fn handle_get(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
     let path_str = required_str(params, "path")?;
     let binary = optional_bool(params, "binary");
     let end_line = optional_usize(params, "end_line");
@@ -1490,7 +1495,8 @@ fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>)
         if line_numbers {
             bail!("line_numbers is not supported with binary: true");
         }
-        let payload = document::read_binary(system, base_dir, target, false)?;
+        let payload =
+            document::read_binary(system, base_dir, target, false, &config.trusted_roots)?;
         let encoded = BASE64_STANDARD.encode(&payload.bytes);
         return Ok(json!({
             "binary": true,
@@ -1506,7 +1512,15 @@ fn handle_get(system: &dyn System, base_dir: &Path, params: &Map<String, Value>)
         _ => None,
     };
 
-    let content = document::get(system, base_dir, target, lines, false, false)?;
+    let content = document::get(
+        system,
+        base_dir,
+        target,
+        lines,
+        false,
+        false,
+        &config.trusted_roots,
+    )?;
 
     if line_numbers {
         let start_num = lines.map_or(1, |(s, _)| s);
@@ -1575,12 +1589,13 @@ fn handle_ls(
 fn handle_metadata(
     system: &dyn System,
     base_dir: &Path,
+    config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let path_str = required_str(params, "path")?;
     let target = Path::new(path_str);
 
-    let meta = document::metadata(system, base_dir, target, false)?;
+    let meta = document::metadata(system, base_dir, target, false, &config.trusted_roots)?;
 
     // File-level fields are always present; markdown fields are emitted only
     // when the file was parsed (rem-lqz).

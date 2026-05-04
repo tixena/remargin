@@ -55,6 +55,7 @@ fn open_config() -> ResolvedConfig {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }
@@ -88,6 +89,7 @@ fn strict_config() -> ResolvedConfig {
         mode: Mode::Strict,
         registry: Some(registry_with_alice_and_botty()),
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }
@@ -106,6 +108,7 @@ fn registered_config() -> ResolvedConfig {
         mode: Mode::Registered,
         registry: Some(registry_with_alice_and_botty()),
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }

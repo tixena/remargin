@@ -50,6 +50,7 @@ fn open_config() -> ResolvedConfig {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }

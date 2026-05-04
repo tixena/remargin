@@ -167,6 +167,7 @@ fn test_config() -> ResolvedConfig {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }
@@ -3191,6 +3192,7 @@ fn mcp_query_pending_for_me_errors_without_identity() {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     };
 

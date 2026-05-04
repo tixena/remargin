@@ -117,6 +117,39 @@ mod tests {
             "handle_search",
             (60, "extracts SearchOptions from tool params"),
         );
+        // CLI: get adapter splits json+line-numbers from the default
+        // path, both branches threading the trusted_roots slice through
+        // the resolved-config-aware document::get (rem-egp9). The split
+        // is shape-shifting on flag combos, not logic; pushing it into
+        // core would force the adapter to teach core about JSON output.
+        m.insert(
+            "cmd_get",
+            (
+                60,
+                "two-branch get adapter (json+line-numbers vs default), threading trusted_roots through document::get (rem-egp9)",
+            ),
+        );
+        // CLI: get binary adapter dispatches across --out / --json /
+        // raw-bytes shapes, threading trusted_roots through
+        // document::read_binary (rem-egp9).
+        m.insert(
+            "cmd_get_binary",
+            (
+                55,
+                "binary get dispatch (--out vs --json vs raw bytes), threading trusted_roots through read_binary (rem-egp9)",
+            ),
+        );
+        // MCP: get handler likewise splits binary vs text response
+        // shaping, both branches threading trusted_roots through
+        // document::read_binary / document::get (rem-egp9). Shape-only
+        // adapter glue.
+        m.insert(
+            "handle_get",
+            (
+                65,
+                "binary vs text response split, threading trusted_roots through read_binary/get (rem-egp9)",
+            ),
+        );
         m
     }
 

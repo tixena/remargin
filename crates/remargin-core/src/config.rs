@@ -14,6 +14,7 @@ use os_shim::System;
 use serde::Deserialize;
 
 use crate::config::permissions::Permissions;
+use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::parser::AuthorType;
 use crate::path::expand_path;
@@ -111,6 +112,16 @@ pub struct ResolvedConfig {
     /// (and any tooling that wants to report provenance) can name the
     /// file without re-walking.
     pub source_path: Option<PathBuf>,
+    /// Effective `trusted_roots` set for the resolver's `cwd`
+    /// (rem-egp9). Populated by [`Self::resolve`] via
+    /// [`crate::config::permissions::resolve::resolve_trusted_roots_for_cwd`]:
+    /// the narrowed result of the parent walk's `trusted_roots`
+    /// declarations, or `[cwd]` when no `.remargin.yaml` declared a
+    /// `trusted_roots:` block anywhere on the walk. Consumed by the
+    /// per-op sandbox check in [`crate::document::allowlist`] so paths
+    /// inside a declared trusted root are reachable even when they
+    /// live outside the MCP spawn cwd / CLI cwd.
+    pub trusted_roots: Vec<PathBuf>,
     /// Only settable via CLI when compiled with `--features unrestricted`.
     pub unrestricted: bool,
 }
@@ -196,6 +207,7 @@ impl ResolvedConfig {
             mode: realm_mode,
             registry: self.registry.clone(),
             source_path: self.source_path.clone(),
+            trusted_roots: self.trusted_roots.clone(),
             unrestricted: self.unrestricted,
         };
 
@@ -298,6 +310,8 @@ impl ResolvedConfig {
             .map(|c| c.ignore.clone())
             .unwrap_or_default();
 
+        let trusted_roots = resolve_trusted_roots_for_cwd(system, cwd)?;
+
         let resolved = Self {
             assets_dir,
             author_type: fields.author_type,
@@ -307,6 +321,7 @@ impl ResolvedConfig {
             mode,
             registry,
             source_path: fields.source_path,
+            trusted_roots,
             unrestricted: false,
         };
 

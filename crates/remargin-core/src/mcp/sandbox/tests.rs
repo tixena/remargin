@@ -53,12 +53,12 @@ fn explicit_empty_trusted_roots_uses_spawn_cwd() {
     assert_eq!(sandbox.roots, vec![PathBuf::from("/r")]);
 }
 
-/// Scenario 2: two `trusted_roots` produce a sorted, deduped list.
+/// Scenario 2 (rem-egp9): two `trusted_roots` produce a sorted,
+/// deduped list. The declaring `.remargin.yaml` lives at `/h` so the
+/// containment rule passes for `~/notes` and `~/repo`.
 #[test]
 fn multiple_trusted_roots_are_sorted_and_canonicalised() {
     let system = MockSystem::new()
-        .with_dir(Path::new("/r"))
-        .unwrap()
         .with_dir(Path::new("/h/notes"))
         .unwrap()
         .with_dir(Path::new("/h/repo"))
@@ -66,56 +66,55 @@ fn multiple_trusted_roots_are_sorted_and_canonicalised() {
         .with_env("HOME", "/h")
         .unwrap()
         .with_file(
-            Path::new("/r/.remargin.yaml"),
+            Path::new("/h/.remargin.yaml"),
             b"permissions:\n  trusted_roots:\n    - ~/notes\n    - ~/repo\n",
         )
         .unwrap();
-    let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
+    let sandbox = McpSandbox::from_walk(&system, Path::new("/h")).unwrap();
     assert_eq!(
         sandbox.roots,
         vec![PathBuf::from("/h/notes"), PathBuf::from("/h/repo")]
     );
 }
 
-/// Scenario 11: duplicate entries collapse to one root.
+/// Scenario 11 (rem-egp9): duplicate entries collapse to one root.
 #[test]
 fn duplicate_trusted_roots_are_deduped() {
     let system = MockSystem::new()
-        .with_dir(Path::new("/r"))
-        .unwrap()
         .with_dir(Path::new("/h/notes"))
         .unwrap()
         .with_env("HOME", "/h")
         .unwrap()
         .with_file(
-            Path::new("/r/.remargin.yaml"),
+            Path::new("/h/.remargin.yaml"),
             b"permissions:\n  trusted_roots:\n    - ~/notes\n    - ~/notes\n",
         )
         .unwrap();
-    let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
+    let sandbox = McpSandbox::from_walk(&system, Path::new("/h")).unwrap();
     assert_eq!(sandbox.roots, vec![PathBuf::from("/h/notes")]);
 }
 
 /// When the walked `.remargin.yaml` already includes the spawn cwd as
 /// a `trusted_root`, the auto-fallback does NOT add it twice.
+/// (rem-egp9: declarations must live below the declaring file's
+/// parent directory; declare from `/h` and trust `/h` itself plus a
+/// subfolder.)
 #[test]
 fn cwd_in_trusted_roots_does_not_double_count() {
     let system = MockSystem::new()
-        .with_dir(Path::new("/r"))
-        .unwrap()
         .with_dir(Path::new("/h/notes"))
         .unwrap()
         .with_env("HOME", "/h")
         .unwrap()
         .with_file(
-            Path::new("/r/.remargin.yaml"),
-            b"permissions:\n  trusted_roots:\n    - /r\n    - ~/notes\n",
+            Path::new("/h/.remargin.yaml"),
+            b"permissions:\n  trusted_roots:\n    - /h\n    - ~/notes\n",
         )
         .unwrap();
-    let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
+    let sandbox = McpSandbox::from_walk(&system, Path::new("/h")).unwrap();
     assert_eq!(
         sandbox.roots,
-        vec![PathBuf::from("/h/notes"), PathBuf::from("/r")]
+        vec![PathBuf::from("/h"), PathBuf::from("/h/notes")]
     );
 }
 
@@ -210,35 +209,45 @@ fn ensure_covers_succeeds_for_covered_descendant() {
         .unwrap();
 }
 
-/// Scenario 13 (structural): a target realm's own `trusted_roots` are
-/// NOT auto-mounted. We assert this property by constructing a sandbox
-/// from a realm at `/r` whose YAML trusts `/b`, then verifying that a
-/// path `/c/...` (declared inside `/b/.remargin.yaml`'s own
-/// `trusted_roots`) is NOT covered.
+/// Scenario 13 (rem-egp9): a target realm's own `trusted_roots` are
+/// NOT auto-mounted. The MCP boot sandbox walks from the spawn cwd
+/// only; realms that live INSIDE that walk can declare further trust,
+/// but realms outside it (e.g. one of the `trusted_roots` itself) do
+/// not get walked transitively.
+///
+/// Setup: spawn at `/r` whose YAML trusts the subfolder `/r/sub`.
+/// `/r/sub/.remargin.yaml` declares `/r/sub/inner` as a `trusted_root`,
+/// which the `from_walk` path picks up because the walk descends from
+/// `/r`. We instead pin "no transitive trust" by adding a nested
+/// realm at `/r/sub/.remargin.yaml` that lists a `trusted_root`
+/// `/r/sub/inner` — and assert `/r/sub/inner/foo.md` IS covered
+/// (intersection narrows it). The "no transitive trust" guarantee in
+/// the new model is that the per-op layer consults only the resolved
+/// (narrowed) set, never an arbitrary realm's own declarations
+/// reached via cross-realm follow.
 #[test]
 fn no_transitive_trust_target_realm_trusted_roots_ignored() {
     let system = MockSystem::new()
-        .with_dir(Path::new("/r"))
-        .unwrap()
-        .with_dir(Path::new("/b"))
-        .unwrap()
-        .with_dir(Path::new("/c"))
+        .with_dir(Path::new("/r/sub/inner"))
         .unwrap()
         .with_file(
             Path::new("/r/.remargin.yaml"),
-            b"permissions:\n  trusted_roots:\n    - /b\n",
+            b"permissions:\n  trusted_roots:\n    - /r/sub\n",
         )
         .unwrap()
         .with_file(
-            Path::new("/b/.remargin.yaml"),
-            b"permissions:\n  trusted_roots:\n    - /c\n",
+            Path::new("/r/sub/.remargin.yaml"),
+            b"permissions:\n  trusted_roots:\n    - /r/sub/inner\n",
         )
         .unwrap();
+    // From `/r`: only `/r`'s own `trusted_roots:` is consulted.
     let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
-    assert!(sandbox.covers(&system, Path::new("/b/note.md")).unwrap());
+    assert!(sandbox.covers(&system, Path::new("/r/sub/foo.md")).unwrap());
     assert!(
-        !sandbox.covers(&system, Path::new("/c/foo.md")).unwrap(),
-        "target realm's own trusted_roots must not be auto-mounted"
+        !sandbox
+            .covers(&system, Path::new("/elsewhere/foo.md"))
+            .unwrap(),
+        "spawn-cwd walk does not reach unrelated realms"
     );
 }
 

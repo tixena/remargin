@@ -23,6 +23,34 @@
 //!   otherwise.
 //! - `allow_dot_folders` strings are accumulated as-is (no path math).
 //!
+//! ## `trusted_roots` narrowing + containment (rem-egp9)
+//!
+//! Unlike `restrict` / `deny_ops` / `allow_dot_folders`, which
+//! accumulate across the parent walk, `trusted_roots` *narrow* as the
+//! walk descends:
+//!
+//! - The outermost (shallowest) declaration sets the initial set.
+//! - Each descendant declaration intersects the running set: entries
+//!   that are not subsets of the parent's set are rejected at parse
+//!   time with a hard error citing the offending path and source file.
+//! - Each declared entry must be the declaring `.remargin.yaml`'s
+//!   parent directory itself, or a subfolder of it (containment rule).
+//!   A folder cannot bless a sibling.
+//!
+//! Containment + symlink handling: the resolver canonicalizes both the
+//! declared entry and the declaring file's parent directory before the
+//! containment check so a symlink that points outside the declaring
+//! folder is rejected. When canonicalization fails (path does not
+//! exist yet, mock FS), the expanded-but-uncanonicalized form is used
+//! for the check — best-effort, the same fallback the per-entry
+//! resolver uses elsewhere.
+//!
+//! When no `.remargin.yaml` is found anywhere on the walk, OR when the
+//! walk found configs but none of them declared `trusted_roots`, the
+//! effective set falls back to `[cwd]`. That preserves open semantics
+//! for the no-config case and lets a user limit the visible surface
+//! by simply changing directories.
+//!
 //! ## No enforcement
 //!
 //! This module is intentionally pure data. The Layer 1 op guard,
@@ -209,11 +237,26 @@ fn extend_resolved(
     system: &dyn System,
     block: &Permissions,
     source_file: &Path,
-) {
+) -> Result<()> {
     let source_dir = source_file.parent().unwrap_or(source_file);
 
     for raw in &block.trusted_roots {
         let path = resolve_trusted_root(system, raw);
+        // Containment: the declared entry must be the declaring
+        // file's parent directory, or a subfolder of it. Canonicalize
+        // both sides to handle symlinks; fall back to the expanded
+        // form when realpath fails (mock FS, dangling path, etc.).
+        let canonical_dir = canonicalize_or_passthrough(system, source_dir.to_path_buf());
+        if !path_covers(&canonical_dir, &path) {
+            anyhow::bail!(
+                "trusted_root {} declared in {} is outside the declaring \
+                 directory {} (entries must be the declaring folder or a \
+                 subfolder)",
+                path.display(),
+                source_file.display(),
+                canonical_dir.display(),
+            );
+        }
         acc.trusted_roots.push(TrustedRoot {
             path,
             source_file: source_file.to_path_buf(),
@@ -251,6 +294,14 @@ fn extend_resolved(
             source_file: source_file.to_path_buf(),
         });
     }
+
+    Ok(())
+}
+
+/// `true` when `target` equals `anchor` or is a descendant of it. Local
+/// helper so this module does not have to depend on `op_guard`.
+fn path_covers(anchor: &Path, target: &Path) -> bool {
+    target == anchor || target.starts_with(anchor)
 }
 
 fn parse_permissions_block(raw: &str, source_file: &Path) -> Result<Permissions> {
@@ -339,6 +390,12 @@ pub fn lint_permissions_in_parents(
 /// parse stop the walk and surface an error whose context names the
 /// offending file.
 ///
+/// `trusted_roots` are narrowed across the walk per rem-egp9 — see the
+/// module-level docs. The final `acc.trusted_roots` carries one entry
+/// per surviving `(path, source_file)` tuple from the deepest level
+/// that actually constrained the set; entries that violate
+/// intersection or containment surface as parse-time errors.
+///
 /// # Errors
 ///
 /// - I/O failure while checking existence of or reading any
@@ -347,8 +404,16 @@ pub fn lint_permissions_in_parents(
 ///   message includes the file path.
 /// - Unknown fields under `permissions:` are rejected (the on-disk
 ///   structs use `#[serde(deny_unknown_fields)]`).
+/// - A `trusted_roots` entry that is not inside the declaring file's
+///   parent directory (containment violation; rem-egp9).
+/// - A `trusted_roots` entry on a child `.remargin.yaml` that is not a
+///   subset of the parent's set (intersection violation; rem-egp9).
 pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<ResolvedPermissions> {
     let mut acc = ResolvedPermissions::default();
+    // Track the per-source-file trusted_roots declarations in walk
+    // order (deepest first) so we can apply intersection narrowing
+    // outermost-to-deepest after the walk completes.
+    let mut trusted_root_levels: Vec<(PathBuf, Vec<TrustedRoot>)> = Vec::new();
     let mut current = start_dir.to_path_buf();
 
     loop {
@@ -362,7 +427,14 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
                 .read_to_string(&candidate)
                 .with_context(|| format!("reading {}", candidate.display()))?;
             let block = parse_permissions_block(&raw, &candidate)?;
-            extend_resolved(&mut acc, system, &block, &candidate);
+            // Snapshot acc.trusted_roots before extend_resolved appends
+            // this file's entries so we can capture the per-file slice.
+            let prior_trusted_len = acc.trusted_roots.len();
+            extend_resolved(&mut acc, system, &block, &candidate)?;
+            if acc.trusted_roots.len() > prior_trusted_len {
+                let level: Vec<TrustedRoot> = acc.trusted_roots[prior_trusted_len..].to_vec();
+                trusted_root_levels.push((candidate.clone(), level));
+            }
         }
 
         if !current.pop() {
@@ -370,7 +442,87 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
         }
     }
 
+    // Apply trusted_roots narrowing across the walk (rem-egp9).
+    // `extend_resolved` already appended every declared entry to
+    // `acc.trusted_roots` in walk order. Replace that flat list with
+    // the narrowed set: outermost declaration wins; descendants must
+    // be subsets.
+    acc.trusted_roots = narrow_trusted_roots(&trusted_root_levels)?;
+
     Ok(acc)
+}
+
+/// Apply the rem-egp9 intersection rule to `trusted_roots` declarations
+/// gathered during the parent walk.
+///
+/// `levels` is in walk order (deepest first). The outermost
+/// declaration sets the initial set; each descendant level narrows it
+/// by intersection (each child entry must be a subset of some entry in
+/// the parent's set, otherwise we hard-error citing the offending
+/// path + source file).
+fn narrow_trusted_roots(levels: &[(PathBuf, Vec<TrustedRoot>)]) -> Result<Vec<TrustedRoot>> {
+    if levels.is_empty() {
+        return Ok(Vec::new());
+    }
+    // levels are deepest-first; reverse to outermost-first so we can
+    // apply narrowing top-down.
+    let mut iter = levels.iter().rev();
+    let Some((_first_file, first_level)) = iter.next() else {
+        return Ok(Vec::new());
+    };
+    let mut current_set: Vec<TrustedRoot> = first_level.clone();
+    for (child_file, child_level) in iter {
+        let mut narrowed: Vec<TrustedRoot> = Vec::new();
+        for child_entry in child_level {
+            let covered_by_parent = current_set
+                .iter()
+                .any(|parent| path_covers(&parent.path, &child_entry.path));
+            if !covered_by_parent {
+                let parent_paths: Vec<String> = current_set
+                    .iter()
+                    .map(|p| p.path.display().to_string())
+                    .collect();
+                anyhow::bail!(
+                    "trusted_root {} declared in {} is not a subset of the \
+                     parent set [{}]; descendant declarations may only narrow",
+                    child_entry.path.display(),
+                    child_file.display(),
+                    parent_paths.join(", "),
+                );
+            }
+            narrowed.push(child_entry.clone());
+        }
+        current_set = narrowed;
+    }
+    Ok(current_set)
+}
+
+/// Resolve `trusted_roots` against a parent walk (rem-egp9).
+///
+/// When no `.remargin.yaml` declared `trusted_roots` anywhere on the
+/// walk, falls back to `[cwd]` — open semantics for the
+/// no-declaration case.
+///
+/// The returned `Vec<PathBuf>` is the canonical absolute-path set the
+/// per-op sandbox layer consults. Each path is canonicalized when
+/// possible; the expanded form is kept otherwise.
+///
+/// # Errors
+///
+/// Surfaces the same parse-time errors as [`resolve_permissions`]
+/// (containment + intersection violations).
+pub fn resolve_trusted_roots_for_cwd(system: &dyn System, cwd: &Path) -> Result<Vec<PathBuf>> {
+    let resolved = resolve_permissions(system, cwd)?;
+    if resolved.trusted_roots.is_empty() {
+        // No declaration anywhere on the walk → CWD fallback.
+        Ok(vec![canonicalize_or_passthrough(system, cwd.to_path_buf())])
+    } else {
+        Ok(resolved
+            .trusted_roots
+            .iter()
+            .map(|tr| tr.path.clone())
+            .collect())
+    }
 }
 
 /// Expand `~` / `$VAR` then realpath; fall back to the expanded form

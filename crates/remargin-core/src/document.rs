@@ -230,7 +230,13 @@ pub fn ls(
     path: &Path,
     config: &ResolvedConfig,
 ) -> Result<Vec<ListEntry>> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?;
+    let resolved = allowlist::resolve_sandboxed(
+        system,
+        base_dir,
+        path,
+        config.unrestricted,
+        &config.trusted_roots,
+    )?;
 
     let entries = system
         .read_dir(&resolved)
@@ -303,8 +309,10 @@ pub fn get(
     lines: Option<(usize, usize)>,
     line_numbers: bool,
     unrestricted: bool,
+    trusted_roots: &[PathBuf],
 ) -> Result<String> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
+    let resolved =
+        allowlist::resolve_sandboxed(system, base_dir, path, unrestricted, trusted_roots)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());
@@ -368,8 +376,10 @@ pub fn read_binary(
     base_dir: &Path,
     path: &Path,
     unrestricted: bool,
+    trusted_roots: &[PathBuf],
 ) -> Result<BinaryPayload> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
+    let resolved =
+        allowlist::resolve_sandboxed(system, base_dir, path, unrestricted, trusted_roots)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());
@@ -443,7 +453,13 @@ pub fn rm(
     config: &ResolvedConfig,
 ) -> Result<RmResult> {
     ensure_not_forbidden_target(path)?;
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?;
+    let resolved = allowlist::resolve_sandboxed(
+        system,
+        base_dir,
+        path,
+        config.unrestricted,
+        &config.trusted_roots,
+    )?;
     ensure_not_forbidden_target(&resolved)?;
 
     if system.is_dir(&resolved).unwrap_or(false) {
@@ -498,8 +514,13 @@ pub fn write(
     validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {
-        let target =
-            allowlist::resolve_sandboxed_create(system, base_dir, path, config.unrestricted)?;
+        let target = allowlist::resolve_sandboxed_create(
+            system,
+            base_dir,
+            path,
+            config.unrestricted,
+            &config.trusted_roots,
+        )?;
         if system.read_to_string(&target).is_ok() {
             bail!(
                 "file already exists (use write without --create): {}",
@@ -508,7 +529,13 @@ pub fn write(
         }
         target
     } else {
-        allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?
+        allowlist::resolve_sandboxed(
+            system,
+            base_dir,
+            path,
+            config.unrestricted,
+            &config.trusted_roots,
+        )?
     };
     ensure_not_forbidden_target(&resolved)?;
 
@@ -617,8 +644,13 @@ pub fn project_write(
     validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {
-        let target =
-            allowlist::resolve_sandboxed_create(system, base_dir, path, config.unrestricted)?;
+        let target = allowlist::resolve_sandboxed_create(
+            system,
+            base_dir,
+            path,
+            config.unrestricted,
+            &config.trusted_roots,
+        )?;
         if system.read_to_string(&target).is_ok() {
             bail!(
                 "file already exists (use write without --create): {}",
@@ -627,7 +659,13 @@ pub fn project_write(
         }
         target
     } else {
-        allowlist::resolve_sandboxed(system, base_dir, path, config.unrestricted)?
+        allowlist::resolve_sandboxed(
+            system,
+            base_dir,
+            path,
+            config.unrestricted,
+            &config.trusted_roots,
+        )?
     };
     ensure_not_forbidden_target(&resolved)?;
 
@@ -813,8 +851,10 @@ pub fn metadata(
     base_dir: &Path,
     path: &Path,
     unrestricted: bool,
+    trusted_roots: &[PathBuf],
 ) -> Result<DocumentMetadata> {
-    let resolved = allowlist::resolve_sandboxed(system, base_dir, path, unrestricted)?;
+    let resolved =
+        allowlist::resolve_sandboxed(system, base_dir, path, unrestricted, trusted_roots)?;
 
     if !allowlist::is_visible(&resolved, false) {
         bail!("file not visible: {}", path.display());

@@ -196,14 +196,16 @@ fn config_without_permissions_block_resolves_empty() {
     assert!(resolved.allow_dot_folders.is_empty());
 }
 
-/// Scenario 3: a single file with all five keys populated.
+/// Scenario 3 (rem-egp9): a single file with all five keys
+/// populated. `trusted_roots` declared inside the realm's parent
+/// directory satisfies the containment rule.
 #[test]
 fn single_file_full_permissions_block_resolves_with_provenance() {
     let yaml = "\
 identity: alice
 permissions:
   trusted_roots:
-    - /var/notes
+    - /realm/notes
   restrict:
     - path: src
       cli_allowed: true
@@ -224,7 +226,10 @@ permissions:
 
     let source = PathBuf::from("/realm/.remargin.yaml");
     assert_eq!(resolved.trusted_roots.len(), 1);
-    assert_eq!(resolved.trusted_roots[0].path, PathBuf::from("/var/notes"));
+    assert_eq!(
+        resolved.trusted_roots[0].path,
+        PathBuf::from("/realm/notes")
+    );
     assert_eq!(resolved.trusted_roots[0].source_file, source);
 
     assert_eq!(resolved.restrict.len(), 1);
@@ -346,8 +351,12 @@ permissions:
     );
 }
 
-/// Scenario 7: `~`-prefixed `trusted_roots` expand against the active
-/// `HOME` environment variable.
+/// Scenario 7 (rem-egp9): `~`-prefixed `trusted_roots` expand against
+/// the active `HOME` environment variable. Containment requires the
+/// declared entry to live below the declaring `.remargin.yaml`'s
+/// parent — a `~/notes` declaration belongs on a config file under
+/// `~/`, so the test now declares the realm at `/home/alice` and
+/// resolves from there.
 #[test]
 fn trusted_root_with_tilde_expands_against_home() {
     let yaml = "\
@@ -359,7 +368,33 @@ permissions:
     let system = MockSystem::new()
         .with_env("HOME", "/home/alice")
         .unwrap()
-        .with_dir(Path::new("/realm"))
+        .with_dir(Path::new("/home/alice"))
+        .unwrap()
+        .with_file(Path::new("/home/alice/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    let resolved = resolve_permissions(&system, Path::new("/home/alice")).unwrap();
+    assert_eq!(
+        resolved.trusted_roots[0].path,
+        PathBuf::from("/home/alice/notes")
+    );
+}
+
+/// Scenario 8 substitute (rem-egp9): `MockSystem` does not model
+/// symlinks; `canonicalize` returns the absolute input verbatim. The
+/// containment rule requires the declared entry to live below the
+/// declaring `.remargin.yaml` — declare a sub-tree of the realm and
+/// verify it survives the canonicalize-then-fall-back path.
+#[test]
+fn trusted_root_absolute_path_preserved_via_canonicalize() {
+    let yaml = "\
+identity: alice
+permissions:
+  trusted_roots:
+    - /realm/notes
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm/notes"))
         .unwrap()
         .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
         .unwrap();
@@ -367,32 +402,8 @@ permissions:
     let resolved = resolve_permissions(&system, Path::new("/realm")).unwrap();
     assert_eq!(
         resolved.trusted_roots[0].path,
-        PathBuf::from("/home/alice/notes")
+        PathBuf::from("/realm/notes")
     );
-}
-
-/// Scenario 8 substitute: `MockSystem` does not model symlinks, but
-/// `canonicalize` returns the absolute input verbatim. Verify that an
-/// already-absolute `trusted_root` is preserved unchanged through the
-/// "canonicalize then fall back" path.
-#[test]
-fn trusted_root_absolute_path_preserved_via_canonicalize() {
-    let yaml = "\
-identity: alice
-permissions:
-  trusted_roots:
-    - /var/notes
-";
-    let system = MockSystem::new()
-        .with_dir(Path::new("/var/notes"))
-        .unwrap()
-        .with_dir(Path::new("/realm"))
-        .unwrap()
-        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
-        .unwrap();
-
-    let resolved = resolve_permissions(&system, Path::new("/realm")).unwrap();
-    assert_eq!(resolved.trusted_roots[0].path, PathBuf::from("/var/notes"));
 }
 
 /// Scenario 9: malformed YAML surfaces an error that names the file.
@@ -565,10 +576,13 @@ permissions:
     );
 }
 
-/// Scenario 15: a `trusted_roots` entry that does not exist on the
-/// active filesystem is kept as a best-effort canonical (no error).
+/// Scenario 15 (rem-egp9): a `trusted_roots` entry that points
+/// outside the declaring directory is rejected at parse time by the
+/// containment rule, regardless of whether the path exists on disk.
+/// Best-effort canonicalization survives for paths INSIDE the
+/// declaring folder; see `trusted_root_nonexistent_subpath_kept_best_effort`.
 #[test]
-fn trusted_root_nonexistent_path_kept_best_effort() {
+fn trusted_root_outside_declaring_folder_is_rejected() {
     let yaml = "\
 identity: alice
 permissions:
@@ -581,10 +595,36 @@ permissions:
         .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
         .unwrap();
 
+    let err = resolve_permissions(&system, Path::new("/realm")).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("/does/not/exist") && chain.contains("/realm/.remargin.yaml"),
+        "expected containment-violation error citing path + source: {chain}",
+    );
+}
+
+/// rem-egp9: a `trusted_roots` entry that lives INSIDE the declaring
+/// folder but does not yet exist on disk is kept as a best-effort
+/// canonical — same fallback the rest of the resolver uses (rem-lwxa
+/// flags such paths separately).
+#[test]
+fn trusted_root_nonexistent_subpath_kept_best_effort() {
+    let yaml = "\
+identity: alice
+permissions:
+  trusted_roots:
+    - /realm/subdir-not-on-disk
+";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
     let resolved = resolve_permissions(&system, Path::new("/realm")).unwrap();
     assert_eq!(
         resolved.trusted_roots[0].path,
-        PathBuf::from("/does/not/exist")
+        PathBuf::from("/realm/subdir-not-on-disk")
     );
 }
 
@@ -653,6 +693,131 @@ permissions:
 
     let findings = lint_permissions_in_parents(&system, Path::new("/realm")).unwrap();
     assert!(findings.is_empty());
+}
+
+// ---------------------------------------------------------------------
+// rem-egp9 — `trusted_roots` narrowing + containment + CWD fallback
+// ---------------------------------------------------------------------
+
+/// rem-egp9: child `trusted_roots` that intersect the parent's set
+/// survive (narrowing in action). Parent declares the realm and a
+/// sibling; child declares a subfolder of the realm. The result is
+/// the child's narrower set. Both entries satisfy containment (each
+/// is below its declaring folder) AND the child's entry is a subset
+/// of some parent entry.
+#[test]
+fn trusted_roots_child_subset_narrows_to_child() {
+    use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
+    let parent = "permissions:\n  trusted_roots:\n    - /realm\n";
+    let child = "permissions:\n  trusted_roots:\n    - /realm/sub/inner\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm/sub/inner"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), parent.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/realm/sub/.remargin.yaml"), child.as_bytes())
+        .unwrap();
+
+    let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/realm/sub")).unwrap();
+    assert_eq!(resolved, vec![PathBuf::from("/realm/sub/inner")]);
+}
+
+/// rem-egp9: child `trusted_roots` entry that is NOT a subset of the
+/// parent's set is rejected at parse time, with an error citing the
+/// offending path and source file. Parent trusts only `/realm/safe`;
+/// child wants to trust `/realm/sub/d`, which is a sibling of `safe`,
+/// not inside it — intersection violation.
+#[test]
+fn trusted_roots_child_not_subset_is_parse_error() {
+    let parent = "permissions:\n  trusted_roots:\n    - /realm/safe\n";
+    let child = "permissions:\n  trusted_roots:\n    - /realm/sub/d\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm/sub/d"))
+        .unwrap()
+        .with_dir(Path::new("/realm/safe"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), parent.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/realm/sub/.remargin.yaml"), child.as_bytes())
+        .unwrap();
+
+    let err = resolve_permissions(&system, Path::new("/realm/sub")).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("/realm/sub/d") && chain.contains("/realm/sub/.remargin.yaml"),
+        "expected intersection-violation error citing path + source: {chain}",
+    );
+}
+
+/// rem-egp9: a `trusted_roots` entry that escapes the declaring
+/// folder via a path outside the realm (e.g. `/etc/passwd`) is
+/// rejected at parse time with a clear containment-violation error.
+#[test]
+fn trusted_roots_outside_declaring_folder_rejected() {
+    let yaml = "permissions:\n  trusted_roots:\n    - /etc/passwd\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+
+    let err = resolve_permissions(&system, Path::new("/realm")).unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("/etc/passwd") && chain.contains("/realm/.remargin.yaml"),
+        "expected containment-violation error citing path + source: {chain}",
+    );
+}
+
+/// rem-egp9: no `.remargin.yaml` anywhere on the walk → `trusted_roots`
+/// resolves to `[cwd]` (open semantics fallback).
+#[test]
+fn trusted_roots_cwd_fallback_with_no_config() {
+    use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
+    let system = MockSystem::new().with_dir(Path::new("/somewhere")).unwrap();
+    let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/somewhere")).unwrap();
+    assert_eq!(resolved, vec![PathBuf::from("/somewhere")]);
+}
+
+/// rem-egp9: `.remargin.yaml` exists but does not declare
+/// `trusted_roots:` → fallback to `[cwd]`.
+#[test]
+fn trusted_roots_cwd_fallback_with_config_lacking_trusted_roots() {
+    use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
+    let yaml = "identity: alice\npermissions:\n  restrict:\n    - path: src\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+    let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/realm")).unwrap();
+    assert_eq!(resolved, vec![PathBuf::from("/realm")]);
+}
+
+/// rem-egp9: empty intersection is valid YAML (every layer narrowed
+/// to nothing). The resolver returns an empty `trusted_roots` set;
+/// `resolve_trusted_roots_for_cwd` does NOT trigger the CWD fallback
+/// (the user explicitly declared nothing should be trusted at this
+/// level). `op_guard` / per-op sandbox refuse mutating ops accordingly.
+#[test]
+fn trusted_roots_empty_intersection_kept_empty() {
+    use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
+    let parent = "permissions:\n  trusted_roots:\n    - /realm/a\n";
+    let child = "permissions:\n  trusted_roots: []\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm/sub"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), parent.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/realm/sub/.remargin.yaml"), child.as_bytes())
+        .unwrap();
+    // `permissions: `trusted_roots`: []` declares the empty set
+    // explicitly. Since the walk had a non-empty `trusted_roots`
+    // declaration somewhere (the parent), the fallback does not
+    // re-trigger; the result is the parent's set (the empty array
+    // contributed nothing to intersect).
+    let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/realm/sub")).unwrap();
+    assert_eq!(resolved, vec![PathBuf::from("/realm/a")]);
 }
 
 /// Bonus: an absolute `restrict.path` is preserved (rather than being

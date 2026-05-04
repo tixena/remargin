@@ -660,29 +660,31 @@ mod tests {
         assert!(!is_tool_error(&result), "{result:#?}");
     }
 
-    /// Recursive realm respect (rem-yj1j.3 scenario 12): with the
-    /// spawn realm trusting `/b` and `/b/.remargin.yaml` declaring a
-    /// `restrict` rule on `src/secret`, an MCP `write` against
-    /// `/b/src/secret/foo.md` is refused by the `op_guard` parent walk
-    /// even though the path is within the sandbox roots.
+    /// Recursive realm respect (rem-yj1j.3 scenario 12; rem-egp9
+    /// containment): the spawn realm trusts a subfolder, the
+    /// subfolder declares a `restrict` rule on `src/secret`, and an
+    /// MCP `write` against the restricted path is refused by the
+    /// `op_guard` parent walk even though the path is within the
+    /// sandbox roots.
     #[test]
     fn mcp_recursive_realm_respect_blocks_write_under_target_restrict() {
         let spawn = TempDir::new().unwrap();
-        let target = TempDir::new().unwrap();
-        let target_canonical = RealSystem::new().canonicalize(target.path()).unwrap();
+        let spawn_canonical = RealSystem::new().canonicalize(spawn.path()).unwrap();
+        let target = spawn_canonical.join("trusted-target");
+        fs::create_dir_all(&target).unwrap();
         write_realm_yaml(
             spawn.path(),
             &format!(
                 "permissions:\n  trusted_roots:\n    - {}\n",
-                target_canonical.display()
+                target.display()
             ),
         );
         write_realm_yaml(
-            &target_canonical,
+            &target,
             "permissions:\n  restrict:\n    - path: src/secret\n",
         );
-        fs::create_dir_all(target_canonical.join("src/secret")).unwrap();
-        let restricted_file = target_canonical.join("src/secret/foo.md");
+        fs::create_dir_all(target.join("src/secret")).unwrap();
+        let restricted_file = target.join("src/secret/foo.md");
         fs::write(&restricted_file, "# initial\n").unwrap();
 
         let system = RealSystem::new();
@@ -707,33 +709,37 @@ mod tests {
         );
     }
 
-    /// No transitive trust (rem-yj1j.3 scenario 13): the spawn realm
-    /// trusts `/b`, `/b/.remargin.yaml` lists `/c` as its own
-    /// `trusted_roots`. An MCP request against `/c/foo.md` is
-    /// rejected at the sandbox boundary because `/c` is NOT mounted
-    /// into the spawn session.
+    /// No transitive trust (rem-yj1j.3 scenario 13; rem-egp9
+    /// containment): the spawn realm trusts a subfolder, the
+    /// subfolder lists a deeper subfolder as its own `trusted_roots`.
+    /// The narrowing rule keeps the descendant inside the parent's
+    /// set, but a path NOT inside any declared `trusted_root` is still
+    /// rejected at the sandbox boundary.
     #[test]
     fn mcp_no_transitive_trust_rejects_target_realm_trusted_roots() {
         let spawn = TempDir::new().unwrap();
-        let trusted = TempDir::new().unwrap();
-        let unrelated = TempDir::new().unwrap();
-        let trusted_canonical = RealSystem::new().canonicalize(trusted.path()).unwrap();
-        let unrelated_canonical = RealSystem::new().canonicalize(unrelated.path()).unwrap();
+        let spawn_canonical = RealSystem::new().canonicalize(spawn.path()).unwrap();
+        let trusted = spawn_canonical.join("trusted");
+        fs::create_dir_all(&trusted).unwrap();
+        let inner_trusted = trusted.join("inner");
+        fs::create_dir_all(&inner_trusted).unwrap();
+        let outsider = spawn_canonical.join("not-trusted");
+        fs::create_dir_all(&outsider).unwrap();
         write_realm_yaml(
             spawn.path(),
             &format!(
                 "permissions:\n  trusted_roots:\n    - {}\n",
-                trusted_canonical.display()
+                trusted.display()
             ),
         );
         write_realm_yaml(
-            &trusted_canonical,
+            &trusted,
             &format!(
                 "permissions:\n  trusted_roots:\n    - {}\n",
-                unrelated_canonical.display()
+                inner_trusted.display()
             ),
         );
-        let outsider_file = unrelated_canonical.join("foo.md");
+        let outsider_file = outsider.join("foo.md");
         fs::write(&outsider_file, b"# beyond\n").unwrap();
 
         let system = RealSystem::new();

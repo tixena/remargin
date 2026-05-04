@@ -86,6 +86,7 @@ fn make_config(mode: Mode, registry: Option<Registry>) -> ResolvedConfig {
         mode,
         registry,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }

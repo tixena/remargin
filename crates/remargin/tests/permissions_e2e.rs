@@ -403,4 +403,199 @@ mod tests {
             "expected NO Bash(remargin ...) deny, got: {deny:#?}"
         );
     }
+
+    // ---------------------------------------------------------------
+    // rem-egp9 — per-op sandbox consults `trusted_roots`
+    // ---------------------------------------------------------------
+
+    /// rem-egp9 acceptance: an MCP `write` to a path INSIDE a declared
+    /// `trusted_root` that lives outside the MCP spawn cwd succeeds.
+    /// Pre-rem-egp9 this failed with `path escapes sandbox` because
+    /// the per-op layer consulted only `base_dir`. The new resolver
+    /// threads `trusted_roots` from the resolved-config through the
+    /// per-op sandbox check.
+    ///
+    /// Containment: the `trusted_root` is declared as a subfolder of
+    /// the spawn cwd's parent (the realm), satisfying rem-egp9's
+    /// containment rule. The point of the test is that the trusted
+    /// root lives OUTSIDE the spawn cwd itself but INSIDE the
+    /// declaring realm.
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive MCP parity check across write/get/metadata/ls in one realm fixture"
+    )]
+    fn mcp_write_inside_trusted_root_outside_spawn_cwd_succeeds() {
+        let realm = realm_with_claude();
+        let realm_canonical = RealSystem::new().canonicalize(realm.path()).unwrap();
+        // Spawn cwd is `<realm>/spawn`; trusted root is `<realm>/notes`.
+        // Both live under `<realm>` so the realm-level
+        // `.remargin.yaml` can declare `notes` as a trusted root.
+        let spawn = realm_canonical.join("spawn");
+        let notes = realm_canonical.join("notes");
+        fs::create_dir_all(&spawn).unwrap();
+        fs::create_dir_all(&notes).unwrap();
+        fs::write(
+            realm_canonical.join(".remargin.yaml"),
+            format!(
+                "permissions:\n  trusted_roots:\n    - {}\n",
+                notes.display()
+            ),
+        )
+        .unwrap();
+
+        // Use a non-markdown file so raw writes are accepted.
+        let outside_file = notes.join("widening.txt");
+
+        let system = RealSystem::new();
+        let base = system.canonicalize(&spawn).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+
+        // MCP write to a path that lives outside the spawn cwd
+        // (`<realm>/spawn`) but inside a declared trusted root
+        // (`<realm>/notes`) succeeds.
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "write",
+                "arguments": {
+                    "path": outside_file.to_string_lossy(),
+                    "content": "hello\n",
+                    "raw": true,
+                    "create": true,
+                }
+            }
+        });
+        let request_str = serde_json::to_string(&request).unwrap();
+        let response = mcp::process_request(&system, &base, &config, &request_str)
+            .unwrap()
+            .unwrap();
+        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let result = parsed.get("result").unwrap();
+        assert!(
+            !result
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            "MCP write to trusted_root outside spawn cwd must succeed: {result:#?}",
+        );
+        assert!(
+            outside_file.exists(),
+            "{} should have been written",
+            outside_file.display()
+        );
+        let body = fs::read_to_string(&outside_file).unwrap();
+        assert!(body.contains("hello"), "body: {body}");
+
+        // Same path through `get` succeeds.
+        let get_req = json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get",
+                "arguments": { "path": outside_file.to_string_lossy() }
+            }
+        });
+        let get_resp = mcp::process_request(&system, &base, &config, &get_req.to_string())
+            .unwrap()
+            .unwrap();
+        let parsed_get: Value = serde_json::from_str(&get_resp).unwrap();
+        let get_result = parsed_get.get("result").unwrap();
+        assert!(
+            !get_result
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            "MCP get on trusted_root outside spawn cwd must succeed: {get_result:#?}",
+        );
+
+        // metadata succeeds.
+        let meta_req = json!({
+            "jsonrpc": "2.0",
+            "id": 3_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "metadata",
+                "arguments": { "path": outside_file.to_string_lossy() }
+            }
+        });
+        let meta_resp = mcp::process_request(&system, &base, &config, &meta_req.to_string())
+            .unwrap()
+            .unwrap();
+        let parsed_meta: Value = serde_json::from_str(&meta_resp).unwrap();
+        let meta_result = parsed_meta.get("result").unwrap();
+        assert!(
+            !meta_result
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            "MCP metadata on trusted_root outside spawn cwd must succeed: {meta_result:#?}",
+        );
+
+        // ls on the trusted root directory succeeds.
+        let ls_req = json!({
+            "jsonrpc": "2.0",
+            "id": 4_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "ls",
+                "arguments": { "path": notes.to_string_lossy() }
+            }
+        });
+        let ls_resp = mcp::process_request(&system, &base, &config, &ls_req.to_string())
+            .unwrap()
+            .unwrap();
+        let parsed_ls: Value = serde_json::from_str(&ls_resp).unwrap();
+        let ls_result = parsed_ls.get("result").unwrap();
+        assert!(
+            !ls_result
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            "MCP ls on trusted_root outside spawn cwd must succeed: {ls_result:#?}",
+        );
+    }
+
+    /// rem-egp9: CLI write to the same trusted-root-outside-spawn-cwd
+    /// path also succeeds (parity with the MCP path).
+    #[test]
+    fn cli_write_inside_trusted_root_outside_cwd_succeeds() {
+        let realm = realm_with_claude();
+        let realm_canonical = RealSystem::new().canonicalize(realm.path()).unwrap();
+        let spawn = realm_canonical.join("spawn");
+        let notes = realm_canonical.join("notes");
+        fs::create_dir_all(&spawn).unwrap();
+        fs::create_dir_all(&notes).unwrap();
+        fs::write(
+            realm_canonical.join(".remargin.yaml"),
+            format!(
+                "permissions:\n  trusted_roots:\n    - {}\n",
+                notes.display()
+            ),
+        )
+        .unwrap();
+        let outside_file = notes.join("widening.txt");
+
+        let out = run_in(
+            &spawn,
+            &[
+                "write",
+                "--identity",
+                "alice",
+                "--type",
+                "human",
+                "--raw",
+                "--create",
+                "--",
+                outside_file.to_str().unwrap(),
+                "hello\n",
+            ],
+        );
+        assert_status(&out, 0);
+        assert!(outside_file.exists());
+    }
 }

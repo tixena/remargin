@@ -968,13 +968,30 @@ fn dispatch_mv(
         let src_exists = system.exists(&src_lexical).unwrap_or(false);
 
         let src_resolved = if src_exists {
-            allowlist::resolve_sandboxed(system, base_dir, src, cfg.unrestricted)?
+            allowlist::resolve_sandboxed(
+                system,
+                base_dir,
+                src,
+                cfg.unrestricted,
+                &cfg.trusted_roots,
+            )?
         } else {
-            allowlist::resolve_sandboxed_create(system, base_dir, src, cfg.unrestricted)?
+            allowlist::resolve_sandboxed_create(
+                system,
+                base_dir,
+                src,
+                cfg.unrestricted,
+                &cfg.trusted_roots,
+            )?
         };
 
-        let dst_resolved =
-            allowlist::resolve_sandboxed_create(system, base_dir, dst, cfg.unrestricted)?;
+        let dst_resolved = allowlist::resolve_sandboxed_create(
+            system,
+            base_dir,
+            dst,
+            cfg.unrestricted,
+            &cfg.trusted_roots,
+        )?;
         ensure_not_forbidden_target(&dst_resolved)?;
 
         let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
@@ -1244,6 +1261,7 @@ mod tests {
             mode: Mode::Open,
             registry: None,
             source_path: None,
+            trusted_roots: Vec::new(),
             unrestricted: false,
         }
     }

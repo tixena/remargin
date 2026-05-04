@@ -160,8 +160,13 @@ pub fn mv(
     // Resolve dst as a create-target. This canonicalises the parent
     // dir + appends the filename so the sandbox boundary is enforced
     // even when dst doesn't exist yet.
-    let dst_resolved =
-        allowlist::resolve_sandboxed_create(system, base_dir, &args.dst, config.unrestricted)?;
+    let dst_resolved = allowlist::resolve_sandboxed_create(
+        system,
+        base_dir,
+        &args.dst,
+        config.unrestricted,
+        &config.trusted_roots,
+    )?;
     ensure_not_forbidden_target(&dst_resolved)?;
 
     let Some(src_resolved) = src_resolved_opt else {
@@ -240,12 +245,19 @@ fn resolve_src(
             base_dir,
             requested,
             config.unrestricted,
+            &config.trusted_roots,
         )?))
     } else {
         // Sandbox-validate the requested source even though the file
         // is missing — escaping the sandbox is the same kind of
         // boundary violation regardless of whether the file exists.
-        allowlist::resolve_sandboxed_create(system, base_dir, requested, config.unrestricted)?;
+        allowlist::resolve_sandboxed_create(
+            system,
+            base_dir,
+            requested,
+            config.unrestricted,
+            &config.trusted_roots,
+        )?;
         Ok(None)
     }
 }

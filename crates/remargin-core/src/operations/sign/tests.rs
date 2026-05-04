@@ -84,6 +84,7 @@ fn make_config(mode: Mode, identity: &str, key_path: Option<&str>) -> ResolvedCo
         mode,
         registry: Some(registry_with_alice_pubkey()),
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }

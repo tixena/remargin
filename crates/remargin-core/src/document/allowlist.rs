@@ -91,21 +91,31 @@ pub fn is_text(path: &Path) -> bool {
         .is_some_and(|ext| TEXT_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }
 
-/// Resolve and sandbox a path. Returns an error if it escapes the base directory.
+/// Resolve and sandbox a path. Returns an error if it escapes both the
+/// base directory AND every declared trusted root.
 ///
-/// When `unrestricted` is `true`, the sandbox check is skipped and the path is
-/// resolved directly (absolute paths bypass the base join).
+/// When `unrestricted` is `true`, the sandbox check is skipped and the
+/// path is resolved directly (absolute paths bypass the base join).
+///
+/// `trusted_roots` (rem-egp9): when the resolved path is not under
+/// `base` but IS under one of the declared trusted roots, the call
+/// succeeds. This is what makes `mcp__remargin__write` to a path
+/// inside a declared trusted root that lives outside the spawn cwd
+/// work — the per-op sandbox layer consults the same trusted-root set
+/// the boot-time MCP cover already used.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The path cannot be canonicalized
-/// - The resolved path escapes the base directory (when `unrestricted` is false)
+/// - The resolved path escapes both `base` and every trusted root
+///   (when `unrestricted` is false)
 pub fn resolve_sandboxed(
     system: &dyn System,
     base: &Path,
     requested: &Path,
     unrestricted: bool,
+    trusted_roots: &[PathBuf],
 ) -> Result<PathBuf> {
     if unrestricted {
         let resolved = if requested.is_absolute() {
@@ -116,31 +126,51 @@ pub fn resolve_sandboxed(
         return Ok(resolved);
     }
 
-    let resolved = system.canonicalize(&base.join(requested))?;
+    // Absolute requests resolve against themselves; relative requests
+    // join onto base. A trusted_root caller would otherwise be forced
+    // to relative-out-of-tree (`../../trusted/foo.md`), which is
+    // awkward. Allowing absolute-from-anywhere is safe because the
+    // sandbox check below still gates access.
+    let resolved = if requested.is_absolute() {
+        system.canonicalize(requested)?
+    } else {
+        system.canonicalize(&base.join(requested))?
+    };
     let canonical_base = system.canonicalize(base)?;
 
-    if !resolved.starts_with(&canonical_base) {
-        bail!("path escapes sandbox: {}", requested.display());
+    if path_under(&resolved, &canonical_base) {
+        return Ok(resolved);
+    }
+    if any_trusted_root_covers(system, trusted_roots, &resolved) {
+        return Ok(resolved);
     }
 
-    Ok(resolved)
+    bail!("path escapes sandbox: {}", requested.display());
 }
 
 /// Resolve and sandbox a path for a file that does not yet exist.
 ///
-/// Canonicalizes the **parent directory** and appends the filename. If the
-/// parent directory does not exist, walks up the path to find the nearest
-/// existing ancestor, validates that it is within the sandbox, and creates
-/// all missing intermediate directories.
+/// Canonicalizes the **parent directory** and appends the filename. If
+/// the parent directory does not exist, walks up the path to find the
+/// nearest existing ancestor, validates that it is within the sandbox
+/// (or any trusted root), and creates all missing intermediate
+/// directories.
 ///
-/// When `unrestricted` is `true`, the sandbox check is skipped (absolute paths
-/// bypass the base join).
+/// When `unrestricted` is `true`, the sandbox check is skipped
+/// (absolute paths bypass the base join).
+///
+/// `trusted_roots` (rem-egp9): when the parent / nearest ancestor is
+/// not under `base` but IS under one of the declared trusted roots,
+/// the call succeeds and the missing directories are created. This
+/// lets `mcp__remargin__write` create new files inside a declared
+/// trusted root that lives outside the MCP spawn cwd.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - No existing ancestor directory can be found
-/// - The resolved path escapes the base directory (when `unrestricted` is false)
+/// - The resolved path escapes both `base` and every trusted root
+///   (when `unrestricted` is false)
 /// - The requested path has no filename component
 /// - Directory creation fails
 pub fn resolve_sandboxed_create(
@@ -148,14 +178,16 @@ pub fn resolve_sandboxed_create(
     base: &Path,
     requested: &Path,
     unrestricted: bool,
+    trusted_roots: &[PathBuf],
 ) -> Result<PathBuf> {
-    let raw_joined = if unrestricted && requested.is_absolute() {
+    let raw_joined = if (unrestricted || !trusted_roots.is_empty()) && requested.is_absolute() {
         requested.to_path_buf()
     } else {
         base.join(requested)
     };
-    // Normalize to resolve `.` and `..` components so that sandbox checks
-    // work correctly even when the system's canonicalize does not (e.g. mocks).
+    // Normalize to resolve `.` and `..` components so that sandbox
+    // checks work correctly even when the system's canonicalize does
+    // not (e.g. mocks).
     let joined = normalize_path(&raw_joined);
     let parent = joined
         .parent()
@@ -167,14 +199,17 @@ pub fn resolve_sandboxed_create(
     let parent_exists = system.exists(parent).unwrap_or(false);
 
     if !parent_exists {
-        // Parent doesn't exist. Walk up to find the nearest existing ancestor
-        // and sandbox-check it before creating any directories.
+        // Parent doesn't exist. Walk up to find the nearest existing
+        // ancestor and sandbox-check it before creating any
+        // directories.
         let nearest = find_existing_ancestor(system, parent)?;
         let canonical_nearest = system.canonicalize(&nearest)?;
 
         if !unrestricted {
             let canonical_base = system.canonicalize(base)?;
-            if !canonical_nearest.starts_with(&canonical_base) {
+            if !path_under(&canonical_nearest, &canonical_base)
+                && !any_trusted_root_covers(system, trusted_roots, &canonical_nearest)
+            {
                 bail!("path escapes sandbox: {}", requested.display());
             }
         }
@@ -197,12 +232,33 @@ pub fn resolve_sandboxed_create(
 
     if !unrestricted {
         let canonical_base = system.canonicalize(base)?;
-        if !canonical_parent.starts_with(&canonical_base) {
+        if !path_under(&canonical_parent, &canonical_base)
+            && !any_trusted_root_covers(system, trusted_roots, &canonical_parent)
+        {
             bail!("path escapes sandbox: {}", requested.display());
         }
     }
 
     Ok(canonical_parent.join(filename))
+}
+
+/// `true` when `target` equals `anchor` or starts with it (descendant).
+fn path_under(target: &Path, anchor: &Path) -> bool {
+    target == anchor || target.starts_with(anchor)
+}
+
+/// `true` when `target` is at-or-below any trusted root.
+///
+/// Best-effort: each trusted root is canonicalized (when possible)
+/// before the comparison. The expanded form is used as a fallback so
+/// trusted roots that don't exist on disk yet still match — same
+/// best-effort semantics as the resolver in
+/// [`crate::config::permissions::resolve`].
+fn any_trusted_root_covers(system: &dyn System, trusted_roots: &[PathBuf], target: &Path) -> bool {
+    trusted_roots.iter().any(|root| {
+        let canonical = system.canonicalize(root).unwrap_or_else(|_| root.clone());
+        path_under(target, &canonical)
+    })
 }
 
 /// Walk up from `path` to find the nearest ancestor directory that exists.

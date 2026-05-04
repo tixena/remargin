@@ -2606,7 +2606,15 @@ fn cmd_get(
     };
 
     if gp.json_mode && gp.line_numbers {
-        let content = document::get(system, cwd, target, lines, false, config.unrestricted)?;
+        let content = document::get(
+            system,
+            cwd,
+            target,
+            lines,
+            false,
+            config.unrestricted,
+            &config.trusted_roots,
+        )?;
         let start_num = lines.map_or(1, |(s, _)| s);
         let json_lines: Vec<Value> = content
             .split('\n')
@@ -2622,6 +2630,7 @@ fn cmd_get(
             lines,
             gp.line_numbers,
             config.unrestricted,
+            &config.trusted_roots,
         )?;
         if gp.json_mode {
             print_output(true, &json!({ "content": content }))
@@ -2653,7 +2662,13 @@ fn cmd_get_binary(
         bail!("--line-numbers is not supported with --binary");
     }
 
-    let payload = document::read_binary(system, cwd, target, config.unrestricted)?;
+    let payload = document::read_binary(
+        system,
+        cwd,
+        target,
+        config.unrestricted,
+        &config.trusted_roots,
+    )?;
 
     if let Some(out_path) = gp.out {
         fs::write(out_path, &payload.bytes)
@@ -3457,7 +3472,13 @@ fn cmd_metadata(
 ) -> Result<()> {
     let target_buf = expand_cli_path(system, path_str)?;
     let target = target_buf.as_path();
-    let meta = document::metadata(system, cwd, target, config.unrestricted)?;
+    let meta = document::metadata(
+        system,
+        cwd,
+        target,
+        config.unrestricted,
+        &config.trusted_roots,
+    )?;
 
     // File-level fields are always present. Markdown fields are only emitted
     // when the file was parsed (rem-lqz).

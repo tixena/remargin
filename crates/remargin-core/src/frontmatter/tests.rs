@@ -26,6 +26,7 @@ fn test_config() -> ResolvedConfig {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }
@@ -320,6 +321,7 @@ fn no_identity_no_author() {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     };
     let mut mapping = Mapping::new();

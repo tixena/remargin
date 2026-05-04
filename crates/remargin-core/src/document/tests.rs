@@ -1,7 +1,7 @@
 //! Tests for the document access layer.
 
 use std::io::Read as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -57,6 +57,7 @@ fn config_with_ignore(patterns: Vec<String>) -> ResolvedConfig {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }
@@ -78,6 +79,7 @@ fn open_config() -> ResolvedConfig {
         mode: Mode::Open,
         registry: None,
         source_path: None,
+        trusted_roots: Vec::new(),
         unrestricted: false,
     }
 }
@@ -286,6 +288,7 @@ fn get_markdown() {
         None,
         false,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(content, "# Hello\nWorld");
@@ -306,6 +309,7 @@ fn get_dotfile_hidden() {
         None,
         false,
         false,
+        &[],
     );
     result.unwrap_err();
 }
@@ -325,6 +329,7 @@ fn get_disallowed_extension() {
         None,
         false,
         false,
+        &[],
     );
     result.unwrap_err();
 }
@@ -347,6 +352,7 @@ fn get_with_lines() {
         Some((2, 4)),
         false,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(content, "line2\nline3\nline4");
@@ -369,6 +375,7 @@ fn get_escape_attempt() {
         None,
         false,
         false,
+        &[],
     );
     result.unwrap_err();
 }
@@ -381,8 +388,14 @@ fn metadata_correct_counts() {
         .with_file(Path::new("/project/doc.md"), DOC_WITH_COMMENTS.as_bytes())
         .unwrap();
 
-    let meta =
-        document::metadata(&system, Path::new("/project"), Path::new("doc.md"), false).unwrap();
+    let meta = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        false,
+        &[],
+    )
+    .unwrap();
     assert_eq!(meta.comment_count, Some(2));
     assert_eq!(meta.pending_count, Some(1)); // abc is unacked
     assert_eq!(meta.pending_for, vec!["alice"]); // abc has to: [alice]
@@ -402,8 +415,14 @@ fn metadata_binary_file_returns_file_level_fields_only() {
         .with_file(Path::new("/project/pic.png"), &[0x89, b'P', b'N', b'G'])
         .unwrap();
 
-    let meta =
-        document::metadata(&system, Path::new("/project"), Path::new("pic.png"), false).unwrap();
+    let meta = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("pic.png"),
+        false,
+        &[],
+    )
+    .unwrap();
 
     assert!(meta.binary);
     assert_eq!(meta.mime, "image/png");
@@ -431,6 +450,7 @@ fn metadata_non_md_text_file_returns_markdown_fields() {
         Path::new("/project"),
         Path::new("notes.txt"),
         false,
+        &[],
     )
     .unwrap();
 
@@ -449,8 +469,14 @@ fn metadata_pdf_is_binary() {
         .with_file(Path::new("/project/doc.pdf"), b"%PDF-1.4")
         .unwrap();
 
-    let meta =
-        document::metadata(&system, Path::new("/project"), Path::new("doc.pdf"), false).unwrap();
+    let meta = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.pdf"),
+        false,
+        &[],
+    )
+    .unwrap();
 
     assert!(meta.binary);
     assert_eq!(meta.mime, "application/pdf");
@@ -466,6 +492,7 @@ fn metadata_missing_file_errors() {
         Path::new("/project"),
         Path::new("nonexistent.md"),
         false,
+        &[],
     );
     result.unwrap_err();
 }
@@ -479,8 +506,14 @@ fn read_binary_returns_bytes_and_mime() {
         .with_file(Path::new("/project/pic.png"), bytes)
         .unwrap();
 
-    let payload =
-        document::read_binary(&system, Path::new("/project"), Path::new("pic.png"), false).unwrap();
+    let payload = document::read_binary(
+        &system,
+        Path::new("/project"),
+        Path::new("pic.png"),
+        false,
+        &[],
+    )
+    .unwrap();
 
     assert_eq!(payload.bytes, bytes);
     assert_eq!(payload.mime, "image/png");
@@ -495,8 +528,14 @@ fn read_binary_rejects_markdown() {
         .with_file(Path::new("/project/doc.md"), b"# hi\n")
         .unwrap();
 
-    let err = document::read_binary(&system, Path::new("/project"), Path::new("doc.md"), false)
-        .unwrap_err();
+    let err = document::read_binary(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        false,
+        &[],
+    )
+    .unwrap_err();
     assert!(format!("{err}").contains("cannot fetch .md as binary"));
 }
 
@@ -509,8 +548,13 @@ fn read_binary_unknown_extension_is_octet_stream() {
         .unwrap();
 
     // `.bin` is NOT allowlisted — this should error on visibility.
-    let result =
-        document::read_binary(&system, Path::new("/project"), Path::new("blob.bin"), false);
+    let result = document::read_binary(
+        &system,
+        Path::new("/project"),
+        Path::new("blob.bin"),
+        false,
+        &[],
+    );
     result.unwrap_err();
 }
 
@@ -522,7 +566,13 @@ fn read_binary_rejects_dotfile() {
         .with_file(Path::new("/project/.env"), b"secret")
         .unwrap();
 
-    let result = document::read_binary(&system, Path::new("/project"), Path::new(".env"), false);
+    let result = document::read_binary(
+        &system,
+        Path::new("/project"),
+        Path::new(".env"),
+        false,
+        &[],
+    );
     result.unwrap_err();
 }
 
@@ -541,6 +591,7 @@ fn read_binary_escape_attempt() {
         Path::new("/project"),
         Path::new("../../etc/passwd"),
         false,
+        &[],
     );
     result.unwrap_err();
 }
@@ -1310,6 +1361,7 @@ fn sandbox_blocks_absolute_escape() {
         Path::new("/project"),
         Path::new("/home/user/other.md"),
         false,
+        &[],
     )
     .unwrap_err();
     assert!(
@@ -1333,6 +1385,7 @@ fn sandbox_create_blocks_absolute_escape() {
         Path::new("/project"),
         Path::new("/other/new.md"),
         false,
+        &[],
     )
     .unwrap_err();
     assert!(
@@ -1358,6 +1411,7 @@ fn sandbox_allows_child_path() {
         Path::new("/project"),
         Path::new("src/main.rs"),
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/project/src/main.rs"));
@@ -1378,6 +1432,7 @@ fn sandbox_create_allows_child() {
         Path::new("/project"),
         Path::new("src/new.md"),
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/project/src/new.md"));
@@ -1398,6 +1453,7 @@ fn unrestricted_allows_absolute_path() {
         Path::new("/project"),
         Path::new("/home/user/file.md"),
         true,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/home/user/file.md"));
@@ -1420,6 +1476,7 @@ fn unrestricted_allows_relative_within_sandbox() {
         Path::new("/project"),
         Path::new("src/main.rs"),
         true,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/project/src/main.rs"));
@@ -1440,6 +1497,7 @@ fn unrestricted_create_allows_absolute_escape() {
         Path::new("/project"),
         Path::new("/other/new.md"),
         true,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/other/new.md"));
@@ -1460,9 +1518,103 @@ fn unrestricted_create_absolute() {
         Path::new("/project"),
         Path::new("/tmp/new.md"),
         true,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/tmp/new.md"));
+}
+
+// ---------------------------------------------------------------------
+// rem-egp9 — per-op sandbox consults trusted_roots
+// ---------------------------------------------------------------------
+
+/// rem-egp9: a path inside `base_dir` is allowed (existing behaviour).
+#[test]
+fn sandbox_under_base_allowed_with_no_trusted_roots() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"# d")
+        .unwrap();
+    let result = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        false,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/project/doc.md"));
+}
+
+/// rem-egp9: an absolute path INSIDE a declared trusted root that
+/// lives OUTSIDE `base_dir` is allowed.
+#[test]
+fn sandbox_under_trusted_root_outside_base_allowed() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/notes"))
+        .unwrap()
+        .with_file(Path::new("/notes/widening.md"), b"# w")
+        .unwrap();
+    let trusted = vec![PathBuf::from("/notes")];
+    let result = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("/notes/widening.md"),
+        false,
+        &trusted,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/notes/widening.md"));
+}
+
+/// rem-egp9: an absolute path NEITHER under base nor any trusted root
+/// is rejected.
+#[test]
+fn sandbox_outside_base_and_trusted_roots_rejected() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/notes"))
+        .unwrap()
+        .with_file(Path::new("/elsewhere/foo.md"), b"# x")
+        .unwrap();
+    let trusted = vec![PathBuf::from("/notes")];
+    let err = allowlist::resolve_sandboxed(
+        &system,
+        Path::new("/project"),
+        Path::new("/elsewhere/foo.md"),
+        false,
+        &trusted,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("path escapes sandbox"),
+        "expected 'path escapes sandbox', got: {err}",
+    );
+}
+
+/// rem-egp9: a brand-new file under a trusted root that lives outside
+/// `base_dir` is allowed by `resolve_sandboxed_create`.
+#[test]
+fn sandbox_create_under_trusted_root_outside_base_allowed() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/project"))
+        .unwrap()
+        .with_dir(Path::new("/notes"))
+        .unwrap();
+    let trusted = vec![PathBuf::from("/notes")];
+    let result = allowlist::resolve_sandboxed_create(
+        &system,
+        Path::new("/project"),
+        Path::new("/notes/new.md"),
+        false,
+        &trusted,
+    )
+    .unwrap();
+    assert_eq!(result, Path::new("/notes/new.md"));
 }
 
 #[test]
@@ -1482,6 +1634,7 @@ fn sandboxed_absolute_blocked_but_unrestricted_allows() {
         Path::new("/project"),
         Path::new("/home/user/notes.md"),
         false,
+        &[],
     )
     .unwrap_err();
     assert!(
@@ -1495,6 +1648,7 @@ fn sandboxed_absolute_blocked_but_unrestricted_allows() {
         Path::new("/project"),
         Path::new("/home/user/notes.md"),
         true,
+        &[],
     )
     .unwrap();
     assert_eq!(result, Path::new("/home/user/notes.md"));
@@ -1518,6 +1672,7 @@ fn line_numbers_full_file() {
         None,
         true,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -1544,6 +1699,7 @@ fn line_numbers_with_range() {
         Some((50, 55)),
         true,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -1570,6 +1726,7 @@ fn line_numbers_padding() {
         Some((998, 1000)),
         true,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(
@@ -1593,6 +1750,7 @@ fn line_numbers_off_by_default() {
         None,
         false,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(content, "hello\nworld");
@@ -1613,6 +1771,7 @@ fn line_numbers_single_line() {
         None,
         true,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(content, "1\u{2502} only line");
@@ -1633,6 +1792,7 @@ fn line_numbers_empty_lines() {
         None,
         true,
         false,
+        &[],
     )
     .unwrap();
     assert_eq!(content, "1\u{2502} first\n2\u{2502} \n3\u{2502} third");
@@ -1653,6 +1813,7 @@ fn line_numbers_binary_rejected() {
         None,
         true,
         false,
+        &[],
     );
     let err = result.unwrap_err();
     assert!(

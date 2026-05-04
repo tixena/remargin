@@ -33,13 +33,16 @@ fn show_empty_when_no_config() {
     assert!(out.trusted_roots.is_empty());
 }
 
-/// 2 — single realm, all four keys populated; provenance preserved.
+/// 2 (rem-egp9) — single realm, all four keys populated; provenance
+/// preserved. Containment requires the `trusted_root` to live under the
+/// declaring file's parent, so the `trusted_root` path is `/r/notes`
+/// (was `/var/notes` pre-rem-egp9).
 #[test]
 fn show_single_realm_full_block() {
     let yaml = "\
 permissions:
   trusted_roots:
-    - /var/notes
+    - /r/notes
   restrict:
     - path: src
   deny_ops:
@@ -51,7 +54,7 @@ permissions:
     let out = show(&system, Path::new("/r")).unwrap();
 
     assert_eq!(out.trusted_roots.len(), 1);
-    assert_eq!(out.trusted_roots[0].path, PathBuf::from("/var/notes"));
+    assert_eq!(out.trusted_roots[0].path, PathBuf::from("/r/notes"));
     assert_eq!(
         out.trusted_roots[0].source_file,
         PathBuf::from("/r/.remargin.yaml")
@@ -81,41 +84,52 @@ permissions:
     );
 }
 
-/// 3 — `trusted_root` that is a realm: nested `.remargin.yaml` is
-/// expanded under `recursive`.
+/// 3 (rem-egp9) — `trusted_root` that is a realm: nested
+/// `.remargin.yaml` is expanded under `recursive`. The `trusted_root`
+/// must live under the declaring file's parent (containment), so
+/// declare from `/r` and trust `/r/x`.
 #[test]
 fn show_recursive_when_trusted_root_is_realm() {
-    let outer = "permissions:\n  trusted_roots:\n    - /x\n";
+    let outer = "permissions:\n  trusted_roots:\n    - /r/x\n";
     let inner = "permissions:\n  restrict:\n    - path: '*'\n";
-    let system = mock_with(&[("/r/.remargin.yaml", outer), ("/x/.remargin.yaml", inner)]);
+    let system = mock_with(&[("/r/.remargin.yaml", outer), ("/r/x/.remargin.yaml", inner)]);
     let out = show(&system, Path::new("/r")).unwrap();
     let nested = out.trusted_roots[0].recursive.as_ref().unwrap();
     assert_eq!(nested.restrict.len(), 1);
     assert_eq!(nested.restrict[0].path_text, "*");
 }
 
-/// 4 — `trusted_root` that is not a realm leaves `recursive = None`.
+/// 4 (rem-egp9) — `trusted_root` that is not a realm leaves
+/// `recursive = None`. Containment requires the `trusted_root` to be a
+/// subfolder of the declaring file's parent.
 #[test]
 fn show_no_recursive_when_no_inner_config() {
-    let outer = "permissions:\n  trusted_roots:\n    - /y\n";
+    let outer = "permissions:\n  trusted_roots:\n    - /r/y\n";
     let system = mock_with(&[("/r/.remargin.yaml", outer)]);
     let out = show(&system, Path::new("/r")).unwrap();
     assert!(out.trusted_roots[0].recursive.is_none());
 }
 
-/// 5 — cycle detection: `/r` trusts `/x`, `/x` trusts `/r`. The
-/// recursion stops once the visited set or depth cap fires; the
+/// 5 (rem-egp9) — cycle detection: `/r/x` trusts a relative `..`
+/// would violate containment, so we exercise cycle detection at the
+/// `show` rendering layer using two realms whose mutual `trusted_roots`
+/// are subfolders. `/r` trusts `/r/x`; `/r/x` trusts `/r/x/back`
+/// (which contains an inner config that loops to `/r/x`). The
 /// important property is that `show` returns rather than running
 /// forever, AND every leaf entry's `recursive` is `None`.
 #[test]
 fn show_cycle_detection_stops_recursion() {
-    let r = "permissions:\n  trusted_roots:\n    - /x\n";
-    let x = "permissions:\n  trusted_roots:\n    - /r\n";
-    let system = mock_with(&[("/r/.remargin.yaml", r), ("/x/.remargin.yaml", x)]);
+    let r = "permissions:\n  trusted_roots:\n    - /r/x\n";
+    let x = "permissions:\n  trusted_roots:\n    - /r/x/back\n";
+    let back = "permissions:\n  trusted_roots:\n    - /r/x/back/loop\n";
+    let loop_yaml = "permissions:\n  trusted_roots:\n    - /r/x/back/loop/again\n";
+    let system = mock_with(&[
+        ("/r/.remargin.yaml", r),
+        ("/r/x/.remargin.yaml", x),
+        ("/r/x/back/.remargin.yaml", back),
+        ("/r/x/back/loop/.remargin.yaml", loop_yaml),
+    ]);
 
-    // The fact that we reach this assertion at all proves recursion
-    // was bounded. Walk every reachable trusted_roots entry and
-    // verify the leaf's `recursive` is `None`.
     let out = show(&system, Path::new("/r")).unwrap();
     let depth_one = out.trusted_roots[0].recursive.as_ref().unwrap();
     let depth_two = depth_one
