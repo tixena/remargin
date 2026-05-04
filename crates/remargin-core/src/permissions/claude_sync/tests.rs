@@ -16,7 +16,7 @@ use crate::permissions::claude_sync::rule_shape::{
     OverlapKind, PathGlob, RuleShape, rules_overlap,
 };
 use crate::permissions::claude_sync::{
-    ALLOW_MCP_REMARGIN, BASH_MUTATORS, RuleSet, apply_rules, revert_rules, rules_for,
+    BASH_MUTATORS, RuleSet, apply_rules, revert_rules, rules_for,
 };
 use crate::permissions::sidecar::{self, sidecar_path};
 
@@ -176,14 +176,19 @@ fn subpath_no_extras_emits_full_default_set() {
     // remargin-cli deny because cli_allowed = false.
     assert_eq!(rules.deny[expected - 1], "Bash(remargin * /a/b/**)");
 
-    // Allow set: only the MCP allow (rem-2plr removed the implicit
-    // `.remargin/` editor-tool re-allow — `mcp__remargin__*` is the
-    // single allow that keeps remargin's runtime working).
-    assert_eq!(rules.allow.len(), 1, "{:#?}", rules.allow);
-    assert_eq!(rules.allow[0], ALLOW_MCP_REMARGIN);
+    // Allow set: empty by default (rem-si27 dropped the implicit
+    // `mcp__remargin__*` allow so users keep per-call oversight of
+    // remargin's MCP tools under a blanket restrict; rem-2plr removed
+    // the implicit `.remargin/` editor-tool re-allow).
+    assert!(rules.allow.is_empty(), "{:#?}", rules.allow);
     assert!(
         !rules.allow.iter().any(|r| r.contains(".remargin")),
         "rem-2plr: no implicit .remargin/ re-allow expected, got: {:#?}",
+        rules.allow
+    );
+    assert!(
+        !rules.allow.iter().any(|r| r.contains("mcp__remargin__")),
+        "rem-si27: no implicit mcp__remargin__* allow expected, got: {:#?}",
         rules.allow
     );
 }
@@ -361,7 +366,7 @@ fn empty_anchor() -> (MockSystem, PathBuf) {
 
 fn small_rule_set() -> RuleSet {
     RuleSet {
-        allow: vec![String::from(ALLOW_MCP_REMARGIN)],
+        allow: Vec::new(),
         deny: vec![
             String::from("Edit(/r/secret/**)"),
             String::from("Write(/r/secret/**)"),
@@ -402,8 +407,13 @@ fn apply_creates_missing_settings_files_and_sidecar() {
         let value = read_settings(&system, file);
         let deny = value["permissions"]["deny"].as_array().unwrap();
         assert_eq!(deny.len(), 2, "{file:?} -> {value:#?}");
+        // rem-si27: `restrict` no longer auto-emits the
+        // `mcp__remargin__*` allow, so the projected `allow` set is
+        // empty when `allow_dot_folders` is also empty. The settings
+        // file's `permissions.allow` slot is initialised as an empty
+        // array regardless.
         let allow = value["permissions"]["allow"].as_array().unwrap();
-        assert_eq!(allow.len(), 1);
+        assert!(allow.is_empty(), "{file:?} -> {value:#?}");
     }
 
     let sidecar = sidecar::load(&system, &anchor).unwrap();
@@ -786,10 +796,10 @@ fn revert_rules_strips_legacy_double_slash_rule() {
     let prior = json!({
         "permissions": {
             // Legacy double-slash deny rules, written by an older
-            // apply. The allow rule is the canonical
-            // `mcp__remargin__*` (no path so no slash drift).
+            // apply. rem-si27 dropped the implicit `mcp__remargin__*`
+            // allow, so the seeded allow set is empty.
             "deny": ["Edit(//r/secret/**)", "Write(//r/secret/**)"],
-            "allow": [ALLOW_MCP_REMARGIN]
+            "allow": []
         }
     });
     system.write(&local, prior.to_string().as_bytes()).unwrap();

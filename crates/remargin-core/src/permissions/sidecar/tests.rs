@@ -23,13 +23,17 @@ fn empty_anchor() -> (MockSystem, PathBuf) {
 }
 
 fn sample_entry() -> SidecarEntry {
+    // rem-si27: the projected allow set is empty by default now that
+    // `restrict` no longer auto-emits `mcp__remargin__*`. Pinning a
+    // single editor-tool re-allow here keeps the round-trip exercised
+    // with a non-empty allow vector.
     SidecarEntry {
         added_at: String::from("2026-04-26T10:00:00Z"),
         added_to_files: vec![
             PathBuf::from(".claude/settings.local.json"),
             PathBuf::from("/home/u/.claude/settings.json"),
         ],
-        allow: vec![String::from("mcp__remargin__*")],
+        allow: vec![String::from("Read(/r/secret/.github/**)")],
         deny: vec![
             String::from("Edit(/r/secret/**)"),
             String::from("Write(/r/secret/**)"),

@@ -25,7 +25,7 @@
 //!         ".claude/settings.local.json",
 //!         "/home/u/.claude/settings.json"
 //!       ],
-//!       "allow": ["mcp__remargin__*"],
+//!       "allow": [],
 //!       "deny": ["Edit(/abs/path/to/restricted/**)", "..."]
 //!     }
 //!   }

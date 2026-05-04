@@ -447,7 +447,15 @@ docs/design.md:25
 
 ## Permissions setup
 
-If `mcp__remargin__*` tools require approval on every call, ask the user to add this to `.claude/settings.local.json`:
+By default, Claude Code prompts on every `mcp__remargin__*` call. That
+is the intended behavior under `restrict`: the user wants explicit
+per-call oversight of remargin's MCP tools, since remargin may be the
+only path reaching the restricted content.
+
+If a user prefers silent forwarding (no prompts), it is **their**
+opt-in choice — `remargin restrict` does not make this decision for
+them. Suggest, but do not assume, that they add this block to
+`.claude/settings.local.json`:
 
 ```json
 {
@@ -462,11 +470,13 @@ the new `mcp__remargin__restrict`, `mcp__remargin__unprotect`,
 `mcp__remargin__permissions_show`, and `mcp__remargin__permissions_check`
 tools — no edit needed when the new commands ship.
 
-When `remargin restrict <path>` itself runs, it APPENDS additional
-deny / allow rules to the same `permissions` block (see the
-"restrict / unprotect" decision flowchart above for the full
-mechanism). The synchronizer is idempotent and the
-`mcp__remargin__*` allow is preserved verbatim.
+When `remargin restrict <path>` itself runs, it APPENDS deny rules
+(plus any explicit `allow_dot_folders` re-allows) to the same
+`permissions` block (see the "restrict / unprotect" decision flowchart
+above for the full mechanism). The synchronizer is idempotent.
+Crucially, `restrict` does **not** add `mcp__remargin__*` to the allow
+list — if the user has it there, it is because they put it there
+themselves, and `unprotect` will leave it alone.
 
 ---
 

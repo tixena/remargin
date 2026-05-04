@@ -86,8 +86,14 @@ pub struct RestrictEntry {
     #[serde(default)]
     pub also_deny_bash: Vec<String>,
 
-    /// When `true`, the CLI is allowed inside this restrict (only the
-    /// MCP / agent surfaces are blocked). Defaults to `false`.
+    /// When `true`, suppresses the projected `Bash(remargin *)` deny
+    /// rule so the CLI stays usable inside this restrict (only the MCP
+    /// / agent surfaces are blocked). Purely deny-side: this flag does
+    /// NOT add anything to the projected `permissions.allow` list, and
+    /// since rem-si27 dropped the auto-emitted `mcp__remargin__*`
+    /// allow, `restrict` no longer projects ANY allow rule unless the
+    /// user explicitly names an `allow_dot_folders` entry. Defaults to
+    /// `false`.
     #[serde(default)]
     pub cli_allowed: bool,
 

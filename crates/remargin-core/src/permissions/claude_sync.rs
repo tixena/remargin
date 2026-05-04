@@ -25,7 +25,6 @@
 //!   Edit(<path>/.*/**)               wildcard rule per Claude tool;
 //!   Write(<path>/.*/**)              suppressed when allow_dot_folders
 //!   NotebookEdit(<path>/.*/**)       names every dot-folder)
-//!   <per allow_dot_folders entry, RE-allow rules>
 //!   Bash(<cmd> [*] <path>/**)       ← every entry from BASH_MUTATORS,
 //!                                     covering the file-modifying
 //!                                     command surface (delete, create,
@@ -38,8 +37,27 @@
 //!   Bash(remargin * <path>/**)      ← only when cli_allowed=false
 //!
 //! allow:
-//!   mcp__remargin__*                ← always present
+//!   <per allow_dot_folders entry, RE-allow rules>   ← only emitted
+//!                                                     when the user
+//!                                                     names a dot-
+//!                                                     folder; empty
+//!                                                     by default
 //! ```
+//!
+//! ## No automatic `mcp__remargin__*` allow (rem-si27)
+//!
+//! Earlier revisions prepended `mcp__remargin__*` to every projected
+//! `allow` list so that a blanket `restrict` could not lock the user out
+//! of the very tools needed to call `unprotect`. That carve-out is
+//! gone: under `restrict` the user wants Claude to prompt before each
+//! MCP call to remargin (since remargin may be the only tool reaching
+//! the restricted content, the user explicitly wants per-call
+//! oversight). Users who want silent forwarding can opt in by adding
+//! `mcp__remargin__*` to `.claude/settings.local.json` themselves —
+//! `restrict` no longer does it for them. With this rule gone, the
+//! `allow` projection is empty unless `allow_dot_folders` names a
+//! folder; `restrict` is now purely a deny-side projection plus those
+//! optional dot-folder re-allows.
 //!
 //! ## Why a single wildcard for dot-folder denies
 //!
@@ -58,12 +76,13 @@
 //! Earlier versions auto-emitted `Edit/Write/Read/NotebookEdit` allows
 //! for `.remargin/**` so an out-of-band Claude session could peek at
 //! the state directory. That carve-out is gone (rem-2plr): remargin's
-//! runtime drives `.remargin/` through `mcp__remargin__*` (which is
-//! still always-allowed) and the native-tool allows were only useful
-//! for inspection — surface area we do not need. Users who want
-//! native-tool reach into `.remargin/` can opt in by adding `.remargin`
-//! to `allow_dot_folders`; the explicit-list path still emits the
-//! per-tool re-allow rules below.
+//! runtime drives `.remargin/` through `mcp__remargin__*` and the
+//! native-tool allows were only useful for inspection — surface area
+//! we do not need. Users who want native-tool reach into `.remargin/`
+//! can opt in by adding `.remargin` to `allow_dot_folders`; the
+//! explicit-list path still emits the per-tool re-allow rules below.
+//! Note that `mcp__remargin__*` itself is no longer auto-allowed
+//! either (rem-si27) — see the section above.
 //!
 //! ## No filesystem access
 //!
@@ -215,11 +234,6 @@ pub(crate) const BASH_MUTATORS: &[&str] = &[
     "pushd *",
 ];
 
-/// Allow rule that pins remargin's MCP tools as always-callable so a
-/// blanket `restrict` rule does not lock the user out of the very
-/// commands needed to reverse it.
-const ALLOW_MCP_REMARGIN: &str = "mcp__remargin__*";
-
 /// Diagnostic surface returned by [`revert_rules`].
 ///
 /// Manual-edit detection lives here: when the caller deletes a rule
@@ -246,9 +260,9 @@ pub struct RevertReport {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RuleSet {
-    /// `permissions.allow` rules. Always contains
-    /// [`ALLOW_MCP_REMARGIN`] so the user can still call remargin
-    /// tools even under a blanket restrict.
+    /// `permissions.allow` rules. Empty by default (rem-si27);
+    /// populated only with the per-dot-folder editor-tool re-allows
+    /// the caller requested via `allow_dot_folders`.
     pub allow: Vec<String>,
     /// `permissions.deny` rules in emit order.
     pub deny: Vec<String>,
@@ -345,9 +359,9 @@ pub fn rules_for(
     //     single-arg, source-side, and both-sides — close the
     //     exfiltration / accidental-source-move surface. Agents that
     //     legitimately need to move a tracked file under a restricted
-    //     realm route through `mcp__remargin__mv` (always allowed via
-    //     [`ALLOW_MCP_REMARGIN`]); humans with `cli_allowed: true`
-    //     fall back to `remargin mv`.
+    //     realm route through `mcp__remargin__mv` (which the user must
+    //     opt in to allowing — rem-si27 dropped the auto-allow);
+    //     humans with `cli_allowed: true` fall back to `remargin mv`.
     deny.push(format!("Bash(mv {glob_root}/**)"));
     deny.push(format!("Bash(mv {glob_root}/** *)"));
     deny.push(format!("Bash(mv {glob_root}/** {glob_root}/**)"));
@@ -363,12 +377,13 @@ pub fn rules_for(
         deny.push(format!("Bash(remargin * {glob_root}/**)"));
     }
 
-    // 6. Allow list. The MCP allow is always present; per-dot-folder
+    // 6. Allow list. Empty by default (rem-si27 dropped the implicit
+    //    `mcp__remargin__*` allow so users keep per-call oversight of
+    //    remargin's MCP tools under a blanket restrict). Per-dot-folder
     //    re-allows override the default-deny ONLY for folders the user
     //    explicitly listed in `allow_dot_folders` (rem-2plr — no
-    //    implicit `.remargin/` carve-out, MCP covers remargin's own
-    //    runtime needs).
-    let mut allow: Vec<String> = vec![String::from(ALLOW_MCP_REMARGIN)];
+    //    implicit `.remargin/` carve-out either).
+    let mut allow: Vec<String> = Vec::new();
     for folder in allow_dot_folders {
         for tool in EDITOR_TOOLS {
             allow.push(format!("{tool}({glob_root}/{folder}/**)"));

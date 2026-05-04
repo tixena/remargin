@@ -159,7 +159,9 @@ pub struct ResolvedRestrict {
     /// [`crate::config::permissions::RestrictEntry::also_deny_bash`].
     pub also_deny_bash: Vec<String>,
 
-    /// Carried verbatim from the on-disk entry.
+    /// Carried verbatim from the on-disk entry. Purely deny-side
+    /// (rem-si27): suppresses the projected `Bash(remargin *)` deny
+    /// rule when `true`; never adds anything to the allow list.
     pub cli_allowed: bool,
 
     /// Resolved path or wildcard-with-realm.
