@@ -926,6 +926,10 @@ fn dispatch_unprotect(
 /// failures (path escape, forbidden basename, restrict-guard violation,
 /// source-and-dest both missing, source-or-dest is a directory), and
 /// otherwise returns a populated [`MvDiff`] with `would_commit = true`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "consolidated mv preflight: every branch is one of the live op's checks (forbidden / sandbox / pre_mutate / dst-exists), kept inline so plan and live mv stay byte-equivalent"
+)]
 fn dispatch_mv(
     system: &dyn System,
     base_dir: &Path,
@@ -936,7 +940,7 @@ fn dispatch_mv(
     force: bool,
 ) -> Result<PlanReport> {
     use crate::document::allowlist;
-    use crate::permissions::op_guard::pre_mutate_check;
+    use crate::permissions::op_guard::pre_mutate_check_for_caller;
     use crate::writer::ensure_not_forbidden_target;
 
     let empty = parser::parse("").context("parsing empty before-document for plan mv")?;
@@ -1012,10 +1016,11 @@ fn dispatch_mv(
             );
         }
 
+        let caller = cfg.caller_info();
         if src_exists {
-            pre_mutate_check(system, "mv", &src_resolved)?;
+            pre_mutate_check_for_caller(system, "mv", &src_resolved, &caller)?;
         }
-        pre_mutate_check(system, "mv", &dst_resolved)?;
+        pre_mutate_check_for_caller(system, "mv", &dst_resolved, &caller)?;
 
         if dst_exists && !noop_same_path && !idempotent_already_settled && !force {
             anyhow::bail!(

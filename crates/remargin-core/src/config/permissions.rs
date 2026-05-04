@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use self::op_name::OpName;
 
 /// A single entry under `permissions.deny_ops`.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DenyOpsEntry {
@@ -44,6 +44,24 @@ pub struct DenyOpsEntry {
     /// an absolute path. Wildcards are NOT accepted here — `deny_ops`
     /// targets specific files / directories.
     pub path: String,
+
+    /// Optional identity (or list of identities) the deny applies to.
+    /// Empty (the default) means "all identities" — current behavior
+    /// for back-compat with `deny_ops` entries written before rem-egp9.
+    ///
+    /// Honored only in strict mode. Open-mode realms cannot trust the
+    /// caller's declared identity (it is trivially spoofed via
+    /// `--identity`), so the resolver records the entry but `op_guard`
+    /// ignores the `to:` filter and `lint_permissions_in_parents`
+    /// surfaces a warning. Strict mode validates identity against the
+    /// registry + signing key, so the filter is meaningful there.
+    ///
+    /// Identity matching: each entry compares against the caller's
+    /// `identity.name` first, falling back to `identity.id` (the
+    /// `.remargin.yaml`'s `identity:` field IS the name). This matches
+    /// the convention used elsewhere in the resolver.
+    #[serde(default)]
+    pub to: Vec<String>,
 }
 
 /// On-disk shape of the `permissions:` block in `.remargin.yaml`.

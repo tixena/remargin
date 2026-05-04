@@ -28,7 +28,7 @@ use serde::Serialize;
 
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
-use crate::permissions::op_guard::pre_mutate_check;
+use crate::permissions::op_guard::{CallerInfo, pre_mutate_check_for_caller};
 use crate::writer::ensure_not_forbidden_target;
 
 /// Inputs to [`mv`].
@@ -169,8 +169,9 @@ pub fn mv(
     )?;
     ensure_not_forbidden_target(&dst_resolved)?;
 
+    let caller = config.caller_info();
     let Some(src_resolved) = src_resolved_opt else {
-        return idempotent_already_settled(system, &dst_resolved, &src_lexical, &args.src);
+        return idempotent_already_settled(system, &dst_resolved, &src_lexical, &args.src, &caller);
     };
 
     if system.is_dir(&src_resolved).unwrap_or(false) {
@@ -185,15 +186,15 @@ pub fn mv(
     }
 
     if src_resolved == dst_resolved {
-        return same_path_noop(system, &src_resolved, dst_resolved);
+        return same_path_noop(system, &src_resolved, dst_resolved, &caller);
     }
 
     // Per-op guard on BOTH endpoints. A restrict entry on either side
     // refuses the move — symmetrically with how `mv`'s default deny
     // expansion now blocks both source-side and destination-side
     // shell `mv`.
-    pre_mutate_check(system, "mv", &src_resolved)?;
-    pre_mutate_check(system, "mv", &dst_resolved)?;
+    pre_mutate_check_for_caller(system, "mv", &src_resolved, &caller)?;
+    pre_mutate_check_for_caller(system, "mv", &dst_resolved, &caller)?;
 
     let dst_pre_existed = system.exists(&dst_resolved).unwrap_or(false);
     if dst_pre_existed && !args.force {
@@ -271,9 +272,10 @@ fn idempotent_already_settled(
     dst_resolved: &Path,
     src_lexical: &Path,
     requested_src: &Path,
+    caller: &CallerInfo,
 ) -> Result<MvOutcome> {
     if system.exists(dst_resolved).unwrap_or(false) {
-        pre_mutate_check(system, "mv", dst_resolved)?;
+        pre_mutate_check_for_caller(system, "mv", dst_resolved, caller)?;
         return Ok(MvOutcome {
             bytes_moved: 0,
             dst_absolute: dst_resolved.to_path_buf(),
@@ -296,8 +298,9 @@ fn same_path_noop(
     system: &dyn System,
     src_resolved: &Path,
     dst_resolved: PathBuf,
+    caller: &CallerInfo,
 ) -> Result<MvOutcome> {
-    pre_mutate_check(system, "mv", src_resolved)?;
+    pre_mutate_check_for_caller(system, "mv", src_resolved, caller)?;
     Ok(MvOutcome {
         bytes_moved: file_size(system, src_resolved),
         dst_absolute: dst_resolved,

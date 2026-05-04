@@ -378,4 +378,114 @@ mod tests {
     // via MCP. Strict-mode error coverage now lives in the CLI-only
     // `cli_unprotect_strict_unrestricted_path_fails` above; the surface
     // removal itself is asserted by `unprotect_absent_from_mcp_surface`.
+
+    // -----------------------------------------------------------------
+    // rem-egp9 — legacy projected rules scrubbed by unprotect via the
+    // existing sidecar mechanism.
+    // -----------------------------------------------------------------
+
+    /// rem-egp9 acceptance: the legacy ~80 projected deny rules
+    /// emitted by pre-rem-egp9 `restrict` (per-tool path denies,
+    /// dot-folder defaults, ~70 Bash-mutator entries, source-side mv
+    /// patterns) are scrubbed cleanly when `unprotect` runs against
+    /// the matching sidecar.
+    ///
+    /// Migration story: users who restrict-then-unprotect-after-upgrade
+    /// get all their legacy rules cleaned up via the existing sidecar
+    /// machinery, with no special-case migration code. The drift
+    /// detector (rem-lwxa) flags users who never run unprotect.
+    #[test]
+    fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
+        // Load the fixture files.
+        let fixture_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_unprotect");
+        let legacy_settings_body =
+            fs::read_to_string(fixture_dir.join("legacy-settings.json")).unwrap();
+        let sidecar_body = fs::read_to_string(fixture_dir.join("sidecar.json")).unwrap();
+
+        // Build a realm that mirrors the on-disk paths the fixture's
+        // sidecar references. The sidecar names the project-scope
+        // settings file as `/realm/.claude/settings.local.json`, but
+        // we run the test in a tempdir; fix the sidecar path to point
+        // to the temp realm so revert_rules can find the file.
+        let realm = realm_with_claude();
+        let realm_path = realm.path();
+        let project_scope = realm_path.join(".claude/settings.local.json");
+        fs::write(&project_scope, &legacy_settings_body).unwrap();
+
+        // Patch the sidecar's `added_to_files` to point at the temp
+        // project-scope settings file path.
+        let mut sidecar_value: Value = serde_json::from_str(&sidecar_body).unwrap();
+        let entries = sidecar_value["entries"].as_object_mut().unwrap();
+        let entry = entries.values_mut().next().unwrap();
+        entry["added_to_files"] = json!([project_scope.to_string_lossy()]);
+        let sidecar_path = realm_path.join(".claude/.remargin-restrictions.json");
+        fs::write(
+            &sidecar_path,
+            serde_json::to_string_pretty(&sidecar_value).unwrap(),
+        )
+        .unwrap();
+
+        // Stand up the matching `.remargin.yaml` so `unprotect` finds
+        // a YAML entry to remove. The path "/realm/src/secret" in the
+        // sidecar maps to a relative `src/secret` from the realm root.
+        let yaml = "permissions:\n  restrict:\n    - path: src/secret\n";
+        fs::write(realm_path.join(".remargin.yaml"), yaml).unwrap();
+        // Patch the sidecar's entry key to also use the temp realm path.
+        let new_key = realm_path.join("src/secret").to_string_lossy().to_string();
+        let mut sidecar_value_v2: Value =
+            serde_json::from_str(&fs::read_to_string(&sidecar_path).unwrap()).unwrap();
+        let entries_v2 = sidecar_value_v2["entries"].as_object_mut().unwrap();
+        let prev_value = entries_v2.remove("/realm/src/secret").unwrap();
+        entries_v2.insert(new_key, prev_value);
+        fs::write(
+            &sidecar_path,
+            serde_json::to_string_pretty(&sidecar_value_v2).unwrap(),
+        )
+        .unwrap();
+
+        // Sanity: settings file currently carries the legacy rules.
+        let pre_settings: Value =
+            serde_json::from_str(&fs::read_to_string(&project_scope).unwrap()).unwrap();
+        let pre_deny = pre_settings["permissions"]["deny"].as_array().unwrap();
+        assert!(
+            pre_deny.len() >= 80,
+            "fixture should carry the ~80 legacy rules, got {}",
+            pre_deny.len()
+        );
+
+        // Run unprotect.
+        let user_settings = realm_path.join("hermetic-user-settings.json");
+        // Touch the user settings file so `unprotect` doesn't think the
+        // path is unset (the sidecar only references the project file).
+        fs::write(&user_settings, "{}").unwrap();
+        let out = run_in(
+            realm_path,
+            &[
+                "unprotect",
+                "src/secret",
+                "--user-settings",
+                user_settings.to_str().unwrap(),
+            ],
+        );
+        assert_status(&out, 0);
+
+        // Settings file is scrubbed of every legacy projected rule.
+        let post_settings: Value =
+            serde_json::from_str(&fs::read_to_string(&project_scope).unwrap()).unwrap();
+        let post_deny = post_settings["permissions"]["deny"].as_array().unwrap();
+        assert!(
+            post_deny.is_empty(),
+            "every legacy rule should be scrubbed; remaining: {post_deny:#?}"
+        );
+
+        // Sidecar entries are empty.
+        let post_sidecar: Value =
+            serde_json::from_str(&fs::read_to_string(&sidecar_path).unwrap()).unwrap();
+        let post_entries = post_sidecar["entries"].as_object().unwrap();
+        assert!(
+            post_entries.is_empty(),
+            "sidecar entries should be empty after unprotect, got: {post_entries:?}"
+        );
+    }
 }

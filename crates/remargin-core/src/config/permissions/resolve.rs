@@ -142,6 +142,13 @@ pub struct ResolvedDenyOps {
 
     /// `.remargin.yaml` that declared the entry.
     pub source_file: PathBuf,
+
+    /// Optional identity filter (rem-egp9). Empty means "all
+    /// identities" — back-compat with pre-rem-egp9 `deny_ops` entries.
+    /// Honored only when the realm is in strict mode; open-mode
+    /// realms ignore the filter and `lint_permissions_in_parents`
+    /// surfaces a warning.
+    pub to: Vec<String>,
 }
 
 /// Accumulated permissions across every `.remargin.yaml` between
@@ -285,6 +292,7 @@ fn extend_resolved(
             ops: entry.ops.clone(),
             path,
             source_file: source_file.to_path_buf(),
+            to: entry.to.clone(),
         });
     }
 
@@ -330,8 +338,16 @@ fn resolve_relative(system: &dyn System, source_dir: &Path, raw: &str) -> PathBu
 /// short-circuit on the first failure — every offending file is
 /// reported so the user fixes them in one pass.
 ///
+/// rem-egp9: also surfaces a non-fatal "`deny_ops` `to:` is ignored
+/// in non-strict mode" warning per offending entry — open / registered
+/// mode realms cannot trust the caller's declared identity (it is
+/// trivially spoofed via `--identity` flags), so the per-op guard
+/// ignores the `to:` filter and emits a wider deny than the user
+/// likely intended. Strict-mode realms validate identity against the
+/// registry + signing key, so the filter is meaningful there.
+///
 /// I/O failures (e.g. read errors) are propagated up as `Err`; only
-/// parse failures become `PermissionsLintError`s.
+/// parse failures and lint warnings become `PermissionsLintError`s.
 ///
 /// # Errors
 ///
@@ -341,6 +357,8 @@ pub fn lint_permissions_in_parents(
     system: &dyn System,
     start_dir: &Path,
 ) -> Result<Vec<PermissionsLintError>> {
+    use crate::config::{Mode, resolve_mode};
+    let realm_mode = resolve_mode(system, start_dir).map_or(Mode::Open, |r| r.mode);
     let mut findings = Vec::new();
     let mut current = start_dir.to_path_buf();
 
@@ -355,7 +373,24 @@ pub fn lint_permissions_in_parents(
                 .read_to_string(&candidate)
                 .with_context(|| format!("reading {}", candidate.display()))?;
             match serde_yaml::from_str::<PermissionsOnly>(&raw) {
-                Ok(_) => {}
+                Ok(projection) => {
+                    if !matches!(realm_mode, Mode::Strict) {
+                        for entry in projection.permissions.deny_ops {
+                            if !entry.to.is_empty() {
+                                findings.push(PermissionsLintError {
+                                    column: None,
+                                    line: None,
+                                    message: format!(
+                                        "deny_ops 'to:' on path '{}' is ignored in non-strict mode (realm mode is {:?}); the deny will fire for every identity",
+                                        entry.path,
+                                        realm_mode,
+                                    ),
+                                    source_file: candidate.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
                 Err(err) => {
                     let location = err.location();
                     findings.push(PermissionsLintError {

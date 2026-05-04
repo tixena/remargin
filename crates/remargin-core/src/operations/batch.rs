@@ -24,7 +24,7 @@ use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::operations::{copy_attachments, find_comment_mut};
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument};
-use crate::permissions::op_guard::pre_mutate_check;
+use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
@@ -176,7 +176,7 @@ pub fn batch_comment(
     // every sub-op (rem-mu9h scenario 18 — atomic refusal). If the
     // path becomes restricted, the entire batch is rejected before
     // any I/O.
-    pre_mutate_check(system, "batch", path)?;
+    pre_mutate_check_for_caller(system, "batch", path, &config.caller_info())?;
 
     // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;

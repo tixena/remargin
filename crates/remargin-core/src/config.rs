@@ -18,6 +18,7 @@ use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::parser::AuthorType;
 use crate::path::expand_path;
+use crate::permissions::op_guard::CallerInfo;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
@@ -46,10 +47,12 @@ pub struct Config {
 }
 
 /// Enforcement mode for the participant registry.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Mode {
+    /// Default — registry / signing not enforced.
+    #[default]
     Open,
     Registered,
     Strict,
@@ -127,6 +130,19 @@ pub struct ResolvedConfig {
 }
 
 impl ResolvedConfig {
+    /// Build the [`CallerInfo`] view of this config so the per-op
+    /// guard can evaluate identity-scoped `deny_ops` (rem-egp9). Pure
+    /// projection — no I/O.
+    #[must_use]
+    pub fn caller_info(&self) -> CallerInfo {
+        CallerInfo {
+            author_type: self.author_type.clone(),
+            identity_id: self.identity.clone(),
+            identity_name: self.identity.clone(),
+            mode: self.mode.clone(),
+        }
+    }
+
     /// Check if a participant is allowed to post (mode + registry enforcement).
     ///
     /// Kept as a crate-private helper used by [`Self::resolve`] as a

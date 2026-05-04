@@ -26,7 +26,7 @@ use crate::config::ResolvedConfig;
 use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser;
-use crate::permissions::op_guard::pre_mutate_check;
+use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Bytes + mime + size for a binary file read.
@@ -510,7 +510,7 @@ pub fn write(
     opts: WriteOptions,
 ) -> Result<WriteOutcome> {
     ensure_not_forbidden_target(path)?;
-    pre_mutate_check(system, "write", path)?;
+    pre_mutate_check_for_caller(system, "write", path, &config.caller_info())?;
     validate_write_opts(path, &opts)?;
 
     let resolved = if opts.create {

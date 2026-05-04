@@ -49,7 +49,7 @@ use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_signature};
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Comment, Segment};
-use crate::permissions::op_guard::pre_mutate_check;
+use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::writer;
 
 /// Classified candidate set returned by [`classify_candidates`]: first
@@ -181,7 +181,7 @@ pub fn sign_comments(
     options: SignOptions,
 ) -> Result<SignResult> {
     writer::ensure_not_forbidden_target(path)?;
-    pre_mutate_check(system, "sign", path)?;
+    pre_mutate_check_for_caller(system, "sign", path, &config.caller_info())?;
 
     let identity = config
         .identity

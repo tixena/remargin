@@ -5,18 +5,21 @@
 //! follow-up integration ticket — the unit tests here cover the
 //! matcher's full decision table.
 
+use std::env;
 use std::path::{Path, PathBuf};
 
 use os_shim::mock::MockSystem;
 
+use crate::config::Mode;
 use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::resolve::{
-    ResolvedPermissions, ResolvedRestrict, RestrictPath, TrustedRoot,
+    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath, TrustedRoot,
 };
+use crate::parser::AuthorType;
 use crate::permissions::op_guard::{
-    DENY_OPS_DENIAL_TEMPLATE, MUTATING_OPS, OpGuardError, OpKind, READ_OPS,
-    RESTRICT_DENIAL_TEMPLATE, check_against_resolved, is_mutating_op, op_kind, pre_mutate_check,
-    restrict_covers,
+    CallerInfo, DENY_OPS_DENIAL_TEMPLATE, MUTATING_OPS, OpGuardError, OpKind, READ_OPS,
+    RESTRICT_DENIAL_TEMPLATE, check_against_resolved, check_against_resolved_for_caller,
+    is_mutating_op, op_kind, pre_mutate_check, restrict_covers,
 };
 
 fn realm_with(yaml: &str) -> MockSystem {
@@ -383,6 +386,7 @@ fn scenario_23_deny_ops_is_not_carved_out_by_trusted_roots() {
             ops: vec![OpName::Purge],
             path: PathBuf::from("/home/user"),
             source_file: source_file.clone(),
+            to: Vec::new(),
         }],
         restrict: vec![ResolvedRestrict {
             also_deny_bash: Vec::new(),
@@ -625,6 +629,7 @@ fn denial_error_wording_matches_canonical_template() {
         op: String::from("purge"),
         source_file: PathBuf::from("/r/.remargin.yaml"),
         target: PathBuf::from("/r/signed/x.md"),
+        to: Vec::new(),
     };
     let denied_msg = format!("{denied}");
     let denied_expected_backtick =
@@ -647,4 +652,202 @@ fn denial_error_wording_matches_canonical_template() {
     assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{op}"));
     assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{target}"));
     assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{source_file}"));
+}
+
+// ---------------------------------------------------------------------
+// rem-egp9 — identity-scoped deny_ops + agent ~/.ssh/** default
+// ---------------------------------------------------------------------
+
+fn deny_ops_with_to(ops: Vec<OpName>, path: &str, to: &[&str]) -> Vec<ResolvedDenyOps> {
+    vec![ResolvedDenyOps {
+        ops,
+        path: PathBuf::from(path),
+        source_file: PathBuf::from("/r/.remargin.yaml"),
+        to: to.iter().copied().map(String::from).collect(),
+    }]
+}
+
+fn caller(name: &str, author_type: AuthorType, mode: Mode) -> CallerInfo {
+    CallerInfo {
+        author_type: Some(author_type),
+        identity_id: Some(String::from(name)),
+        identity_name: Some(String::from(name)),
+        mode,
+    }
+}
+
+/// rem-egp9: `to:` filter matches the caller's identity in strict
+/// mode → deny fires.
+#[test]
+fn deny_ops_to_matches_caller_in_strict_mode_refuses() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice"]),
+        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
+    };
+    let caller = caller("alice", AuthorType::Human, Mode::Strict);
+    let err =
+        check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
+            .unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(
+        chain.contains("alice"),
+        "refusal must name the identity: {chain}"
+    );
+    assert!(
+        chain.contains("deny_ops"),
+        "refusal must cite deny_ops: {chain}"
+    );
+}
+
+/// rem-egp9: `to:` filter does NOT match the caller in strict mode →
+/// deny does not fire (rule applies only to other identities).
+#[test]
+fn deny_ops_to_does_not_match_caller_in_strict_mode_allows() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
+        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
+    };
+    let caller = caller("alice", AuthorType::Human, Mode::Strict);
+    check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
+        .unwrap();
+}
+
+/// rem-egp9: in open mode the `to:` filter is ignored — the deny
+/// fires for every identity (the realm cannot trust the declared
+/// identity). Lint surfaces a warning at parse time.
+#[test]
+fn deny_ops_to_is_ignored_in_open_mode() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
+        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
+    };
+    // Caller "alice" is NOT in `to`, but the realm is open mode.
+    // The deny fires anyway because open mode cannot trust identity.
+    let caller = caller("alice", AuthorType::Human, Mode::Open);
+    let err =
+        check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
+            .unwrap_err();
+    assert!(matches!(
+        err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::DeniedOp { .. })
+    ));
+}
+
+/// rem-egp9: a strict-mode AGENT caller is denied READ on
+/// `~/.ssh/id_ed25519` by the synthesized default. Drives the read
+/// path through the `get` op (which `is_mutating_op` reports `false`
+/// — the synthesized deny covers every op including reads).
+#[test]
+fn strict_agent_denied_default_ssh_read() {
+    // Stand $HOME up so the synthesized path is deterministic.
+    // SAFETY: tests run single-threaded by default; no other test in
+    // this scope touches HOME at the same time.
+    // SAFETY: std::env::set_var/remove_var are unsafe in 2024 edition.
+    // SAFETY: tests run single-threaded by default; the rem-egp9
+    // suite owns the HOME env var for the duration of the test.
+    // SAFETY (rem-egp9): cargo test runs each test on its own thread but
+    // env vars are process-global. The HOME-touching tests in this scope
+    // are not parallel-safe with each other, but they are deterministic
+    // when run individually (cargo test -- --test-threads=1 honored by CI).
+    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let resolved = ResolvedPermissions::default();
+    let caller = caller("nimbus", AuthorType::Agent, Mode::Strict);
+    let err = check_against_resolved_for_caller(
+        "get",
+        Path::new("/h/.ssh/id_ed25519"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(chain.contains("deny_ops"), "{chain}");
+}
+
+/// rem-egp9: a strict-mode HUMAN caller can read the same SSH path
+/// (the synthesized default applies to agents only).
+#[test]
+fn strict_human_can_read_ssh() {
+    // SAFETY: tests run single-threaded by default; the rem-egp9
+    // suite owns the HOME env var for the duration of the test.
+    // SAFETY (rem-egp9): cargo test runs each test on its own thread but
+    // env vars are process-global. The HOME-touching tests in this scope
+    // are not parallel-safe with each other, but they are deterministic
+    // when run individually (cargo test -- --test-threads=1 honored by CI).
+    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let resolved = ResolvedPermissions::default();
+    let caller = caller("alice", AuthorType::Human, Mode::Strict);
+    check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
+        .unwrap();
+}
+
+/// rem-egp9: the user can override the synthesized default by listing
+/// the same path with `to: [<agent_id>]` and `ops: []`.
+#[test]
+fn strict_agent_default_ssh_override_via_explicit_to_with_empty_ops() {
+    // SAFETY: tests run single-threaded by default; the rem-egp9
+    // suite owns the HOME env var for the duration of the test.
+    // SAFETY (rem-egp9): cargo test runs each test on its own thread but
+    // env vars are process-global. The HOME-touching tests in this scope
+    // are not parallel-safe with each other, but they are deterministic
+    // when run individually (cargo test -- --test-threads=1 honored by CI).
+    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: vec![ResolvedDenyOps {
+            ops: Vec::new(),
+            path: PathBuf::from("/h/.ssh"),
+            source_file: PathBuf::from("/r/.remargin.yaml"),
+            to: vec![String::from("nimbus")],
+        }],
+        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
+    };
+    let caller = caller("nimbus", AuthorType::Agent, Mode::Strict);
+    check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
+        .unwrap();
+}
+
+/// rem-egp9: the synthesized SSH default does NOT fire in open mode
+/// (the realm cannot trust that the caller really is an agent).
+#[test]
+fn open_mode_agent_can_read_ssh_no_synthesized_default() {
+    // SAFETY: tests run single-threaded by default; the rem-egp9
+    // suite owns the HOME env var for the duration of the test.
+    // SAFETY (rem-egp9): cargo test runs each test on its own thread but
+    // env vars are process-global. The HOME-touching tests in this scope
+    // are not parallel-safe with each other, but they are deterministic
+    // when run individually (cargo test -- --test-threads=1 honored by CI).
+    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let resolved = ResolvedPermissions::default();
+    let caller = caller("nimbus", AuthorType::Agent, Mode::Open);
+    check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
+        .unwrap();
+}
+
+/// rem-egp9: identity matching falls back from name to id.
+#[test]
+fn deny_ops_to_matches_id_when_name_does_not() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice-id"]),
+        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
+    };
+    let caller = CallerInfo {
+        author_type: Some(AuthorType::Human),
+        identity_id: Some(String::from("alice-id")),
+        identity_name: Some(String::from("alice-display-name")),
+        mode: Mode::Strict,
+    };
+    let err =
+        check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
+            .unwrap_err();
+    let chain = format!("{err:#}");
+    assert!(chain.contains("alice-id"), "{chain}");
 }

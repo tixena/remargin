@@ -50,7 +50,7 @@ use crate::frontmatter;
 use crate::id;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, LegacyRole, Segment};
-use crate::permissions::op_guard::pre_mutate_check;
+use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::Reactions;
 use crate::writer;
 
@@ -163,7 +163,7 @@ pub fn migrate(
     backup: bool,
 ) -> Result<Vec<MigratedComment>> {
     writer::ensure_not_forbidden_target(path)?;
-    pre_mutate_check(system, "migrate", path)?;
+    pre_mutate_check_for_caller(system, "migrate", path, &config.caller_info())?;
     let mut doc = parser::parse_file(system, path)?;
 
     let legacy_count = doc.legacy_comments().len();
