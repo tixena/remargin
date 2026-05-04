@@ -222,48 +222,66 @@ mod tests {
         assert_eq!(value["yaml_was_created"], json!(true));
     }
 
-    /// Scenario 20: MCP parity. Calling `mcp__remargin__restrict` with
-    /// the same args produces a structurally-identical payload.
+    /// rem-888p: `restrict` is intentionally absent from the MCP
+    /// surface. `tools/list` must not advertise it, and dispatching it
+    /// must return a CLI-pointing tool error. Replaces the previous
+    /// MCP-parity test (`mcp_restrict_matches_cli_json`).
     #[test]
-    fn mcp_restrict_matches_cli_json() {
+    fn restrict_absent_from_mcp_surface() {
         let realm = realm_with_claude();
-        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
-        let user_settings = user_settings_arg(&realm);
 
         let system = RealSystem::new();
         let base = system.canonicalize(realm.path()).unwrap();
         let config =
             ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
-        let request = json!({
+        // tools/list does not advertise `restrict`.
+        let list_request = json!({
             "jsonrpc": "2.0",
             "id": 1_i32,
+            "method": "tools/list",
+            "params": {}
+        });
+        let list_response_str =
+            mcp::process_request(&system, &base, &config, &list_request.to_string())
+                .unwrap()
+                .unwrap();
+        let list_response: Value = serde_json::from_str(&list_response_str).unwrap();
+        let tools = list_response["result"]["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(
+            !names.contains(&"restrict"),
+            "restrict must not appear in tools/list (rem-888p), got: {names:?}"
+        );
+
+        // tools/call with name=restrict returns a CLI-pointing tool error.
+        let call_request = json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
             "method": "tools/call",
             "params": {
                 "name": "restrict",
-                "arguments": {
-                    "path": "src/secret",
-                    "user_settings": user_settings.to_string_lossy(),
-                }
+                "arguments": { "path": "src/secret" }
             }
         });
-        let request_str = serde_json::to_string(&request).unwrap();
-        let response_str = mcp::process_request(&system, &base, &config, &request_str)
-            .unwrap()
-            .unwrap();
-        let response: Value = serde_json::from_str(&response_str).unwrap();
-        let result = response.get("result").unwrap();
-        let content = result.get("content").and_then(Value::as_array).unwrap();
-        let text = content[0].get("text").and_then(Value::as_str).unwrap();
-        let payload: Value = serde_json::from_str(text).unwrap();
-        assert!(payload.get("absolute_path").is_some());
-        assert!(payload.get("anchor").is_some());
-        assert!(
-            payload
-                .get("rules_applied")
-                .and_then(Value::as_array)
-                .is_some_and(|a| !a.is_empty())
+        let call_response_str =
+            mcp::process_request(&system, &base, &config, &call_request.to_string())
+                .unwrap()
+                .unwrap();
+        let call_response: Value = serde_json::from_str(&call_response_str).unwrap();
+        assert_eq!(
+            call_response["result"]["isError"].as_bool(),
+            Some(true),
+            "restrict dispatch must surface as a tool error (rem-888p)"
         );
+        let text = call_response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(
+            text.contains("not available via MCP"),
+            "expected refusal pointing to CLI, got: {text}"
+        );
+        assert!(text.contains("remargin restrict"), "got: {text}");
     }
 
     /// rem-ss9s: helper that runs `restrict src/secret` with the

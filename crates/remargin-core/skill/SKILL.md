@@ -359,14 +359,21 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 - `identity` — print configured identity. `identity create --identity NAME --type human|agent [--key PATH]` prints YAML to stdout.
 - `version` — print version info.
 
-### Permissions (CLI + MCP)
+### Permissions
 
 | Need | MCP tool | CLI |
 |---|---|---|
-| Restrict a path | `mcp__remargin__restrict` | `remargin restrict` |
-| Unprotect a path | `mcp__remargin__unprotect` | `remargin unprotect` |
+| Restrict a path | _CLI-only (rem-888p)_ | `remargin restrict` |
+| Unprotect a path | _CLI-only (rem-888p)_ | `remargin unprotect` |
 | Show resolved permissions | `mcp__remargin__permissions_show` | `remargin permissions show` |
 | Check if path is restricted | `mcp__remargin__permissions_check` | `remargin permissions check` |
+
+`restrict` and `unprotect` are intentionally CLI-only: they mutate
+permission policy and that decision belongs to the human, not to the
+agent. The MCP surface deliberately omits them, and `mcp__remargin__plan`
+also rejects `op="restrict"` and `op="unprotect"` for the same reason.
+Never call `remargin unprotect` from a Bash subprocess to clear a
+denial — surface the denial to the user and wait for explicit consent.
 
 No identity flags on these commands — editing your own permissions doesn't need an identity declaration.
 
@@ -466,9 +473,10 @@ them. Suggest, but do not assume, that they add this block to
 ```
 
 Approves all remargin tools at once. The wildcard automatically covers
-the new `mcp__remargin__restrict`, `mcp__remargin__unprotect`,
-`mcp__remargin__permissions_show`, and `mcp__remargin__permissions_check`
-tools — no edit needed when the new commands ship.
+the read-only inspection tools (`mcp__remargin__permissions_show`,
+`mcp__remargin__permissions_check`) — no edit needed when new commands
+ship. (`restrict` / `unprotect` are CLI-only — rem-888p — and not
+exposed via MCP.)
 
 When `remargin restrict <path>` itself runs, it APPENDS deny rules
 (plus any explicit `allow_dot_folders` re-allows) to the same

@@ -90,32 +90,20 @@ mod tests {
         serde_json::from_str(&body).unwrap()
     }
 
-    /// E3: CLI restrict and MCP restrict produce structurally
-    /// identical state. We run each in its own realm so they can't
-    /// interfere with each other; then compare the produced YAML +
-    /// the project-scope settings JSON.
+    /// E3 (rem-888p): the MCP `restrict` tool is intentionally absent
+    /// from the surface. Calling it leaves the realm completely
+    /// untouched (no .remargin.yaml, no settings file mutation), and
+    /// the response is a CLI-pointing tool error. Replaces the
+    /// previous "CLI and MCP restrict produce same state" parity
+    /// check, which no longer applies now that the MCP entry is gone.
     #[test]
-    fn cli_and_mcp_restrict_produce_same_state() {
-        // CLI side.
-        let cli_realm = realm_with_claude();
-        write_md(
-            &cli_realm,
-            "src/secret/foo.md",
-            "---\ntitle: t\n---\n\n# Hi\n",
-        );
-        restrict_in(&cli_realm, "src/secret", &[]);
-
-        // MCP side.
-        let mcp_realm = realm_with_claude();
-        write_md(
-            &mcp_realm,
-            "src/secret/foo.md",
-            "---\ntitle: t\n---\n\n# Hi\n",
-        );
-        let mcp_user_settings = user_settings(&mcp_realm);
+    fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
+        let realm = realm_with_claude();
+        write_md(&realm, "src/secret/foo.md", "---\ntitle: t\n---\n\n# Hi\n");
+        let mcp_user_settings = user_settings(&realm);
 
         let system = RealSystem::new();
-        let base = system.canonicalize(mcp_realm.path()).unwrap();
+        let base = system.canonicalize(realm.path()).unwrap();
         let config =
             ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
         let request = json!({
@@ -131,31 +119,38 @@ mod tests {
             }
         });
         let request_str = serde_json::to_string(&request).unwrap();
-        mcp::process_request(&system, &base, &config, &request_str)
+        let response_str = mcp::process_request(&system, &base, &config, &request_str)
             .unwrap()
             .unwrap();
+        let response: Value = serde_json::from_str(&response_str).unwrap();
+        assert_eq!(
+            response["result"]["isError"].as_bool(),
+            Some(true),
+            "MCP restrict must surface as a tool error (rem-888p)"
+        );
 
-        // Compare the YAML shapes (ignoring the absolute paths in
-        // resolved entries, which legitimately differ between
-        // tempdirs).
-        let cli_yaml = fs::read_to_string(cli_realm.path().join(".remargin.yaml")).unwrap();
-        let mcp_yaml = fs::read_to_string(mcp_realm.path().join(".remargin.yaml")).unwrap();
-        assert_eq!(cli_yaml, mcp_yaml, "YAML shapes diverged");
-
-        // Project-scope settings: the deny array should have the
-        // same shape (rule strings differ in the tempdir path, but
-        // the count + tool prefixes match).
-        let cli_settings = read_local_settings(&cli_realm);
-        let mcp_settings = read_local_settings(&mcp_realm);
-        let cli_deny_len = cli_settings["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .len();
-        let mcp_deny_len = mcp_settings["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .len();
-        assert_eq!(cli_deny_len, mcp_deny_len);
+        // No realm artifacts may have been created by the rejected
+        // dispatch: no .remargin.yaml, no project-scope settings, no
+        // user-scope settings file, no sidecar.
+        assert!(
+            !realm.path().join(".remargin.yaml").exists(),
+            "rejected MCP restrict must not create .remargin.yaml"
+        );
+        assert!(
+            !realm.path().join(".claude/settings.local.json").exists(),
+            "rejected MCP restrict must not create project settings"
+        );
+        assert!(
+            !mcp_user_settings.exists(),
+            "rejected MCP restrict must not create user settings"
+        );
+        assert!(
+            !realm
+                .path()
+                .join(".claude/.remargin-restrictions.json")
+                .exists(),
+            "rejected MCP restrict must not create sidecar"
+        );
     }
 
     /// E5: restrict two paths, unprotect one — the other survives

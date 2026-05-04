@@ -256,7 +256,7 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 30_usize);
+    assert_eq!(tools.len(), 28_usize);
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
@@ -280,8 +280,6 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"permissions_check"));
     assert!(names.contains(&"plan"));
     assert!(names.contains(&"query"));
-    assert!(names.contains(&"restrict"));
-    assert!(names.contains(&"unprotect"));
     assert!(names.contains(&"rm"));
     assert!(names.contains(&"search"));
     assert!(names.contains(&"sign"));
@@ -290,6 +288,10 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"sandbox_remove"));
     assert!(names.contains(&"sandbox_list"));
     assert!(names.contains(&"identity_create"));
+
+    // rem-888p: restrict and unprotect are intentionally CLI-only.
+    assert!(!names.contains(&"restrict"));
+    assert!(!names.contains(&"unprotect"));
 }
 
 #[test]
@@ -625,6 +627,138 @@ fn unknown_tool_returns_error() {
     );
 
     assert!(is_tool_error(&response));
+}
+
+/// rem-888p: `restrict` is intentionally absent from the MCP surface;
+/// dispatching it returns a tool error pointing the caller at the CLI.
+#[test]
+fn restrict_tool_dispatch_rejected() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "restrict",
+                "arguments": { "path": "src/secret" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let content = response["result"]["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("not available via MCP"),
+        "expected refusal pointing to CLI, got: {text}"
+    );
+    assert!(text.contains("remargin restrict"), "got: {text}");
+}
+
+/// rem-888p: `unprotect` is intentionally absent from the MCP surface;
+/// dispatching it returns a tool error pointing the caller at the CLI.
+#[test]
+fn unprotect_tool_dispatch_rejected() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "unprotect",
+                "arguments": { "path": "src/secret" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let content = response["result"]["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("not available via MCP"),
+        "expected refusal pointing to CLI, got: {text}"
+    );
+    assert!(text.contains("remargin unprotect"), "got: {text}");
+}
+
+/// rem-888p: `plan` with `op="restrict"` rejects with a CLI-pointing
+/// error; the projection itself stays reachable via the CLI.
+#[test]
+fn plan_restrict_op_rejected_via_mcp() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "restrict", "path": "src/secret" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let content = response["result"]["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("not available via MCP"),
+        "expected refusal pointing to CLI, got: {text}"
+    );
+    assert!(text.contains("remargin plan restrict"), "got: {text}");
+}
+
+/// rem-888p: `plan` with `op="unprotect"` rejects with a CLI-pointing
+/// error; the projection itself stays reachable via the CLI.
+#[test]
+fn plan_unprotect_op_rejected_via_mcp() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "unprotect", "path": "src/secret" }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let content = response["result"]["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("not available via MCP"),
+        "expected refusal pointing to CLI, got: {text}"
+    );
+    assert!(text.contains("remargin plan unprotect"), "got: {text}");
 }
 
 #[test]

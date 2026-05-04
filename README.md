@@ -405,9 +405,12 @@ entry kind) is documented as the module-level rustdoc on
 `crates/remargin/tests/cli_permissions.rs` — adding a field on the
 Rust types without updating the doc fails the build.
 
-Same surfaces are exposed via MCP as `mcp__remargin__restrict`,
-`mcp__remargin__unprotect`, `mcp__remargin__permissions_show`, and
-`mcp__remargin__permissions_check`.
+The read-only inspection surfaces are exposed via MCP as
+`mcp__remargin__permissions_show` and `mcp__remargin__permissions_check`.
+`restrict` and `unprotect` are intentionally CLI-only (rem-888p): they
+mutate permission policy and that decision belongs to the human, not
+to the agent. `mcp__remargin__plan` likewise rejects `op="restrict"`
+and `op="unprotect"`.
 
 ## CLI Reference
 

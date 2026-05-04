@@ -38,8 +38,6 @@ use crate::operations::search;
 use crate::parser;
 use crate::path::expand_path;
 use crate::permissions::inspect as permissions_inspect;
-use crate::permissions::restrict as permissions_restrict;
-use crate::permissions::unprotect as permissions_unprotect;
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -75,18 +73,10 @@ const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 /// supersedes the `McpSandbox` boundary (rem-w6m1). Listed
 /// alphabetically.
 ///
-/// `restrict` writes to absolute settings files outside the spawn
-/// sandbox by design (`~/.claude/settings.json` is the canonical
-/// user-scope file); its own anchor-walk + lexical-normalisation
-/// guarantees the restricted path lives under a valid `.claude/`
-/// ancestor. Routing it through `ensure_sandbox_covers_request`
-/// would reject the user-scope settings path and break the command.
-const NO_PATH_TOOLS: &[&str] = &[
-    "identity_create",
-    "permissions_show",
-    "restrict",
-    "unprotect",
-];
+/// `restrict` and `unprotect` are intentionally absent from the MCP
+/// surface (rem-888p): they mutate permission policy and must only be
+/// invokable by the human via the CLI.
+const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -450,23 +440,15 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv (rem-0j2x / T44) - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops: restrict (rem-puy5) - surfaces a `config_diff` describing every settings/YAML/sidecar file the live op would touch, plus detected conflicts. unprotect (rem-6eop) - surfaces an `unprotect_diff` describing every file the reverse op would touch, plus drift conflicts (manual edits, missing entries).",
+        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv (rem-0j2x / T44) - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (restrict / unprotect) are CLI-only - use `remargin plan restrict` / `remargin plan unprotect` (rem-888p).",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | mv | purge | restrict | sandbox-add | sandbox-remove | sign | unprotect | write" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | mv | purge | sandbox-add | sandbox-remove | sign | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
                 "src": { "type": "string", "description": "For mv: source path (rem-0j2x)." },
                 "dst": { "type": "string", "description": "For mv: destination path (rem-0j2x)." },
                 "force": { "type": "boolean", "description": "For mv: project the --force overwrite semantics.", "default": false },
-                "path": { "type": "string", "description": "For restrict / unprotect: subpath (or `*` for realm-wide)." },
-                "also_deny_bash": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "For restrict: extra Bash commands to deny on the path, layered on top of the broad default deny list (rem-p74a) which already covers every common file-modifying command (rm, chmod, editors, scriptable interpreters, archivers, shells, VCS, etc.)."
-                },
-                "cli_allowed": { "type": "boolean", "description": "For restrict: allow `Bash(remargin *)` so the CLI stays usable.", "default": false },
-                "user_settings": { "type": "string", "description": "For restrict: explicit user-scope settings path (defaults to `~/.claude/settings.json`)." },
                 "ids": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -731,59 +713,6 @@ fn desc_permissions_check() -> ToolDesc {
     }
 }
 
-/// Build the `restrict` tool descriptor (rem-yj1j.5 / rem-rdjy).
-fn desc_restrict() -> ToolDesc {
-    ToolDesc {
-        name: "restrict",
-        description: "Add a permissions.restrict entry under the nearest .claude/-bearing ancestor's \
-             .remargin.yaml AND project the equivalent rules into both Claude settings files \
-             (project-scope + user-scope) plus the sidecar. Idempotent. Supports the literal '*' \
-             for realm-wide restriction.",
-        schema: json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string", "description": "Subpath relative to the anchor, OR the literal '*' for realm-wide." },
-                "also_deny_bash": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Extra Bash command names to deny on the restricted path, layered on top of the broad default deny list (rem-p74a) which already blocks every common file-modifying command (rm, chmod, editors, scriptable interpreters, archivers, shells, VCS, etc.).",
-                    "default": []
-                },
-                "cli_allowed": {
-                    "type": "boolean",
-                    "description": "When true, allow Bash(remargin *) on the path so the CLI stays usable; the MCP / agent surfaces are still blocked.",
-                    "default": false
-                },
-                "user_settings": {
-                    "type": "string",
-                    "description": "Optional alternative path for the user-scope settings file. Defaults to ~/.claude/settings.json."
-                }
-            },
-            "required": ["path"]
-        }),
-    }
-}
-
-/// Build the `unprotect` tool descriptor (rem-yj1j.6 / rem-hsg4).
-fn desc_unprotect() -> ToolDesc {
-    ToolDesc {
-        name: "unprotect",
-        description: "Reverse a previous restrict: remove the matching permissions.restrict entry \
-             from the nearest .claude/-bearing ancestor's .remargin.yaml AND scrub the sidecar-tracked \
-             rules from both Claude settings files. Idempotent. Surfaces manual-edit divergences as \
-             warnings (never errors). Pass strict=true to fail with an error instead of warn-and-no-op \
-             when the path is not currently restricted.",
-        schema: json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string", "description": "Subpath relative to the anchor (matches the on-disk `path` field of the original restrict entry), OR the literal '*' for realm-wide." },
-                "strict": { "type": "boolean", "description": "When true, return an error instead of a warning if `path` is not currently restricted. Default false.", "default": false }
-            },
-            "required": ["path"]
-        }),
-    }
-}
-
 /// Build the `sandbox_add` tool descriptor.
 fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
@@ -880,14 +809,12 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_purge(),
         desc_query(),
         desc_react(),
-        desc_restrict(),
         desc_rm(),
         desc_sandbox_add(),
         desc_sandbox_list(),
         desc_sandbox_remove(),
         desc_search(),
         desc_sign(),
-        desc_unprotect(),
         desc_verify(),
         desc_write(),
     ]
@@ -1251,14 +1178,18 @@ fn dispatch_tool(
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
-        "restrict" => handle_restrict(system, base_dir, p),
+        "restrict" | "unprotect" => {
+            return tool_result_error(&format!(
+                "tool '{tool_name}' is not available via MCP - use the CLI: 'remargin {tool_name}' \
+                 or 'remargin plan {tool_name}' (rem-888p)"
+            ));
+        }
         "rm" => handle_rm(system, base_dir, config, p),
         "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
         "sandbox_list" => handle_sandbox_list(system, base_dir, config, p),
         "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, p),
         "search" => handle_search(system, base_dir, p),
         "sign" => handle_sign(system, base_dir, config, p),
-        "unprotect" => handle_unprotect(system, base_dir, p),
         "verify" => handle_verify(system, base_dir, config, p),
         "write" => handle_write(system, base_dir, config, p),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
@@ -1780,6 +1711,16 @@ fn resolve_role_identity_for_mcp(
     ))
 }
 
+/// Build the canonical "this plan op is CLI-only" error returned when
+/// `mcp__remargin__plan` is called with `op="restrict"` or
+/// `op="unprotect"` (rem-888p). Pulled out so [`handle_plan`] stays
+/// under the adapter LOC cap.
+fn plan_op_cli_only_error(op: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "plan op '{op}' is not available via MCP - use the CLI: 'remargin plan {op}' (rem-888p)"
+    )
+}
+
 /// Handle the `plan` tool: parse the request shape, build a
 /// [`plan_ops::PlanRequest`], and delegate to the canonical
 /// [`plan_ops::dispatch`] (rem-oqv / rem-3a2). The adapter-layer work is
@@ -1862,7 +1803,7 @@ fn handle_plan(
         "purge" => plan_ops::PlanRequest::Purge {
             path: base_dir.join(required_str(params, "file")?),
         },
-        "restrict" => build_plan_restrict_request(system, base_dir, params)?,
+        "restrict" | "unprotect" => return Err(plan_op_cli_only_error(op)),
         "sandbox-add" => plan_ops::PlanRequest::SandboxAdd {
             path: base_dir.join(required_str(params, "file")?),
         },
@@ -1873,7 +1814,6 @@ fn handle_plan(
             path: base_dir.join(required_str(params, "file")?),
             selection: build_sign_selection(params, "plan sign")?,
         },
-        "unprotect" => build_plan_unprotect_request(base_dir, params)?,
         "write" => {
             let file = required_str(params, "file")?;
             let content = required_str(params, "content")?;
@@ -1920,59 +1860,6 @@ fn parse_plan_batch_ops(params: &Map<String, Value>) -> Result<Vec<projections::
         ops.push(projections::ProjectBatchOp::from_json_object(obj, idx)?);
     }
     Ok(ops)
-}
-
-/// Translate `plan op="restrict"` MCP params into a
-/// [`plan_ops::PlanRequest::Restrict`] (rem-puy5). Pulled out so
-/// `handle_plan` stays under the adapter LOC cap (rem-wpq).
-///
-/// Anchor-walk failure surfaces via the projection's reject path
-/// rather than bailing here — the dispatcher synthesizes a report
-/// with `would_commit = false` and a populated `reject_reason`.
-fn build_plan_restrict_request<'req>(
-    system: &dyn System,
-    base_dir: &Path,
-    params: &Map<String, Value>,
-) -> Result<plan_ops::PlanRequest<'req>> {
-    let path_str = required_str(params, "path")?;
-    let cli_allowed = optional_bool(params, "cli_allowed");
-    let also_deny_bash = string_array(params, "also_deny_bash");
-    let user_scope = match optional_str(params, "user_settings") {
-        Some(explicit) => PathBuf::from(explicit),
-        None => expand_path(system, "~/.claude/settings.json")
-            .context("expanding default ~/.claude/settings.json")?,
-    };
-    let project_scope = permissions_restrict::find_claude_anchor(system, base_dir).map_or_else(
-        |_err| base_dir.join(".claude/settings.local.json"),
-        |anchor| anchor.join(".claude/settings.local.json"),
-    );
-    let restrict_args = permissions_restrict::RestrictArgs::new(
-        String::from(path_str),
-        also_deny_bash,
-        cli_allowed,
-    );
-    Ok(plan_ops::PlanRequest::Restrict {
-        args: restrict_args,
-        cwd: base_dir.to_path_buf(),
-        settings_files: vec![project_scope, user_scope],
-    })
-}
-
-/// Translate `plan op="unprotect"` MCP params into a
-/// [`plan_ops::PlanRequest::Unprotect`] (rem-6eop / T43). Symmetric
-/// mirror of [`build_plan_restrict_request`] for the reverse
-/// direction. Anchor-walk failure surfaces via the projection's
-/// reject path rather than bailing here.
-fn build_plan_unprotect_request<'req>(
-    base_dir: &Path,
-    params: &Map<String, Value>,
-) -> Result<plan_ops::PlanRequest<'req>> {
-    let path_str = required_str(params, "path")?;
-    let unprotect_args = permissions_unprotect::UnprotectArgs::new(String::from(path_str));
-    Ok(plan_ops::PlanRequest::Unprotect {
-        args: unprotect_args,
-        cwd: base_dir.to_path_buf(),
-    })
 }
 
 /// Parse the `lines` field of a `plan.write` request into a
@@ -2125,56 +2012,6 @@ fn handle_react(
 
     let action = if remove { "removed" } else { "added" };
     Ok(json!({ "action": action, "emoji": emoji, "comment_id": comment_id }))
-}
-
-/// Handle the `restrict` tool (rem-yj1j.5 / rem-rdjy).
-///
-/// Mirrors the CLI surface: anchor-walk from `base_dir`, append-or-
-/// merge into `<anchor>/.remargin.yaml`, project rules into both
-/// settings files (project-scope = `<anchor>/.claude/settings.local.json`,
-/// user-scope = `~/.claude/settings.json` unless overridden), update
-/// the sidecar.
-///
-/// `path` is a required field. `also_deny_bash` and `cli_allowed`
-/// are optional with the same defaults as the CLI. `user_settings`
-/// replaces the default user-scope path; the param normalisation
-/// pass already expanded `~` / `$VAR`.
-fn handle_restrict(
-    system: &dyn System,
-    base_dir: &Path,
-    params: &Map<String, Value>,
-) -> Result<Value> {
-    let path_str = required_str(params, "path")?;
-    let cli_allowed = optional_bool(params, "cli_allowed");
-    let also_deny_bash = string_array(params, "also_deny_bash");
-
-    let user_scope = match optional_str(params, "user_settings") {
-        Some(explicit) => PathBuf::from(explicit),
-        None => expand_path(system, "~/.claude/settings.json")
-            .context("expanding default ~/.claude/settings.json")?,
-    };
-    let anchor = permissions_restrict::find_claude_anchor(system, base_dir)?;
-    let project_scope = anchor.join(".claude/settings.local.json");
-
-    let args = permissions_restrict::RestrictArgs::new(
-        String::from(path_str),
-        also_deny_bash,
-        cli_allowed,
-    );
-    let outcome =
-        permissions_restrict::restrict(system, base_dir, &args, &[project_scope, user_scope])?;
-
-    Ok(json!({
-        "absolute_path": outcome.absolute_path.display().to_string(),
-        "anchor": outcome.anchor.display().to_string(),
-        "claude_files_touched": outcome
-            .claude_files_touched
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>(),
-        "rules_applied": outcome.rules_applied,
-        "yaml_was_created": outcome.yaml_was_created,
-    }))
 }
 
 /// Handle the `rm` tool: remove a file from the managed document tree.
@@ -2418,40 +2255,6 @@ fn handle_sign(
         "repaired": repaired,
         "signed": signed,
         "skipped": skipped,
-    }))
-}
-
-/// Handle the `unprotect` tool (rem-yj1j.6 / rem-hsg4).
-///
-/// Mirrors the CLI surface: anchor-walk from `base_dir`, look up
-/// the sidecar, remove the matching `.remargin.yaml` entry, and
-/// scrub the recorded rules from each settings file the
-/// corresponding `restrict` call touched.
-fn handle_unprotect(
-    system: &dyn System,
-    base_dir: &Path,
-    params: &Map<String, Value>,
-) -> Result<Value> {
-    let path_str = required_str(params, "path")?;
-    let strict = params
-        .get("strict")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let args =
-        permissions_unprotect::UnprotectArgs::new(String::from(path_str)).with_strict(strict);
-    let outcome = permissions_unprotect::unprotect(system, base_dir, &args)?;
-
-    Ok(json!({
-        "absolute_path": outcome.absolute_path.display().to_string(),
-        "anchor": outcome.anchor.display().to_string(),
-        "claude_files_touched": outcome
-            .claude_files_touched
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>(),
-        "rules_removed": outcome.rules_removed,
-        "warnings": outcome.warnings,
-        "yaml_entry_removed": outcome.yaml_entry_removed,
     }))
 }
 

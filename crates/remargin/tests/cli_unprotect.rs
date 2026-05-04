@@ -187,39 +187,66 @@ mod tests {
         assert!(value.get("warnings").and_then(Value::as_array).is_some());
     }
 
-    /// Scenario 16: MCP parity — `mcp__remargin__unprotect` returns
-    /// the same shape as the CLI `--json` output.
+    /// rem-888p: `unprotect` is intentionally absent from the MCP
+    /// surface. `tools/list` must not advertise it, and dispatching it
+    /// must return a CLI-pointing tool error. Replaces the previous
+    /// MCP-parity test (`mcp_unprotect_matches_cli_json`).
     #[test]
-    fn mcp_unprotect_matches_cli_json() {
+    fn unprotect_absent_from_mcp_surface() {
         let realm = realm_with_claude();
-        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
-        run_restrict(&realm, "src/secret");
 
         let system = RealSystem::new();
         let base = system.canonicalize(realm.path()).unwrap();
         let config =
             ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
-        let request = json!({
+        // tools/list does not advertise `unprotect`.
+        let list_request = json!({
             "jsonrpc": "2.0",
             "id": 1_i32,
+            "method": "tools/list",
+            "params": {}
+        });
+        let list_response_str =
+            mcp::process_request(&system, &base, &config, &list_request.to_string())
+                .unwrap()
+                .unwrap();
+        let list_response: Value = serde_json::from_str(&list_response_str).unwrap();
+        let tools = list_response["result"]["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(
+            !names.contains(&"unprotect"),
+            "unprotect must not appear in tools/list (rem-888p), got: {names:?}"
+        );
+
+        // tools/call with name=unprotect returns a CLI-pointing tool error.
+        let call_request = json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
             "method": "tools/call",
             "params": {
                 "name": "unprotect",
                 "arguments": { "path": "src/secret" }
             }
         });
-        let request_str = serde_json::to_string(&request).unwrap();
-        let response_str = mcp::process_request(&system, &base, &config, &request_str)
-            .unwrap()
+        let call_response_str =
+            mcp::process_request(&system, &base, &config, &call_request.to_string())
+                .unwrap()
+                .unwrap();
+        let call_response: Value = serde_json::from_str(&call_response_str).unwrap();
+        assert_eq!(
+            call_response["result"]["isError"].as_bool(),
+            Some(true),
+            "unprotect dispatch must surface as a tool error (rem-888p)"
+        );
+        let text = call_response["result"]["content"][0]["text"]
+            .as_str()
             .unwrap();
-        let response: Value = serde_json::from_str(&response_str).unwrap();
-        let result = response.get("result").unwrap();
-        let content = result.get("content").and_then(Value::as_array).unwrap();
-        let text = content[0].get("text").and_then(Value::as_str).unwrap();
-        let payload: Value = serde_json::from_str(text).unwrap();
-        assert!(payload.get("absolute_path").is_some());
-        assert_eq!(payload["yaml_entry_removed"], json!(true));
+        assert!(
+            text.contains("not available via MCP"),
+            "expected refusal pointing to CLI, got: {text}"
+        );
+        assert!(text.contains("remargin unprotect"), "got: {text}");
     }
 
     /// rem-s669: when rules have been hand-deleted from BOTH the
@@ -357,52 +384,9 @@ mod tests {
         assert!(!yaml_path.exists(), "no .remargin.yaml should be created");
     }
 
-    /// rem-bimq: MCP parity for `strict=true`. Calls the tool
-    /// directly (avoiding the full subprocess pipeline) and
-    /// asserts the JSON-RPC response surfaces the error.
-    #[test]
-    fn mcp_unprotect_strict_unrestricted_path_returns_error() {
-        let realm = realm_with_claude();
-        let system = RealSystem::new();
-        let base = system.canonicalize(realm.path()).unwrap();
-        let config =
-            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
-
-        let request = json!({
-            "jsonrpc": "2.0",
-            "id": 1_i32,
-            "method": "tools/call",
-            "params": {
-                "name": "unprotect",
-                "arguments": { "path": "src/secret", "strict": true }
-            }
-        });
-        let request_str = serde_json::to_string(&request).unwrap();
-        let response_str = mcp::process_request(&system, &base, &config, &request_str)
-            .unwrap()
-            .unwrap();
-        let response: Value = serde_json::from_str(&response_str).unwrap();
-        // MCP tool errors surface either as a JSON-RPC `error` object
-        // or as a result with `isError: true` and a text body. Accept
-        // whichever the server emits and assert the message text.
-        let body = response
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(Value::as_str)
-            .map(String::from)
-            .or_else(|| {
-                let r = response.get("result")?;
-                r.get("content")
-                    .and_then(Value::as_array)
-                    .and_then(|c| c.first())
-                    .and_then(|item| item.get("text"))
-                    .and_then(Value::as_str)
-                    .map(String::from)
-            })
-            .unwrap();
-        assert!(
-            body.contains("not currently restricted") && body.contains("--strict"),
-            "expected MCP error to mention strict refusal, got: {body}",
-        );
-    }
+    // rem-888p: the previous `mcp_unprotect_strict_unrestricted_path_returns_error`
+    // (rem-bimq MCP parity) is gone — `unprotect` is no longer exposed
+    // via MCP. Strict-mode error coverage now lives in the CLI-only
+    // `cli_unprotect_strict_unrestricted_path_fails` above; the surface
+    // removal itself is asserted by `unprotect_absent_from_mcp_surface`.
 }
