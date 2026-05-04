@@ -253,10 +253,13 @@ mod tests {
         assert_eq!(value["mv_diff"]["dst_exists"], json!(true));
     }
 
-    /// `remargin restrict` emits the new source-side `mv` deny
-    /// patterns into the project-scope settings file (rem-0j2x / T44).
+    /// rem-egp9: `remargin restrict` no longer projects per-Bash-cmd
+    /// mv patterns into Claude settings — the projection shrunk to a
+    /// single coarse `Bash(remargin *)` deny. Source-side `mv` refusal
+    /// now lives in the `op_guard`'s `mv` handler (rem-0j2x), which
+    /// fires on both MCP and CLI `mv` invocations through remargin.
     #[test]
-    fn restrict_emits_source_side_mv_denies() {
+    fn restrict_does_not_project_bash_mv_denies() {
         let realm = TempDir::new().unwrap();
         fs::create_dir_all(realm.path().join(".claude")).unwrap();
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
@@ -283,28 +286,13 @@ mod tests {
             .map(|v| String::from(v.as_str().unwrap()))
             .collect();
 
-        // Existing destination-side rule.
+        // No Bash(mv ...) patterns at all — the projection no longer
+        // tries to defend against `mv` at the Claude layer.
         assert!(
-            deny.iter()
-                .any(|r| r.starts_with("Bash(mv * ") && r.ends_with("/**)"))
+            !deny.iter().any(|r| r.starts_with("Bash(mv ")),
+            "rem-egp9: no Bash(mv ...) patterns expected, got: {deny:#?}"
         );
-        // New source-side rules (rem-0j2x).
-        assert!(
-            deny.iter()
-                .any(|r| r.contains("Bash(mv ") && r.ends_with("/**)") && !r.contains("* ")),
-            "expected `Bash(mv <path>/**)` rule, got: {deny:#?}"
-        );
-        assert!(
-            deny.iter()
-                .any(|r| r.contains("Bash(mv ") && r.contains("/** *)")),
-            "expected source-side `Bash(mv <path>/** *)` rule, got: {deny:#?}"
-        );
-        assert!(
-            deny.iter().any(|r| {
-                let opens = r.matches("/**").count();
-                opens >= 2 && r.starts_with("Bash(mv ")
-            }),
-            "expected both-sides `Bash(mv <path>/** <path>/**)` rule, got: {deny:#?}"
-        );
+        // The single coarse remargin-cli deny is the only entry.
+        assert_eq!(deny, vec![String::from("Bash(remargin *)")]);
     }
 }

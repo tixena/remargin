@@ -1,8 +1,15 @@
 //! Unit tests for [`crate::permissions::claude_sync::rules_for`]
-//! (rem-yj1j.4 / rem-wv71).
+//! (rem-yj1j.4 / rem-wv71; minimised by rem-egp9).
 //!
 //! Pure-data round-trips: every test feeds a hand-rolled
 //! [`ResolvedRestrict`] in and asserts the returned rule strings.
+//!
+//! Under rem-egp9 the projection shrunk dramatically: the editor-tool
+//! denies, dot-folder defaults, ~70 Bash-mutator entries, and source-
+//! side `mv` patterns are no longer projected into Claude settings.
+//! `op_guard` is the load-bearing per-target enforcement layer; the
+//! Claude side now emits at most one coarse `Bash(remargin *)` deny
+//! plus user-supplied `also_deny_bash` extras.
 
 use core::slice::from_ref;
 use std::path::{Path, PathBuf};
@@ -15,9 +22,7 @@ use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
 use crate::permissions::claude_sync::rule_shape::{
     OverlapKind, PathGlob, RuleShape, rules_overlap,
 };
-use crate::permissions::claude_sync::{
-    BASH_MUTATORS, RuleSet, apply_rules, revert_rules, rules_for,
-};
+use crate::permissions::claude_sync::{RuleSet, apply_rules, revert_rules, rules_for};
 use crate::permissions::sidecar::{self, sidecar_path};
 
 fn restrict_subpath(path: &str, also_deny_bash: &[&str], cli_allowed: bool) -> ResolvedRestrict {
@@ -40,232 +45,72 @@ fn restrict_wildcard(realm: &str, cli_allowed: bool) -> ResolvedRestrict {
     }
 }
 
-/// Scenario 1 — subpath, no extras, `cli_allowed = false`.
+/// Scenario 1 (rem-egp9) — subpath, no extras, `cli_allowed = false`
+/// emits exactly one coarse deny: `Bash(remargin *)`. No path tail —
+/// the matcher cannot be evaded with tilde / `$HOME` / relative paths.
 #[test]
-fn subpath_no_extras_emits_full_default_set() {
+fn cli_disallowed_emits_only_remargin_cli_deny() {
     let entry = restrict_subpath("/a/b", &[], false);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    // deny: 4 editor-tool path denies + 4 dot-folder wildcards +
-    // BASH_MUTATORS.len() bash mutators + 3 source-side mv shapes
-    // (rem-0j2x / T44) + 1 remargin-cli deny.
-    let expected = 4 + 4 + BASH_MUTATORS.len() + 3 + 1;
-    assert_eq!(rules.deny.len(), expected, "{:#?}", rules.deny);
-
-    // Editor-tool denies in spec order.
-    assert_eq!(rules.deny[0], "Edit(/a/b/**)");
-    assert_eq!(rules.deny[1], "Write(/a/b/**)");
-    assert_eq!(rules.deny[2], "Read(/a/b/**)");
-    assert_eq!(rules.deny[3], "NotebookEdit(/a/b/**)");
-
-    // Dot-folder wildcard denies.
-    assert_eq!(rules.deny[4], "Edit(/a/b/.*/**)");
-    assert_eq!(rules.deny[5], "Write(/a/b/.*/**)");
-    assert_eq!(rules.deny[6], "Read(/a/b/.*/**)");
-    assert_eq!(rules.deny[7], "NotebookEdit(/a/b/.*/**)");
-
-    // Bash mutators: original write-side surface anchors at index 8
-    // and is preserved verbatim so older settings files do not churn
-    // on re-runs.
-    assert_eq!(rules.deny[8], "Bash(cp * /a/b/**)");
-    assert_eq!(rules.deny[9], "Bash(mv * /a/b/**)");
-    assert_eq!(rules.deny[10], "Bash(tee /a/b/**)");
-
-    // rem-p74a expanded the default deny list to cover every
-    // file-modifying command surface. Spot-check one entry per
-    // category to guard against accidental list shrinkage. Membership
-    // (not exact index) so reordering inside BASH_MUTATORS does not
-    // break the test.
-    let must_contain = [
-        // Plain `sed *` (rem-p74a special case).
-        "Bash(sed * /a/b/**)",
-        // Delete.
-        "Bash(rm * /a/b/**)",
-        "Bash(rmdir * /a/b/**)",
-        "Bash(unlink * /a/b/**)",
-        // Create / link.
-        "Bash(mkdir * /a/b/**)",
-        "Bash(mkfifo * /a/b/**)",
-        "Bash(mknod * /a/b/**)",
-        "Bash(ln * /a/b/**)",
-        "Bash(install * /a/b/**)",
-        // Metadata / permissions.
-        "Bash(chmod * /a/b/**)",
-        "Bash(chown * /a/b/**)",
-        "Bash(chgrp * /a/b/**)",
-        "Bash(setfacl * /a/b/**)",
-        "Bash(chattr * /a/b/**)",
-        // Editors.
-        "Bash(vim * /a/b/**)",
-        "Bash(nvim * /a/b/**)",
-        "Bash(nano * /a/b/**)",
-        "Bash(emacs * /a/b/**)",
-        "Bash(ed * /a/b/**)",
-        "Bash(vi * /a/b/**)",
-        "Bash(micro * /a/b/**)",
-        // Scriptable interpreters.
-        "Bash(awk * /a/b/**)",
-        "Bash(perl * /a/b/**)",
-        "Bash(python * /a/b/**)",
-        "Bash(python3 * /a/b/**)",
-        "Bash(ruby * /a/b/**)",
-        "Bash(node * /a/b/**)",
-        "Bash(php * /a/b/**)",
-        "Bash(lua * /a/b/**)",
-        // Archives.
-        "Bash(tar * /a/b/**)",
-        "Bash(zip * /a/b/**)",
-        "Bash(unzip * /a/b/**)",
-        "Bash(gzip * /a/b/**)",
-        "Bash(gunzip * /a/b/**)",
-        "Bash(bzip2 * /a/b/**)",
-        "Bash(bunzip2 * /a/b/**)",
-        "Bash(xz * /a/b/**)",
-        "Bash(unxz * /a/b/**)",
-        "Bash(7z * /a/b/**)",
-        "Bash(zstd * /a/b/**)",
-        // Sync / remote copy.
-        "Bash(rsync * /a/b/**)",
-        "Bash(scp * /a/b/**)",
-        "Bash(sftp * /a/b/**)",
-        // Patch.
-        "Bash(patch * /a/b/**)",
-        // Network downloads.
-        "Bash(curl * /a/b/**)",
-        "Bash(wget * /a/b/**)",
-        // Shells.
-        "Bash(bash * /a/b/**)",
-        "Bash(sh * /a/b/**)",
-        "Bash(zsh * /a/b/**)",
-        "Bash(fish * /a/b/**)",
-        "Bash(dash * /a/b/**)",
-        "Bash(ksh * /a/b/**)",
-        // VCS / build.
-        "Bash(git * /a/b/**)",
-        "Bash(make * /a/b/**)",
-        "Bash(cmake * /a/b/**)",
-        // Disk / write.
-        "Bash(dd * /a/b/**)",
-        "Bash(script * /a/b/**)",
-        "Bash(split * /a/b/**)",
-        "Bash(csplit * /a/b/**)",
-        "Bash(sort * /a/b/**)",
-        // Directory navigation (rem-e6yd / T42). Closes the
-        // `cd /restricted && rm file` shell-relative bypass. Both
-        // bare and with-flag forms must be denied.
-        "Bash(cd /a/b/**)",
-        "Bash(cd * /a/b/**)",
-        "Bash(pushd /a/b/**)",
-        "Bash(pushd * /a/b/**)",
-        // Source-side mv coverage (rem-0j2x / T44). The `mv *`
-        // template emits the destination-side shape via BASH_MUTATORS;
-        // these three close the source-side hole the original list
-        // missed.
-        "Bash(mv /a/b/**)",
-        "Bash(mv /a/b/** *)",
-        "Bash(mv /a/b/** /a/b/**)",
-    ];
-    for needle in must_contain {
-        assert!(
-            rules.deny.iter().any(|rule| rule == needle),
-            "rem-p74a default deny list missing {needle:?}\nfull deny: {:#?}",
-            rules.deny
-        );
-    }
-
-    // remargin-cli deny because cli_allowed = false.
-    assert_eq!(rules.deny[expected - 1], "Bash(remargin * /a/b/**)");
-
-    // Allow set: empty by default (rem-si27 dropped the implicit
-    // `mcp__remargin__*` allow so users keep per-call oversight of
-    // remargin's MCP tools under a blanket restrict; rem-2plr removed
-    // the implicit `.remargin/` editor-tool re-allow).
+    assert_eq!(rules.deny, vec![String::from("Bash(remargin *)")]);
     assert!(rules.allow.is_empty(), "{:#?}", rules.allow);
-    assert!(
-        !rules.allow.iter().any(|r| r.contains(".remargin")),
-        "rem-2plr: no implicit .remargin/ re-allow expected, got: {:#?}",
-        rules.allow
-    );
-    assert!(
-        !rules.allow.iter().any(|r| r.contains("mcp__remargin__")),
-        "rem-si27: no implicit mcp__remargin__* allow expected, got: {:#?}",
-        rules.allow
-    );
 }
 
-/// Scenario 2 — wildcard restrict expands to the realm root glob.
+/// Scenario 2 (rem-egp9) — wildcard restrict produces the same coarse
+/// deny shape (path-shape-independent).
 #[test]
-fn wildcard_uses_realm_root_for_glob() {
+fn wildcard_restrict_also_emits_only_remargin_cli_deny() {
     let entry = restrict_wildcard("/r", false);
     let rules = rules_for(&entry, Path::new("/r"), &[]);
 
-    assert_eq!(rules.deny[0], "Edit(/r/**)");
-    assert_eq!(rules.deny[4], "Edit(/r/.*/**)");
-    // The realm root is anchored by the entry, not by the supplied
-    // anchor (see rules_for's docstring).
-    assert!(rules.deny.iter().all(|rule| rule.contains("/r/")));
+    assert_eq!(rules.deny, vec![String::from("Bash(remargin *)")]);
+    assert!(rules.allow.is_empty(), "{:#?}", rules.allow);
 }
 
-/// Scenario 3 — `cli_allowed = true` removes the remargin-cli deny.
+/// Scenario 3 (rem-egp9) — `cli_allowed = true` emits zero deny rules.
+/// The `op_guard` is the only layer that gates per-target ops.
 #[test]
-fn cli_allowed_skips_remargin_cli_deny() {
+fn cli_allowed_emits_zero_deny_rules() {
     let entry = restrict_subpath("/a/b", &[], true);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    assert!(
-        !rules
-            .deny
-            .iter()
-            .any(|rule| rule.starts_with("Bash(remargin")),
-        "cli_allowed=true must omit Bash(remargin ...) deny, got: {:#?}",
-        rules.deny
-    );
-    // 4 editor + 4 dot-folder + BASH_MUTATORS.len() + 3 source-side
-    // mv shapes (rem-0j2x / T44). One fewer than when
-    // cli_allowed=false: the `Bash(remargin *)` deny is dropped.
-    let expected = 4 + 4 + BASH_MUTATORS.len() + 3;
-    assert_eq!(rules.deny.len(), expected);
+    assert!(rules.deny.is_empty(), "{:#?}", rules.deny);
+    assert!(rules.allow.is_empty(), "{:#?}", rules.allow);
 }
 
-/// Scenario 4 — `also_deny_bash` adds extra Bash denies right after
-/// the standard mutators. Uses commands NOT in the default
-/// [`BASH_MUTATORS`] list so the test exercises the extras path even
-/// after rem-p74a expanded the defaults to cover most common
-/// file-modifying commands.
+/// Scenario 4 (rem-egp9) — `also_deny_bash` extras are appended after
+/// the coarse `Bash(remargin *)` deny so the projection still backs
+/// user-declared external defenses.
 #[test]
-fn also_deny_bash_extras_appended() {
-    // `aria2c` (download tool) and `nc` (netcat) are not in the
-    // default deny list, so their presence below uniquely proves the
-    // extras path is exercised.
+fn also_deny_bash_extras_appended_after_remargin_deny() {
     let entry = restrict_subpath("/a/b", &["aria2c", "nc"], false);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    let aria_idx = rules
-        .deny
-        .iter()
-        .position(|r| r == "Bash(aria2c * /a/b/**)")
-        .unwrap();
-    let nc_idx = rules
-        .deny
-        .iter()
-        .position(|r| r == "Bash(nc * /a/b/**)")
-        .unwrap();
-    // Extras appear before the cli deny so the surface stays human-
-    // readable: standard mutators, callers' extras, then the
-    // remargin-cli last-line defense.
-    let cli_idx = rules
-        .deny
-        .iter()
-        .position(|r| r.starts_with("Bash(remargin"))
-        .unwrap();
-    assert!(
-        aria_idx < cli_idx && nc_idx < cli_idx,
-        "extras should land before the remargin-cli deny: aria2c={aria_idx}, nc={nc_idx}, cli={cli_idx}"
+    assert_eq!(
+        rules.deny,
+        vec![
+            String::from("Bash(remargin *)"),
+            String::from("Bash(aria2c * /a/b/**)"),
+            String::from("Bash(nc * /a/b/**)"),
+        ],
     );
 }
 
-/// Scenario 5 — `allow_dot_folders` re-allows the named folders on top
-/// of the wildcard deny. `.remargin/` is NOT auto-allowed (rem-2plr).
+/// Scenario 4b — `also_deny_bash` works with `cli_allowed = true` too:
+/// no `Bash(remargin *)` line, just the extras.
+#[test]
+fn also_deny_bash_extras_present_with_cli_allowed() {
+    let entry = restrict_subpath("/a/b", &["curl"], true);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    assert_eq!(rules.deny, vec![String::from("Bash(curl * /a/b/**)")]);
+}
+
+/// Scenario 5 — `allow_dot_folders` re-allows are still emitted (one
+/// per Claude editor tool) for explicit folder names. The dot-folder
+/// default-deny is no longer projected, but the re-allow remains
+/// useful for users who hand-author dot-folder denies.
 #[test]
 fn allow_dot_folders_emits_re_allows() {
     let entry = restrict_subpath("/a/b", &[], false);
@@ -292,8 +137,8 @@ fn allow_dot_folders_emits_re_allows() {
     );
 }
 
-/// rem-2plr: `.remargin/` listed explicitly in `allow_dot_folders` IS
-/// honoured — the explicit-list path still emits per-tool re-allows.
+/// `.remargin/` listed explicitly in `allow_dot_folders` IS honoured —
+/// the explicit-list path still emits per-tool re-allows.
 #[test]
 fn explicit_remargin_in_allow_list_emits_re_allows() {
     let entry = restrict_subpath("/a/b", &[], false);
@@ -307,7 +152,7 @@ fn explicit_remargin_in_allow_list_emits_re_allows() {
     assert_eq!(count, 4, "{:#?}", rules.allow);
 }
 
-/// rem-2plr negative-presence guard: by default, neither settings array
+/// rem-egp9 negative-presence guard: by default, neither settings array
 /// (deny/allow) contains the four native-tool `.remargin/**` allows.
 #[test]
 fn no_implicit_remargin_native_allows_emitted() {
@@ -325,6 +170,94 @@ fn no_implicit_remargin_native_allows_emitted() {
             !rules.deny.iter().any(|r| r == &needle),
             "rem-2plr: {needle} must not appear in deny either, got: {:#?}",
             rules.deny
+        );
+    }
+}
+
+/// rem-egp9 negative-presence guard: per-tool path denies are no
+/// longer projected. Edit/Write/Read/NotebookEdit denies must NOT
+/// appear in the rule set under the new minimal shape.
+#[test]
+fn no_per_tool_path_denies_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    for tool in ["Edit", "Write", "Read", "NotebookEdit"] {
+        let needle = format!("{tool}(/a/b/**)");
+        assert!(
+            !rules.deny.iter().any(|r| r == &needle),
+            "rem-egp9: {needle} must not be projected; got: {:#?}",
+            rules.deny,
+        );
+    }
+}
+
+/// rem-egp9 negative-presence guard: dot-folder default-deny patterns
+/// (`Tool(<path>/.*/**)`) are no longer projected. The `op_guard`
+/// enforces dot-folder default-deny inside the binary.
+#[test]
+fn no_dot_folder_default_deny_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    for tool in ["Edit", "Write", "Read", "NotebookEdit"] {
+        let needle = format!("{tool}(/a/b/.*/**)");
+        assert!(
+            !rules.deny.iter().any(|r| r == &needle),
+            "rem-egp9: {needle} must not be projected; got: {:#?}",
+            rules.deny,
+        );
+    }
+}
+
+/// rem-egp9 negative-presence guard: the `BASH_MUTATORS` projection
+/// (~70 Bash command denies) is gone. Spot-check half a dozen
+/// previously-emitted patterns.
+#[test]
+fn no_bash_mutator_denies_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    let must_be_absent = [
+        "Bash(rm * /a/b/**)",
+        "Bash(cp * /a/b/**)",
+        "Bash(mv * /a/b/**)",
+        "Bash(tee /a/b/**)",
+        "Bash(sed -i * /a/b/**)",
+        "Bash(chmod * /a/b/**)",
+        "Bash(curl * /a/b/**)",
+        "Bash(git * /a/b/**)",
+        "Bash(cd /a/b/**)",
+        "Bash(cd * /a/b/**)",
+        "Bash(pushd /a/b/**)",
+        "Bash(pushd * /a/b/**)",
+    ];
+    for needle in must_be_absent {
+        assert!(
+            !rules.deny.iter().any(|r| r == needle),
+            "rem-egp9: {needle} must not be projected; got: {:#?}",
+            rules.deny,
+        );
+    }
+}
+
+/// rem-egp9 negative-presence guard: the source-side `mv` patterns
+/// (`Bash(mv <path>/**)`, `Bash(mv <path>/** *)`,
+/// `Bash(mv <path>/** <path>/**)`) are no longer projected.
+#[test]
+fn no_source_side_mv_patterns_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    for needle in [
+        "Bash(mv /a/b/**)",
+        "Bash(mv /a/b/** *)",
+        "Bash(mv /a/b/** /a/b/**)",
+    ] {
+        assert!(
+            !rules.deny.iter().any(|r| r == needle),
+            "rem-egp9: {needle} must not be projected; got: {:#?}",
+            rules.deny,
         );
     }
 }
@@ -407,11 +340,9 @@ fn apply_creates_missing_settings_files_and_sidecar() {
         let value = read_settings(&system, file);
         let deny = value["permissions"]["deny"].as_array().unwrap();
         assert_eq!(deny.len(), 2, "{file:?} -> {value:#?}");
-        // rem-si27: `restrict` no longer auto-emits the
-        // `mcp__remargin__*` allow, so the projected `allow` set is
-        // empty when `allow_dot_folders` is also empty. The settings
-        // file's `permissions.allow` slot is initialised as an empty
-        // array regardless.
+        // rem-si27 / rem-egp9: `restrict` no longer auto-emits any
+        // allow rule. The settings file's `permissions.allow` slot is
+        // initialised as an empty array regardless.
         let allow = value["permissions"]["allow"].as_array().unwrap();
         assert!(allow.is_empty(), "{file:?} -> {value:#?}");
     }

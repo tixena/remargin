@@ -134,16 +134,14 @@ mod tests {
         }
     }
 
-    /// Scenario 19: allow-vs-deny overlap surfaces when the user-scope
-    /// settings file already has an allow rule that matches one of the
-    /// projected deny rules.
+    /// rem-egp9: the projection no longer emits per-tool path denies,
+    /// so a user-scope `Read(<path>/**)` allow has nothing on the
+    /// projected deny side to overlap with.
     #[test]
     fn plan_surfaces_allow_deny_overlap_in_user_settings() {
         let realm = realm_with_claude();
         let target = realm.path().join("src/secret");
         fs::create_dir_all(&target).unwrap();
-        // Resolve the canonical absolute path the projection will see;
-        // tempdirs may live under `/private/var/folders/...` on macOS.
         let canonical = fs::canonicalize(&target).unwrap();
         let allow_pattern = format!("{}/**", canonical.display());
         let user_settings = user_settings_arg(&realm);
@@ -171,24 +169,20 @@ mod tests {
         let conflicts = report["config_diff"]["conflicts"].as_array().unwrap();
         let saw_overlap = conflicts.iter().any(|c| c["kind"] == "allow_deny_overlap");
         assert!(
-            saw_overlap,
-            "expected allow_deny_overlap in conflicts: {conflicts:?}"
+            !saw_overlap,
+            "rem-egp9: native-tool allow has no projected deny to overlap with: {conflicts:?}",
         );
     }
 
-    /// rem-aovx scenario 16: the original `eburgos_notes` case — a
-    /// user-scope `Read(/realm/**)` allow already on disk in single-
-    /// slash form must surface as an overlap against the projection's
-    /// `///`-prefixed denies. This guards against the format-drift
-    /// regression that motivated rem-aovx.
+    /// rem-egp9: the format-drift overlap case is moot now that no
+    /// native-tool path denies are projected. The legacy
+    /// `Read(/realm/**)` allow has nothing on the projected deny side
+    /// to overlap with.
     #[test]
     fn plan_overlap_seeded_with_single_slash_allow_still_fires() {
         let realm = realm_with_claude();
         let user_settings = user_settings_arg(&realm);
-        // Resolve the canonical realm path so the test is robust to
-        // macOS `/private/var/folders/...` symlinks.
         let canonical = fs::canonicalize(realm.path()).unwrap();
-        // Single-slash form, no `//` prefix — the format-drift case.
         let body = json!({
             "permissions": {
                 "allow": [format!("Read({}/**)", canonical.display())],
@@ -211,13 +205,10 @@ mod tests {
         assert_status(&out, 0);
         let report = parse_json(&out);
         let conflicts = report["config_diff"]["conflicts"].as_array().unwrap();
-        let saw_overlap = conflicts.iter().any(|c| {
-            c["kind"] == "allow_deny_overlap"
-                && c["allow_rule"].as_str().unwrap_or("").contains("Read(")
-        });
+        let saw_overlap = conflicts.iter().any(|c| c["kind"] == "allow_deny_overlap");
         assert!(
-            saw_overlap,
-            "expected single-slash allow to still surface overlap: {conflicts:?}"
+            !saw_overlap,
+            "rem-egp9: legacy native-tool allow no longer overlaps the minimised projection: {conflicts:?}",
         );
     }
 
@@ -262,16 +253,15 @@ mod tests {
         }
     }
 
-    /// rem-aovx scenario 18 (CLI): subtree-shadow overlap surfaces
-    /// `kind=allow_deny_overlap` and reports `overlap_kind` =
-    /// `allow_shadowed_by_broader_deny` so the formatter / parser can
-    /// tailor the message.
+    /// rem-egp9: subtree-shadow overlap can no longer fire — the
+    /// minimised projection emits only `Bash(remargin *)` plus
+    /// optional `also_deny_bash` extras. There is no broader projected
+    /// deny to shadow a more-specific user-scope allow.
     #[test]
     fn plan_overlap_subtree_shadow_reports_kind() {
         let realm = realm_with_claude();
         let user_settings = user_settings_arg(&realm);
         let canonical = fs::canonicalize(realm.path()).unwrap();
-        // Specific allow inside the realm.
         let body = json!({
             "permissions": {
                 "allow": [format!("Read({}/safe)", canonical.display())],
@@ -299,8 +289,8 @@ mod tests {
                 && c["overlap_kind"] == "allow_shadowed_by_broader_deny"
         });
         assert!(
-            saw_shadow,
-            "expected allow_shadowed_by_broader_deny: {conflicts:?}"
+            !saw_shadow,
+            "rem-egp9: minimised projection has no broad path deny to shadow allow: {conflicts:?}",
         );
     }
 

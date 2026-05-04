@@ -1,5 +1,5 @@
 //! Claude-settings synchronizer rule generation (rem-yj1j.4 / T25,
-//! slice 1 — `rem-wv71`).
+//! slice 1 — `rem-wv71`; minimised by `rem-egp9`).
 //!
 //! [`rules_for`] is a pure function over a [`ResolvedRestrict`] +
 //! anchor + `allow_dot_folders` list. Given those inputs it produces
@@ -7,34 +7,20 @@
 //! that the Claude-settings merger (slice 3, `rem-7m4u`) will write
 //! into `.claude/settings.local.json` and `~/.claude/settings.json`.
 //!
-//! ## Output shape
+//! ## Output shape (rem-egp9 — minimised)
 //!
-//! `<path>` below is a single-leading-slash absolute path glob —
-//! Claude's documented form. Earlier revisions emitted `//<path>` /
-//! `///<path>` (rem-em33); legacy on-disk rules in either of those
-//! forms are still recognised for membership / overlap purposes via
-//! [`canonicalize_rule`].
+//! Earlier revisions projected ~80 deny rules per realm (per-tool
+//! editor denies, dot-folder defaults, ~70 Bash-mutator entries,
+//! source/dest `mv` patterns) into `~/.claude/settings.json`. Pattern
+//! matching against literal command text was leaky: tilde, `$HOME`,
+//! relative paths, and `cd <restricted>` all dodged it. The remargin
+//! `op_guard` is the load-bearing layer; Claude's projection is now a
+//! single coarse defense.
 //!
 //! ```text
 //! deny:
-//!   Edit(<path>/**)
-//!   Write(<path>/**)
-//!   Read(<path>/**)
-//!   NotebookEdit(<path>/**)
-//!   Read(<path>/.*/**)             ← dot-folder default-deny (one
-//!   Edit(<path>/.*/**)               wildcard rule per Claude tool;
-//!   Write(<path>/.*/**)              suppressed when allow_dot_folders
-//!   NotebookEdit(<path>/.*/**)       names every dot-folder)
-//!   Bash(<cmd> [*] <path>/**)       ← every entry from BASH_MUTATORS,
-//!                                     covering the file-modifying
-//!                                     command surface (delete, create,
-//!                                     link, metadata, editors,
-//!                                     scriptable interpreters,
-//!                                     archives, sync/copy, patch,
-//!                                     downloads, shells, VCS/build,
-//!                                     disk/write — see the constant)
+//!   Bash(remargin *)                              ← only when cli_allowed=false
 //!   <per also_deny_bash entry, Bash(<cmd> * <path>/**)>
-//!   Bash(remargin * <path>/**)      ← only when cli_allowed=false
 //!
 //! allow:
 //!   <per allow_dot_folders entry, RE-allow rules>   ← only emitted
@@ -43,6 +29,21 @@
 //!                                                     folder; empty
 //!                                                     by default
 //! ```
+//!
+//! Notes:
+//!
+//! - `Bash(remargin *)` carries no path tail. Path-shape-independent —
+//!   no path on the command line for the matcher to evade. The
+//!   `cli_allowed: true` case emits zero deny rules from this projection.
+//! - `also_deny_bash` continues to emit user-supplied entries verbatim.
+//!   These are user-declared external defenses and remain useful as
+//!   backstops outside remargin.
+//! - `allow_dot_folders` still affects `op_guard`'s dot-folder gate inside
+//!   the binary, but no longer projects re-allow rules into Claude
+//!   settings — dot-folder default-deny is now an `op_guard`-only concept.
+//!   When the caller does name folders here, the projection still emits
+//!   per-tool re-allow rules (the existing carve-out for users who pair
+//!   the new minimal projection with hand-written dot-folder denies).
 //!
 //! ## No automatic `mcp__remargin__*` allow (rem-si27)
 //!
@@ -54,35 +55,7 @@
 //! the restricted content, the user explicitly wants per-call
 //! oversight). Users who want silent forwarding can opt in by adding
 //! `mcp__remargin__*` to `.claude/settings.local.json` themselves —
-//! `restrict` no longer does it for them. With this rule gone, the
-//! `allow` projection is empty unless `allow_dot_folders` names a
-//! folder; `restrict` is now purely a deny-side projection plus those
-//! optional dot-folder re-allows.
-//!
-//! ## Why a single wildcard for dot-folder denies
-//!
-//! The spec proposed two options: enumerate every `.<name>/` under the
-//! path, or emit one wildcard `.*` rule. Walking the filesystem at
-//! rule-generation time is expensive AND races against folder
-//! creation. A single `.*/**` wildcard rule covers all current and
-//! future dot-folders without filesystem access. When
-//! `allow_dot_folders` lists specific names that should remain
-//! reachable (e.g. `.github`), we add narrow re-allows that override
-//! the broader deny — Claude's permission resolution gives the more-
-//! specific allow precedence.
-//!
-//! ## `.remargin/` is NOT auto-allowed for native tools
-//!
-//! Earlier versions auto-emitted `Edit/Write/Read/NotebookEdit` allows
-//! for `.remargin/**` so an out-of-band Claude session could peek at
-//! the state directory. That carve-out is gone (rem-2plr): remargin's
-//! runtime drives `.remargin/` through `mcp__remargin__*` and the
-//! native-tool allows were only useful for inspection — surface area
-//! we do not need. Users who want native-tool reach into `.remargin/`
-//! can opt in by adding `.remargin` to `allow_dot_folders`; the
-//! explicit-list path still emits the per-tool re-allow rules below.
-//! Note that `mcp__remargin__*` itself is no longer auto-allowed
-//! either (rem-si27) — see the section above.
+//! `restrict` no longer does it for them.
 //!
 //! ## No filesystem access
 //!
@@ -104,135 +77,16 @@ use serde_json::{Map, Value};
 use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
 use crate::permissions::sidecar::{self, SidecarEntry};
 
-/// Editor-side Claude tools touched by the base path-deny and the
-/// dot-folder default-deny. Order matches the spec's example output
-/// (Edit / Write / Read / `NotebookEdit`) so settings-file diffs read
-/// the way users expect.
+/// Editor-side Claude tools touched by per-dot-folder re-allow rules.
+/// Order matches the spec's example output (Edit / Write / Read /
+/// `NotebookEdit`) so settings-file diffs read the way users expect.
+///
+/// Since `rem-egp9` shrunk the projection, this constant is only used
+/// when the caller passes a non-empty `allow_dot_folders` list — the
+/// dot-folder default-deny itself is no longer projected, so the
+/// re-allow only matters for users who hand-author dot-folder denies in
+/// their settings file and want the projection to add per-tool overrides.
 const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit"];
-
-/// Default-deny Bash command tokens for the restricted path
-/// (rem-p74a). Every entry expands to `Bash(<token> {glob_root}/**)`,
-/// so a token of `cp *` becomes `Bash(cp * /path/**)` while a bare
-/// `tee` becomes `Bash(tee /path/**)`. The trailing `*` (or its
-/// absence) is part of the token by design — the format string in
-/// [`rules_for`] does NOT inject one.
-///
-/// The list is broad on purpose: most entries below can read, modify,
-/// create, delete, or otherwise mutate a file on disk, which would
-/// defeat the MCP-only contract `restrict` is supposed to enforce.
-/// `cd` / `pushd` (rem-e6yd / T42) are non-mutating but close the
-/// shell-relative bypass — `cd /restricted && rm file` would
-/// otherwise route around every other rule because `rm`'s argv would
-/// no longer carry the restricted path. Users can layer extra denies
-/// on top via `--also-deny-bash`; the purpose of THIS list is to
-/// make the defaults safe-by-default so an agent cannot trivially
-/// bypass the restriction with a forgotten command.
-///
-/// Ordering: original write-side mutators first (preserves
-/// rule-emission order with older settings files), then the new
-/// categories grouped by intent. Within each category, order is
-/// alphabetical-ish for human scanability, not load-bearing.
-///
-/// `sed` appears twice on purpose: legacy `sed -i *` is preserved so
-/// repeat runs do not shuffle rule order or churn the sidecar, and
-/// plain `sed *` is added alongside to cover redirection-based writes
-/// (`sed ... > /restricted/file`) that escape `-i`.
-///
-/// `cd` / `pushd` each appear twice (`cd` and `cd *`) to match both
-/// the bare form (`cd /path/notes`) and the with-flag form
-/// (`cd -P /path/notes`), since the matcher needs the path to land in
-/// the trailing position with no fixed-token prefix.
-pub(crate) const BASH_MUTATORS: &[&str] = &[
-    // Write-side mutators (original surface).
-    "cp *",
-    "mv *",
-    "tee",
-    "tee *",
-    "sed -i *",
-    "sed *",
-    "truncate *",
-    "touch",
-    "touch *",
-    // Delete.
-    "rm *",
-    "rmdir *",
-    "unlink *",
-    // Create / link.
-    "install *",
-    "ln *",
-    "mkdir *",
-    "mkfifo *",
-    "mknod *",
-    // Metadata / permissions.
-    "chattr *",
-    "chgrp *",
-    "chmod *",
-    "chown *",
-    "setfacl *",
-    // Interactive editors.
-    "ed *",
-    "emacs *",
-    "micro *",
-    "nano *",
-    "nvim *",
-    "vi *",
-    "vim *",
-    // Scriptable interpreters (can write any file).
-    "awk *",
-    "lua *",
-    "node *",
-    "perl *",
-    "php *",
-    "python *",
-    "python3 *",
-    "ruby *",
-    // Archives.
-    "7z *",
-    "bunzip2 *",
-    "bzip2 *",
-    "gunzip *",
-    "gzip *",
-    "tar *",
-    "unxz *",
-    "unzip *",
-    "xz *",
-    "zip *",
-    "zstd *",
-    // Sync / remote copy.
-    "rsync *",
-    "scp *",
-    "sftp *",
-    // Patch.
-    "patch *",
-    // Network downloads.
-    "curl *",
-    "wget *",
-    // Shells (can do anything).
-    "bash *",
-    "dash *",
-    "fish *",
-    "ksh *",
-    "sh *",
-    "zsh *",
-    // VCS / build.
-    "cmake *",
-    "git *",
-    "make *",
-    // Disk / write.
-    "csplit *",
-    "dd *",
-    "script *",
-    "sort *",
-    "split *",
-    // Directory navigation (rem-e6yd / T42). Closes the
-    // shell-relative bypass: `cd /restricted && rm file` would
-    // otherwise dodge every Bash deny because `rm`'s argv carries
-    // only `file`. Both bare and with-flag forms emitted.
-    "cd",
-    "cd *",
-    "pushd",
-    "pushd *",
-];
 
 /// Diagnostic surface returned by [`revert_rules`].
 ///
@@ -304,17 +158,25 @@ pub struct SettingsFileSim {
     pub will_be_created: bool,
 }
 
-/// Compute the rule set for one resolved restrict entry.
+/// Compute the rule set for one resolved restrict entry (rem-egp9).
 ///
 /// Pure: no filesystem access. The caller must pass the realm anchor
-/// (the directory that holds `.claude/`) so wildcard entries can
-/// expand to a concrete path glob. `allow_dot_folders` controls which
-/// dot-folder names get a re-allow rule on top of the default-deny.
+/// (the directory that holds `.claude/`) — kept for signature stability
+/// even though wildcard entries already carry their own realm root.
 ///
-/// Wildcards (`RestrictPath::Wildcard`) anchor at the entry's
-/// `realm_root`; `_anchor` is unused for these entries because the
-/// realm root already anchors them. Absolute entries use their own
-/// path verbatim.
+/// Output (per the new minimal projection):
+///
+/// - When `cli_allowed == false`, emits a single coarse deny rule:
+///   `Bash(remargin *)`. Path-shape-independent — no path on the
+///   command line for the matcher to evade.
+/// - When `cli_allowed == true`, emits zero coarse deny rules.
+/// - In either case, every entry in `also_deny_bash` is appended as
+///   `Bash(<cmd> * <glob_root>/**)` so user-declared external defenses
+///   keep their full shape.
+/// - `allow_dot_folders` still produces per-dot-folder re-allow rules
+///   (one per Claude editor tool); the dot-folder default-deny itself
+///   is no longer projected, but the re-allow remains useful for users
+///   who hand-author dot-folder denies in their settings file.
 #[must_use]
 pub fn rules_for(
     entry: &ResolvedRestrict,
@@ -329,60 +191,26 @@ pub fn rules_for(
 
     let mut deny: Vec<String> = Vec::new();
 
-    // `glob_root` is canonical absolute (leading `/`). Format strings
-    // therefore emit `Tool(/path/**)` directly — no extra `//` prefix
-    // (rem-em33). Legacy on-disk rules with the older `//` / `///`
-    // prefix still match for membership purposes via
-    // [`canonicalize_rule`].
-
-    // 1. Base read/write tool denies — the editor-side defenses.
-    for tool in EDITOR_TOOLS {
-        deny.push(format!("{tool}({glob_root}/**)"));
+    // 1. Block remargin CLI invocations entirely when `cli_allowed` is
+    //    false. No path tail — the matcher cannot be dodged with
+    //    tilde / `$HOME` / relative paths because there is no path on
+    //    the command line. The `op_guard` handles per-target enforcement.
+    if !entry.cli_allowed {
+        deny.push(String::from("Bash(remargin *)"));
     }
 
-    // 2. Dot-folder default-deny. A single wildcard rule per tool
-    //    covers every current and future dot-folder under the
-    //    restricted root; specific allows below override.
-    for tool in EDITOR_TOOLS {
-        deny.push(format!("{tool}({glob_root}/.*/**)"));
-    }
-
-    // 3. Bash mutators — keep shell-out paths from dodging the
-    //    editor-tool denies.
-    for cmd in BASH_MUTATORS {
-        deny.push(format!("Bash({cmd} {glob_root}/**)"));
-    }
-
-    // 3a. Source-side `mv` coverage (rem-0j2x / T44). The `mv *`
-    //     template above only emits the destination-side pattern
-    //     (`Bash(mv * /path/**)`). The remaining shapes — bare
-    //     single-arg, source-side, and both-sides — close the
-    //     exfiltration / accidental-source-move surface. Agents that
-    //     legitimately need to move a tracked file under a restricted
-    //     realm route through `mcp__remargin__mv` (which the user must
-    //     opt in to allowing — rem-si27 dropped the auto-allow);
-    //     humans with `cli_allowed: true` fall back to `remargin mv`.
-    deny.push(format!("Bash(mv {glob_root}/**)"));
-    deny.push(format!("Bash(mv {glob_root}/** *)"));
-    deny.push(format!("Bash(mv {glob_root}/** {glob_root}/**)"));
-
-    // 4. Caller-supplied bash extras, e.g. `also_deny_bash: [curl]`.
+    // 2. User-supplied Bash extras (`also_deny_bash`). Kept verbatim
+    //    so external defenses (e.g. blanket `curl`/`wget` blocks) read
+    //    the same way they used to.
     for cmd in &entry.also_deny_bash {
         deny.push(format!("Bash({cmd} * {glob_root}/**)"));
     }
 
-    // 5. Block remargin CLI invocations against the restricted root
-    //    unless the caller explicitly opted in via `cli_allowed: true`.
-    if !entry.cli_allowed {
-        deny.push(format!("Bash(remargin * {glob_root}/**)"));
-    }
-
-    // 6. Allow list. Empty by default (rem-si27 dropped the implicit
-    //    `mcp__remargin__*` allow so users keep per-call oversight of
-    //    remargin's MCP tools under a blanket restrict). Per-dot-folder
-    //    re-allows override the default-deny ONLY for folders the user
-    //    explicitly listed in `allow_dot_folders` (rem-2plr — no
-    //    implicit `.remargin/` carve-out either).
+    // 3. Allow list. Empty by default. Per-dot-folder re-allows are
+    //    only emitted when the user explicitly names a folder in
+    //    `allow_dot_folders` — useful when the user pairs the new
+    //    minimal projection with hand-written editor-tool denies for
+    //    dot-folders they want to keep readable.
     let mut allow: Vec<String> = Vec::new();
     for folder in allow_dot_folders {
         for tool in EDITOR_TOOLS {

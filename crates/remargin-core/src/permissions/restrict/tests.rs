@@ -176,16 +176,20 @@ fn duplicate_path_does_not_create_second_entry() {
     assert_eq!(restricts.len(), 1, "{value:#?}");
 }
 
-/// Scenario 9: re-running after a manually-deleted Claude rule
-/// backfills the missing rule (`apply_rules` dedupes against existing
-/// entries; the second call still writes any missing strings).
+/// Scenario 9 (rem-egp9): re-running after a manually-deleted Claude
+/// rule backfills the missing rule (`apply_rules` dedupes against
+/// existing entries; the second call still writes any missing strings).
+/// Uses the coarse `Bash(remargin *)` deny — the only rule the
+/// minimised projection emits when `cli_allowed = false` and there are
+/// no `also_deny_bash` extras.
 #[test]
 fn rerun_backfills_missing_settings_rule() {
     let (system, anchor) = realm_with_claude(&[]);
     let files = settings_files(&anchor);
     restrict(&system, &anchor, &args("src/secret"), &files).unwrap();
 
-    // Manually scrub one rule from the project-scope settings file.
+    // Manually scrub the projected rule from the project-scope
+    // settings file.
     let local = files[0].clone();
     let mut value: Value = serde_yaml::from_str(&system.read_to_string(&local).unwrap()).unwrap();
     if let Some(deny) = value
@@ -193,7 +197,7 @@ fn rerun_backfills_missing_settings_rule() {
         .and_then(|p| p.get_mut("deny"))
         .and_then(|d| d.as_sequence_mut())
     {
-        deny.retain(|v| v.as_str() != Some("Edit(/r/src/secret/**)"));
+        deny.retain(|v| v.as_str() != Some("Bash(remargin *)"));
     }
     let body = serde_json::to_string_pretty(&value).unwrap();
     system.write(&local, body.as_bytes()).unwrap();
@@ -204,9 +208,8 @@ fn rerun_backfills_missing_settings_rule() {
         serde_json::from_str(&system.read_to_string(&local).unwrap()).unwrap();
     let deny = after["permissions"]["deny"].as_array().unwrap();
     assert!(
-        deny.iter()
-            .any(|v| v.as_str() == Some("Edit(/r/src/secret/**)")),
-        "missing edit deny was not backfilled: {after:#?}"
+        deny.iter().any(|v| v.as_str() == Some("Bash(remargin *)")),
+        "missing remargin-cli deny was not backfilled: {after:#?}"
     );
 }
 
