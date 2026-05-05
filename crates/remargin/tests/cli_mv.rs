@@ -253,13 +253,14 @@ mod tests {
         assert_eq!(value["mv_diff"]["dst_exists"], json!(true));
     }
 
-    /// rem-egp9: `remargin restrict` no longer projects per-Bash-cmd
-    /// mv patterns into Claude settings — the projection shrunk to a
-    /// single coarse `Bash(remargin *)` deny. Source-side `mv` refusal
-    /// now lives in the `op_guard`'s `mv` handler (rem-0j2x), which
-    /// fires on both MCP and CLI `mv` invocations through remargin.
+    /// rem-qjqu: `remargin restrict` projects the full native-tool
+    /// fence into Claude settings — editor-tool denies, dot-folder
+    /// defaults, the `BASH_MUTATORS` list (including dest-side `mv *`),
+    /// and source-side `mv` patterns (rem-0j2x / T44). Slice A of
+    /// `rem-egp9` removed these along with the remargin-specific
+    /// rules; this task restored the native-tool half.
     #[test]
-    fn restrict_does_not_project_bash_mv_denies() {
+    fn restrict_projects_full_mv_deny_set() {
         let realm = TempDir::new().unwrap();
         fs::create_dir_all(realm.path().join(".claude")).unwrap();
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
@@ -286,13 +287,32 @@ mod tests {
             .map(|v| String::from(v.as_str().unwrap()))
             .collect();
 
-        // No Bash(mv ...) patterns at all — the projection no longer
-        // tries to defend against `mv` at the Claude layer.
+        let target_root = realm
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("src/secret")
+            .display()
+            .to_string();
+
+        // Dest-side from BASH_MUTATORS (`mv *`):
+        let dest_pattern = format!("Bash(mv * {target_root}/**)");
+        // Source-side trio (rem-0j2x / T44):
+        let src_bare = format!("Bash(mv {target_root}/**)");
+        let src_to_anywhere = format!("Bash(mv {target_root}/** *)");
+        let src_to_self = format!("Bash(mv {target_root}/** {target_root}/**)");
+
+        for pat in [&dest_pattern, &src_bare, &src_to_anywhere, &src_to_self] {
+            assert!(
+                deny.iter().any(|r| r == pat),
+                "expected `{pat}` in deny set, got: {deny:#?}"
+            );
+        }
+
+        // The coarse remargin CLI deny is also present (no path tail).
         assert!(
-            !deny.iter().any(|r| r.starts_with("Bash(mv ")),
-            "rem-egp9: no Bash(mv ...) patterns expected, got: {deny:#?}"
+            deny.iter().any(|r| r == "Bash(remargin *)"),
+            "expected `Bash(remargin *)` in deny set, got: {deny:#?}"
         );
-        // The single coarse remargin-cli deny is the only entry.
-        assert_eq!(deny, vec![String::from("Bash(remargin *)")]);
     }
 }

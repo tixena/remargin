@@ -176,13 +176,14 @@ fn wildcard_resolves_to_anchor_and_emits_realm_rules() {
     let projection = project_restrict(&system, &realm, &args, &[project, user]).unwrap();
     let diff = diff_or_fail(projection);
     assert_eq!(diff.absolute_path, realm);
-    // Under rem-egp9 the projection emits exactly one coarse deny —
-    // `Bash(remargin *)` — when `cli_allowed = false`. Per-realm path
-    // patterns are no longer projected; op_guard handles per-target
-    // enforcement.
-    assert_eq!(
+    let realm_str = realm.display().to_string();
+    assert!(
+        diff.settings_files[0]
+            .deny_rules_to_add
+            .iter()
+            .any(|r| r.contains(&realm_str) && r.contains("/**")),
+        "expected realm-wide deny rule, got {:?}",
         diff.settings_files[0].deny_rules_to_add,
-        vec![String::from("Bash(remargin *)")],
     );
 }
 
@@ -233,12 +234,8 @@ fn yaml_entry_change_surfaces_conflict_with_previous() {
     );
 }
 
-/// rem-egp9: the minimised projection emits at most one coarse
-/// `Bash(remargin *)` deny plus user-supplied `also_deny_bash`
-/// extras. There are no per-tool path denies anymore, so an existing
-/// `Read(...)` allow has no projected deny to overlap with.
 #[test]
-fn allow_deny_overlap_no_longer_fires_for_native_tool_allow() {
+fn allow_deny_overlap_surfaces_when_existing_allow_matches_projected_deny() {
     let (system, realm, project, user) = fresh_realm();
     let secret_glob = format!("{}/src/secret/**", realm.display());
     let body = serde_json::json!({
@@ -257,21 +254,22 @@ fn allow_deny_overlap_no_longer_fires_for_native_tool_allow() {
         matches!(
             c,
             ConfigConflict::AllowDenyOverlap {
+                overlap_kind: OverlapKind::Exact,
                 settings_file,
                 ..
             } if settings_file == &user
         )
     });
     assert!(
-        !saw_overlap,
-        "rem-egp9: native-tool allow has no projected deny to overlap with: {:?}",
-        diff.conflicts,
+        saw_overlap,
+        "expected AllowDenyOverlap (Exact) on user-scope file. conflicts: {:?}, sims: {:?}",
+        diff.conflicts, diff.settings_files,
     );
 }
 
-/// rem-egp9: format-drift tolerance is moot now that no per-tool
-/// denies are projected. The legacy single-slash allow has nothing on
-/// the deny side to overlap against either.
+/// rem-aovx scenario 17: format-drift tolerance — a user-scope allow
+/// with the legacy single-slash prefix still surfaces as an overlap
+/// against the projection's `///`-prefixed deny rules.
 #[test]
 fn allow_deny_overlap_handles_legacy_single_slash_format() {
     let (system, realm, project, user) = fresh_realm();
@@ -298,22 +296,20 @@ fn allow_deny_overlap_handles_legacy_single_slash_format() {
         )
     });
     assert!(
-        !saw_overlap,
-        "rem-egp9: legacy native-tool allow no longer overlaps the minimised projection: {:?}",
+        saw_overlap,
+        "expected format-drift overlap on user-scope file. conflicts: {:?}",
         diff.conflicts,
     );
 }
 
-/// rem-egp9: subtree-shadow detection only fires when the projection
-/// emits an overlapping deny. With the minimised projection the
-/// wildcard restrict no longer projects `Read(/realm/**)` etc., so a
-/// hand-rolled `Read(/realm/safe)` allow is left untouched.
+/// rem-aovx scenario 18: a more-specific allow shadowed by the
+/// realm-wide projected deny (subtree shadow) is reported as
+/// `AllowShadowedByBroaderDeny`.
 #[test]
 fn allow_deny_overlap_subtree_shadow_kind() {
     let (system, realm, project, user) = fresh_realm();
     // Allow a strict subpath, then restrict the whole realm — the
-    // minimised projection emits only `Bash(remargin *)`, so no
-    // subtree shadow overlap fires.
+    // wildcard deny shadows the safe-area allow.
     let safe_path = format!("{}/safe", realm.display());
     let body = serde_json::json!({
         "permissions": {
@@ -338,9 +334,9 @@ fn allow_deny_overlap_subtree_shadow_kind() {
         )
     });
     assert!(
-        !saw_shadow,
-        "rem-egp9: minimised projection has no Read(/realm/**) deny to shadow the allow: {:?}",
-        diff.conflicts,
+        saw_shadow,
+        "expected AllowShadowedByBroaderDeny in {:?}",
+        diff.conflicts
     );
 }
 

@@ -169,15 +169,15 @@ mod tests {
         let conflicts = report["config_diff"]["conflicts"].as_array().unwrap();
         let saw_overlap = conflicts.iter().any(|c| c["kind"] == "allow_deny_overlap");
         assert!(
-            !saw_overlap,
-            "rem-egp9: native-tool allow has no projected deny to overlap with: {conflicts:?}",
+            saw_overlap,
+            "expected allow_deny_overlap in conflicts: {conflicts:?}"
         );
     }
 
-    /// rem-egp9: the format-drift overlap case is moot now that no
-    /// native-tool path denies are projected. The legacy
-    /// `Read(/realm/**)` allow has nothing on the projected deny side
-    /// to overlap with.
+    /// rem-em33: format-drift case — a single-slash `Read(/realm/**)`
+    /// allow on disk still surfaces an overlap against the projected
+    /// `Read(/realm/**)` deny because the conflict detector
+    /// canonicalises both forms.
     #[test]
     fn plan_overlap_seeded_with_single_slash_allow_still_fires() {
         let realm = realm_with_claude();
@@ -207,8 +207,8 @@ mod tests {
         let conflicts = report["config_diff"]["conflicts"].as_array().unwrap();
         let saw_overlap = conflicts.iter().any(|c| c["kind"] == "allow_deny_overlap");
         assert!(
-            !saw_overlap,
-            "rem-egp9: legacy native-tool allow no longer overlaps the minimised projection: {conflicts:?}",
+            saw_overlap,
+            "expected single-slash allow to still surface overlap: {conflicts:?}"
         );
     }
 
@@ -253,10 +253,10 @@ mod tests {
         }
     }
 
-    /// rem-egp9: subtree-shadow overlap can no longer fire — the
-    /// minimised projection emits only `Bash(remargin *)` plus
-    /// optional `also_deny_bash` extras. There is no broader projected
-    /// deny to shadow a more-specific user-scope allow.
+    /// Subtree-shadow case: a user-scope allow inside the realm
+    /// (`Read(/realm/safe)`) is shadowed by the broader projected deny
+    /// (`Read(/realm/**)`). The conflict detector reports this as
+    /// `overlap_kind=allow_shadowed_by_broader_deny`.
     #[test]
     fn plan_overlap_subtree_shadow_reports_kind() {
         let realm = realm_with_claude();
@@ -289,8 +289,8 @@ mod tests {
                 && c["overlap_kind"] == "allow_shadowed_by_broader_deny"
         });
         assert!(
-            !saw_shadow,
-            "rem-egp9: minimised projection has no broad path deny to shadow allow: {conflicts:?}",
+            saw_shadow,
+            "expected allow_shadowed_by_broader_deny: {conflicts:?}"
         );
     }
 

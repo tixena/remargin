@@ -97,10 +97,9 @@ mod tests {
         );
     }
 
-    /// Scenario 15 + 16 + 17 (rem-egp9): end-to-end restrict produces
-    /// exactly one coarse `Bash(remargin *)` deny per settings file
-    /// (`cli_allowed` defaults to false), the sidecar entry, and the
-    /// gitignore line.
+    /// Scenarios 15-17: end-to-end restrict writes the projected
+    /// rule set into both settings files, records the sidecar entry,
+    /// and adds the gitignore line.
     #[test]
     fn restrict_writes_settings_sidecar_and_gitignore() {
         let realm = realm_with_claude();
@@ -118,29 +117,21 @@ mod tests {
         );
         assert_status(&out, 0);
 
-        // Project-scope settings file landed with exactly one deny
-        // (the coarse remargin-cli deny).
+        // Project-scope settings file landed with the rules.
         let project_scope = realm.path().join(".claude/settings.local.json");
         let body = fs::read_to_string(&project_scope).unwrap();
         let value: Value = serde_json::from_str(&body).unwrap();
-        let deny: Vec<&str> = value["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(deny, vec!["Bash(remargin *)"]);
+        let deny = value["permissions"]["deny"].as_array().unwrap();
+        assert!(deny.iter().any(|v| {
+            v.as_str()
+                .is_some_and(|s| s.starts_with("Edit(") && s.contains("src/secret"))
+        }));
+        assert!(deny.iter().any(|v| v.as_str() == Some("Bash(remargin *)")));
 
-        // User-scope file landed too with the same single deny.
+        // User-scope file landed too.
         let user_body = fs::read_to_string(&user_settings).unwrap();
         let user_value: Value = serde_json::from_str(&user_body).unwrap();
-        let user_deny: Vec<&str> = user_value["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(user_deny, vec!["Bash(remargin *)"]);
+        assert!(user_value["permissions"]["deny"].is_array());
 
         // Sidecar exists with one entry.
         let sidecar_body =
@@ -368,11 +359,10 @@ mod tests {
         assert_eq!(tokens, vec!["curl".to_owned()]);
     }
 
-    /// rem-egp9: `restrict` no longer projects per-Bash-command denies
-    /// (the legacy `cd`/`pushd` defaults from rem-e6yd / T42 are gone).
-    /// The shell-relative `cd /restricted && rm file` bypass class is
-    /// addressed by `op_guard`'s per-target enforcement on the remargin
-    /// side, not by Claude pattern-matching that paths can dodge.
+    /// rem-e6yd / T42: `cd` and `pushd` denies are emitted by default
+    /// so the `cd /restricted && rm file` bypass class is closed. Both
+    /// the bare form (`cd /path`) and the with-flag form (`cd -P /path`)
+    /// are covered by emitting both `cd <path>/**` and `cd * <path>/**`.
     #[test]
     fn cd_pushd_denies_emitted_by_default() {
         let realm = realm_with_claude();
@@ -390,35 +380,43 @@ mod tests {
         );
         assert_status(&out, 0);
 
+        let canonical = fs::canonicalize(realm.path().join("src/secret")).unwrap();
+        let glob = format!("{}/**", canonical.display());
+        let expected: [String; 4] = [
+            format!("Bash(cd {glob})"),
+            format!("Bash(cd * {glob})"),
+            format!("Bash(pushd {glob})"),
+            format!("Bash(pushd * {glob})"),
+        ];
+
         let project_scope = realm.path().join(".claude/settings.local.json");
         let project_body = fs::read_to_string(&project_scope).unwrap();
         let project_value: Value = serde_json::from_str(&project_body).unwrap();
         let project_deny = project_value["permissions"]["deny"].as_array().unwrap();
-        for needle in ["Bash(cd ", "Bash(pushd "] {
+        for needle in &expected {
             assert!(
-                !project_deny
+                project_deny
                     .iter()
-                    .any(|v| v.as_str().is_some_and(|s| s.contains(needle))),
-                "rem-egp9: no {needle} patterns expected, got {project_deny:?}"
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "project-scope settings missing {needle}, got {project_deny:?}"
             );
         }
 
         let user_body = fs::read_to_string(&user_settings).unwrap();
         let user_value: Value = serde_json::from_str(&user_body).unwrap();
         let user_deny = user_value["permissions"]["deny"].as_array().unwrap();
-        for needle in ["Bash(cd ", "Bash(pushd "] {
+        for needle in &expected {
             assert!(
-                !user_deny
+                user_deny
                     .iter()
-                    .any(|v| v.as_str().is_some_and(|s| s.contains(needle))),
-                "rem-egp9: no {needle} patterns expected, got {user_deny:?}"
+                    .any(|v| v.as_str() == Some(needle.as_str())),
+                "user-scope settings missing {needle}, got {user_deny:?}"
             );
         }
     }
 
-    /// rem-egp9: round-trip is now trivially clean since the projection
-    /// no longer emits cd/pushd denies. We still pin that whatever
-    /// `restrict` emits, `unprotect` removes via the sidecar.
+    /// rem-e6yd / T42: cd / pushd denies installed by `restrict` are
+    /// scrubbed cleanly by `unprotect` via the sidecar — no leftovers.
     #[test]
     fn cd_pushd_denies_round_trip_through_unprotect() {
         let realm = realm_with_claude();
@@ -490,11 +488,10 @@ mod tests {
         }
     }
 
-    /// rem-egp9: `plan restrict` reflects the minimised projection.
-    /// `deny_rules_to_add` now contains only `Bash(remargin *)` (when
-    /// `cli_allowed=false`) plus any `also_deny_bash` extras — no
-    /// per-Bash-cmd defaults. Pins that the cd/pushd patterns are NOT
-    /// in the plan's projected adds.
+    /// rem-e6yd / T42: `plan restrict` reflects the cd/pushd defaults
+    /// in its `deny_rules_to_add` projection. Pin both the bare and
+    /// with-flag forms so the plan output stays in sync with what the
+    /// live `restrict` would emit.
     #[test]
     fn plan_restrict_reflects_cd_pushd_defaults() {
         let realm = realm_with_claude();
@@ -514,17 +511,24 @@ mod tests {
         );
         assert_status(&out, 0);
         let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let canonical = fs::canonicalize(realm.path().join("src/secret")).unwrap();
+        let glob = format!("{}/**", canonical.display());
+        let expected: [String; 4] = [
+            format!("Bash(cd {glob})"),
+            format!("Bash(cd * {glob})"),
+            format!("Bash(pushd {glob})"),
+            format!("Bash(pushd * {glob})"),
+        ];
         for sf in report["config_diff"]["settings_files"].as_array().unwrap() {
             let to_add = sf["deny_rules_to_add"].as_array().unwrap();
-            for needle in ["Bash(cd ", "Bash(pushd "] {
+            for needle in &expected {
                 assert!(
-                    !to_add
-                        .iter()
-                        .any(|v| v.as_str().is_some_and(|s| s.contains(needle))),
-                    "rem-egp9: plan restrict no longer projects {needle} patterns, got {to_add:?}"
+                    to_add.iter().any(|v| v.as_str() == Some(needle.as_str())),
+                    "plan restrict's deny_rules_to_add missing {needle} for {}, got {to_add:?}",
+                    sf["path"].as_str().unwrap_or("<unknown>")
                 );
             }
-            // Sanity: the new coarse remargin-cli deny IS projected.
+            // Sanity: the coarse remargin-cli deny IS also projected.
             assert!(
                 to_add
                     .iter()
