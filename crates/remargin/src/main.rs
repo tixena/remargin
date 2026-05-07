@@ -4,7 +4,6 @@
 mod obsidian;
 
 use std::env;
-use std::fs;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -1457,7 +1456,10 @@ fn resolve_comment_content(
 fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathBuf> {
     if file == "-" {
         let input = read_stdin()?;
-        let temp_path = env::temp_dir().join("remargin-stdin.md");
+        let temp_root = system
+            .env_var("TMPDIR")
+            .unwrap_or_else(|_err| String::from("/tmp"));
+        let temp_path = PathBuf::from(temp_root).join("remargin-stdin.md");
         system
             .write(&temp_path, input.as_bytes())
             .context("writing stdin to temp file")?;
@@ -1605,17 +1607,17 @@ fn main() -> ExitCode {
     let verbose = output.is_some_and(|o| o.verbose);
     let json_mode = output.is_some_and(|o| o.json);
 
+    let system = RealSystem::new();
     if verbose {
+        let env_filter_directives = system.env_var("RUST_LOG").unwrap_or_default();
+        let base_filter = tracing_subscriber::EnvFilter::try_new(&env_filter_directives)
+            .unwrap_or_else(|_err| tracing_subscriber::EnvFilter::new(""));
         tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive(tracing::Level::DEBUG.into()),
-            )
+            .with_env_filter(base_filter.add_directive(tracing::Level::DEBUG.into()))
             .with_writer(io::stderr)
             .init();
     }
 
-    let system = RealSystem::new();
     let cwd = match system.current_dir() {
         Ok(dir) => dir,
         Err(err) => {
@@ -2671,7 +2673,8 @@ fn cmd_get_binary(
     )?;
 
     if let Some(out_path) = gp.out {
-        fs::write(out_path, &payload.bytes)
+        system
+            .write(out_path, &payload.bytes)
             .with_context(|| format!("writing {}", out_path.display()))?;
         let summary = json!({
             "mime": payload.mime,
@@ -3579,7 +3582,7 @@ fn cmd_plan(
         },
         PlanAction::Batch { path, ops_file, .. } => plan_ops::PlanRequest::Batch {
             path: resolve_doc_path(system, cwd, path)?,
-            ops: read_plan_batch_ops(ops_file)?,
+            ops: read_plan_batch_ops(system, ops_file)?,
         },
         PlanAction::Comment {
             path,
@@ -3987,11 +3990,16 @@ fn emit_unprotect_conflict_line(conflict: &plan_ops::UnprotectConflict) -> Resul
 
 /// Read a JSON file (or stdin when `path == "-"`) into a vector of
 /// [`projections::ProjectBatchOp`] values for `plan batch`.
-fn read_plan_batch_ops(path: &str) -> Result<Vec<projections::ProjectBatchOp>> {
+fn read_plan_batch_ops(
+    system: &dyn System,
+    path: &str,
+) -> Result<Vec<projections::ProjectBatchOp>> {
     let json_text = if path == "-" {
         read_stdin()?
     } else {
-        fs::read_to_string(path).with_context(|| format!("reading plan batch ops file {path}"))?
+        system
+            .read_to_string(Path::new(path))
+            .with_context(|| format!("reading plan batch ops file {path}"))?
     };
     let raw: Value =
         serde_json::from_str(&json_text).context("parsing plan batch ops JSON body")?;
