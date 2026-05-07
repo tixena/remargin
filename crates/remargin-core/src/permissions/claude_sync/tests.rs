@@ -86,10 +86,17 @@ fn subpath_no_extras_emits_full_default_set() {
     let must_contain = [
         // Plain `sed *` (rem-p74a special case).
         "Bash(sed * /a/b/**)",
-        // Delete.
+        // Delete (rem-djqy adds the bare forms; the with-flag form
+        // is preserved verbatim so older settings files do not churn
+        // on re-runs).
+        "Bash(rm /a/b/**)",
         "Bash(rm * /a/b/**)",
+        "Bash(rmdir /a/b/**)",
         "Bash(rmdir * /a/b/**)",
+        "Bash(unlink /a/b/**)",
         "Bash(unlink * /a/b/**)",
+        "Bash(shred /a/b/**)",
+        "Bash(shred * /a/b/**)",
         // Create / link.
         "Bash(mkdir * /a/b/**)",
         "Bash(ln * /a/b/**)",
@@ -119,6 +126,10 @@ fn subpath_no_extras_emits_full_default_set() {
         // Network downloads.
         "Bash(curl * /a/b/**)",
         "Bash(wget * /a/b/**)",
+        // Arg fan-out (rem-djqy).
+        "Bash(xargs * /a/b/**)",
+        // Find (rem-djqy). Coarse: covers `-delete`, `-exec`, etc.
+        "Bash(find * /a/b/**)",
         // Shells.
         "Bash(bash * /a/b/**)",
         "Bash(sh * /a/b/**)",
@@ -134,6 +145,47 @@ fn subpath_no_extras_emits_full_default_set() {
         "Bash(cd * /a/b/**)",
         "Bash(pushd /a/b/**)",
         "Bash(pushd * /a/b/**)",
+        // Windows CMD file-mutation surface (rem-djqy).
+        "Bash(attrib /a/b/**)",
+        "Bash(attrib * /a/b/**)",
+        "Bash(copy /a/b/**)",
+        "Bash(copy * /a/b/**)",
+        "Bash(del /a/b/**)",
+        "Bash(del * /a/b/**)",
+        "Bash(erase /a/b/**)",
+        "Bash(erase * /a/b/**)",
+        "Bash(fc * /a/b/**)",
+        "Bash(move /a/b/**)",
+        "Bash(move * /a/b/**)",
+        "Bash(rd /a/b/**)",
+        "Bash(rd * /a/b/**)",
+        "Bash(ren /a/b/**)",
+        "Bash(ren * /a/b/**)",
+        "Bash(rename /a/b/**)",
+        "Bash(rename * /a/b/**)",
+        "Bash(robocopy * /a/b/**)",
+        "Bash(type * /a/b/**)",
+        "Bash(xcopy * /a/b/**)",
+        // PowerShell cmdlet surface (rem-djqy). Each cmdlet is a
+        // file-mutation primitive that the Unix list above misses.
+        "Bash(Add-Content /a/b/**)",
+        "Bash(Add-Content * /a/b/**)",
+        "Bash(Clear-Content /a/b/**)",
+        "Bash(Clear-Content * /a/b/**)",
+        "Bash(Copy-Item /a/b/**)",
+        "Bash(Copy-Item * /a/b/**)",
+        "Bash(Move-Item /a/b/**)",
+        "Bash(Move-Item * /a/b/**)",
+        "Bash(New-Item /a/b/**)",
+        "Bash(New-Item * /a/b/**)",
+        "Bash(Out-File /a/b/**)",
+        "Bash(Out-File * /a/b/**)",
+        "Bash(Remove-Item /a/b/**)",
+        "Bash(Remove-Item * /a/b/**)",
+        "Bash(Rename-Item /a/b/**)",
+        "Bash(Rename-Item * /a/b/**)",
+        "Bash(Set-Content /a/b/**)",
+        "Bash(Set-Content * /a/b/**)",
         // Source-side mv coverage (rem-0j2x / T44). The `mv *`
         // template emits the destination-side shape via BASH_MUTATORS;
         // these three close the source-side hole the original list
@@ -291,6 +343,126 @@ fn explicit_remargin_in_allow_list_emits_re_allows() {
         .filter(|rule| rule.contains(".remargin"))
         .count();
     assert_eq!(count, 4, "{:#?}", rules.allow);
+}
+
+/// rem-djqy: deletion family emits BOTH bare and `*`-flag forms so
+/// `rm <path>` (with no intervening flag tokens) is denied alongside
+/// `rm -rf <path>`. Mirrors the rem-e6yd / T42 doubling rationale for
+/// `cd` / `pushd`.
+#[test]
+fn deletion_family_emits_bare_and_flagged_forms() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    for cmd in ["rm", "rmdir", "unlink", "shred"] {
+        let bare = format!("Bash({cmd} /a/b/**)");
+        let with_flags = format!("Bash({cmd} * /a/b/**)");
+        assert!(
+            rules.deny.iter().any(|rule| rule == &bare),
+            "missing bare deletion rule {bare:?} in {:#?}",
+            rules.deny
+        );
+        assert!(
+            rules.deny.iter().any(|rule| rule == &with_flags),
+            "missing flagged deletion rule {with_flags:?} in {:#?}",
+            rules.deny
+        );
+    }
+}
+
+/// rem-djqy: every Windows CMD mutator is projected. The list mirrors
+/// the cross-platform decision in the audit (default-on, no per-realm
+/// opt-in) so an agent on Windows cannot route around the deny-list
+/// with native shell tools.
+#[test]
+fn windows_cmd_mutators_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    // Each entry expands to `Bash(<cmd> /a/b/**)`. Tools that take a
+    // source AND destination (`copy`, `move`, `xcopy`, `robocopy`)
+    // get the `*` form so they are caught regardless of which side
+    // of the argv the path lands in.
+    let bare_or_flagged = [
+        "attrib", "del", "erase", "move", "rd", "ren", "rename", "copy",
+    ];
+    for cmd in bare_or_flagged {
+        let bare = format!("Bash({cmd} /a/b/**)");
+        let flagged = format!("Bash({cmd} * /a/b/**)");
+        assert!(
+            rules.deny.iter().any(|rule| rule == &bare),
+            "missing Windows bare rule {bare:?}"
+        );
+        assert!(
+            rules.deny.iter().any(|rule| rule == &flagged),
+            "missing Windows flagged rule {flagged:?}"
+        );
+    }
+
+    let flagged_only = ["fc", "robocopy", "type", "xcopy"];
+    for cmd in flagged_only {
+        let flagged = format!("Bash({cmd} * /a/b/**)");
+        assert!(
+            rules.deny.iter().any(|rule| rule == &flagged),
+            "missing Windows flagged-only rule {flagged:?}"
+        );
+    }
+}
+
+/// rem-djqy: every PowerShell cmdlet mutator is projected with both
+/// the bare and flagged shapes (PowerShell's `-Path` style means a
+/// `cmdlet <path>` invocation is common and the bare form is needed
+/// for the same reason as the Unix delete family).
+#[test]
+fn powershell_cmdlet_mutators_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    let cmdlets = [
+        "Add-Content",
+        "Clear-Content",
+        "Copy-Item",
+        "Move-Item",
+        "New-Item",
+        "Out-File",
+        "Remove-Item",
+        "Rename-Item",
+        "Set-Content",
+    ];
+    for cmd in cmdlets {
+        let bare = format!("Bash({cmd} /a/b/**)");
+        let flagged = format!("Bash({cmd} * /a/b/**)");
+        assert!(
+            rules.deny.iter().any(|rule| rule == &bare),
+            "missing PowerShell bare rule {bare:?}"
+        );
+        assert!(
+            rules.deny.iter().any(|rule| rule == &flagged),
+            "missing PowerShell flagged rule {flagged:?}"
+        );
+    }
+}
+
+/// rem-djqy: `xargs` and `find` close the arg-fan-out / find-exec
+/// gaps in the original Unix list. `xargs <path>` could deliver a
+/// restricted path to another command, dodging the per-cmd denies
+/// unless `xargs` itself is gated.
+#[test]
+fn xargs_and_find_projected() {
+    let entry = restrict_subpath("/a/b", &[], false);
+    let rules = rules_for(&entry, Path::new("/a"), &[]);
+
+    assert!(
+        rules
+            .deny
+            .iter()
+            .any(|rule| rule == "Bash(xargs * /a/b/**)"),
+        "xargs deny missing"
+    );
+    assert!(
+        rules.deny.iter().any(|rule| rule == "Bash(find * /a/b/**)"),
+        "find deny missing"
+    );
 }
 
 /// rem-2plr / rem-si27 negative-presence guard: by default, neither

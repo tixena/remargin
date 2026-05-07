@@ -141,6 +141,40 @@ const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit"];
 /// the bare form (`cd /path/notes`) and the with-flag form
 /// (`cd -P /path/notes`), since the matcher needs the path to land in
 /// the trailing position with no fixed-token prefix.
+///
+/// The same `bare` + `cmd *` doubling applies to the destructive
+/// deletion family (`rm`, `rmdir`, `unlink`) — agents commonly run
+/// `rm /path/foo` with no intervening flag tokens, and the original
+/// `<cmd> *` template alone would only match the with-flag form. The
+/// trigger for rem-djqy was an agent invoking `rmdir <path>` and
+/// having the rule miss; emitting the bare form alongside closes that
+/// gap without weakening any existing rule.
+///
+/// rem-djqy / Windows + PowerShell coverage. Remargin runs on every
+/// platform an agent might shell out from. The original list was
+/// Unix-only, which left an agent on a Windows agent free to bypass
+/// the deny-list with native Windows tools (`del`, `rd`, `move`,
+/// `copy`, …) or PowerShell cmdlets (`Remove-Item`, `Move-Item`,
+/// `Set-Content`, …). The list below adds both shells' file-mutation
+/// surface so the deny-list is platform-independent.
+///
+/// Decisions for the gap audit:
+///
+/// - **Shell redirection (`>` / `>>`)**: NOT included. Redirection is
+///   shell syntax, not a command argv — Claude's matcher operates on
+///   argv-shaped patterns and cannot see the redirection
+///   unambiguously. Unenforceable at this layer.
+/// - **`find ... -delete` / `find ... -exec`**: NOT enumerable as a
+///   single token. `find` itself is added as a coarse mutator (its
+///   `-exec` is an arbitrary-execution surface), but specific flag
+///   shapes inside are out of scope.
+/// - **`xargs`, `eval`, `exec`**: `xargs` is added (delivers args to
+///   another command); `eval` / `exec` are shell builtins that the
+///   matcher cannot meaningfully gate without context, so they fall
+///   under the per-shell deny (`bash *`, `sh *`, …) already covered.
+/// - **`mktemp`**: NOT added. Creates files in a tempdir, not the
+///   restricted root; hostile use would still need a follow-up write
+///   that the existing rules catch.
 pub(crate) const BASH_MUTATORS: &[&str] = &[
     // Write-side mutators (original surface).
     "cp *",
@@ -152,10 +186,18 @@ pub(crate) const BASH_MUTATORS: &[&str] = &[
     "truncate *",
     "touch",
     "touch *",
-    // Delete.
+    // Delete. Both bare and `*` forms (rem-djqy): `rm /path/foo`
+    // (no flags) does not match `Bash(rm * /path/**)` because the
+    // middle `*` requires at least one token, mirroring the
+    // `cd` / `pushd` doubling rationale above.
+    "rm",
     "rm *",
+    "rmdir",
     "rmdir *",
+    "unlink",
     "unlink *",
+    "shred",
+    "shred *",
     // Create / link.
     "install *",
     "ln *",
@@ -206,6 +248,13 @@ pub(crate) const BASH_MUTATORS: &[&str] = &[
     // Network downloads.
     "curl *",
     "wget *",
+    // Arg fan-out (rem-djqy). `xargs` delivers a path argv to another
+    // command; without gating it an agent could run
+    // `echo /restricted/file | xargs rm` and dodge `Bash(rm *)`.
+    "xargs *",
+    // Find (rem-djqy). `-delete` / `-exec` are arbitrary-mutation
+    // surfaces; deny the command coarsely so the path tail matches.
+    "find *",
     // Shells (can do anything).
     "bash *",
     "dash *",
@@ -231,6 +280,54 @@ pub(crate) const BASH_MUTATORS: &[&str] = &[
     "cd *",
     "pushd",
     "pushd *",
+    // Windows CMD file-mutation surface (rem-djqy). Agents on
+    // Windows can route around the Unix-flavored list above unless
+    // these are enumerated explicitly. Both bare and with-flag forms
+    // for the no-arg-but-path invocation, mirroring the rationale on
+    // the Unix delete family. Case-insensitive shells (CMD,
+    // PowerShell) are matched by the lowercased token.
+    "attrib",
+    "attrib *",
+    "copy",
+    "copy *",
+    "del",
+    "del *",
+    "erase",
+    "erase *",
+    "fc *",
+    "move",
+    "move *",
+    "rd",
+    "rd *",
+    "ren",
+    "ren *",
+    "rename",
+    "rename *",
+    "robocopy *",
+    "type *",
+    "xcopy *",
+    // PowerShell cmdlet surface (rem-djqy). Capitalisation matches
+    // PowerShell's canonical form. Each cmdlet is the WriteKind /
+    // delete equivalent of a Unix mutator above, but the matcher
+    // sees them as distinct tokens.
+    "Add-Content",
+    "Add-Content *",
+    "Clear-Content",
+    "Clear-Content *",
+    "Copy-Item",
+    "Copy-Item *",
+    "Move-Item",
+    "Move-Item *",
+    "New-Item",
+    "New-Item *",
+    "Out-File",
+    "Out-File *",
+    "Remove-Item",
+    "Remove-Item *",
+    "Rename-Item",
+    "Rename-Item *",
+    "Set-Content",
+    "Set-Content *",
 ];
 
 /// Diagnostic surface returned by [`revert_rules`].
