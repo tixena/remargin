@@ -95,22 +95,26 @@ mod tests {
         assert!(sidecar["entries"].as_object().unwrap().is_empty());
     }
 
-    /// Scenario 13: Layer 1 stops enforcing after unprotect. The
-    /// post-unprotect write succeeds because the per-op guard
-    /// re-resolves on each call.
+    /// Layer 1 stops enforcing after unprotect. Post-polarity-flip:
+    /// `restrict src/secret` allow-lists that subpath; writes
+    /// elsewhere in the realm are refused. After `unprotect src/secret`
+    /// the realm is open mode and writes outside the (former) allow-list
+    /// succeed because the per-op guard re-resolves on each call.
     #[test]
     fn layer_1_stops_enforcing_after_unprotect() {
         let realm = realm_with_claude();
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
-        // Use a markdown doc so the comment-preserving write path
-        // applies; raw mode is not allowed for .md files.
+        fs::create_dir_all(realm.path().join("src/public")).unwrap();
+        // Markdown doc — raw mode is not allowed on .md so the
+        // comment-preserving write path applies.
         fs::write(
-            realm.path().join("src/secret/foo.md"),
+            realm.path().join("src/public/foo.md"),
             "---\ntitle: test\n---\n\n# Hi\n",
         )
         .unwrap();
         run_restrict(&realm, "src/secret");
 
+        // Outside the allow-list → refused.
         let blocked = run_in(
             realm.path(),
             &[
@@ -120,20 +124,21 @@ mod tests {
                 "--type",
                 "human",
                 "--",
-                "src/secret/foo.md",
+                "src/public/foo.md",
                 "---\ntitle: test\n---\n\n# Updated\n",
             ],
         );
         assert_ne!(blocked.status.code(), Some(0_i32));
         let blocked_stderr = String::from_utf8_lossy(&blocked.stderr);
         assert!(
-            blocked_stderr.contains("denied by `restrict`"),
-            "expected restrict refusal, got: {blocked_stderr}"
+            blocked_stderr.contains("outside the allow-list"),
+            "expected outside-allow-list refusal, got: {blocked_stderr}"
         );
 
         let unprotect = run_in(realm.path(), &["unprotect", "src/secret"]);
         assert_status(&unprotect, 0);
 
+        // No restrict declared → open mode → write proceeds.
         let allowed = run_in(
             realm.path(),
             &[
@@ -143,12 +148,12 @@ mod tests {
                 "--type",
                 "human",
                 "--",
-                "src/secret/foo.md",
+                "src/public/foo.md",
                 "---\ntitle: test\n---\n\n# Updated\n",
             ],
         );
         assert_status(&allowed, 0);
-        let body = fs::read_to_string(realm.path().join("src/secret/foo.md")).unwrap();
+        let body = fs::read_to_string(realm.path().join("src/public/foo.md")).unwrap();
         assert!(body.contains("# Updated"));
     }
 

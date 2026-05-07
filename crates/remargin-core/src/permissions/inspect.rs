@@ -1,74 +1,6 @@
-//! Inspection helpers behind `remargin permissions show / check`
-//! (rem-yj1j.7 / T28).
-//!
-//! Both functions are pure given an [`os_shim::System`]; the CLI /
-//! MCP surfaces sit on top of these and add only argument parsing and
-//! output formatting.
-//!
-//! ## `show`
-//!
-//! Walks `.remargin.yaml` from `cwd`, accumulates the resolved
-//! permissions, and groups them into a JSON-serialisable
-//! [`ShowOutput`]. When a `trusted_roots` entry is itself the parent
-//! of a `.remargin.yaml`, that realm's permissions are expanded
-//! recursively and attached to the entry's `recursive` field. Cycle
-//! detection uses a visited-set of canonical paths and a hard depth
-//! cap.
-//!
-//! ## `check`
-//!
-//! Gitignore-style: returns `restricted = true` when the path is
-//! covered by any `restrict` entry OR by any `deny_ops` entry. With
-//! `--why`, the closest matching rule is named with its source file
-//! and a human-readable rule text.
-//!
-//! ## Canonical `permissions show --json` schema (rem-k7e5)
-//!
-//! The shape below is the contract for `remargin permissions show
-//! --json` and the MCP `permissions_show` tool. The Rust types in
-//! this module ([`ShowOutput`], [`RestrictView`], [`DenyOpsView`],
-//! [`AllowDotFoldersView`], [`TrustedRootView`]) are the
-//! single-source-of-truth — `permissions_show_json_shape_is_canonical`
-//! in `tests/cli_permissions.rs` deserialises real CLI output into
-//! `#[serde(deny_unknown_fields)]` mirrors and fails the build if a
-//! field is added without updating this schema. `elapsed_ms` is
-//! injected at the surface (CLI / MCP wrapper) and is therefore
-//! NOT part of the [`ShowOutput`] struct in this module.
-//!
-//! ```text
-//! ShowOutput
-//!   allow_dot_folders : Array<AllowDotFoldersView>
-//!   deny_ops          : Array<DenyOpsView>
-//!   restrict          : Array<RestrictView>
-//!   trusted_roots     : Array<TrustedRootView>
-//!   elapsed_ms        : number   -- injected by the CLI / MCP layer
-//!
-//! RestrictView
-//!   absolute_path  : string | null   -- canonicalised path; null for `path: '*'`
-//!   also_deny_bash : Array<string>   -- bash-token deny list, defaults to []
-//!   cli_allowed    : boolean         -- whether `remargin` itself is allowed to read
-//!   path_text      : string          -- exact yaml `path:` text ("src/secret" or "*")
-//!   realm_root     : string | null   -- non-null only for the `path: '*'` wildcard
-//!   source_file    : string          -- absolute path of the .remargin.yaml that declared it
-//!
-//! DenyOpsView
-//!   ops         : Array<string>      -- e.g. ["purge", "rm"]
-//!   path        : string             -- canonical path the rule covers
-//!   source_file : string
-//!
-//! AllowDotFoldersView
-//!   names       : Array<string>      -- the dot-folder basenames allowed (".obsidian", ...)
-//!   source_file : string
-//!
-//! TrustedRootView
-//!   path        : string             -- canonical absolute path of the trusted root
-//!   recursive   : ShowOutput | null  -- nested realm permissions; null when not anchored
-//!   source_file : string
-//! ```
-//!
-//! `permissions check --json` returns a separate [`CheckOutput`]
-//! shape (`matching_rule`, `path`, `restricted`) and is documented
-//! on that struct directly.
+//! `permissions show` / `permissions check`. `check` routes through the
+//! same `target_is_sanctioned` predicate the per-op guard uses so the
+//! two layers cannot drift.
 
 #[cfg(test)]
 mod tests;
@@ -80,11 +12,7 @@ use os_shim::System;
 use serde::Serialize;
 
 use crate::config::permissions::resolve::{ResolvedPermissions, RestrictPath, resolve_permissions};
-use crate::permissions::op_guard::restrict_covers;
-
-/// Maximum depth for recursive `trusted_roots` expansion. Stops the
-/// resolver from running away if a chain ever reaches into itself.
-pub const MAX_RECURSION_DEPTH: usize = 3;
+use crate::permissions::op_guard::target_is_sanctioned;
 
 /// Serialised view of a single `allow_dot_folders` declaration.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -144,41 +72,24 @@ pub struct RestrictView {
     pub source_file: PathBuf,
 }
 
-/// Top-level output of `show()`. Serialises directly to the JSON
-/// payload returned by the CLI / MCP.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ShowOutput {
     pub allow_dot_folders: Vec<AllowDotFoldersView>,
     pub deny_ops: Vec<DenyOpsView>,
     pub restrict: Vec<RestrictView>,
-    pub trusted_roots: Vec<TrustedRootView>,
 }
 
-/// Serialised view of a single `trusted_roots` declaration.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct TrustedRootView {
-    pub path: PathBuf,
-    /// Permissions inside `path` when it itself anchors a realm
-    /// (i.e. holds a `.remargin.yaml`). Bounded by
-    /// [`MAX_RECURSION_DEPTH`]; cycles are detected and stop expansion.
-    pub recursive: Option<Box<ShowOutput>>,
-    pub source_file: PathBuf,
-}
-
-/// Run `permissions check`: gitignore-style coverage test for `path`.
+/// `permissions check`: would `op_guard` refuse a mutating op on `path`?
 ///
-/// `cwd` drives the parent walk that picks up applicable `.remargin.yaml`
-/// files. `path` is canonicalised through the [`os_shim::System`] before
-/// matching. When `why` is `true`, the returned [`CheckOutput`] carries
-/// the closest matching rule (closest = first in the resolver's
-/// deepest-first list).
+/// Returns `restricted=true` when the path is outside the allow-list
+/// declared by `restrict`, or covered by a `deny_ops` entry. Routes
+/// through the same predicates the per-op guard uses so the two layers
+/// cannot drift.
 ///
 /// # Errors
 ///
-/// Forwards I/O / parse failures from
-/// [`crate::config::permissions::resolve::resolve_permissions`].
+/// Forwards I/O / parse failures from `resolve_permissions`.
 pub fn check(system: &dyn System, cwd: &Path, path: &Path, why: bool) -> Result<CheckOutput> {
     let canonical = system
         .canonicalize(path)
@@ -192,16 +103,18 @@ pub fn check(system: &dyn System, cwd: &Path, path: &Path, why: bool) -> Result<
     })
 }
 
-/// Run `permissions show`: parent-walk + recursive trusted-root
-/// expansion.
+/// `permissions show`: dump the resolved permissions for `cwd`.
 ///
 /// # Errors
 ///
-/// Forwards I/O / parse failures from
-/// [`crate::config::permissions::resolve::resolve_permissions`].
+/// Forwards I/O / parse failures from `resolve_permissions`.
 pub fn show(system: &dyn System, cwd: &Path) -> Result<ShowOutput> {
-    let mut visited: Vec<PathBuf> = Vec::new();
-    show_inner(system, cwd, 0, &mut visited)
+    let resolved = resolve_permissions(system, cwd)?;
+    Ok(ShowOutput {
+        allow_dot_folders: group_allow_dot_folders(&resolved),
+        deny_ops: group_deny_ops(&resolved),
+        restrict: group_restrict(&resolved),
+    })
 }
 
 fn absolutise(cwd: &Path, path: &Path) -> PathBuf {
@@ -213,24 +126,6 @@ fn absolutise(cwd: &Path, path: &Path) -> PathBuf {
 }
 
 fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Option<MatchingRule> {
-    if let Some(entry) = resolved
-        .restrict
-        .iter()
-        .find(|entry| restrict_covers(&entry.path, canonical))
-    {
-        let rule_text = match &entry.path {
-            RestrictPath::Absolute(path) => format!("restrict path {}", path.display()),
-            RestrictPath::Wildcard { realm_root } => {
-                format!("restrict wildcard under realm {}", realm_root.display())
-            }
-        };
-        return Some(MatchingRule {
-            kind: "restrict",
-            rule_text,
-            source_file: entry.source_file.clone(),
-        });
-    }
-
     if let Some(entry) = resolved
         .deny_ops
         .iter()
@@ -244,6 +139,19 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
                 entry.path.display(),
             ),
             source_file: entry.source_file.clone(),
+        });
+    }
+
+    if !target_is_sanctioned(canonical, &resolved.restrict)
+        && let Some(first) = resolved.restrict.first()
+    {
+        return Some(MatchingRule {
+            kind: "restrict",
+            rule_text: format!(
+                "outside allow-list (target {} is not inside any `restrict` entry)",
+                canonical.display(),
+            ),
+            source_file: first.source_file.clone(),
         });
     }
 
@@ -303,62 +211,4 @@ fn group_restrict(resolved: &ResolvedPermissions) -> Vec<RestrictView> {
             },
         })
         .collect()
-}
-
-fn group_trusted_roots(
-    system: &dyn System,
-    resolved: &ResolvedPermissions,
-    depth: usize,
-    visited: &mut Vec<PathBuf>,
-) -> Result<Vec<TrustedRootView>> {
-    let mut out = Vec::with_capacity(resolved.trusted_roots.len());
-    for entry in &resolved.trusted_roots {
-        let recursive = recursive_for_trusted_root(system, &entry.path, depth, visited)?;
-        out.push(TrustedRootView {
-            path: entry.path.clone(),
-            recursive,
-            source_file: entry.source_file.clone(),
-        });
-    }
-    Ok(out)
-}
-
-fn recursive_for_trusted_root(
-    system: &dyn System,
-    candidate: &Path,
-    depth: usize,
-    visited: &mut Vec<PathBuf>,
-) -> Result<Option<Box<ShowOutput>>> {
-    if depth + 1 >= MAX_RECURSION_DEPTH {
-        return Ok(None);
-    }
-    let canonical = system
-        .canonicalize(candidate)
-        .unwrap_or_else(|_err| candidate.to_path_buf());
-    if visited.iter().any(|seen| seen == &canonical) {
-        return Ok(None);
-    }
-    let inner_config = candidate.join(".remargin.yaml");
-    let exists = system.exists(&inner_config).unwrap_or(false);
-    if !exists {
-        return Ok(None);
-    }
-    visited.push(canonical);
-    let nested = show_inner(system, candidate, depth + 1, visited)?;
-    Ok(Some(Box::new(nested)))
-}
-
-fn show_inner(
-    system: &dyn System,
-    cwd: &Path,
-    depth: usize,
-    visited: &mut Vec<PathBuf>,
-) -> Result<ShowOutput> {
-    let resolved = resolve_permissions(system, cwd)?;
-    Ok(ShowOutput {
-        allow_dot_folders: group_allow_dot_folders(&resolved),
-        deny_ops: group_deny_ops(&resolved),
-        restrict: group_restrict(&resolved),
-        trusted_roots: group_trusted_roots(system, &resolved, depth, visited)?,
-    })
 }

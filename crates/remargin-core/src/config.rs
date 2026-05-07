@@ -115,15 +115,8 @@ pub struct ResolvedConfig {
     /// (and any tooling that wants to report provenance) can name the
     /// file without re-walking.
     pub source_path: Option<PathBuf>,
-    /// Effective `trusted_roots` set for the resolver's `cwd`
-    /// (rem-egp9). Populated by [`Self::resolve`] via
-    /// [`crate::config::permissions::resolve::resolve_trusted_roots_for_cwd`]:
-    /// the narrowed result of the parent walk's `trusted_roots`
-    /// declarations, or `[cwd]` when no `.remargin.yaml` declared a
-    /// `trusted_roots:` block anywhere on the walk. Consumed by the
-    /// per-op sandbox check in [`crate::document::allowlist`] so paths
-    /// inside a declared trusted root are reachable even when they
-    /// live outside the MCP spawn cwd / CLI cwd.
+    /// Allow-listed roots derived from `permissions.restrict` in the
+    /// parent walk; `[cwd]` when none declared.
     pub trusted_roots: Vec<PathBuf>,
     /// Only settable via CLI when compiled with `--features unrestricted`.
     pub unrestricted: bool,

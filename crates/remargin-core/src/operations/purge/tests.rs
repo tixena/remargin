@@ -126,8 +126,8 @@ fn frontmatter_cleanup() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn purge_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+fn purge_refused_when_target_outside_allow_list() {
+    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
     let system = MockSystem::new()
         .with_file(Path::new("/docs/test.md"), doc_with_comments().as_bytes())
         .unwrap()
@@ -137,8 +137,8 @@ fn purge_refused_when_target_under_restrict() {
     let err = purge(&system, Path::new("/docs/test.md"), &open_config()).unwrap_err();
     let chain = format!("{err:#}");
     assert!(
-        chain.contains("denied by `restrict`"),
-        "expected restrict refusal, got {chain}"
+        chain.contains("outside the allow-list"),
+        "expected outside-allow-list refusal, got {chain}"
     );
 }
 

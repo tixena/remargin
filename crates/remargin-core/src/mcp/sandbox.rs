@@ -49,8 +49,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use os_shim::System;
 
-use crate::config::permissions::resolve::resolve_permissions;
-
 /// MCP server's allowed-paths surface, resolved at boot from
 /// `permissions.trusted_roots` in the parent-walked `.remargin.yaml`.
 ///
@@ -110,21 +108,16 @@ impl McpSandbox {
     /// Forwards I/O / parse failures from
     /// [`crate::config::permissions::resolve::resolve_permissions`].
     pub fn from_walk(system: &dyn System, spawn_cwd: &Path) -> Result<Self> {
-        let perms = resolve_permissions(system, spawn_cwd)?;
-
-        let mut roots: Vec<PathBuf> = perms.trusted_roots.into_iter().map(|tr| tr.path).collect();
-
-        if roots.is_empty() {
-            let canonical = system
-                .canonicalize(spawn_cwd)
-                .unwrap_or_else(|_err| spawn_cwd.to_path_buf());
-            roots.push(canonical);
-        }
-
-        roots.sort();
-        roots.dedup();
-
-        Ok(Self { roots })
+        // The sandbox is always rooted at the spawn cwd post-eradication.
+        // The op-guard allow-list (`restrict`) handles fine-grained
+        // sanctioning; the sandbox just keeps the MCP server from
+        // wandering outside the directory it was launched in.
+        let canonical = system
+            .canonicalize(spawn_cwd)
+            .unwrap_or_else(|_err| spawn_cwd.to_path_buf());
+        Ok(Self {
+            roots: vec![canonical],
+        })
     }
 }
 

@@ -1,66 +1,9 @@
-//! Per-op permission guard for Layer 1 enforcement (rem-yj1j.2 / T23).
+//! Per-op permission guard.
 //!
-//! The single entry point is [`pre_mutate_check`]. It runs the parent-
-//! walk resolver (T22), then evaluates `restrict`, `deny_ops`, and the
-//! dot-folder default-deny against the op's target. Any match returns a
-//! structured [`OpGuardError`] that names the offending rule and source
-//! file.
-//!
-//! ## Design choices
-//!
-//! - **Per-op resolution** — no caching. The walk runs every call so
-//!   `.remargin.yaml` edits take effect immediately.
-//! - **Mutating-only `restrict`** — read-side ops are not affected. To
-//!   block reads, declare an explicit `deny_ops` entry.
-//! - **Dot-folder default-deny under restrict** — once a `restrict`
-//!   covers a path, paths inside un-listed dot-folders below it are
-//!   refused too. This keeps `.git/`, `.cache/`, etc. out of the
-//!   blast radius unless the user explicitly opts them in.
-//! - **`.remargin/` always allowed** — remargin owns this folder; the
-//!   dot-folder default-deny never fires on it.
-//! - **`trusted_roots` carve out outer restricts** — when a target is
-//!   inside a `trusted_root` whose path is at-or-below a `restrict`
-//!   entry's anchor, that restrict (and its associated dot-folder
-//!   default-deny) is bypassed for that target. This enables the
-//!   allowlist pattern: declare `restrict '*'` at a parent realm
-//!   (e.g. `~/.remargin.yaml`) and list the writable subtrees in
-//!   `trusted_roots`. Restricts declared *inside* a trusted root still
-//!   fire — they are the more specific opt-out and win, because the
-//!   trusted root is no longer at-or-below their anchor. `deny_ops` is
-//!   never affected; it always fires regardless of `trusted_roots`, so
-//!   it remains the right primitive for "block this op everywhere".
-//!
-//! ## Op classification (read vs write)
-//!
-//! [`OpKind`] is the canonical read-vs-write classifier. Every op the
-//! CLI / MCP surface dispatches to remargin-core MUST be classified by
-//! [`op_kind`]. The classification drives whether `restrict` (and the
-//! dot-folder default-deny) gates the op:
-//!
-//! - [`OpKind::Read`] ops bypass `restrict`. To block a read on a
-//!   restricted path, declare an explicit `deny_ops` entry naming the
-//!   read op. Current read ops: `comments`, `get`, `lint`, `ls`,
-//!   `metadata`, `query`, `search`, `verify`.
-//! - [`OpKind::Write`] ops are gated by `restrict`. Current write ops:
-//!   `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`,
-//!   `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`.
-//!
-//! `deny_ops` is evaluated for every op regardless of kind — that is
-//! the read-side carve-out's escape hatch.
-//!
-//! ## Denial-error wording (pinned)
-//!
-//! The user-visible error text for a denial is documented and pinned by
-//! a unit test:
-//!
-//! - [`RESTRICT_DENIAL_TEMPLATE`] — `op '<op>' on '<target>' is denied
-//!   by 'restrict' rule in <yaml>`.
-//! - [`DENY_OPS_DENIAL_TEMPLATE`] — `op '<op>' on '<target>' is denied
-//!   by 'deny_ops' rule in <yaml>`.
-//!
-//! Templates use backtick-delimited slots in the actual `Display`
-//! impls. Both forms are recognised by the wording test so wording
-//! drift in either direction is caught.
+//! `restrict` is an allow-list: at least one entry in the parent walk
+//! engages allow-list mode (target must lie inside some entry); zero
+//! entries = open mode. `deny_ops` is evaluated regardless and is the
+//! escape hatch for blocking specific ops including reads.
 
 #[cfg(test)]
 mod tests;
@@ -74,8 +17,7 @@ use thiserror::Error;
 use crate::config::Mode;
 use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::resolve::{
-    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath, TrustedRoot,
-    resolve_permissions,
+    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath, resolve_permissions,
 };
 use crate::parser::AuthorType;
 
@@ -113,18 +55,9 @@ pub const MUTATING_OPS: &[&str] = &[
     "write",
 ];
 
-/// Documented template for [`OpGuardError::RestrictedPath`].
-///
-/// The actual `Display` impl uses backticks around the slots; this
-/// template uses single quotes to match the wording in design docs
-/// and acceptance criteria. The wording-pin test
-/// (`denial_error_wording_matches_canonical_template`) accepts either
-/// delimiter so neither form can drift without notice.
-pub const RESTRICT_DENIAL_TEMPLATE: &str =
-    "op '{op}' on '{target}' is denied by 'restrict' rule in {source_file}";
+/// Wording pinned by `denial_error_wording_matches_canonical_template`.
+pub const OUTSIDE_ALLOWED_DENIAL_TEMPLATE: &str = "op '{op}' on '{target}' is denied: outside the allow-list declared by 'restrict' in {source_file}";
 
-/// Documented template for [`OpGuardError::DeniedOp`]. See
-/// [`RESTRICT_DENIAL_TEMPLATE`] for the delimiter convention.
 pub const DENY_OPS_DENIAL_TEMPLATE: &str =
     "op '{op}' on '{target}' is denied by 'deny_ops' rule in {source_file}";
 
@@ -251,14 +184,14 @@ pub enum OpGuardError {
         target: PathBuf,
     },
 
-    /// A `restrict` entry covers `target`.
-    #[error("op `{op}` on `{target}` is denied by `restrict` rule in {source_file}", target = .target.display(), source_file = .source_file.display())]
-    RestrictedPath {
-        /// The op name.
+    /// `target` is outside every allow-listed root from `restrict`.
+    #[error("op `{op}` on `{target}` is denied: outside the allow-list declared by `restrict` in {source_file}", target = .target.display(), source_file = .source_file.display())]
+    OutsideAllowedRoots {
         op: String,
-        /// The source `.remargin.yaml` that declared the rule.
+        /// First `.remargin.yaml` in walk order that declared a
+        /// `restrict` entry (used to point the user at where the
+        /// allow-list lives).
         source_file: PathBuf,
-        /// The target path.
         target: PathBuf,
     },
 }
@@ -408,23 +341,14 @@ pub fn check_against_resolved_for_caller(
     }
 
     if is_mutating_op(op) {
-        if let Some(violation) = find_restrict_violation(
-            op,
-            target,
-            &permissions.restrict,
-            &permissions.trusted_roots,
-        ) {
+        if let Some(violation) = find_restrict_violation(op, target, &permissions.restrict) {
             return Err(violation.into());
         }
 
         let allow_dot_folder_names = permissions.allow_dot_folder_names();
-        if let Some(violation) = find_dot_folder_violation(
-            op,
-            target,
-            &permissions.restrict,
-            &permissions.trusted_roots,
-            &allow_dot_folder_names,
-        ) {
+        if let Some(violation) =
+            find_dot_folder_violation(op, target, &permissions.restrict, &allow_dot_folder_names)
+        {
             return Err(violation.into());
         }
     }
@@ -516,19 +440,31 @@ fn find_deny_ops_violation(
         })
 }
 
+/// Single shared predicate: is `target` inside the allow-list?
+///
+/// Empty `restrict` → open mode → always `true`. Otherwise `target`
+/// must lie inside at least one entry. Used by both the per-op guard
+/// and the inspection surface (`permissions check`) so the two cannot
+/// drift.
+#[must_use]
+pub fn target_is_sanctioned(target: &Path, restrict: &[ResolvedRestrict]) -> bool {
+    if restrict.is_empty() {
+        return true;
+    }
+    restrict
+        .iter()
+        .any(|entry| restrict_covers(&entry.path, target))
+}
+
 fn find_dot_folder_violation(
     op: &str,
     target: &Path,
     restrict: &[ResolvedRestrict],
-    trusted_roots: &[TrustedRoot],
     allow_dot_folders: &[String],
 ) -> Option<OpGuardError> {
     for entry in restrict {
         let realm_anchor = restrict_anchor(entry);
         if !path_covers(realm_anchor, target) {
-            continue;
-        }
-        if trusted_roots_carve_out(realm_anchor, target, trusted_roots) {
             continue;
         }
         if let Some(folder) = first_disallowed_dot_folder(realm_anchor, target, allow_dot_folders) {
@@ -547,49 +483,26 @@ fn find_restrict_violation(
     op: &str,
     target: &Path,
     restrict: &[ResolvedRestrict],
-    trusted_roots: &[TrustedRoot],
 ) -> Option<OpGuardError> {
-    restrict
-        .iter()
-        .find(|entry| {
-            restrict_covers(&entry.path, target)
-                && !trusted_roots_carve_out(restrict_anchor(entry), target, trusted_roots)
-        })
-        .map(|entry| OpGuardError::RestrictedPath {
-            op: String::from(op),
-            source_file: entry.source_file.clone(),
-            target: target.to_path_buf(),
-        })
+    if target_is_sanctioned(target, restrict) {
+        return None;
+    }
+    let first = restrict.first()?;
+    Some(OpGuardError::OutsideAllowedRoots {
+        op: String::from(op),
+        source_file: first.source_file.clone(),
+        target: target.to_path_buf(),
+    })
 }
 
-/// The anchor path of a `restrict` entry — the absolute path for an
+/// The anchor of a `restrict` entry — the absolute path for an
 /// `Absolute` entry, or the realm root for a `Wildcard` entry.
-fn restrict_anchor(entry: &ResolvedRestrict) -> &Path {
+#[must_use]
+pub fn restrict_anchor(entry: &ResolvedRestrict) -> &Path {
     match &entry.path {
         RestrictPath::Absolute(path) => path.as_path(),
         RestrictPath::Wildcard { realm_root } => realm_root.as_path(),
     }
-}
-
-/// `true` when any `trusted_root` carves `target` out of the `restrict`
-/// entry anchored at `restrict_anchor`.
-///
-/// A trusted root T carves out a restrict R for target X when:
-/// - T's path is at-or-below R's anchor (so R would otherwise cover T), AND
-/// - X is at-or-below T's path (so X is in the carved-out region).
-///
-/// This means restricts *inside* a trusted root still fire — those
-/// restrict anchors live below the trusted root, so the at-or-below
-/// check fails and no carve-out applies. They are the more specific
-/// opt-out and win.
-fn trusted_roots_carve_out(
-    restrict_anchor: &Path,
-    target: &Path,
-    trusted_roots: &[TrustedRoot],
-) -> bool {
-    trusted_roots
-        .iter()
-        .any(|tr| path_covers(restrict_anchor, &tr.path) && path_covers(&tr.path, target))
 }
 
 /// Walk `target`'s components beneath `realm_anchor` looking for the

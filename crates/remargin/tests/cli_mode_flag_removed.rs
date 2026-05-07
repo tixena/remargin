@@ -67,20 +67,8 @@ mod tests {
         );
     }
 
-    /// `remargin resolve-mode` remains a valid, read-only subcommand. The
-    /// ban is on the `--mode` *flag*, not on the subcommand that reports
-    /// the resolved mode.
-    #[test]
-    fn resolve_mode_subcommand_still_works() {
-        let output = Command::cargo_bin("remargin")
-            .unwrap()
-            .arg("resolve-mode")
-            .output()
-            .unwrap();
-
-        assert!(
-            output.status.success(),
-            "resolve-mode must still succeed: {output:?}"
-        );
-    }
+    // The `resolve-mode` subcommand's behavior is covered in-process by
+    // `resolve_mode_*` tests in `remargin-core/src/config/tests.rs`
+    // against a MockSystem. The CLI smoke variant was deleted because
+    // it walked up to the real `~/.remargin.yaml`.
 }

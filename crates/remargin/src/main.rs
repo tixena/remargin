@@ -3080,32 +3080,8 @@ fn format_string_list(items: &[String]) -> String {
     out
 }
 
-/// Render a [`permissions_inspect::ShowOutput`] as multi-line text. Top
-/// level lists are sorted by source-file ordering already; the function
-/// only formats.
 fn emit_permissions_show_text(cwd: &Path, report: &permissions_inspect::ShowOutput) {
     eprintln!("Permissions resolved at {}:", cwd.display());
-    eprintln!();
-
-    eprintln!("  trusted_roots:");
-    if report.trusted_roots.is_empty() {
-        eprintln!("    (none)");
-    } else {
-        for entry in &report.trusted_roots {
-            eprintln!(
-                "    {}  (source: {})",
-                entry.path.display(),
-                entry.source_file.display()
-            );
-            if let Some(nested) = entry.recursive.as_deref() {
-                eprintln!(
-                    "      recursive permissions inside {}:",
-                    entry.path.display()
-                );
-                emit_permissions_show_indented(nested, "        ");
-            }
-        }
-    }
     eprintln!();
 
     eprintln!("  restrict:");
@@ -3153,48 +3129,6 @@ fn emit_permissions_show_text(cwd: &Path, report: &permissions_inspect::ShowOutp
     } else {
         for entry in &report.allow_dot_folders {
             eprintln!("    {}", format_string_list(&entry.names));
-        }
-    }
-}
-
-/// Indented variant used to render the `recursive` block under a
-/// trusted-root entry. Keeps the formatting compact since we are
-/// already nested.
-fn emit_permissions_show_indented(report: &permissions_inspect::ShowOutput, indent: &str) {
-    if !report.trusted_roots.is_empty() {
-        eprintln!("{indent}trusted_roots:");
-        for entry in &report.trusted_roots {
-            eprintln!(
-                "{indent}  {}  (source: {})",
-                entry.path.display(),
-                entry.source_file.display()
-            );
-        }
-    }
-    if !report.restrict.is_empty() {
-        eprintln!("{indent}restrict:");
-        for entry in &report.restrict {
-            eprintln!(
-                "{indent}  {}  (source: {})",
-                entry.path_text,
-                entry.source_file.display()
-            );
-        }
-    }
-    if !report.deny_ops.is_empty() {
-        eprintln!("{indent}deny_ops:");
-        for entry in &report.deny_ops {
-            eprintln!(
-                "{indent}  {}  ops={}",
-                entry.path.display(),
-                format_string_list(&entry.ops)
-            );
-        }
-    }
-    if !report.allow_dot_folders.is_empty() {
-        eprintln!("{indent}allow_dot_folders:");
-        for entry in &report.allow_dot_folders {
-            eprintln!("{indent}  {}", format_string_list(&entry.names));
         }
     }
 }

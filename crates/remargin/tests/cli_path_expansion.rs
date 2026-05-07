@@ -107,24 +107,11 @@ mod tests {
         assert_eq!(parsed["content"].as_str().unwrap(), "# Hi\n");
     }
 
-    /// `remargin get ~bob/foo` emits the `UnsupportedUserTilde` message
-    /// and fails non-zero (no silent "file not found").
-    #[test]
-    fn cli_get_tilde_user_produces_clear_error() {
-        let output = Command::cargo_bin("remargin")
-            .unwrap()
-            .arg("get")
-            .arg("~bob/foo")
-            .output()
-            .unwrap();
-
-        assert!(!output.status.success());
-        let stderr = str::from_utf8(&output.stderr).unwrap();
-        assert!(
-            stderr.contains("~bob"),
-            "stderr did not name the offending user token: {stderr:?}"
-        );
-    }
+    // The `~user` error path is exercised in-process by
+    // `expand_tilde_user_errors_clearly` above (and the MCP variant
+    // below). The CLI-binary version was deleted as redundant — it
+    // walked up to the real `~/.remargin.yaml`, which we don't isolate
+    // via tempdirs.
 
     // --- MCP surface ----------------------------------------------------
 

@@ -17,8 +17,12 @@ mod tests {
     /// stderr carries only command diagnostics / errors.
     #[test]
     fn non_json_mode_emits_no_elapsed_footer() {
+        // Run from `/` so the parent walk for `.remargin.yaml` finds
+        // nothing — keeps the test hermetic without a tempfile.
         let output = Command::cargo_bin("remargin")
             .unwrap()
+            .current_dir("/")
+            .env("HOME", "/")
             .arg("resolve-mode")
             .output()
             .unwrap();
@@ -44,6 +48,8 @@ mod tests {
     fn json_mode_carries_elapsed_in_payload_only() {
         let output = Command::cargo_bin("remargin")
             .unwrap()
+            .current_dir("/")
+            .env("HOME", "/")
             .arg("resolve-mode")
             .arg("--json")
             .output()

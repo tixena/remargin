@@ -1,61 +1,5 @@
-//! Parent-walk resolver for the `permissions:` block (rem-yj1j.1 / T22).
-//!
-//! Walks from a starting directory up to the filesystem root, parses
-//! every `.remargin.yaml` found, and accumulates each file's
-//! `permissions:` block into a single [`ResolvedPermissions`]. Each
-//! resolved entry preserves the source-file path so downstream
-//! diagnostics can name the `.remargin.yaml` that contributed a rule.
-//!
-//! Order: deepest (closest to `start_dir`) first within each `Vec`,
-//! then progressively shallower files. Callers that want a
-//! "closest declaration wins" semantics can take `.first()`.
-//!
-//! ## Path resolution
-//!
-//! - `trusted_roots` entries are passed through [`expand_path`] (so
-//!   `~` and `$VAR` resolve), then through `System::canonicalize`
-//!   when possible. If realpath fails (path does not exist yet, mock
-//!   FS, etc.) the expanded form is kept as a best-effort absolute.
-//! - `restrict.path == "*"` becomes [`RestrictPath::Wildcard`] anchored
-//!   at the declaring file's parent directory.
-//! - Other `restrict.path` and `deny_ops.path` resolve against
-//!   `<source_file_dir>/<path>`. Realpath when possible; raw join
-//!   otherwise.
-//! - `allow_dot_folders` strings are accumulated as-is (no path math).
-//!
-//! ## `trusted_roots` narrowing + containment (rem-egp9)
-//!
-//! Unlike `restrict` / `deny_ops` / `allow_dot_folders`, which
-//! accumulate across the parent walk, `trusted_roots` *narrow* as the
-//! walk descends:
-//!
-//! - The outermost (shallowest) declaration sets the initial set.
-//! - Each descendant declaration intersects the running set: entries
-//!   that are not subsets of the parent's set are rejected at parse
-//!   time with a hard error citing the offending path and source file.
-//! - Each declared entry must be the declaring `.remargin.yaml`'s
-//!   parent directory itself, or a subfolder of it (containment rule).
-//!   A folder cannot bless a sibling.
-//!
-//! Containment + symlink handling: the resolver canonicalizes both the
-//! declared entry and the declaring file's parent directory before the
-//! containment check so a symlink that points outside the declaring
-//! folder is rejected. When canonicalization fails (path does not
-//! exist yet, mock FS), the expanded-but-uncanonicalized form is used
-//! for the check — best-effort, the same fallback the per-entry
-//! resolver uses elsewhere.
-//!
-//! When no `.remargin.yaml` is found anywhere on the walk, OR when the
-//! walk found configs but none of them declared `trusted_roots`, the
-//! effective set falls back to `[cwd]`. That preserves open semantics
-//! for the no-config case and lets a user limit the visible surface
-//! by simply changing directories.
-//!
-//! ## No enforcement
-//!
-//! This module is intentionally pure data. The Layer 1 op guard,
-//! Claude-settings synchronizer, and CLI surfaces all consume this
-//! resolver's output but live in their own modules / sibling tasks.
+//! Parent-walk resolver for the `permissions:` block. Pure data — no
+//! enforcement.
 
 use std::path::{Path, PathBuf};
 
@@ -166,10 +110,11 @@ pub struct ResolvedPermissions {
     pub deny_ops: Vec<ResolvedDenyOps>,
 
     /// Restrict entries in walk order (deepest file first).
+    ///
+    /// `restrict` is an allow-list: with at least one entry the per-op
+    /// guard runs in allow-list mode (targets must be inside some
+    /// entry); with zero entries it runs in open mode.
     pub restrict: Vec<ResolvedRestrict>,
-
-    /// Trusted roots in walk order (deepest file first).
-    pub trusted_roots: Vec<TrustedRoot>,
 }
 
 impl ResolvedPermissions {
@@ -220,21 +165,6 @@ pub enum RestrictPath {
     },
 }
 
-/// A `trusted_roots` entry after `~` / `$VAR` expansion and realpath
-/// canonicalization (best-effort).
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct TrustedRoot {
-    /// Canonicalized absolute path. When the path does not exist on
-    /// the active `System`, the expanded-but-uncanonicalized form is
-    /// stored instead — verifying physical existence is the MCP
-    /// startup checker's job (T24 / rem-yj1j.3), not this resolver.
-    pub path: PathBuf,
-
-    /// `.remargin.yaml` that declared the entry.
-    pub source_file: PathBuf,
-}
-
 fn canonicalize_or_passthrough(system: &dyn System, path: PathBuf) -> PathBuf {
     system.canonicalize(&path).unwrap_or(path)
 }
@@ -244,31 +174,8 @@ fn extend_resolved(
     system: &dyn System,
     block: &Permissions,
     source_file: &Path,
-) -> Result<()> {
+) {
     let source_dir = source_file.parent().unwrap_or(source_file);
-
-    for raw in &block.trusted_roots {
-        let path = resolve_trusted_root(system, raw);
-        // Containment: the declared entry must be the declaring
-        // file's parent directory, or a subfolder of it. Canonicalize
-        // both sides to handle symlinks; fall back to the expanded
-        // form when realpath fails (mock FS, dangling path, etc.).
-        let canonical_dir = canonicalize_or_passthrough(system, source_dir.to_path_buf());
-        if !path_covers(&canonical_dir, &path) {
-            anyhow::bail!(
-                "trusted_root {} declared in {} is outside the declaring \
-                 directory {} (entries must be the declaring folder or a \
-                 subfolder)",
-                path.display(),
-                source_file.display(),
-                canonical_dir.display(),
-            );
-        }
-        acc.trusted_roots.push(TrustedRoot {
-            path,
-            source_file: source_file.to_path_buf(),
-        });
-    }
 
     for entry in &block.restrict {
         let resolved_path = if entry.path == RESTRICT_WILDCARD {
@@ -302,14 +209,6 @@ fn extend_resolved(
             source_file: source_file.to_path_buf(),
         });
     }
-
-    Ok(())
-}
-
-/// `true` when `target` equals `anchor` or is a descendant of it. Local
-/// helper so this module does not have to depend on `op_guard`.
-fn path_covers(anchor: &Path, target: &Path) -> bool {
-    target == anchor || target.starts_with(anchor)
 }
 
 fn parse_permissions_block(raw: &str, source_file: &Path) -> Result<Permissions> {
@@ -439,16 +338,8 @@ pub fn lint_permissions_in_parents(
 ///   message includes the file path.
 /// - Unknown fields under `permissions:` are rejected (the on-disk
 ///   structs use `#[serde(deny_unknown_fields)]`).
-/// - A `trusted_roots` entry that is not inside the declaring file's
-///   parent directory (containment violation; rem-egp9).
-/// - A `trusted_roots` entry on a child `.remargin.yaml` that is not a
-///   subset of the parent's set (intersection violation; rem-egp9).
 pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<ResolvedPermissions> {
     let mut acc = ResolvedPermissions::default();
-    // Track the per-source-file trusted_roots declarations in walk
-    // order (deepest first) so we can apply intersection narrowing
-    // outermost-to-deepest after the walk completes.
-    let mut trusted_root_levels: Vec<(PathBuf, Vec<TrustedRoot>)> = Vec::new();
     let mut current = start_dir.to_path_buf();
 
     loop {
@@ -462,14 +353,7 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
                 .read_to_string(&candidate)
                 .with_context(|| format!("reading {}", candidate.display()))?;
             let block = parse_permissions_block(&raw, &candidate)?;
-            // Snapshot acc.trusted_roots before extend_resolved appends
-            // this file's entries so we can capture the per-file slice.
-            let prior_trusted_len = acc.trusted_roots.len();
-            extend_resolved(&mut acc, system, &block, &candidate)?;
-            if acc.trusted_roots.len() > prior_trusted_len {
-                let level: Vec<TrustedRoot> = acc.trusted_roots[prior_trusted_len..].to_vec();
-                trusted_root_levels.push((candidate.clone(), level));
-            }
+            extend_resolved(&mut acc, system, &block, &candidate);
         }
 
         if !current.pop() {
@@ -477,94 +361,36 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
         }
     }
 
-    // Apply trusted_roots narrowing across the walk (rem-egp9).
-    // `extend_resolved` already appended every declared entry to
-    // `acc.trusted_roots` in walk order. Replace that flat list with
-    // the narrowed set: outermost declaration wins; descendants must
-    // be subsets.
-    acc.trusted_roots = narrow_trusted_roots(&trusted_root_levels)?;
-
     Ok(acc)
 }
 
-/// Apply the rem-egp9 intersection rule to `trusted_roots` declarations
-/// gathered during the parent walk.
+/// Resolve the canonical path-set of allow-listed roots for `cwd`.
 ///
-/// `levels` is in walk order (deepest first). The outermost
-/// declaration sets the initial set; each descendant level narrows it
-/// by intersection (each child entry must be a subset of some entry in
-/// the parent's set, otherwise we hard-error citing the offending
-/// path + source file).
-fn narrow_trusted_roots(levels: &[(PathBuf, Vec<TrustedRoot>)]) -> Result<Vec<TrustedRoot>> {
-    if levels.is_empty() {
-        return Ok(Vec::new());
-    }
-    // levels are deepest-first; reverse to outermost-first so we can
-    // apply narrowing top-down.
-    let mut iter = levels.iter().rev();
-    let Some((_first_file, first_level)) = iter.next() else {
-        return Ok(Vec::new());
-    };
-    let mut current_set: Vec<TrustedRoot> = first_level.clone();
-    for (child_file, child_level) in iter {
-        let mut narrowed: Vec<TrustedRoot> = Vec::new();
-        for child_entry in child_level {
-            let covered_by_parent = current_set
-                .iter()
-                .any(|parent| path_covers(&parent.path, &child_entry.path));
-            if !covered_by_parent {
-                let parent_paths: Vec<String> = current_set
-                    .iter()
-                    .map(|p| p.path.display().to_string())
-                    .collect();
-                anyhow::bail!(
-                    "trusted_root {} declared in {} is not a subset of the \
-                     parent set [{}]; descendant declarations may only narrow",
-                    child_entry.path.display(),
-                    child_file.display(),
-                    parent_paths.join(", "),
-                );
-            }
-            narrowed.push(child_entry.clone());
-        }
-        current_set = narrowed;
-    }
-    Ok(current_set)
-}
-
-/// Resolve `trusted_roots` against a parent walk (rem-egp9).
+/// Walks `.remargin.yaml` parents from `cwd` and returns each
+/// `restrict` entry's resolved path (the realm root for `'*'` entries,
+/// the absolute target for explicit paths). When no `.remargin.yaml`
+/// declared a `restrict` block anywhere on the walk, falls back to
+/// `[cwd]` — open semantics for the no-declaration case.
 ///
-/// When no `.remargin.yaml` declared `trusted_roots` anywhere on the
-/// walk, falls back to `[cwd]` — open semantics for the
-/// no-declaration case.
-///
-/// The returned `Vec<PathBuf>` is the canonical absolute-path set the
-/// per-op sandbox layer consults. Each path is canonicalized when
-/// possible; the expanded form is kept otherwise.
+/// Consumed by the MCP sandbox + per-op `allowlist::resolve_sandboxed`
+/// to know which directories the caller is sanctioned to operate in.
 ///
 /// # Errors
 ///
-/// Surfaces the same parse-time errors as [`resolve_permissions`]
-/// (containment + intersection violations).
+/// Surfaces the same parse-time errors as [`resolve_permissions`].
 pub fn resolve_trusted_roots_for_cwd(system: &dyn System, cwd: &Path) -> Result<Vec<PathBuf>> {
     let resolved = resolve_permissions(system, cwd)?;
-    if resolved.trusted_roots.is_empty() {
-        // No declaration anywhere on the walk → CWD fallback.
+    if resolved.restrict.is_empty() {
+        // No declaration anywhere on the walk → CWD fallback (open mode).
         Ok(vec![canonicalize_or_passthrough(system, cwd.to_path_buf())])
     } else {
         Ok(resolved
-            .trusted_roots
+            .restrict
             .iter()
-            .map(|tr| tr.path.clone())
+            .map(|entry| match &entry.path {
+                RestrictPath::Absolute(p) => p.clone(),
+                RestrictPath::Wildcard { realm_root } => realm_root.clone(),
+            })
             .collect())
     }
-}
-
-/// Expand `~` / `$VAR` then realpath; fall back to the expanded form
-/// if canonicalization fails (path does not exist, mock FS lacks the
-/// inode, etc.). Errors from [`expand_path`] also fall back to the raw
-/// string — the resolver is best-effort by design (see module docs).
-fn resolve_trusted_root(system: &dyn System, raw: &str) -> PathBuf {
-    let expanded = expand_path(system, raw).unwrap_or_else(|_err| PathBuf::from(raw));
-    canonicalize_or_passthrough(system, expanded)
 }

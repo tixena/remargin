@@ -207,14 +207,15 @@ mod tests {
         );
     }
 
-    /// E9: per-op no-cache. Restrict, manually delete the
-    /// `.remargin.yaml` entry between two write attempts; the
-    /// second write succeeds because the `op_guard` re-resolves on
-    /// every call.
+    /// Per-op no-cache: edit `.remargin.yaml` between two write
+    /// attempts; the second write succeeds because `op_guard` re-resolves
+    /// every call. Post-polarity-flip: target a path OUTSIDE the
+    /// allow-list so the first write is refused, then drop the
+    /// allow-list and the second write proceeds in open mode.
     #[test]
     fn per_op_no_cache_picks_up_yaml_edits() {
         let realm = realm_with_claude();
-        write_md(&realm, "src/secret/foo.md", "---\ntitle: t\n---\n\n# Hi\n");
+        write_md(&realm, "src/public/foo.md", "---\ntitle: t\n---\n\n# Hi\n");
         restrict_in(&realm, "src/secret", &[]);
 
         let blocked = run_in(
@@ -226,7 +227,7 @@ mod tests {
                 "--type",
                 "human",
                 "--",
-                "src/secret/foo.md",
+                "src/public/foo.md",
                 "---\ntitle: t\n---\n\n# Updated\n",
             ],
         );
@@ -250,7 +251,7 @@ mod tests {
                 "--type",
                 "human",
                 "--",
-                "src/secret/foo.md",
+                "src/public/foo.md",
                 "---\ntitle: t\n---\n\n# Updated\n",
             ],
         );
@@ -408,18 +409,11 @@ mod tests {
     // rem-egp9 — per-op sandbox consults `trusted_roots`
     // ---------------------------------------------------------------
 
-    /// rem-egp9 acceptance: an MCP `write` to a path INSIDE a declared
-    /// `trusted_root` that lives outside the MCP spawn cwd succeeds.
-    /// Pre-rem-egp9 this failed with `path escapes sandbox` because
-    /// the per-op layer consulted only `base_dir`. The new resolver
-    /// threads `trusted_roots` from the resolved-config through the
-    /// per-op sandbox check.
-    ///
-    /// Containment: the `trusted_root` is declared as a subfolder of
-    /// the spawn cwd's parent (the realm), satisfying rem-egp9's
-    /// containment rule. The point of the test is that the trusted
-    /// root lives OUTSIDE the spawn cwd itself but INSIDE the
-    /// declaring realm.
+    // The `trusted_roots`-extends-the-MCP-sandbox scenario was
+    // eradicated along with the deny-list polarity. The MCP sandbox is
+    // now always anchored at the spawn cwd; reach across boundaries by
+    // spawning the MCP server inside the target realm.
+    #[ignore = "eradicated: trusted_roots no longer extends the MCP sandbox"]
     #[test]
     #[expect(
         clippy::too_many_lines,
@@ -560,8 +554,8 @@ mod tests {
         );
     }
 
-    /// rem-egp9: CLI write to the same trusted-root-outside-spawn-cwd
-    /// path also succeeds (parity with the MCP path).
+    // Eradicated alongside `mcp_write_inside_trusted_root_outside_spawn_cwd_succeeds`.
+    #[ignore = "eradicated: trusted_roots no longer extends the CLI sandbox"]
     #[test]
     fn cli_write_inside_trusted_root_outside_cwd_succeeds() {
         let realm = realm_with_claude();

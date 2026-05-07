@@ -66,8 +66,18 @@ pub struct DenyOpsEntry {
 
 /// On-disk shape of the `permissions:` block in `.remargin.yaml`.
 ///
-/// All fields have `#[serde(default)]` so partial declarations
-/// (`permissions: { trusted_roots: [...] }`) are valid.
+/// All fields have `#[serde(default)]` so partial declarations are
+/// valid (an empty `permissions: {}` block parses as
+/// [`Permissions::default`]).
+///
+/// ## Allow-list polarity
+///
+/// `restrict` is an **allow-list**: each entry names a path where
+/// remargin's mutating ops are sanctioned. With at least one `restrict`
+/// declared in the parent walk, the per-op guard runs in allow-list
+/// mode and refuses targets outside every entry. With zero `restrict`
+/// declared anywhere on the walk, remargin runs in open mode and any
+/// target is allowed.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -81,15 +91,11 @@ pub struct Permissions {
     #[serde(default)]
     pub deny_ops: Vec<DenyOpsEntry>,
 
-    /// Subpaths to restrict from agent edits. The literal `"*"` matches
-    /// the entire realm anchored at the declaring `.remargin.yaml`.
+    /// Allow-list of paths where remargin's mutating ops are sanctioned.
+    /// The literal `"*"` matches the entire realm anchored at the
+    /// declaring `.remargin.yaml`.
     #[serde(default)]
     pub restrict: Vec<RestrictEntry>,
-
-    /// Directories the MCP server is allowed to expose. Resolved via
-    /// realpath at use time (see [`resolve::resolve_permissions`]).
-    #[serde(default)]
-    pub trusted_roots: Vec<String>,
 }
 
 /// A single entry under `permissions.restrict`.

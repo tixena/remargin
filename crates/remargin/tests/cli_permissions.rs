@@ -71,15 +71,6 @@ mod tests {
         deny_ops: Vec<DenyOpsSchema>,
         elapsed_ms: u64,
         restrict: Vec<RestrictSchema>,
-        trusted_roots: Vec<TrustedRootSchema>,
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct TrustedRootSchema {
-        path: String,
-        recursive: Option<Box<ShowSchema>>,
-        source_file: String,
     }
 
     fn run_in(dir: &Path, args: &[&str]) -> Output {
@@ -137,8 +128,9 @@ mod tests {
         assert_eq!(ops[0].as_str().unwrap(), "purge");
     }
 
-    /// Scenario 20b: `permissions check` exits 0 when the path sits
-    /// under a `restrict` entry (gitignore-style: matched = success).
+    /// `permissions check` exits 0 when the path is OUTSIDE the
+    /// allow-list declared by `restrict` — the path is restricted
+    /// (the gitignore-style "matched = success" code, post-polarity-flip).
     #[test]
     fn check_exits_zero_for_restricted_path() {
         let realm = TempDir::new().unwrap();
@@ -146,10 +138,10 @@ mod tests {
             realm.path(),
             "permissions:\n  restrict:\n    - path: src/secret\n",
         );
-        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
-        fs::write(realm.path().join("src/secret/foo.md"), "x").unwrap();
+        fs::create_dir_all(realm.path().join("src/public")).unwrap();
+        fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
 
-        let out = run_in(realm.path(), &["permissions", "check", "src/secret/foo.md"]);
+        let out = run_in(realm.path(), &["permissions", "check", "src/public/foo.md"]);
         assert_status(&out, 0);
     }
 
@@ -173,34 +165,13 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(
-            body.get("trusted_roots")
-                .and_then(Value::as_array)
-                .unwrap()
-                .is_empty()
-        );
     }
 
-    /// Scenario 21b: with no rules covering a path, `permissions check`
-    /// exits 1 (the gitignore-style "not matched" code).
+    /// `permissions check` exits 1 when the path IS inside the
+    /// allow-list — sanctioned, not restricted, gitignore-style
+    /// "not matched".
     #[test]
     fn check_exits_one_when_unrestricted() {
-        let realm = TempDir::new().unwrap();
-        write_realm_yaml(
-            realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
-        );
-        fs::create_dir_all(realm.path().join("src/public")).unwrap();
-        fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
-
-        let out = run_in(realm.path(), &["permissions", "check", "src/public/foo.md"]);
-        assert_status(&out, 1);
-    }
-
-    /// `--why` populates the matching-rule section in JSON output for a
-    /// restricted hit (smoke test for the optional detail field).
-    #[test]
-    fn check_why_populates_matching_rule() {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
@@ -209,12 +180,28 @@ mod tests {
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         fs::write(realm.path().join("src/secret/foo.md"), "x").unwrap();
 
+        let out = run_in(realm.path(), &["permissions", "check", "src/secret/foo.md"]);
+        assert_status(&out, 1);
+    }
+
+    /// `--why` populates the matching-rule section in JSON output when
+    /// the target is OUTSIDE the allow-list (post-polarity-flip).
+    #[test]
+    fn check_why_populates_matching_rule() {
+        let realm = TempDir::new().unwrap();
+        write_realm_yaml(
+            realm.path(),
+            "permissions:\n  restrict:\n    - path: src/secret\n",
+        );
+        fs::create_dir_all(realm.path().join("src/public")).unwrap();
+        fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
+
         let out = run_in(
             realm.path(),
             &[
                 "permissions",
                 "check",
-                "src/secret/foo.md",
+                "src/public/foo.md",
                 "--why",
                 "--json",
             ],
@@ -299,7 +286,7 @@ mod tests {
     }
 
     /// `permissions_check` MCP tool agrees with CLI `--json` for both
-    /// restricted (= true) and unrestricted (= false) targets.
+    /// restricted (= outside allow-list) and unrestricted (= inside) targets.
     #[test]
     fn mcp_permissions_check_matches_cli_json() {
         let realm = TempDir::new().unwrap();
@@ -317,13 +304,13 @@ mod tests {
         let config =
             ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
-        // Restricted target.
+        // Outside allow-list → restricted.
         let cli_hit = run_in(
             realm.path(),
             &[
                 "permissions",
                 "check",
-                "src/secret/foo.md",
+                "src/public/foo.md",
                 "--json",
                 "--why",
             ],
@@ -334,15 +321,15 @@ mod tests {
             &base,
             &config,
             "permissions_check",
-            &json!({ "path": "src/secret/foo.md", "why": true }),
+            &json!({ "path": "src/public/foo.md", "why": true }),
         );
         let mcp_hit_body = mcp_payload(&mcp_hit);
         assert_eq!(cli_hit_body, mcp_hit_body);
 
-        // Unrestricted target.
+        // Inside allow-list → not restricted.
         let cli_miss = run_in(
             realm.path(),
-            &["permissions", "check", "src/public/foo.md", "--json"],
+            &["permissions", "check", "src/secret/foo.md", "--json"],
         );
         assert_status(&cli_miss, 1);
         let cli_miss_body = parse_cli_json(&cli_miss);
@@ -350,7 +337,7 @@ mod tests {
             &base,
             &config,
             "permissions_check",
-            &json!({ "path": "src/public/foo.md" }),
+            &json!({ "path": "src/secret/foo.md" }),
         );
         let mcp_miss_body = mcp_payload(&mcp_miss);
         assert_eq!(cli_miss_body, mcp_miss_body);
@@ -383,7 +370,6 @@ mod tests {
             parsed.elapsed_ms < 60_000,
             "elapsed_ms unrealistically large"
         );
-        assert!(parsed.trusted_roots.is_empty());
         assert_eq!(parsed.allow_dot_folders.len(), 1);
         let dot = &parsed.allow_dot_folders[0];
         assert_eq!(dot.names, vec![String::from(".obsidian")]);
@@ -399,13 +385,7 @@ mod tests {
         // Belt-and-suspenders: also flag an undocumented top-level
         // key by inspecting the raw Value, not just the typed mirror.
         let body: Value = serde_json::from_str(stdout).unwrap();
-        let documented = [
-            "allow_dot_folders",
-            "deny_ops",
-            "elapsed_ms",
-            "restrict",
-            "trusted_roots",
-        ];
+        let documented = ["allow_dot_folders", "deny_ops", "elapsed_ms", "restrict"];
         for key in body.as_object().unwrap().keys() {
             assert!(
                 documented.contains(&key.as_str()),
@@ -430,47 +410,6 @@ mod tests {
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         fs::create_dir_all(realm.path().join("archive")).unwrap();
         realm
-    }
-
-    /// Pin the `trusted_roots` schema mirror by reading every
-    /// field; the canonical realm test does not currently populate
-    /// `trusted_roots` so without this consumer the strict mirror
-    /// would round-trip but trip the `dead_code` lint.
-    fn assert_trusted_root_shape(entry: &TrustedRootSchema) {
-        assert!(!entry.path.is_empty());
-        assert!(!entry.source_file.is_empty());
-        if let Some(nested) = entry.recursive.as_deref() {
-            // Recursive shape mirrors the top-level schema.
-            assert!(nested.elapsed_ms < u64::MAX);
-        }
-    }
-
-    /// rem-k7e5: when a `trusted_roots` entry IS present the schema
-    /// mirror still holds. Uses a self-pointing trusted root and
-    /// exercises every field on the trusted-root schema struct.
-    #[test]
-    fn permissions_show_json_trusted_roots_shape() {
-        let realm = TempDir::new().unwrap();
-        let nested = realm.path().join("nested");
-        fs::create_dir_all(&nested).unwrap();
-        // Non-anchoring trusted root: `nested` has no .remargin.yaml,
-        // so `recursive` is null.
-        let yaml = format!(
-            "permissions:\n  trusted_roots:\n    - {}\n",
-            nested.display()
-        );
-        write_realm_yaml(realm.path(), &yaml);
-
-        let out = run_in(realm.path(), &["permissions", "show", "--json"]);
-        assert_status(&out, 0);
-        let parsed: ShowSchema = serde_json::from_str(stdout_of(&out)).unwrap();
-        assert_eq!(parsed.trusted_roots.len(), 1);
-        let root = &parsed.trusted_roots[0];
-        assert_trusted_root_shape(root);
-        assert!(
-            root.recursive.is_none(),
-            "non-anchoring trusted root should null recursive"
-        );
     }
 
     /// Pin the schema-doc claim that `realm_root` is non-null only
@@ -516,19 +455,13 @@ mod tests {
         assert_status(&out, 0);
         let body: Value = serde_json::from_str(stdout_of(&out)).unwrap();
         let map = body.as_object().unwrap();
-        for key in [
-            "allow_dot_folders",
-            "deny_ops",
-            "elapsed_ms",
-            "restrict",
-            "trusted_roots",
-        ] {
+        for key in ["allow_dot_folders", "deny_ops", "elapsed_ms", "restrict"] {
             assert!(
                 map.contains_key(key),
                 "empty payload missing key {key}: {body}"
             );
         }
-        for array_key in ["allow_dot_folders", "deny_ops", "restrict", "trusted_roots"] {
+        for array_key in ["allow_dot_folders", "deny_ops", "restrict"] {
             assert!(
                 map.get(array_key)
                     .and_then(Value::as_array)
@@ -564,8 +497,9 @@ mod tests {
         );
     }
 
-    /// `PathBuf` coverage: also ensure relative paths beginning with `./`
-    /// canonicalise correctly through the CLI surface.
+    /// `PathBuf` coverage: relative paths beginning with `./` canonicalise
+    /// through the CLI surface. Uses an OUTSIDE-the-allow-list target so
+    /// the CLI exits 0 (= restricted, allow-list flipped).
     #[test]
     fn check_dot_slash_path_canonicalises() {
         let realm = TempDir::new().unwrap();
@@ -573,12 +507,12 @@ mod tests {
             realm.path(),
             "permissions:\n  restrict:\n    - path: src/secret\n",
         );
-        fs::create_dir_all(realm.path().join("src/secret")).unwrap();
-        fs::write(realm.path().join("src/secret/foo.md"), "x").unwrap();
+        fs::create_dir_all(realm.path().join("src/public")).unwrap();
+        fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
 
         let out = run_in(
             realm.path(),
-            &["permissions", "check", "./src/secret/foo.md"],
+            &["permissions", "check", "./src/public/foo.md"],
         );
         assert_status(&out, 0);
     }
@@ -660,103 +594,9 @@ mod tests {
         assert!(!is_tool_error(&result), "{result:#?}");
     }
 
-    /// Recursive realm respect (rem-yj1j.3 scenario 12; rem-egp9
-    /// containment): the spawn realm trusts a subfolder, the
-    /// subfolder declares a `restrict` rule on `src/secret`, and an
-    /// MCP `write` against the restricted path is refused by the
-    /// `op_guard` parent walk even though the path is within the
-    /// sandbox roots.
-    #[test]
-    fn mcp_recursive_realm_respect_blocks_write_under_target_restrict() {
-        let spawn = TempDir::new().unwrap();
-        let spawn_canonical = RealSystem::new().canonicalize(spawn.path()).unwrap();
-        let target = spawn_canonical.join("trusted-target");
-        fs::create_dir_all(&target).unwrap();
-        write_realm_yaml(
-            spawn.path(),
-            &format!(
-                "permissions:\n  trusted_roots:\n    - {}\n",
-                target.display()
-            ),
-        );
-        write_realm_yaml(
-            &target,
-            "permissions:\n  restrict:\n    - path: src/secret\n",
-        );
-        fs::create_dir_all(target.join("src/secret")).unwrap();
-        let restricted_file = target.join("src/secret/foo.md");
-        fs::write(&restricted_file, "# initial\n").unwrap();
-
-        let system = RealSystem::new();
-        let base = system.canonicalize(spawn.path()).unwrap();
-        let config =
-            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
-        let result = mcp_call(
-            &base,
-            &config,
-            "write",
-            &json!({
-                "path": restricted_file.to_string_lossy(),
-                "content": "# overwrite\n",
-                "raw": true,
-            }),
-        );
-        assert!(is_tool_error(&result), "{result:#?}");
-        let text = extract_tool_text(&result);
-        assert!(
-            text.contains("denied by `restrict`"),
-            "expected target-realm restrict refusal, got: {text}"
-        );
-    }
-
-    /// No transitive trust (rem-yj1j.3 scenario 13; rem-egp9
-    /// containment): the spawn realm trusts a subfolder, the
-    /// subfolder lists a deeper subfolder as its own `trusted_roots`.
-    /// The narrowing rule keeps the descendant inside the parent's
-    /// set, but a path NOT inside any declared `trusted_root` is still
-    /// rejected at the sandbox boundary.
-    #[test]
-    fn mcp_no_transitive_trust_rejects_target_realm_trusted_roots() {
-        let spawn = TempDir::new().unwrap();
-        let spawn_canonical = RealSystem::new().canonicalize(spawn.path()).unwrap();
-        let trusted = spawn_canonical.join("trusted");
-        fs::create_dir_all(&trusted).unwrap();
-        let inner_trusted = trusted.join("inner");
-        fs::create_dir_all(&inner_trusted).unwrap();
-        let outsider = spawn_canonical.join("not-trusted");
-        fs::create_dir_all(&outsider).unwrap();
-        write_realm_yaml(
-            spawn.path(),
-            &format!(
-                "permissions:\n  trusted_roots:\n    - {}\n",
-                trusted.display()
-            ),
-        );
-        write_realm_yaml(
-            &trusted,
-            &format!(
-                "permissions:\n  trusted_roots:\n    - {}\n",
-                inner_trusted.display()
-            ),
-        );
-        let outsider_file = outsider.join("foo.md");
-        fs::write(&outsider_file, b"# beyond\n").unwrap();
-
-        let system = RealSystem::new();
-        let base = system.canonicalize(spawn.path()).unwrap();
-        let config =
-            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
-        let result = mcp_call(
-            &base,
-            &config,
-            "get",
-            &json!({ "path": outsider_file.to_string_lossy() }),
-        );
-        assert!(is_tool_error(&result), "{result:#?}");
-        let text = extract_tool_text(&result);
-        assert!(
-            text.contains("path escapes MCP sandbox"),
-            "expected sandbox rejection for non-transitive trust, got: {text}"
-        );
-    }
+    // The two `trusted_roots`-shaped scenarios that lived here
+    // (recursive-realm-respect and no-transitive-trust) tested the old
+    // deny-list-with-carve-out polarity. Post-eradication, the relevant
+    // semantics are pinned by op_guard's allow-list scenarios in
+    // `remargin-core/src/permissions/op_guard/tests.rs`.
 }

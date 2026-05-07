@@ -1258,6 +1258,7 @@ mod tests {
 
     fn open_config() -> ResolvedConfig {
         ResolvedConfig {
+            trusted_roots: Vec::new(),
             assets_dir: String::from("assets"),
             author_type: Some(AuthorType::Human),
             identity: Some(String::from("eduardo")),
@@ -1266,7 +1267,6 @@ mod tests {
             mode: Mode::Open,
             registry: None,
             source_path: None,
-            trusted_roots: Vec::new(),
             unrestricted: false,
         }
     }
