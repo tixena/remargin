@@ -153,7 +153,7 @@ fn yaml_missing_sidecar_present_reverts_settings_only() {
     restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();
 
     // Strip the YAML entry by hand: rewrite without permissions.restrict.
-    restrict::write_remargin_yaml(&system, &anchor, "permissions:\n  restrict: []\n").unwrap();
+    restrict::write_remargin_yaml(&system, &anchor, "permissions:\n  trusted_roots: []\n").unwrap();
 
     let outcome = unprotect(
         &system,
@@ -297,7 +297,7 @@ fn other_restrict_entries_are_preserved() {
     .unwrap();
 
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let restricts = value["permissions"]["restrict"].as_sequence().unwrap();
+    let restricts = value["permissions"]["trusted_roots"].as_sequence().unwrap();
     assert_eq!(restricts.len(), 1);
     assert_eq!(restricts[0]["path"], Value::String(String::from("archive")));
 }
@@ -389,7 +389,8 @@ fn last_restrict_removal_keeps_other_permissions_subkeys() {
 fn next_unprotect_compacts_pre_existing_empty_restrict() {
     let (system, anchor) = realm_with_claude();
 
-    let body = "permissions:\n  restrict: []\n  deny_ops:\n  - path: archive\n    ops: [purge]\n";
+    let body =
+        "permissions:\n  trusted_roots: []\n  deny_ops:\n  - path: archive\n    ops: [purge]\n";
     restrict::write_remargin_yaml(&system, &anchor, body).unwrap();
 
     let outcome = unprotect(
@@ -422,7 +423,7 @@ fn next_unprotect_compacts_pre_existing_empty_restrict() {
 fn empty_permissions_block_is_removed_entirely() {
     let (system, anchor) = realm_with_claude();
 
-    let body = "permissions:\n  restrict: []\n  allow_dot_folders: []\n";
+    let body = "permissions:\n  trusted_roots: []\n  allow_dot_folders: []\n";
     restrict::write_remargin_yaml(&system, &anchor, body).unwrap();
 
     unprotect(
@@ -507,6 +508,6 @@ fn rem_is4z_bypass_uses_dedicated_helper() {
     // Pin the only sanctioned entry point so a future change
     // re-exporting `write_remargin_yaml` from another module fails
     // this test deliberately.
-    let body = "permissions:\n  restrict: []\n";
+    let body = "permissions:\n  trusted_roots: []\n";
     restrict::write_remargin_yaml(&system, &anchor, body).unwrap();
 }

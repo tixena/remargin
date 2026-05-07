@@ -2,7 +2,7 @@
 //! slice 1 — `rem-wv71`; minimised by `rem-egp9` slice A; native-tool
 //! fences restored by `rem-qjqu`).
 //!
-//! [`rules_for`] is a pure function over a [`ResolvedRestrict`] +
+//! [`rules_for`] is a pure function over a [`ResolvedTrustedRoot`] +
 //! anchor + `allow_dot_folders` list. Given those inputs it produces
 //! the exact `permissions.deny` / `permissions.allow` rule strings
 //! that the Claude-settings merger (slice 3, `rem-7m4u`) will write
@@ -100,7 +100,7 @@ use os_shim::System;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
+use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::permissions::sidecar::{self, SidecarEntry};
 
 /// Editor-side Claude tools touched by the base path-deny and the
@@ -251,7 +251,7 @@ pub struct RevertReport {
     pub warnings: Vec<String>,
 }
 
-/// Generated rule strings for one [`ResolvedRestrict`] entry.
+/// Generated rule strings for one [`ResolvedTrustedRoot`] entry.
 ///
 /// `deny` and `allow` map 1:1 to Claude's `permissions.deny` /
 /// `permissions.allow` arrays. Both sides of the sync (apply +
@@ -310,7 +310,7 @@ pub struct SettingsFileSim {
 /// expand to a concrete path glob. `allow_dot_folders` controls which
 /// dot-folder names get a re-allow rule on top of the default-deny.
 ///
-/// Wildcards (`RestrictPath::Wildcard`) anchor at the entry's
+/// Wildcards (`TrustedRootPath::Wildcard`) anchor at the entry's
 /// `realm_root`; `_anchor` is unused for these entries because the
 /// realm root already anchors them. Absolute entries use their own
 /// path verbatim.
@@ -335,13 +335,13 @@ pub struct SettingsFileSim {
 /// (`rem-si27`); the user opts in if they want silent MCP forwarding.
 #[must_use]
 pub fn rules_for(
-    entry: &ResolvedRestrict,
+    entry: &ResolvedTrustedRoot,
     _anchor: &Path,
     allow_dot_folders: &[String],
 ) -> RuleSet {
     let restricted_root = match &entry.path {
-        RestrictPath::Absolute(path) => path.clone(),
-        RestrictPath::Wildcard { realm_root } => realm_root.clone(),
+        TrustedRootPath::Absolute(path) => path.clone(),
+        TrustedRootPath::Wildcard { realm_root } => realm_root.clone(),
     };
     let glob_root = restricted_root.display().to_string();
 

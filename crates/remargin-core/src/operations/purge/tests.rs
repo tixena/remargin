@@ -127,7 +127,7 @@ fn frontmatter_cleanup() {
 
 #[test]
 fn purge_refused_when_target_outside_allow_list() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = MockSystem::new()
         .with_file(Path::new("/docs/test.md"), doc_with_comments().as_bytes())
         .unwrap()

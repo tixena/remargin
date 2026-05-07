@@ -17,7 +17,8 @@ use thiserror::Error;
 use crate::config::Mode;
 use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::resolve::{
-    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath, resolve_permissions,
+    ResolvedDenyOps, ResolvedPermissions, ResolvedTrustedRoot, resolve_permissions,
+    trusted_root_anchor, trusted_root_covers,
 };
 use crate::parser::AuthorType;
 
@@ -236,21 +237,6 @@ pub fn op_kind(op: &str) -> Option<OpKind> {
     }
 }
 
-/// `true` when a [`RestrictPath`] entry covers `target`.
-///
-/// - Wildcard entries cover every path under their `realm_root`.
-/// - Absolute entries cover their own path and any descendant.
-///
-/// Both inputs should be canonicalized before this is called; the
-/// helper does no realpath itself.
-#[must_use]
-pub fn restrict_covers(entry: &RestrictPath, target: &Path) -> bool {
-    match entry {
-        RestrictPath::Absolute(path) => path_covers(path, target),
-        RestrictPath::Wildcard { realm_root } => path_covers(realm_root, target),
-    }
-}
-
 /// Run Layer 1 enforcement for an upcoming mutating op.
 ///
 /// `target` is the absolute path of the file the op will operate on.
@@ -341,14 +327,19 @@ pub fn check_against_resolved_for_caller(
     }
 
     if is_mutating_op(op) {
-        if let Some(violation) = find_restrict_violation(op, target, &permissions.restrict) {
+        if let Some(violation) =
+            find_trusted_roots_violation(op, target, &permissions.trusted_roots)
+        {
             return Err(violation.into());
         }
 
         let allow_dot_folder_names = permissions.allow_dot_folder_names();
-        if let Some(violation) =
-            find_dot_folder_violation(op, target, &permissions.restrict, &allow_dot_folder_names)
-        {
+        if let Some(violation) = find_dot_folder_violation(
+            op,
+            target,
+            &permissions.trusted_roots,
+            &allow_dot_folder_names,
+        ) {
             return Err(violation.into());
         }
     }
@@ -440,30 +431,27 @@ fn find_deny_ops_violation(
         })
 }
 
-/// Single shared predicate: is `target` inside the allow-list?
-///
-/// Empty `restrict` → open mode → always `true`. Otherwise `target`
-/// must lie inside at least one entry. Used by both the per-op guard
-/// and the inspection surface (`permissions check`) so the two cannot
-/// drift.
+/// `true` when `target` is inside at least one `trusted_roots` entry,
+/// or when the list is empty (open mode). Shared by `op_guard` and
+/// `inspect::check` so the two layers can't drift.
 #[must_use]
-pub fn target_is_sanctioned(target: &Path, restrict: &[ResolvedRestrict]) -> bool {
-    if restrict.is_empty() {
+pub fn target_is_sanctioned(target: &Path, trusted_roots: &[ResolvedTrustedRoot]) -> bool {
+    if trusted_roots.is_empty() {
         return true;
     }
-    restrict
+    trusted_roots
         .iter()
-        .any(|entry| restrict_covers(&entry.path, target))
+        .any(|entry| trusted_root_covers(&entry.path, target))
 }
 
 fn find_dot_folder_violation(
     op: &str,
     target: &Path,
-    restrict: &[ResolvedRestrict],
+    trusted_roots: &[ResolvedTrustedRoot],
     allow_dot_folders: &[String],
 ) -> Option<OpGuardError> {
-    for entry in restrict {
-        let realm_anchor = restrict_anchor(entry);
+    for entry in trusted_roots {
+        let realm_anchor = trusted_root_anchor(entry);
         if !path_covers(realm_anchor, target) {
             continue;
         }
@@ -479,30 +467,20 @@ fn find_dot_folder_violation(
     None
 }
 
-fn find_restrict_violation(
+fn find_trusted_roots_violation(
     op: &str,
     target: &Path,
-    restrict: &[ResolvedRestrict],
+    trusted_roots: &[ResolvedTrustedRoot],
 ) -> Option<OpGuardError> {
-    if target_is_sanctioned(target, restrict) {
+    if target_is_sanctioned(target, trusted_roots) {
         return None;
     }
-    let first = restrict.first()?;
+    let first = trusted_roots.first()?;
     Some(OpGuardError::OutsideAllowedRoots {
         op: String::from(op),
         source_file: first.source_file.clone(),
         target: target.to_path_buf(),
     })
-}
-
-/// The anchor of a `restrict` entry — the absolute path for an
-/// `Absolute` entry, or the realm root for a `Wildcard` entry.
-#[must_use]
-pub fn restrict_anchor(entry: &ResolvedRestrict) -> &Path {
-    match &entry.path {
-        RestrictPath::Absolute(path) => path.as_path(),
-        RestrictPath::Wildcard { realm_root } => realm_root.as_path(),
-    }
 }
 
 /// Walk `target`'s components beneath `realm_anchor` looking for the

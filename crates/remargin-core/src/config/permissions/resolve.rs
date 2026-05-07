@@ -13,8 +13,8 @@ use crate::path::expand_path;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
 
-/// Wildcard sentinel preserved from `restrict.path = "*"`.
-const RESTRICT_WILDCARD: &str = "*";
+/// Wildcard sentinel preserved from `trusted_roots[].path = "*"`.
+const TRUSTED_ROOT_WILDCARD: &str = "*";
 
 /// Minimal projection used to extract just the `permissions:` block
 /// from a `.remargin.yaml` without coupling to the full
@@ -96,32 +96,22 @@ pub struct ResolvedDenyOps {
 }
 
 /// Accumulated permissions across every `.remargin.yaml` between
-/// `start_dir` and `/`. Each entry remembers its source file.
+/// `start_dir` and `/`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedPermissions {
-    /// Per-file dot-folder allow-list groups in walk order (deepest
-    /// file first). Each [`ResolvedAllowDotFolders`] preserves the
-    /// `.remargin.yaml` that declared it; the flattened name list is
-    /// available through [`ResolvedPermissions::allow_dot_folder_names`].
     pub allow_dot_folders: Vec<ResolvedAllowDotFolders>,
 
-    /// Per-path op denials in walk order (deepest file first).
     pub deny_ops: Vec<ResolvedDenyOps>,
 
-    /// Restrict entries in walk order (deepest file first).
-    ///
-    /// `restrict` is an allow-list: with at least one entry the per-op
-    /// guard runs in allow-list mode (targets must be inside some
-    /// entry); with zero entries it runs in open mode.
-    pub restrict: Vec<ResolvedRestrict>,
+    /// Paths where remargin is sanctioned to operate, in walk order
+    /// (deepest first). Non-empty → allow-list mode for the per-op
+    /// guard; empty → open mode. Also drives the MCP sandbox boundary
+    /// and Claude-side rule emission.
+    pub trusted_roots: Vec<ResolvedTrustedRoot>,
 }
 
 impl ResolvedPermissions {
-    /// Flattened view of every declared dot-folder name across all
-    /// declaring files, preserving walk order. Equivalent to the old
-    /// `allow_dot_folders: Vec<String>` shape; consumers that only
-    /// care about names (e.g. the op guard) call this.
     #[must_use]
     pub fn allow_dot_folder_names(&self) -> Vec<String> {
         self.allow_dot_folders
@@ -131,36 +121,26 @@ impl ResolvedPermissions {
     }
 }
 
-/// A `restrict` entry after path resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct ResolvedRestrict {
-    /// Carried verbatim from the on-disk entry. See
-    /// [`crate::config::permissions::RestrictEntry::also_deny_bash`].
+pub struct ResolvedTrustedRoot {
     pub also_deny_bash: Vec<String>,
 
-    /// Carried verbatim from the on-disk entry. Purely deny-side
-    /// (rem-si27): suppresses the projected `Bash(remargin *)` deny
-    /// rule when `true`; never adds anything to the allow list.
+    /// When `true`, suppress the projected `Bash(remargin *)` deny.
     pub cli_allowed: bool,
 
-    /// Resolved path or wildcard-with-realm.
-    pub path: RestrictPath,
+    pub path: TrustedRootPath,
 
-    /// `.remargin.yaml` that declared the entry.
     pub source_file: PathBuf,
 }
 
-/// Resolved form of a `restrict.path`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum RestrictPath {
-    /// Concrete absolute path (canonicalized when possible).
+pub enum TrustedRootPath {
     Absolute(PathBuf),
-    /// `"*"` — applies to the entire realm anchored at the declaring
+    /// `"*"` — the entire realm anchored at the declaring
     /// `.remargin.yaml`'s parent directory.
     Wildcard {
-        /// Parent directory of the declaring `.remargin.yaml`.
         realm_root: PathBuf,
     },
 }
@@ -177,17 +157,18 @@ fn extend_resolved(
 ) {
     let source_dir = source_file.parent().unwrap_or(source_file);
 
-    for entry in &block.restrict {
-        let resolved_path = if entry.path == RESTRICT_WILDCARD {
-            RestrictPath::Wildcard {
+    for entry in &block.trusted_roots {
+        let raw_path = entry.path();
+        let resolved_path = if raw_path == TRUSTED_ROOT_WILDCARD {
+            TrustedRootPath::Wildcard {
                 realm_root: source_dir.to_path_buf(),
             }
         } else {
-            RestrictPath::Absolute(resolve_relative(system, source_dir, &entry.path))
+            TrustedRootPath::Absolute(resolve_relative(system, source_dir, raw_path))
         };
-        acc.restrict.push(ResolvedRestrict {
-            also_deny_bash: entry.also_deny_bash.clone(),
-            cli_allowed: entry.cli_allowed,
+        acc.trusted_roots.push(ResolvedTrustedRoot {
+            also_deny_bash: entry.also_deny_bash().to_vec(),
+            cli_allowed: entry.cli_allowed(),
             path: resolved_path,
             source_file: source_file.to_path_buf(),
         });
@@ -209,6 +190,26 @@ fn extend_resolved(
             source_file: source_file.to_path_buf(),
         });
     }
+}
+
+/// Anchor for a [`ResolvedTrustedRoot`] — its absolute path or its
+/// realm root.
+#[must_use]
+pub fn trusted_root_anchor(entry: &ResolvedTrustedRoot) -> &Path {
+    match &entry.path {
+        TrustedRootPath::Absolute(p) => p.as_path(),
+        TrustedRootPath::Wildcard { realm_root } => realm_root.as_path(),
+    }
+}
+
+/// `true` when the entry covers `target` (descendant or exact match).
+#[must_use]
+pub fn trusted_root_covers(entry: &TrustedRootPath, target: &Path) -> bool {
+    let anchor = match entry {
+        TrustedRootPath::Absolute(p) => p.as_path(),
+        TrustedRootPath::Wildcard { realm_root } => realm_root.as_path(),
+    };
+    target == anchor || target.starts_with(anchor)
 }
 
 fn parse_permissions_block(raw: &str, source_file: &Path) -> Result<Permissions> {
@@ -364,32 +365,24 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
     Ok(acc)
 }
 
-/// Resolve the canonical path-set of allow-listed roots for `cwd`.
-///
-/// Walks `.remargin.yaml` parents from `cwd` and returns each
-/// `restrict` entry's resolved path (the realm root for `'*'` entries,
-/// the absolute target for explicit paths). When no `.remargin.yaml`
-/// declared a `restrict` block anywhere on the walk, falls back to
-/// `[cwd]` — open semantics for the no-declaration case.
-///
-/// Consumed by the MCP sandbox + per-op `allowlist::resolve_sandboxed`
-/// to know which directories the caller is sanctioned to operate in.
+/// MCP / `allowlist::resolve_sandboxed` boundary set for `cwd`. Reads
+/// `permissions.trusted_roots` from the parent walk; falls back to
+/// `[cwd]` when none declared.
 ///
 /// # Errors
 ///
 /// Surfaces the same parse-time errors as [`resolve_permissions`].
 pub fn resolve_trusted_roots_for_cwd(system: &dyn System, cwd: &Path) -> Result<Vec<PathBuf>> {
     let resolved = resolve_permissions(system, cwd)?;
-    if resolved.restrict.is_empty() {
-        // No declaration anywhere on the walk → CWD fallback (open mode).
+    if resolved.trusted_roots.is_empty() {
         Ok(vec![canonicalize_or_passthrough(system, cwd.to_path_buf())])
     } else {
         Ok(resolved
-            .restrict
+            .trusted_roots
             .iter()
             .map(|entry| match &entry.path {
-                RestrictPath::Absolute(p) => p.clone(),
-                RestrictPath::Wildcard { realm_root } => realm_root.clone(),
+                TrustedRootPath::Absolute(p) => p.clone(),
+                TrustedRootPath::Wildcard { realm_root } => realm_root.clone(),
             })
             .collect())
     }

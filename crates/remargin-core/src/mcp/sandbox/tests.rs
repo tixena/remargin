@@ -33,13 +33,61 @@ fn from_walk_uses_spawn_cwd_with_no_config() {
 }
 
 #[test]
-fn from_walk_uses_spawn_cwd_even_with_restrict_declared() {
-    // The MCP sandbox is the spawn-cwd boundary; per-op allow-list
-    // (`restrict`) is enforced by op_guard, not by widening / narrowing
-    // the sandbox.
-    let system = spawn_system_with(Some("permissions:\n  restrict:\n    - path: '*'\n"));
+fn from_walk_uses_spawn_cwd_when_only_restrict_declared() {
+    // `restrict` is the per-op allow-list; it does not extend the
+    // boot sandbox. Only `trusted_roots` does that.
+    let system = spawn_system_with(Some("permissions:\n  trusted_roots:\n    - path: '*'\n"));
     let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
     assert_eq!(sandbox.roots, vec![PathBuf::from("/r")]);
+}
+
+#[test]
+fn from_walk_uses_trusted_roots_when_declared() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/r"))
+        .unwrap()
+        .with_dir(Path::new("/h/notes"))
+        .unwrap()
+        .with_dir(Path::new("/h/repo"))
+        .unwrap()
+        .with_env("HOME", "/h")
+        .unwrap()
+        .with_file(
+            Path::new("/r/.remargin.yaml"),
+            b"permissions:\n  trusted_roots:\n    - ~/notes\n    - ~/repo\n",
+        )
+        .unwrap();
+    let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
+    // Spawn cwd is always included alongside declared trusted_roots.
+    assert_eq!(
+        sandbox.roots,
+        vec![
+            PathBuf::from("/h/notes"),
+            PathBuf::from("/h/repo"),
+            PathBuf::from("/r"),
+        ]
+    );
+}
+
+#[test]
+fn from_walk_dedups_trusted_roots() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/r"))
+        .unwrap()
+        .with_dir(Path::new("/h/notes"))
+        .unwrap()
+        .with_env("HOME", "/h")
+        .unwrap()
+        .with_file(
+            Path::new("/r/.remargin.yaml"),
+            b"permissions:\n  trusted_roots:\n    - ~/notes\n    - ~/notes\n",
+        )
+        .unwrap();
+    let sandbox = McpSandbox::from_walk(&system, Path::new("/r")).unwrap();
+    assert_eq!(
+        sandbox.roots,
+        vec![PathBuf::from("/h/notes"), PathBuf::from("/r")]
+    );
 }
 
 #[test]

@@ -189,7 +189,7 @@ fn read_yaml_entry(
         return Ok(None);
     };
     let Some(restrict_seq) = permissions
-        .get(Value::String(String::from("restrict")))
+        .get(Value::String(String::from("trusted_roots")))
         .and_then(Value::as_sequence)
     else {
         return Ok(None);

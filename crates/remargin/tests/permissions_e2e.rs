@@ -183,7 +183,7 @@ mod tests {
         let yaml: serde_yaml::Value =
             serde_yaml::from_str(&fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap())
                 .unwrap();
-        let restricts = yaml["permissions"]["restrict"].as_sequence().unwrap();
+        let restricts = yaml["permissions"]["trusted_roots"].as_sequence().unwrap();
         assert_eq!(restricts.len(), 1);
         assert_eq!(
             restricts[0]["path"],
@@ -238,7 +238,7 @@ mod tests {
         // the YAML.
         fs::write(
             realm.path().join(".remargin.yaml"),
-            "permissions:\n  restrict: []\n",
+            "permissions:\n  trusted_roots: []\n",
         )
         .unwrap();
 

@@ -38,7 +38,7 @@ use chrono::Utc;
 use os_shim::System;
 use serde_yaml::{Mapping, Value};
 
-use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
+use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::permissions::claude_sync::{RuleSet, apply_rules, rules_for};
 
 /// Wildcard literal accepted in `restrict.path`. Mirrors the schema
@@ -198,15 +198,15 @@ pub fn restrict(
 
     let yaml_was_created = upsert_remargin_yaml(system, &anchor, &on_disk_path, args)?;
 
-    let resolved = ResolvedRestrict {
+    let resolved = ResolvedTrustedRoot {
         also_deny_bash: args.also_deny_bash.clone(),
         cli_allowed: args.cli_allowed,
         path: if args.path == RESTRICT_WILDCARD {
-            RestrictPath::Wildcard {
+            TrustedRootPath::Wildcard {
                 realm_root: anchor.clone(),
             }
         } else {
-            RestrictPath::Absolute(absolute_path.clone())
+            TrustedRootPath::Absolute(absolute_path.clone())
         },
         source_file: anchor.join(".remargin.yaml"),
     };
@@ -379,7 +379,7 @@ pub fn simulate_upsert_remargin_yaml(
         .context("`permissions` must be a YAML mapping")?;
 
     let restrict_value = permissions
-        .entry(Value::String(String::from("restrict")))
+        .entry(Value::String(String::from("trusted_roots")))
         .or_insert(Value::Sequence(Vec::new()));
     let restrict_seq = restrict_value
         .as_sequence_mut()

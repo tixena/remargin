@@ -49,6 +49,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use os_shim::System;
 
+use crate::config::permissions::resolve::{TrustedRootPath, resolve_permissions};
+
 /// MCP server's allowed-paths surface, resolved at boot from
 /// `permissions.trusted_roots` in the parent-walked `.remargin.yaml`.
 ///
@@ -108,16 +110,26 @@ impl McpSandbox {
     /// Forwards I/O / parse failures from
     /// [`crate::config::permissions::resolve::resolve_permissions`].
     pub fn from_walk(system: &dyn System, spawn_cwd: &Path) -> Result<Self> {
-        // The sandbox is always rooted at the spawn cwd post-eradication.
-        // The op-guard allow-list (`restrict`) handles fine-grained
-        // sanctioning; the sandbox just keeps the MCP server from
-        // wandering outside the directory it was launched in.
-        let canonical = system
+        let perms = resolve_permissions(system, spawn_cwd)?;
+        let canonical_cwd = system
             .canonicalize(spawn_cwd)
             .unwrap_or_else(|_err| spawn_cwd.to_path_buf());
-        Ok(Self {
-            roots: vec![canonical],
-        })
+        // Spawn cwd is always in the sandbox; declared `trusted_roots`
+        // only EXTEND it. Otherwise a vault declaring narrow trusted
+        // roots would lock its own spawn cwd out of the sandbox.
+        let mut roots: Vec<PathBuf> = vec![canonical_cwd];
+        roots.extend(
+            perms
+                .trusted_roots
+                .into_iter()
+                .map(|entry| match entry.path {
+                    TrustedRootPath::Absolute(p) => p,
+                    TrustedRootPath::Wildcard { realm_root } => realm_root,
+                }),
+        );
+        roots.sort();
+        roots.dedup();
+        Ok(Self { roots })
     }
 }
 

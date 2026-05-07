@@ -3084,11 +3084,11 @@ fn emit_permissions_show_text(cwd: &Path, report: &permissions_inspect::ShowOutp
     eprintln!("Permissions resolved at {}:", cwd.display());
     eprintln!();
 
-    eprintln!("  restrict:");
-    if report.restrict.is_empty() {
+    eprintln!("  trusted_roots:");
+    if report.trusted_roots.is_empty() {
         eprintln!("    (none)");
     } else {
-        for entry in &report.restrict {
+        for entry in &report.trusted_roots {
             eprintln!(
                 "    {}  (source: {})",
                 entry.path_text,

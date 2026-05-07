@@ -244,7 +244,7 @@ fn remove_restrict_path(root: &mut serde_yaml::Mapping, path_on_disk: &str) -> b
     else {
         return false;
     };
-    let restrict_key = Value::String(String::from("restrict"));
+    let restrict_key = Value::String(String::from("trusted_roots"));
     let Some(restrict_seq) = permissions
         .get_mut(&restrict_key)
         .and_then(Value::as_sequence_mut)

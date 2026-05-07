@@ -3093,7 +3093,7 @@ fn assert_deny_ops_refusal(err: &anyhow::Error) {
 
 #[test]
 fn comment_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let position = InsertPosition::Append;
@@ -3133,7 +3133,7 @@ fn comment_refused_when_deny_ops_lists_comment() {
 
 #[test]
 fn ack_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
     let config = open_config();
     let err = ack_comments(
@@ -3165,7 +3165,7 @@ fn ack_refused_when_deny_ops_lists_ack() {
 
 #[test]
 fn react_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
     let config = open_config();
     let err = react(
@@ -3199,7 +3199,7 @@ fn react_refused_when_deny_ops_lists_react() {
 
 #[test]
 fn delete_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
     let config = open_config();
     let err = delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]).unwrap_err();
@@ -3217,7 +3217,7 @@ fn delete_refused_when_deny_ops_lists_delete() {
 
 #[test]
 fn edit_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
     let config = open_config();
     let err = edit_comment(
@@ -3252,7 +3252,7 @@ fn edit_refused_when_deny_ops_lists_edit() {
 #[test]
 fn batch_refused_when_target_under_restrict() {
     use crate::operations::batch::{BatchCommentOp, batch_comment};
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let ops = vec![
@@ -3307,7 +3307,7 @@ fn batch_refused_when_deny_ops_lists_batch() {
 #[test]
 fn batch_atomic_refusal_leaves_doc_untouched() {
     use crate::operations::batch::{BatchCommentOp, batch_comment};
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
@@ -3355,7 +3355,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
 #[test]
 fn migrate_refused_when_target_under_restrict() {
     use crate::operations::migrate::{MigrateIdentities, migrate};
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let err = migrate(
@@ -3389,7 +3389,7 @@ fn migrate_refused_when_deny_ops_lists_migrate() {
 #[test]
 fn sandbox_add_refused_when_target_under_restrict() {
     use core::slice::from_ref;
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let path = PathBuf::from("/docs/test.md");
@@ -3426,7 +3426,7 @@ fn sandbox_add_refused_when_deny_ops_lists_sandbox_add() {
 #[test]
 fn sandbox_remove_refused_when_target_under_restrict() {
     use core::slice::from_ref;
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let path = PathBuf::from("/docs/test.md");
@@ -3461,7 +3461,7 @@ fn sandbox_remove_refused_when_deny_ops_lists_sandbox_remove() {
 
 #[test]
 fn sign_refused_when_target_under_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = MockSystem::new()
         .with_file(
             Path::new("/docs/test.md"),
@@ -3518,7 +3518,7 @@ fn sign_refused_when_deny_ops_lists_sign() {
 #[test]
 fn write_refused_when_target_under_restrict() {
     use crate::document::{WriteOptions, write};
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
     let err = write(
@@ -3559,7 +3559,7 @@ fn write_refused_when_deny_ops_lists_write() {
 /// for every read op.
 #[test]
 fn read_ops_unaffected_by_restrict() {
-    let yaml = "permissions:\n  restrict:\n    - path: elsewhere\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
 
     // Reading the file directly should still work (no mutation, no guard).

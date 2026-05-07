@@ -55,7 +55,7 @@ mod tests {
 
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
-    struct RestrictSchema {
+    struct TrustedRootSchema {
         absolute_path: Option<String>,
         also_deny_bash: Vec<String>,
         cli_allowed: bool,
@@ -70,7 +70,7 @@ mod tests {
         allow_dot_folders: Vec<AllowDotFoldersSchema>,
         deny_ops: Vec<DenyOpsSchema>,
         elapsed_ms: u64,
-        restrict: Vec<RestrictSchema>,
+        trusted_roots: Vec<TrustedRootSchema>,
     }
 
     fn run_in(dir: &Path, args: &[&str]) -> Output {
@@ -109,7 +109,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n  deny_ops:\n    - path: archive\n      ops: [purge]\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n  deny_ops:\n    - path: archive\n      ops: [purge]\n",
         );
         // Materialise the targets so `restrict_covers` matches paths
         // canonicalised through the real filesystem.
@@ -119,8 +119,8 @@ mod tests {
         let out = run_in(realm.path(), &["permissions", "show", "--json"]);
         assert_status(&out, 0);
         let body: Value = serde_json::from_str(stdout_of(&out)).unwrap();
-        let restrict = body.get("restrict").and_then(Value::as_array).unwrap();
-        assert_eq!(restrict.len(), 1);
+        let trusted_roots = body.get("trusted_roots").and_then(Value::as_array).unwrap();
+        assert_eq!(trusted_roots.len(), 1);
         let deny_ops = body.get("deny_ops").and_then(Value::as_array).unwrap();
         assert_eq!(deny_ops.len(), 1);
         let ops = deny_ops[0].get("ops").and_then(Value::as_array).unwrap();
@@ -136,7 +136,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n",
         );
         fs::create_dir_all(realm.path().join("src/public")).unwrap();
         fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
@@ -154,7 +154,7 @@ mod tests {
         assert_status(&out, 0);
         let body: Value = serde_json::from_str(stdout_of(&out)).unwrap();
         assert!(
-            body.get("restrict")
+            body.get("trusted_roots")
                 .and_then(Value::as_array)
                 .unwrap()
                 .is_empty()
@@ -175,7 +175,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n",
         );
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         fs::write(realm.path().join("src/secret/foo.md"), "x").unwrap();
@@ -191,7 +191,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n",
         );
         fs::create_dir_all(realm.path().join("src/public")).unwrap();
         fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
@@ -210,7 +210,7 @@ mod tests {
         let body: Value = serde_json::from_str(stdout_of(&out)).unwrap();
         assert_eq!(body.get("restricted").unwrap(), &Value::Bool(true));
         let rule = body.get("matching_rule").unwrap();
-        assert_eq!(rule.get("kind").unwrap().as_str().unwrap(), "restrict");
+        assert_eq!(rule.get("kind").unwrap().as_str().unwrap(), "trusted_roots");
     }
 
     // --- Scenario 22: MCP parity ------------------------------------------
@@ -262,7 +262,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n  deny_ops:\n    - path: archive\n      ops: [purge]\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n  deny_ops:\n    - path: archive\n      ops: [purge]\n",
         );
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         fs::create_dir_all(realm.path().join("archive")).unwrap();
@@ -292,7 +292,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n",
         );
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         fs::write(realm.path().join("src/secret/foo.md"), "x").unwrap();
@@ -380,12 +380,17 @@ mod tests {
         assert!(!deny.path.is_empty());
         assert!(!deny.source_file.is_empty());
 
-        assert_restrict_wildcard_invariant(&parsed.restrict);
+        assert_trusted_root_wildcard_invariant(&parsed.trusted_roots);
 
         // Belt-and-suspenders: also flag an undocumented top-level
         // key by inspecting the raw Value, not just the typed mirror.
         let body: Value = serde_json::from_str(stdout).unwrap();
-        let documented = ["allow_dot_folders", "deny_ops", "elapsed_ms", "restrict"];
+        let documented = [
+            "allow_dot_folders",
+            "deny_ops",
+            "elapsed_ms",
+            "trusted_roots",
+        ];
         for key in body.as_object().unwrap().keys() {
             assert!(
                 documented.contains(&key.as_str()),
@@ -403,7 +408,7 @@ mod tests {
         write_realm_yaml(
             realm.path(),
             "permissions:\n  \
-             restrict:\n    - path: src/secret\n    - path: '*'\n  \
+             trusted_roots:\n    - path: src/secret\n    - path: '*'\n  \
              deny_ops:\n    - path: archive\n      ops: [purge]\n  \
              allow_dot_folders:\n    - .obsidian\n",
         );
@@ -415,7 +420,7 @@ mod tests {
     /// Pin the schema-doc claim that `realm_root` is non-null only
     /// for wildcard `path: '*'` entries, and `absolute_path` is
     /// non-null otherwise.
-    fn assert_restrict_wildcard_invariant(restrict: &[RestrictSchema]) {
+    fn assert_trusted_root_wildcard_invariant(restrict: &[TrustedRootSchema]) {
         let mut saw_wildcard = false;
         let mut saw_absolute = false;
         for entry in restrict {
@@ -455,13 +460,18 @@ mod tests {
         assert_status(&out, 0);
         let body: Value = serde_json::from_str(stdout_of(&out)).unwrap();
         let map = body.as_object().unwrap();
-        for key in ["allow_dot_folders", "deny_ops", "elapsed_ms", "restrict"] {
+        for key in [
+            "allow_dot_folders",
+            "deny_ops",
+            "elapsed_ms",
+            "trusted_roots",
+        ] {
             assert!(
                 map.contains_key(key),
                 "empty payload missing key {key}: {body}"
             );
         }
-        for array_key in ["allow_dot_folders", "deny_ops", "restrict"] {
+        for array_key in ["allow_dot_folders", "deny_ops", "trusted_roots"] {
             assert!(
                 map.get(array_key)
                     .and_then(Value::as_array)
@@ -480,7 +490,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n",
         );
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
 
@@ -488,8 +498,8 @@ mod tests {
         assert_status(&out, 0);
         let stderr = str::from_utf8(&out.stderr).unwrap();
         assert!(
-            stderr.contains("restrict:"),
-            "expected 'restrict:' header in:\n{stderr}",
+            stderr.contains("trusted_roots:"),
+            "expected 'trusted_roots:' header in:\n{stderr}",
         );
         assert!(
             stderr.contains("src/secret"),
@@ -505,7 +515,7 @@ mod tests {
         let realm = TempDir::new().unwrap();
         write_realm_yaml(
             realm.path(),
-            "permissions:\n  restrict:\n    - path: src/secret\n",
+            "permissions:\n  trusted_roots:\n    - path: src/secret\n",
         );
         fs::create_dir_all(realm.path().join("src/public")).unwrap();
         fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();

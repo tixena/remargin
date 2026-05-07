@@ -24,14 +24,14 @@ fn show_empty_when_no_config() {
     let out = show(&system, Path::new("/r")).unwrap();
     assert!(out.allow_dot_folders.is_empty());
     assert!(out.deny_ops.is_empty());
-    assert!(out.restrict.is_empty());
+    assert!(out.trusted_roots.is_empty());
 }
 
 #[test]
 fn show_single_realm_full_block() {
     let yaml = "\
 permissions:
-  restrict:
+  trusted_roots:
     - path: src
   deny_ops:
     - path: src/secret
@@ -41,10 +41,10 @@ permissions:
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let out = show(&system, Path::new("/r")).unwrap();
 
-    assert_eq!(out.restrict.len(), 1);
-    assert_eq!(out.restrict[0].path_text, "/r/src");
+    assert_eq!(out.trusted_roots.len(), 1);
+    assert_eq!(out.trusted_roots[0].path_text, "/r/src");
     assert_eq!(
-        out.restrict[0].source_file,
+        out.trusted_roots[0].source_file,
         PathBuf::from("/r/.remargin.yaml")
     );
 
@@ -64,27 +64,27 @@ permissions:
 
 #[test]
 fn show_multi_realm_walk_surfaces_both() {
-    let parent = "permissions:\n  restrict:\n    - path: top\n";
-    let child = "permissions:\n  restrict:\n    - path: nested\n";
+    let parent = "permissions:\n  trusted_roots:\n    - path: top\n";
+    let child = "permissions:\n  trusted_roots:\n    - path: nested\n";
     let system = mock_with(&[
         ("/r/.remargin.yaml", parent),
         ("/r/sub/.remargin.yaml", child),
     ]);
     let out = show(&system, Path::new("/r/sub")).unwrap();
-    assert_eq!(out.restrict.len(), 2);
+    assert_eq!(out.trusted_roots.len(), 2);
     assert_eq!(
-        out.restrict[0].source_file,
+        out.trusted_roots[0].source_file,
         PathBuf::from("/r/sub/.remargin.yaml")
     );
     assert_eq!(
-        out.restrict[1].source_file,
+        out.trusted_roots[1].source_file,
         PathBuf::from("/r/.remargin.yaml")
     );
 }
 
 #[test]
 fn show_round_trips_through_json() {
-    let yaml = "permissions:\n  restrict:\n    - path: src\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let out = show(&system, Path::new("/r")).unwrap();
     let json = serde_json::to_string(&out).unwrap();
@@ -94,12 +94,12 @@ fn show_round_trips_through_json() {
 
 #[test]
 fn show_wildcard_entry_carries_realm_root() {
-    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: '*'\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let out = show(&system, Path::new("/r")).unwrap();
-    assert_eq!(out.restrict[0].path_text, "*");
-    assert_eq!(out.restrict[0].realm_root, Some(PathBuf::from("/r")));
-    assert!(out.restrict[0].absolute_path.is_none());
+    assert_eq!(out.trusted_roots[0].path_text, "*");
+    assert_eq!(out.trusted_roots[0].realm_root, Some(PathBuf::from("/r")));
+    assert!(out.trusted_roots[0].absolute_path.is_none());
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn check_no_restrict_anywhere_is_unrestricted() {
 /// Inside the allow-list — not restricted.
 #[test]
 fn check_path_inside_allow_list_is_not_restricted() {
-    let yaml = "permissions:\n  restrict:\n    - path: src/secret\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(
         &system,
@@ -165,7 +165,7 @@ fn check_path_inside_allow_list_is_not_restricted() {
 /// Outside the allow-list — restricted.
 #[test]
 fn check_path_outside_allow_list_is_restricted() {
-    let yaml = "permissions:\n  restrict:\n    - path: src/secret\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(
         &system,
@@ -179,7 +179,7 @@ fn check_path_outside_allow_list_is_restricted() {
 
 #[test]
 fn check_wildcard_restrict_allows_anywhere_in_realm() {
-    let yaml = "permissions:\n  restrict:\n    - path: '*'\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: '*'\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(&system, Path::new("/r"), Path::new("/r/anywhere.md"), false).unwrap();
     assert!(!result.restricted);
@@ -195,7 +195,7 @@ fn check_deny_ops_entry_counts_as_restricted() {
 
 #[test]
 fn check_why_populates_matching_rule_for_outside_allow_list() {
-    let yaml = "permissions:\n  restrict:\n    - path: src/secret\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(
         &system,
@@ -205,15 +205,15 @@ fn check_why_populates_matching_rule_for_outside_allow_list() {
     )
     .unwrap();
     let rule = result.matching_rule.unwrap();
-    assert_eq!(rule.kind, "restrict");
+    assert_eq!(rule.kind, "trusted_roots");
     assert_eq!(rule.source_file, PathBuf::from("/r/.remargin.yaml"));
-    assert!(rule.rule_text.contains("outside allow-list"));
+    assert!(rule.rule_text.contains("outside trusted_roots"));
 }
 
 #[test]
 fn check_non_existent_path_matched_lexically() {
     // Outside the allow-list → restricted.
-    let yaml = "permissions:\n  restrict:\n    - path: src/secret\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(
         &system,
@@ -227,7 +227,7 @@ fn check_non_existent_path_matched_lexically() {
 
 #[test]
 fn check_canonicalised_match_inside_allow_list() {
-    let yaml = "permissions:\n  restrict:\n    - path: real\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: real\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(&system, Path::new("/r"), Path::new("/r/real/x.md"), false).unwrap();
     assert!(!result.restricted);
@@ -235,13 +235,13 @@ fn check_canonicalised_match_inside_allow_list() {
 
 #[test]
 fn check_round_trips_through_json() {
-    let yaml = "permissions:\n  restrict:\n    - path: src\n";
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     // `/r/foo.md` is OUTSIDE the allow-list `/r/src`.
     let result = check(&system, Path::new("/r"), Path::new("/r/foo.md"), true).unwrap();
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"restricted\":true"));
-    assert!(json.contains("\"kind\":\"restrict\""));
+    assert!(json.contains("\"kind\":\"trusted_roots\""));
 }
 
 // ---------------------------------------------------------------------
@@ -258,7 +258,7 @@ fn inspect_check_and_op_guard_agree_on_allow_list_membership() {
     use crate::permissions::op_guard::check_against_resolved;
 
     // Vault realm: `restrict '*'` → the whole realm is allow-listed.
-    let inner = "permissions:\n  restrict:\n    - path: '*'\n";
+    let inner = "permissions:\n  trusted_roots:\n    - path: '*'\n";
     let system = mock_with(&[("/home/user/vault/.remargin.yaml", inner)]);
 
     let inside = Path::new("/home/user/vault/foo.md");

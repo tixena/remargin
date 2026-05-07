@@ -434,7 +434,7 @@ mod tests {
         // Stand up the matching `.remargin.yaml` so `unprotect` finds
         // a YAML entry to remove. The path "/realm/src/secret" in the
         // sidecar maps to a relative `src/secret` from the realm root.
-        let yaml = "permissions:\n  restrict:\n    - path: src/secret\n";
+        let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
         fs::write(realm_path.join(".remargin.yaml"), yaml).unwrap();
         // Patch the sidecar's entry key to also use the temp realm path.
         let new_key = realm_path.join("src/secret").to_string_lossy().to_string();

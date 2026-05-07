@@ -313,7 +313,7 @@ mod tests {
 
         let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
-        value["permissions"]["restrict"][0]["also_deny_bash"]
+        value["permissions"]["trusted_roots"][0]["also_deny_bash"]
             .as_sequence()
             .map(|s| s.iter().map(|v| v.as_str().unwrap().to_owned()).collect())
             .unwrap_or_default()

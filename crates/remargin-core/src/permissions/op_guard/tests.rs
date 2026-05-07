@@ -7,14 +7,15 @@ use os_shim::mock::MockSystem;
 
 use crate::config::Mode;
 use crate::config::permissions::op_name::OpName;
+use crate::config::permissions::resolve::trusted_root_covers;
 use crate::config::permissions::resolve::{
-    ResolvedDenyOps, ResolvedPermissions, ResolvedRestrict, RestrictPath,
+    ResolvedDenyOps, ResolvedPermissions, ResolvedTrustedRoot, TrustedRootPath,
 };
 use crate::parser::AuthorType;
 use crate::permissions::op_guard::{
     CallerInfo, DENY_OPS_DENIAL_TEMPLATE, MUTATING_OPS, OUTSIDE_ALLOWED_DENIAL_TEMPLATE,
     OpGuardError, OpKind, READ_OPS, check_against_resolved, check_against_resolved_for_caller,
-    is_mutating_op, op_kind, pre_mutate_check, restrict_covers,
+    is_mutating_op, op_kind, pre_mutate_check,
 };
 
 fn realm_with(yaml: &str) -> MockSystem {
@@ -64,14 +65,14 @@ fn scenario_01_no_restrict_allows_everything() {
 /// the allow-list succeeds.
 #[test]
 fn scenario_02_restrict_subpath_allows_inside() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: src/secret\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
     pre_mutate_check(&system, "comment", Path::new("/r/src/secret/foo.md")).unwrap();
 }
 
 /// `restrict src/secret` blocks targets OUTSIDE the allow-list.
 #[test]
 fn scenario_03_restrict_subpath_blocks_outside() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: src/secret\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
     let err = pre_mutate_check(&system, "comment", Path::new("/r/src/public/foo.md")).unwrap_err();
     assert!(outside_allowed_match(&err, "comment", "/r/.remargin.yaml"));
 }
@@ -79,7 +80,7 @@ fn scenario_03_restrict_subpath_blocks_outside() {
 /// Read ops bypass the allow-list check; only `deny_ops` can block reads.
 #[test]
 fn scenario_04_restrict_does_not_block_read_ops() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: src/secret\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
     for op in READ_OPS {
         let result = pre_mutate_check(&system, op, Path::new("/r/src/public/foo.md"));
         assert!(result.is_ok(), "read op {op} should not be blocked");
@@ -89,7 +90,7 @@ fn scenario_04_restrict_does_not_block_read_ops() {
 /// `restrict '*'` covers the whole realm; any path under it is allowed.
 #[test]
 fn scenario_05_wildcard_restrict_allows_anywhere_in_realm() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: '*'\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: '*'\n");
     pre_mutate_check(&system, "write", Path::new("/r/anywhere/file.md")).unwrap();
 }
 
@@ -120,7 +121,7 @@ fn scenario_08_deny_ops_covers_descendants() {
 /// `DotFolderDenied` fires.
 #[test]
 fn scenario_09_dot_folder_under_allow_list_is_denied() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: src/foo\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/foo\n");
     let err = pre_mutate_check(&system, "write", Path::new("/r/src/foo/.git/x.md")).unwrap_err();
     assert!(dot_folder_match(&err, ".git", "/r/.remargin.yaml"));
 }
@@ -136,7 +137,7 @@ fn scenario_09b_dot_folder_outside_restrict_is_allowed() {
 /// still fires for `.git/` etc.
 #[test]
 fn scenario_09c_wildcard_with_dot_folder_denial() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: '*'\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: '*'\n");
     let err = pre_mutate_check(&system, "write", Path::new("/r/.git/x.md")).unwrap_err();
     assert!(dot_folder_match(&err, ".git", "/r/.remargin.yaml"));
 }
@@ -145,7 +146,7 @@ fn scenario_09c_wildcard_with_dot_folder_denial() {
 #[test]
 fn scenario_10_allow_dot_folders_unblocks_named_dot_folder() {
     let system = realm_with(
-        "permissions:\n  restrict:\n    - path: src/foo\n  allow_dot_folders: ['.git']\n",
+        "permissions:\n  trusted_roots:\n    - path: src/foo\n  allow_dot_folders: ['.git']\n",
     );
     pre_mutate_check(&system, "write", Path::new("/r/src/foo/.git/x.md")).unwrap();
 }
@@ -156,10 +157,10 @@ fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: Vec::new(),
-        restrict: vec![ResolvedRestrict {
+        trusted_roots: vec![ResolvedTrustedRoot {
             also_deny_bash: Vec::new(),
             cli_allowed: false,
-            path: RestrictPath::Wildcard {
+            path: TrustedRootPath::Wildcard {
                 realm_root: PathBuf::from("/r"),
             },
             source_file: PathBuf::from("/r/.remargin.yaml"),
@@ -174,8 +175,8 @@ fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
 /// declared at `/r/sub` covers `/r/sub/foo.md`, so the op succeeds.
 #[test]
 fn scenario_12_multi_realm_walks_combine() {
-    let parent = "permissions:\n  restrict:\n    - path: '*'\n";
-    let child = "permissions:\n  restrict:\n    - path: '*'\n";
+    let parent = "permissions:\n  trusted_roots:\n    - path: '*'\n";
+    let child = "permissions:\n  trusted_roots:\n    - path: '*'\n";
     let system = MockSystem::new()
         .with_dir(Path::new("/r/sub"))
         .unwrap()
@@ -190,7 +191,7 @@ fn scenario_12_multi_realm_walks_combine() {
 /// effect immediately.
 #[test]
 fn scenario_17_no_caching_per_op_reresolves() {
-    let with_restrict_outside = "permissions:\n  restrict:\n    - path: only-this-subdir\n";
+    let with_restrict_outside = "permissions:\n  trusted_roots:\n    - path: only-this-subdir\n";
     let without_restrict = "identity: alice\n";
 
     let initial = MockSystem::new()
@@ -214,7 +215,7 @@ fn scenario_17_no_caching_per_op_reresolves() {
 /// Refusal carries the absolute path of the declaring `.remargin.yaml`.
 #[test]
 fn scenario_19_source_file_in_every_refusal() {
-    let system = realm_with("permissions:\n  restrict:\n    - path: src\n");
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: src\n");
     // Outside the allow-list `src` → refused.
     let err = pre_mutate_check(&system, "write", Path::new("/r/other.md")).unwrap_err();
     let chain = format!("{err:#}");
@@ -229,22 +230,22 @@ fn scenario_19_source_file_in_every_refusal() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn restrict_covers_absolute_exact_and_descendants() {
-    let entry = RestrictPath::Absolute(PathBuf::from("/r/src"));
-    assert!(restrict_covers(&entry, Path::new("/r/src")));
-    assert!(restrict_covers(&entry, Path::new("/r/src/foo.md")));
-    assert!(restrict_covers(&entry, Path::new("/r/src/sub/foo.md")));
-    assert!(!restrict_covers(&entry, Path::new("/r/other.md")));
+fn trusted_root_covers_absolute_exact_and_descendants() {
+    let entry = TrustedRootPath::Absolute(PathBuf::from("/r/src"));
+    assert!(trusted_root_covers(&entry, Path::new("/r/src")));
+    assert!(trusted_root_covers(&entry, Path::new("/r/src/foo.md")));
+    assert!(trusted_root_covers(&entry, Path::new("/r/src/sub/foo.md")));
+    assert!(!trusted_root_covers(&entry, Path::new("/r/other.md")));
 }
 
 #[test]
-fn restrict_covers_wildcard_under_realm() {
-    let entry = RestrictPath::Wildcard {
+fn trusted_root_covers_wildcard_under_realm() {
+    let entry = TrustedRootPath::Wildcard {
         realm_root: PathBuf::from("/r"),
     };
-    assert!(restrict_covers(&entry, Path::new("/r/anything.md")));
-    assert!(restrict_covers(&entry, Path::new("/r/sub/anything.md")));
-    assert!(!restrict_covers(&entry, Path::new("/elsewhere/x.md")));
+    assert!(trusted_root_covers(&entry, Path::new("/r/anything.md")));
+    assert!(trusted_root_covers(&entry, Path::new("/r/sub/anything.md")));
+    assert!(!trusted_root_covers(&entry, Path::new("/elsewhere/x.md")));
 }
 
 #[test]
@@ -262,10 +263,10 @@ fn dot_folder_denial_only_active_for_mutating_ops() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: Vec::new(),
-        restrict: vec![ResolvedRestrict {
+        trusted_roots: vec![ResolvedTrustedRoot {
             also_deny_bash: Vec::new(),
             cli_allowed: false,
-            path: RestrictPath::Wildcard {
+            path: TrustedRootPath::Wildcard {
                 realm_root: PathBuf::from("/r"),
             },
             source_file: PathBuf::from("/r/.remargin.yaml"),
@@ -302,7 +303,7 @@ fn scenario_13_symlink_target_resolves_to_allow_list_outside() {
     fs::write(realm_path.join("public/foo.md"), "x").unwrap();
     fs::write(
         realm_path.join(".remargin.yaml"),
-        "permissions:\n  restrict:\n    - path: src/secret\n",
+        "permissions:\n  trusted_roots:\n    - path: src/secret\n",
     )
     .unwrap();
 
@@ -440,7 +441,7 @@ fn deny_ops_to_matches_caller_in_strict_mode_refuses() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice"]),
-        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
     let err =
@@ -456,7 +457,7 @@ fn deny_ops_to_does_not_match_caller_in_strict_mode_allows() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
-        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
     check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
@@ -468,7 +469,7 @@ fn deny_ops_to_is_ignored_in_open_mode() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
-        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
     };
     let caller = caller("alice", AuthorType::Human, Mode::Open);
     let err =
@@ -527,7 +528,7 @@ fn strict_agent_default_ssh_override_via_explicit_to_with_empty_ops() {
             source_file: PathBuf::from("/r/.remargin.yaml"),
             to: vec![String::from("nimbus")],
         }],
-        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
     };
     let caller = caller("nimbus", AuthorType::Agent, Mode::Strict);
     check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
@@ -551,7 +552,7 @@ fn deny_ops_to_matches_id_when_name_does_not() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice-id"]),
-        restrict: Vec::new(),
+        trusted_roots: Vec::new(),
     };
     let caller = CallerInfo {
         author_type: Some(AuthorType::Human),

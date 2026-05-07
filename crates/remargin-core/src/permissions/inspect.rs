@@ -11,7 +11,9 @@ use anyhow::Result;
 use os_shim::System;
 use serde::Serialize;
 
-use crate::config::permissions::resolve::{ResolvedPermissions, RestrictPath, resolve_permissions};
+use crate::config::permissions::resolve::{
+    ResolvedPermissions, TrustedRootPath, resolve_permissions,
+};
 use crate::permissions::op_guard::target_is_sanctioned;
 
 /// Serialised view of a single `allow_dot_folders` declaration.
@@ -57,15 +59,15 @@ pub struct MatchingRule {
     pub source_file: PathBuf,
 }
 
-/// Serialised view of a single `restrict` declaration.
+/// Serialised view of a single `trusted_roots` declaration.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct RestrictView {
+pub struct TrustedRootView {
     /// Canonical absolute path; `None` for wildcard entries.
     pub absolute_path: Option<PathBuf>,
     pub also_deny_bash: Vec<String>,
     pub cli_allowed: bool,
-    /// On-disk text from `.remargin.yaml` — `"src/secret"` or `"*"`.
+    /// On-disk text — `"src/secret"`, `"*"`, etc.
     pub path_text: String,
     /// Anchor directory for wildcard entries; `None` otherwise.
     pub realm_root: Option<PathBuf>,
@@ -77,7 +79,7 @@ pub struct RestrictView {
 pub struct ShowOutput {
     pub allow_dot_folders: Vec<AllowDotFoldersView>,
     pub deny_ops: Vec<DenyOpsView>,
-    pub restrict: Vec<RestrictView>,
+    pub trusted_roots: Vec<TrustedRootView>,
 }
 
 /// `permissions check`: would `op_guard` refuse a mutating op on `path`?
@@ -113,7 +115,7 @@ pub fn show(system: &dyn System, cwd: &Path) -> Result<ShowOutput> {
     Ok(ShowOutput {
         allow_dot_folders: group_allow_dot_folders(&resolved),
         deny_ops: group_deny_ops(&resolved),
-        restrict: group_restrict(&resolved),
+        trusted_roots: group_trusted_roots(&resolved),
     })
 }
 
@@ -142,13 +144,13 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
         });
     }
 
-    if !target_is_sanctioned(canonical, &resolved.restrict)
-        && let Some(first) = resolved.restrict.first()
+    if !target_is_sanctioned(canonical, &resolved.trusted_roots)
+        && let Some(first) = resolved.trusted_roots.first()
     {
         return Some(MatchingRule {
-            kind: "restrict",
+            kind: "trusted_roots",
             rule_text: format!(
-                "outside allow-list (target {} is not inside any `restrict` entry)",
+                "outside trusted_roots (target {} is not inside any entry)",
                 canonical.display(),
             ),
             source_file: first.source_file.clone(),
@@ -188,12 +190,12 @@ fn group_deny_ops(resolved: &ResolvedPermissions) -> Vec<DenyOpsView> {
         .collect()
 }
 
-fn group_restrict(resolved: &ResolvedPermissions) -> Vec<RestrictView> {
+fn group_trusted_roots(resolved: &ResolvedPermissions) -> Vec<TrustedRootView> {
     resolved
-        .restrict
+        .trusted_roots
         .iter()
         .map(|entry| match &entry.path {
-            RestrictPath::Absolute(path) => RestrictView {
+            TrustedRootPath::Absolute(path) => TrustedRootView {
                 absolute_path: Some(path.clone()),
                 also_deny_bash: entry.also_deny_bash.clone(),
                 cli_allowed: entry.cli_allowed,
@@ -201,7 +203,7 @@ fn group_restrict(resolved: &ResolvedPermissions) -> Vec<RestrictView> {
                 realm_root: None,
                 source_file: entry.source_file.clone(),
             },
-            RestrictPath::Wildcard { realm_root } => RestrictView {
+            TrustedRootPath::Wildcard { realm_root } => TrustedRootView {
                 absolute_path: None,
                 also_deny_bash: entry.also_deny_bash.clone(),
                 cli_allowed: entry.cli_allowed,

@@ -86,7 +86,7 @@ fn wildcard_path_stored_in_yaml() {
     restrict(&system, &anchor, &args("*"), &settings_files(&anchor)).unwrap();
 
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let entry = &value["permissions"]["restrict"][0];
+    let entry = &value["permissions"]["trusted_roots"][0];
     assert_eq!(entry["path"], Value::String(String::from("*")));
 }
 
@@ -122,7 +122,7 @@ fn creates_remargin_yaml_when_absent() {
     assert!(outcome.yaml_was_created);
 
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let entry = &value["permissions"]["restrict"][0];
+    let entry = &value["permissions"]["trusted_roots"][0];
     assert_eq!(entry["path"], Value::String(String::from("src/secret")));
 }
 
@@ -144,7 +144,7 @@ fn appends_to_existing_remargin_yaml() {
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
     assert_eq!(value["identity"], Value::String(String::from("alice")));
     assert_eq!(value["type"], Value::String(String::from("human")));
-    let restrict_entry = &value["permissions"]["restrict"][0];
+    let restrict_entry = &value["permissions"]["trusted_roots"][0];
     assert_eq!(
         restrict_entry["path"],
         Value::String(String::from("src/secret"))
@@ -172,7 +172,7 @@ fn duplicate_path_does_not_create_second_entry() {
     .unwrap();
 
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let restricts = value["permissions"]["restrict"].as_sequence().unwrap();
+    let restricts = value["permissions"]["trusted_roots"].as_sequence().unwrap();
     assert_eq!(restricts.len(), 1, "{value:#?}");
 }
 
@@ -223,7 +223,7 @@ fn also_deny_bash_propagates_to_yaml_and_rules() {
     let outcome = restrict(&system, &anchor, &a, &settings_files(&anchor)).unwrap();
 
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let entry = &value["permissions"]["restrict"][0];
+    let entry = &value["permissions"]["trusted_roots"][0];
     let extras = entry["also_deny_bash"].as_sequence().unwrap();
     assert_eq!(extras.len(), 2);
 
@@ -251,7 +251,7 @@ fn cli_allowed_true_omits_remargin_cli_deny() {
     let outcome = restrict(&system, &anchor, &a, &settings_files(&anchor)).unwrap();
 
     let value = read_yaml(&system, &anchor.join(".remargin.yaml"));
-    let entry = &value["permissions"]["restrict"][0];
+    let entry = &value["permissions"]["trusted_roots"][0];
     assert_eq!(entry["cli_allowed"], Value::Bool(true));
 
     assert!(
@@ -308,7 +308,7 @@ fn write_remargin_yaml_bypass_is_scoped_to_this_module() {
     // `crate::permissions::restrict::write_remargin_yaml`. A future
     // change that re-exports it from the crate root or another
     // module must update this test deliberately.
-    let body = "permissions:\n  restrict: []\n";
+    let body = "permissions:\n  trusted_roots: []\n";
     write_remargin_yaml(&system, &anchor, body).unwrap();
     assert_eq!(
         system

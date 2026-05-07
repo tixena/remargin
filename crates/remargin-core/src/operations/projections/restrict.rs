@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use os_shim::System;
 
-use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
+use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::operations::plan::{
     ConfigConflict, ConfigPlanDiff, EntryAction, RemarginYamlDiff, SettingsFileDiff, SidecarDiff,
 };
@@ -119,15 +119,15 @@ pub fn project_restrict(
         args,
     )?;
 
-    let resolved_for_rules = ResolvedRestrict {
+    let resolved_for_rules = ResolvedTrustedRoot {
         also_deny_bash: args.also_deny_bash.clone(),
         cli_allowed: args.cli_allowed,
         path: if args.path == RESTRICT_WILDCARD {
-            RestrictPath::Wildcard {
+            TrustedRootPath::Wildcard {
                 realm_root: anchor.clone(),
             }
         } else {
-            RestrictPath::Absolute(resolution.absolute_path.clone())
+            TrustedRootPath::Absolute(resolution.absolute_path.clone())
         },
         source_file: anchor.join(".remargin.yaml"),
     };

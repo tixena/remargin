@@ -3,7 +3,7 @@
 //! fences restored by rem-qjqu).
 //!
 //! Pure-data round-trips: every test feeds a hand-rolled
-//! [`ResolvedRestrict`] in and asserts the returned rule strings.
+//! [`ResolvedTrustedRoot`] in and asserts the returned rule strings.
 //!
 //! `restrict` projects the full native-tool fence (editor-tool denies,
 //! dot-folder defaults, `BASH_MUTATORS` list, mv source/dest patterns)
@@ -19,7 +19,7 @@ use os_shim::System as _;
 use os_shim::mock::MockSystem;
 use serde_json::{Value, json};
 
-use crate::config::permissions::resolve::{ResolvedRestrict, RestrictPath};
+use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::permissions::claude_sync::rule_shape::{
     OverlapKind, PathGlob, RuleShape, rules_overlap,
 };
@@ -28,20 +28,20 @@ use crate::permissions::claude_sync::{
 };
 use crate::permissions::sidecar::{self, sidecar_path};
 
-fn restrict_subpath(path: &str, also_deny_bash: &[&str], cli_allowed: bool) -> ResolvedRestrict {
-    ResolvedRestrict {
+fn restrict_subpath(path: &str, also_deny_bash: &[&str], cli_allowed: bool) -> ResolvedTrustedRoot {
+    ResolvedTrustedRoot {
         also_deny_bash: also_deny_bash.iter().copied().map(String::from).collect(),
         cli_allowed,
-        path: RestrictPath::Absolute(PathBuf::from(path)),
+        path: TrustedRootPath::Absolute(PathBuf::from(path)),
         source_file: PathBuf::from("/r/.remargin.yaml"),
     }
 }
 
-fn restrict_wildcard(realm: &str, cli_allowed: bool) -> ResolvedRestrict {
-    ResolvedRestrict {
+fn restrict_wildcard(realm: &str, cli_allowed: bool) -> ResolvedTrustedRoot {
+    ResolvedTrustedRoot {
         also_deny_bash: Vec::new(),
         cli_allowed,
-        path: RestrictPath::Wildcard {
+        path: TrustedRootPath::Wildcard {
             realm_root: PathBuf::from(realm),
         },
         source_file: PathBuf::from(format!("{realm}/.remargin.yaml")),
