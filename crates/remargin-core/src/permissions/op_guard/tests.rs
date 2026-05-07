@@ -1,6 +1,5 @@
 //! Acceptance scenarios for the per-op guard under allow-list polarity.
 
-use std::env;
 use std::path::{Path, PathBuf};
 
 use os_shim::mock::MockSystem;
@@ -166,7 +165,14 @@ fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
             source_file: PathBuf::from("/r/.remargin.yaml"),
         }],
     };
-    check_against_resolved("write", Path::new("/r/.remargin/state.yaml"), &resolved).unwrap();
+    let system = MockSystem::new();
+    check_against_resolved(
+        &system,
+        "write",
+        Path::new("/r/.remargin/state.yaml"),
+        &resolved,
+    )
+    .unwrap();
 }
 
 /// Multi-realm: deepest restrict declaration is what cites the source
@@ -272,7 +278,8 @@ fn dot_folder_denial_only_active_for_mutating_ops() {
             source_file: PathBuf::from("/r/.remargin.yaml"),
         }],
     };
-    check_against_resolved("get", Path::new("/r/src/.git/x.md"), &resolved).unwrap();
+    let system = MockSystem::new();
+    check_against_resolved(&system, "get", Path::new("/r/src/.git/x.md"), &resolved).unwrap();
 }
 
 #[test]
@@ -444,9 +451,15 @@ fn deny_ops_to_matches_caller_in_strict_mode_refuses() {
         trusted_roots: Vec::new(),
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
-    let err =
-        check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
-            .unwrap_err();
+    let system = MockSystem::new();
+    let err = check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
     let chain = format!("{err:#}");
     assert!(chain.contains("alice"));
     assert!(chain.contains("deny_ops"));
@@ -460,8 +473,15 @@ fn deny_ops_to_does_not_match_caller_in_strict_mode_allows() {
         trusted_roots: Vec::new(),
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
-    check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
-        .unwrap();
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -472,26 +492,35 @@ fn deny_ops_to_is_ignored_in_open_mode() {
         trusted_roots: Vec::new(),
     };
     let caller = caller("alice", AuthorType::Human, Mode::Open);
-    let err =
-        check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
-            .unwrap_err();
+    let system = MockSystem::new();
+    let err = check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
     assert!(matches!(
         err.downcast_ref::<OpGuardError>(),
         Some(OpGuardError::DeniedOp { .. })
     ));
 }
 
+/// `MockSystem` with a synthetic `$HOME` so the synthesized `~/.ssh/**`
+/// agent default-deny reads a deterministic path without touching the
+/// real process env.
+fn ssh_test_system() -> MockSystem {
+    MockSystem::new().with_env("HOME", "/h").unwrap()
+}
+
 #[test]
 fn strict_agent_denied_default_ssh_read() {
-    // SAFETY: cargo test threads share env vars. Tests in this module
-    // that touch HOME run serially via -- --test-threads=1 in CI.
-    // SAFETY: tests touching HOME serialise via cargo's default
-    // single-threaded test runner; this block fully owns the env var
-    // for the duration of the test.
-    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let system = ssh_test_system();
     let resolved = ResolvedPermissions::default();
     let caller = caller("nimbus", AuthorType::Agent, Mode::Strict);
     let err = check_against_resolved_for_caller(
+        &system,
         "get",
         Path::new("/h/.ssh/id_ed25519"),
         &resolved,
@@ -504,22 +533,22 @@ fn strict_agent_denied_default_ssh_read() {
 
 #[test]
 fn strict_human_can_read_ssh() {
-    // SAFETY: tests touching HOME serialise via cargo's default
-    // single-threaded test runner; this block fully owns the env var
-    // for the duration of the test.
-    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let system = ssh_test_system();
     let resolved = ResolvedPermissions::default();
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
-    check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
-        .unwrap();
+    check_against_resolved_for_caller(
+        &system,
+        "get",
+        Path::new("/h/.ssh/id_ed25519"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
 }
 
 #[test]
 fn strict_agent_default_ssh_override_via_explicit_to_with_empty_ops() {
-    // SAFETY: tests touching HOME serialise via cargo's default
-    // single-threaded test runner; this block fully owns the env var
-    // for the duration of the test.
-    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let system = ssh_test_system();
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: vec![ResolvedDenyOps {
@@ -531,20 +560,29 @@ fn strict_agent_default_ssh_override_via_explicit_to_with_empty_ops() {
         trusted_roots: Vec::new(),
     };
     let caller = caller("nimbus", AuthorType::Agent, Mode::Strict);
-    check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
-        .unwrap();
+    check_against_resolved_for_caller(
+        &system,
+        "get",
+        Path::new("/h/.ssh/id_ed25519"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
 }
 
 #[test]
 fn open_mode_agent_can_read_ssh_no_synthesized_default() {
-    // SAFETY: tests touching HOME serialise via cargo's default
-    // single-threaded test runner; this block fully owns the env var
-    // for the duration of the test.
-    let _: () = unsafe { env::set_var("HOME", "/h") };
+    let system = ssh_test_system();
     let resolved = ResolvedPermissions::default();
     let caller = caller("nimbus", AuthorType::Agent, Mode::Open);
-    check_against_resolved_for_caller("get", Path::new("/h/.ssh/id_ed25519"), &resolved, &caller)
-        .unwrap();
+    check_against_resolved_for_caller(
+        &system,
+        "get",
+        Path::new("/h/.ssh/id_ed25519"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -560,9 +598,15 @@ fn deny_ops_to_matches_id_when_name_does_not() {
         identity_name: Some(String::from("alice-display-name")),
         mode: Mode::Strict,
     };
-    let err =
-        check_against_resolved_for_caller("purge", Path::new("/r/secret/x.md"), &resolved, &caller)
-            .unwrap_err();
+    let system = MockSystem::new();
+    let err = check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
     let chain = format!("{err:#}");
     assert!(chain.contains("alice-id"), "{chain}");
 }

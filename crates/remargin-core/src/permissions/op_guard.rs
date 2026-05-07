@@ -285,7 +285,7 @@ pub fn pre_mutate_check_for_caller(
         .map_or_else(|| canonical_target.clone(), Path::to_path_buf);
     let permissions = resolve_permissions(system, &walk_anchor)?;
 
-    check_against_resolved_for_caller(op, &canonical_target, &permissions, caller)
+    check_against_resolved_for_caller(system, op, &canonical_target, &permissions, caller)
 }
 
 /// Evaluate already-resolved permissions against `target` and `op`.
@@ -295,32 +295,31 @@ pub fn pre_mutate_check_for_caller(
 ///
 /// Returns the same [`OpGuardError`] variants as [`pre_mutate_check`].
 pub fn check_against_resolved(
+    system: &dyn System,
     op: &str,
     target: &Path,
     permissions: &ResolvedPermissions,
 ) -> Result<()> {
-    check_against_resolved_for_caller(op, target, permissions, &CallerInfo::default())
+    check_against_resolved_for_caller(system, op, target, permissions, &CallerInfo::default())
 }
 
 /// Caller-aware variant of [`check_against_resolved`].
 ///
-/// The caller-scoped `deny_ops { to: ... }` filter is honored only in
-/// strict mode (open-mode realms record the entry but ignore the
-/// filter — `lint_permissions_in_parents` surfaces a warning). Agents
-/// in strict mode get a synthesized `~/.ssh/**` virtual deny that the
-/// user can override by listing the same path with explicit
-/// `to: [<identity>]` and `ops: []`.
+/// HOME is read via the `system` so MockSystem-driven tests can drive
+/// the synthesized `~/.ssh/**` virtual deny via `with_env` without
+/// touching the real process env.
 ///
 /// # Errors
 ///
 /// Same as [`check_against_resolved`].
 pub fn check_against_resolved_for_caller(
+    system: &dyn System,
     op: &str,
     target: &Path,
     permissions: &ResolvedPermissions,
     caller: &CallerInfo,
 ) -> Result<()> {
-    let home = system_home_or_passthrough();
+    let home = system_home_or_passthrough(system);
     let deny_ops = effective_deny_ops(&home, permissions, caller);
     if let Some(violation) = find_deny_ops_violation(op, target, &deny_ops, caller) {
         return Err(violation.into());
@@ -348,12 +347,12 @@ pub fn check_against_resolved_for_caller(
 }
 
 /// Where to expand `~/.ssh/**` for the synthesized agent default-deny.
-/// Falls back to the literal `~/.ssh` when `$HOME` is unset; the per-
-/// op layer compares canonical paths so a literal `~` is harmless on
-/// systems that have no home directory.
-fn system_home_or_passthrough() -> PathBuf {
-    use std::env;
-    env::var_os("HOME").map_or_else(|| PathBuf::from("~"), PathBuf::from)
+/// Reads HOME via the os-shim system so MockSystem-driven tests can set
+/// it via `with_env` without mutating the real process env.
+fn system_home_or_passthrough(system: &dyn System) -> PathBuf {
+    system
+        .env_var("HOME")
+        .map_or_else(|_err| PathBuf::from("~"), PathBuf::from)
 }
 
 /// Build the effective `deny_ops` list the caller should be checked

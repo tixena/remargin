@@ -265,7 +265,7 @@ fn inspect_check_and_op_guard_agree_on_allow_list_membership() {
     let resolved = resolve_permissions(&system, Path::new("/home/user/vault")).unwrap();
 
     // op_guard allows this write.
-    check_against_resolved("write", inside, &resolved).unwrap();
+    check_against_resolved(&system, "write", inside, &resolved).unwrap();
 
     // permissions check must agree: not restricted.
     let out = check(&system, Path::new("/home/user/vault"), inside, true).unwrap();
@@ -281,7 +281,7 @@ fn inspect_check_and_op_guard_agree_on_allow_list_membership() {
     // walk returns empty and the path is unrestricted (open mode).
     let outside_open = Path::new("/elsewhere/foo.md");
     let resolved_open = resolve_permissions(&system, Path::new("/elsewhere")).unwrap();
-    check_against_resolved("write", outside_open, &resolved_open).unwrap();
+    check_against_resolved(&system, "write", outside_open, &resolved_open).unwrap();
     let out_open = check(&system, Path::new("/elsewhere"), outside_open, false).unwrap();
     assert!(!out_open.restricted);
 }
