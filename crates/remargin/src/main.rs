@@ -540,9 +540,17 @@ enum Commands {
         identity_args: IdentityArgs,
     },
     /// Strip all comments from a document.
+    ///
+    /// With `--recursive`, treat `file` as a directory and purge every
+    /// visible markdown file under it (rem-nrjy). Per-file `op_guard`
+    /// checks fire individually so a single `deny_ops` or allow-list
+    /// refusal does not abort the whole batch.
     Purge {
-        /// Path to the document.
+        /// Path to the document (or directory when `--recursive` is set).
         file: String,
+        /// Recursively purge every `.md` file under the directory at `file`.
+        #[arg(long)]
+        recursive: bool,
         #[command(flatten)]
         identity_args: IdentityArgs,
         #[command(flatten)]
@@ -973,10 +981,15 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `purge` op (rem-qll).
+    /// Project a `purge` op (rem-qll). Pass `--recursive` to project
+    /// a directory-level purge (rem-nrjy).
     Purge {
-        /// Path to the document.
+        /// Path to the document (or directory when `--recursive` is set).
         path: String,
+        /// Project a recursive purge over every visible `.md` file
+        /// under the directory at `path`.
+        #[arg(long)]
+        recursive: bool,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1476,6 +1489,29 @@ fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<PathB
 /// the file exists, etc.) on top of the expanded `PathBuf`.
 fn expand_cli_path(system: &dyn System, raw: &str) -> Result<PathBuf> {
     expand_path(system, raw).with_context(|| format!("expanding path argument {raw:?}"))
+}
+
+/// Resolve a path argument for the `purge` subcommand. In single-file
+/// mode this funnels through [`resolve_doc_path`] (which honours stdin
+/// `-`); in `--recursive` mode the path is treated as a directory, so
+/// stdin redirection makes no sense and we just expand `~` / `$VAR`
+/// before joining onto `cwd`.
+fn resolve_purge_path(
+    system: &dyn System,
+    cwd: &Path,
+    raw: &str,
+    recursive: bool,
+) -> Result<PathBuf> {
+    if recursive {
+        let expanded = expand_cli_path(system, raw)?;
+        Ok(if expanded.is_absolute() {
+            expanded
+        } else {
+            cwd.join(expanded)
+        })
+    } else {
+        resolve_doc_path(system, cwd, raw)
+    }
 }
 
 /// Same as [`expand_cli_path`] but for a `&Path`. Used by flags that clap
@@ -2241,8 +2277,11 @@ fn dispatch_with_config(
             cmd_plan(system, cwd, config, action, plan_action_output(action).json)
         }
         Commands::Purge {
-            file, output_args, ..
-        } => cmd_purge(system, cwd, config, file, output_args.json),
+            file,
+            output_args,
+            recursive,
+            ..
+        } => cmd_purge(system, cwd, config, file, *recursive, output_args.json),
         Commands::Query {
             path,
             author,
@@ -3656,8 +3695,11 @@ fn cmd_plan(
             dst: expand_cli_path(system, dst)?,
             force: *force,
         },
-        PlanAction::Purge { path, .. } => plan_ops::PlanRequest::Purge {
-            path: resolve_doc_path(system, cwd, path)?,
+        PlanAction::Purge {
+            path, recursive, ..
+        } => plan_ops::PlanRequest::Purge {
+            path: resolve_purge_path(system, cwd, path, *recursive)?,
+            recursive: *recursive,
         },
         PlanAction::React {
             path,
@@ -4022,9 +4064,21 @@ fn cmd_purge(
     cwd: &Path,
     config: &ResolvedConfig,
     file: &str,
+    recursive: bool,
     json_mode: bool,
 ) -> Result<()> {
-    let path = resolve_doc_path(system, cwd, file)?;
+    let path = resolve_purge_path(system, cwd, file, recursive)?;
+
+    if recursive {
+        let result = purge::purge_dir(system, &path, config)?;
+        return print_output(json_mode, &result.to_json(cwd));
+    }
+
+    if system.is_dir(&path).unwrap_or(false) {
+        anyhow::bail!(
+            "target is a directory: {file} (pass --recursive to purge every .md file under it)"
+        );
+    }
     let result = purge::purge(system, &path, config)?;
 
     print_output(

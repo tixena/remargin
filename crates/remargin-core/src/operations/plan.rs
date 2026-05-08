@@ -24,7 +24,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use os_shim::System;
@@ -32,6 +32,7 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use crate::config::ResolvedConfig;
+use crate::document::allowlist;
 use crate::document::{self, WriteOptions, WriteProjection};
 use crate::operations::migrate::MigrateIdentities;
 use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
@@ -200,6 +201,13 @@ pub struct PlanReport {
     pub noop: bool,
     /// The mutating op label (`write`, `comment`, `ack`, `batch`, ...).
     pub op: String,
+    /// Recursive-purge projection emitted by `plan purge --recursive`
+    /// (rem-nrjy). `None` for the single-file purge case AND every
+    /// other op. The document-level fields stay vacuously empty in the
+    /// recursive case — each per-file projection inside this struct
+    /// carries its own counters and refusal reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purge_dir_diff: Option<PurgeDirDiff>,
     /// Human-readable reason when `would_commit` is `false`. `None` when
     /// the projection would commit cleanly. Specific enough to act on
     /// (which comment, which invariant).
@@ -520,6 +528,76 @@ pub enum UnprotectConflict {
     },
 }
 
+/// Recursive-purge projection emitted by `plan purge --recursive`
+/// (rem-nrjy).
+///
+/// Mirrors the read-only side of
+/// [`crate::operations::purge::purge_dir`]: enumerates every visible
+/// `.md` file the live op would attempt under the requested directory,
+/// names per-file projected outcomes (would-purge / would-noop /
+/// would-refuse), and surfaces refusal reasons verbatim so a caller
+/// previewing the recursive purge can see exactly which files would
+/// be touched and which would be blocked by `op_guard` / allow-list.
+///
+/// The document-level fields on the carrying [`PlanReport`]
+/// (`comments`, `changed_line_ranges`, `checksum_*`, `verify_after`)
+/// stay vacuously empty because each per-file projection here carries
+/// its own counters; the directory case has no single before/after
+/// document to diff against.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct PurgeDirDiff {
+    /// Canonical absolute directory path that was projected.
+    pub directory: PathBuf,
+    /// Per-file outcomes the live op would produce. Sorted by path
+    /// so the projection is byte-stable across calls.
+    pub files: Vec<PurgeDirFileDiff>,
+    /// `true` when no visible `.md` files exist under `directory`.
+    /// The live op succeeds with empty per-file lists in this case.
+    pub no_md_files: bool,
+}
+
+/// One per-file outcome inside a [`PurgeDirDiff`].
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct PurgeDirFileDiff {
+    /// Number of attachments the live purge would clean up. `0` for
+    /// the refuse / noop branches.
+    pub attachments_cleaned: usize,
+    /// Number of comment blocks the live purge would remove. `0` for
+    /// the refuse branch and for files that already have no
+    /// comments.
+    pub comments_removed: usize,
+    /// Outcome the live op would produce for this file.
+    pub outcome: PurgeDirFileOutcome,
+    /// Absolute path of the file. Adapters should strip their base
+    /// dir for display purposes.
+    pub path: PathBuf,
+    /// Refusal reason when `outcome == Refused`. `None` for the
+    /// would-purge / would-noop branches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reject_reason: Option<String>,
+}
+
+/// What the live `purge_dir` would do to one file in a
+/// [`PurgeDirDiff`]. Mirrors [`PurgeBulkResult`]'s three buckets.
+///
+/// [`PurgeBulkResult`]: crate::operations::purge::PurgeBulkResult
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PurgeDirFileOutcome {
+    /// `op_guard` / allow-list / forbidden-target refusal. Surfaced
+    /// per-file; does not abort the rest of the projection.
+    Refused,
+    /// File has no remargin comments. Live op records this in
+    /// `skipped` and never writes.
+    Skipped,
+    /// Live op would write the cleaned file. `comments_removed` and
+    /// `attachments_cleaned` are populated.
+    WouldPurge,
+}
+
 /// File-relocation projection emitted by the `plan mv` op
 /// (rem-0j2x / T44).
 ///
@@ -619,8 +697,17 @@ pub enum PlanRequest<'req> {
         /// would overwrite an existing destination).
         force: bool,
     },
-    /// `plan purge` — projects removal of all comments.
-    Purge { path: PathBuf },
+    /// `plan purge` — projects removal of all comments. When
+    /// `recursive` is true, `path` is treated as a directory and the
+    /// projection enumerates every visible `.md` file under it
+    /// (rem-nrjy). The report carries a [`PurgeDirDiff`] in
+    /// [`PlanReport::purge_dir_diff`] in the recursive case; the
+    /// document-level fields stay vacuously empty.
+    Purge {
+        path: PathBuf,
+        /// `true` to project a recursive directory purge.
+        recursive: bool,
+    },
     /// `plan react` — projects add/remove of an emoji reaction.
     React {
         path: PathBuf,
@@ -756,6 +843,7 @@ pub fn project_report(
         mv_diff: None,
         noop,
         op: String::from(op_label),
+        purge_dir_diff: None,
         reject_reason,
         unprotect_diff: None,
         verify_after,
@@ -815,9 +903,13 @@ pub fn dispatch(
         PlanRequest::Mv { src, dst, force } => {
             dispatch_mv(system, base_dir, cfg, identity, src, dst, *force)
         }
-        PlanRequest::Purge { path } => {
-            let (before, after) = projections::project_purge(system, path, cfg)?;
-            Ok(project_report(label, &before, &after, cfg, identity))
+        PlanRequest::Purge { path, recursive } => {
+            if *recursive {
+                dispatch_purge_dir(system, cfg, identity, path)
+            } else {
+                let (before, after) = projections::project_purge(system, path, cfg)?;
+                Ok(project_report(label, &before, &after, cfg, identity))
+            }
         }
         PlanRequest::React {
             path,
@@ -1058,6 +1150,169 @@ fn dispatch_mv(
     }
 
     Ok(report)
+}
+
+/// Build a [`PlanReport`] for the recursive `purge` op (rem-nrjy).
+///
+/// Pure: no disk writes. Walks the directory the same way
+/// [`crate::operations::purge::purge_dir`] does, runs the same per-file
+/// `op_guard` / parser preflight on each candidate, and returns a
+/// [`PurgeDirDiff`] enumerating projected per-file outcomes. The
+/// document-level fields stay empty — the directory case has no single
+/// before/after pair to diff.
+///
+/// `would_commit` is `true` whenever the walk itself succeeds; per-file
+/// refusals are advisory and live in
+/// [`PurgeDirFileDiff::reject_reason`]. A walk-level failure (missing
+/// directory, I/O error) propagates as `Err` and is rendered as a
+/// rejected report by the caller.
+fn dispatch_purge_dir(
+    system: &dyn System,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+    dir: &Path,
+) -> Result<PlanReport> {
+    let empty = parser::parse("").context("parsing empty before-document for plan purge")?;
+    let mut report = project_report("purge", &empty, &empty, cfg, identity);
+
+    if !system.exists(dir).unwrap_or(false) {
+        report.reject_reason = Some(format!("directory does not exist: {}", dir.display()));
+        report.would_commit = false;
+        return Ok(report);
+    }
+    if !system.is_dir(dir).unwrap_or(false) {
+        report.reject_reason = Some(format!("not a directory: {}", dir.display()));
+        report.would_commit = false;
+        return Ok(report);
+    }
+
+    let entries = system
+        .walk_dir(dir, false, false)
+        .with_context(|| format!("walking directory {}", dir.display()))?;
+
+    // Reuse the same candidate filter the live op uses so plan and
+    // apply enumerate exactly the same set.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for entry in &entries {
+        if !entry.is_file {
+            continue;
+        }
+        if path_has_dot_component_under_plan(&entry.path, dir) {
+            continue;
+        }
+        if !allowlist::is_visible(&entry.path, false) {
+            continue;
+        }
+        let is_md = entry
+            .path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+        if !is_md {
+            continue;
+        }
+        candidates.push(entry.path.clone());
+    }
+    candidates.sort();
+
+    let mut files: Vec<PurgeDirFileDiff> = Vec::with_capacity(candidates.len());
+    let mut any_would_purge = false;
+    for path in &candidates {
+        let projection = project_one_purge_file(system, cfg, path);
+        if matches!(projection.outcome, PurgeDirFileOutcome::WouldPurge) {
+            any_would_purge = true;
+        }
+        files.push(projection);
+    }
+
+    let no_md_files = candidates.is_empty();
+    report.noop = !any_would_purge;
+    report.would_commit = true;
+    report.purge_dir_diff = Some(PurgeDirDiff {
+        directory: dir.to_path_buf(),
+        files,
+        no_md_files,
+    });
+    Ok(report)
+}
+
+/// `true` when `path` has any path component (relative to `root`)
+/// whose name starts with `.`. Mirrors the helper in
+/// `operations::purge` so plan + apply enumerate the same files.
+fn path_has_dot_component_under_plan(path: &Path, root: &Path) -> bool {
+    let suffix = path.strip_prefix(root).unwrap_or(path);
+    suffix.components().any(|c| {
+        if let Component::Normal(part) = c {
+            part.to_str().is_some_and(|s| s.starts_with('.'))
+        } else {
+            false
+        }
+    })
+}
+
+/// Project one file's purge outcome for the recursive plan dispatch.
+///
+/// Mirrors `purge_one_for_bulk` in the live op: runs the per-file
+/// `op_guard` preflight (refusal -> `Refused`), parses the file, counts
+/// the comments that would be removed, and decides between
+/// `WouldPurge` (>0 comments) and `Skipped` (no comments to strip).
+fn project_one_purge_file(
+    system: &dyn System,
+    cfg: &ResolvedConfig,
+    path: &Path,
+) -> PurgeDirFileDiff {
+    use crate::permissions::op_guard::pre_mutate_check_for_caller;
+    use crate::writer::ensure_not_forbidden_target;
+
+    let preflight = (|| -> Result<()> {
+        ensure_not_forbidden_target(path)?;
+        pre_mutate_check_for_caller(system, "purge", path, &cfg.caller_info())?;
+        Ok(())
+    })();
+
+    if let Err(err) = preflight {
+        return PurgeDirFileDiff {
+            attachments_cleaned: 0,
+            comments_removed: 0,
+            outcome: PurgeDirFileOutcome::Refused,
+            path: path.to_path_buf(),
+            reject_reason: Some(format!("{err:#}")),
+        };
+    }
+
+    let parsed = match parser::parse_file(system, path) {
+        Ok(doc) => doc,
+        Err(err) => {
+            return PurgeDirFileDiff {
+                attachments_cleaned: 0,
+                comments_removed: 0,
+                outcome: PurgeDirFileOutcome::Refused,
+                path: path.to_path_buf(),
+                reject_reason: Some(format!("{err:#}")),
+            };
+        }
+    };
+
+    let comments = parsed.comments();
+    let comments_removed = comments.len();
+    let attachments_cleaned = comments.iter().map(|cm| cm.attachments.len()).sum();
+
+    if comments_removed == 0 {
+        PurgeDirFileDiff {
+            attachments_cleaned: 0,
+            comments_removed: 0,
+            outcome: PurgeDirFileOutcome::Skipped,
+            path: path.to_path_buf(),
+            reject_reason: None,
+        }
+    } else {
+        PurgeDirFileDiff {
+            attachments_cleaned,
+            comments_removed,
+            outcome: PurgeDirFileOutcome::WouldPurge,
+            path: path.to_path_buf(),
+            reject_reason: None,
+        }
+    }
 }
 
 /// Decide whether an [`UnprotectConfigDiff`] amounts to a noop. True

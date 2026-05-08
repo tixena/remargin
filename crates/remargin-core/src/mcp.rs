@@ -507,11 +507,12 @@ fn desc_plan() -> ToolDesc {
 fn desc_purge() -> ToolDesc {
     ToolDesc {
         name: "purge",
-        description: "Strip all comments from a document. To preview without writing, use `plan` with op=\"purge\".",
+        description: "Strip all comments from a document, or every .md file in a directory when `recursive` is true (rem-nrjy). To preview without writing, use `plan` with op=\"purge\".",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
-                "file": { "type": "string", "description": "Path to the document" }
+                "file": { "type": "string", "description": "Path to the document (or directory when `recursive` is true)" },
+                "recursive": { "type": "boolean", "description": "Recursively purge every visible .md file under `file` (treats `file` as a directory)." }
             },
             "required": ["file"]
         })),
@@ -1817,6 +1818,7 @@ fn handle_plan(
         },
         "purge" => plan_ops::PlanRequest::Purge {
             path: base_dir.join(required_str(params, "file")?),
+            recursive: optional_bool(params, "recursive"),
         },
         "restrict" | "unprotect" => return Err(plan_op_cli_only_error(op)),
         "sandbox-add" => plan_ops::PlanRequest::SandboxAdd {
@@ -1892,7 +1894,9 @@ fn parse_plan_line_range(raw: &str) -> Result<(usize, usize)> {
     Ok((start, end))
 }
 
-/// Handle the `purge` tool: strip all comments from a document.
+/// Handle the `purge` tool: strip all comments from a document, or
+/// every visible `.md` file in a directory when `recursive` is true
+/// (rem-nrjy).
 fn handle_purge(
     system: &dyn System,
     base_dir: &Path,
@@ -1900,10 +1904,23 @@ fn handle_purge(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
+    let recursive = optional_bool(params, "recursive");
     let declared = resolve_identity_from_params(system, base_dir, config, params)?;
     let cfg = effective_config(config, declared.as_ref());
 
     let path = base_dir.join(file);
+
+    if recursive {
+        let result = purge::purge_dir(system, &path, cfg)?;
+        return Ok(result.to_json(base_dir));
+    }
+
+    if system.is_dir(&path).unwrap_or(false) {
+        bail!(
+            "target is a directory: {file} (pass `recursive: true` to purge every .md file under it)"
+        );
+    }
+
     let result = purge::purge(system, &path, cfg)?;
 
     Ok(json!({

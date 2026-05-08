@@ -2625,6 +2625,151 @@ fn mcp_plan_purge_destroys_every_comment_id() {
     assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
 }
 
+// ---------------------------------------------------------------------
+// Recursive purge MCP coverage (rem-nrjy). Confirms the directory form
+// is wired through the MCP surface and produces the documented
+// per-file outcome shape.
+// ---------------------------------------------------------------------
+
+#[test]
+fn mcp_purge_recursive_clears_every_md_file() {
+    let base = Path::new("/realm");
+    let path_a = base.join("a.md");
+    let path_b = base.join("notes/b.md");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_dir(base.join("notes"))
+        .unwrap()
+        .with_file(&path_a, b"# A\n")
+        .unwrap()
+        .with_file(&path_b, b"# B\n")
+        .unwrap();
+    let config = test_config();
+    let _id_a: String = create_comment(
+        &system,
+        &path_a,
+        &config,
+        &CreateCommentParams::new("seed a", &InsertPosition::Append),
+    )
+    .unwrap();
+    let _id_b: String = create_comment(
+        &system,
+        &path_b,
+        &config,
+        &CreateCommentParams::new("seed b", &InsertPosition::Append),
+    )
+    .unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "purge",
+                "arguments": { "file": ".", "recursive": true }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "recursive purge should succeed: {response}"
+    );
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["comments_removed"], 2_u64);
+    let purged = payload["purged"].as_array().unwrap();
+    assert_eq!(purged.len(), 2);
+}
+
+#[test]
+fn mcp_purge_dir_without_recursive_errors() {
+    let base = Path::new("/realm");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_file(base.join("a.md"), b"# A\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "purge",
+                "arguments": { "file": "." }
+            }
+        }),
+    );
+
+    assert!(
+        is_tool_error(&response),
+        "purge on a directory without `recursive` must error: {response}"
+    );
+}
+
+#[test]
+fn mcp_plan_purge_recursive_emits_purge_dir_diff() {
+    let base = Path::new("/realm");
+    let path_a = base.join("a.md");
+    let system = MockSystem::new()
+        .with_dir(base)
+        .unwrap()
+        .with_file(&path_a, b"# A\n")
+        .unwrap();
+    let config = test_config();
+    let _id_a: String = create_comment(
+        &system,
+        &path_a,
+        &config,
+        &CreateCommentParams::new("seed a", &InsertPosition::Append),
+    )
+    .unwrap();
+    let before_bytes = system.read_to_string(&path_a).unwrap();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": { "op": "purge", "file": ".", "recursive": true }
+            }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "plan recursive purge should succeed: {response}"
+    );
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "purge");
+    assert_eq!(report["would_commit"], json!(true));
+    let diff = &report["purge_dir_diff"];
+    assert!(diff.is_object(), "purge_dir_diff missing: {report}");
+    let files = diff["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["outcome"], "would_purge");
+    assert_eq!(files[0]["comments_removed"], 1_u64);
+
+    // Plan must not write disk.
+    let after_bytes = system.read_to_string(&path_a).unwrap();
+    assert_eq!(before_bytes, after_bytes);
+}
+
 #[test]
 fn mcp_plan_migrate_no_op_without_legacy_comments() {
     let base = Path::new("/docs");
