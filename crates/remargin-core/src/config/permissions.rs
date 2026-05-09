@@ -37,12 +37,20 @@ pub struct Permissions {
     /// `.remargin.yaml`. Each entry can be a bare string (just a path)
     /// or a full record with `also_deny_bash` / `cli_allowed` flags.
     ///
-    /// Drives:
-    /// - the per-op `op_guard` allow-list,
-    /// - the Claude-side `Edit/Write/Bash` deny projection, and
-    /// - the MCP boot-time sandbox boundary.
+    /// Three on-disk states (rem-djfx):
+    /// - **Key absent** (`None`) — no opinion stated; the resolver
+    ///   falls back to the cwd as the implicit allow-listed root.
+    /// - **Empty list** (`Some(vec![])`) — explicit zero grants; the
+    ///   realm is locked and every read / write outside any inherited
+    ///   parent root is denied.
+    /// - **Non-empty list** — exactly those paths are reachable;
+    ///   nothing else.
+    ///
+    /// Drives the per-op `op_guard` allow-list (reads + writes), the
+    /// Claude-side `Edit/Write/Bash` deny projection, and (until
+    /// rem-08w0) the MCP boot-time sandbox boundary.
     #[serde(default)]
-    pub trusted_roots: Vec<TrustedRootEntry>,
+    pub trusted_roots: Option<Vec<TrustedRootEntry>>,
 }
 
 /// Bare-string or full-record on-disk form for a `trusted_roots` entry.

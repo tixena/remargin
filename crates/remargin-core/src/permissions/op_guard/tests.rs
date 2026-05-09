@@ -76,13 +76,32 @@ fn scenario_03_restrict_subpath_blocks_outside() {
     assert!(outside_allowed_match(&err, "comment", "/r/.remargin.yaml"));
 }
 
-/// Read ops bypass the allow-list check; only `deny_ops` can block reads.
+/// rem-djfx: reads are gated by `trusted_roots` just like writes.
+/// Every read op outside the allow-list is refused with the same
+/// `OutsideAllowedRoots` error.
 #[test]
-fn scenario_04_restrict_does_not_block_read_ops() {
+fn scenario_04_restrict_blocks_read_ops_outside_allow_list() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
     for op in READ_OPS {
-        let result = pre_mutate_check(&system, op, Path::new("/r/src/public/foo.md"));
-        assert!(result.is_ok(), "read op {op} should not be blocked");
+        let err = pre_mutate_check(&system, op, Path::new("/r/src/public/foo.md")).unwrap_err();
+        assert!(
+            outside_allowed_match(&err, op, "/r/.remargin.yaml"),
+            "read op {op} expected OutsideAllowedRoots, got: {err:#}",
+        );
+    }
+}
+
+/// rem-djfx: reads INSIDE the allow-list pass.
+#[test]
+fn scenario_04b_restrict_allows_read_ops_inside_allow_list() {
+    let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
+    for op in READ_OPS {
+        let result = pre_mutate_check(&system, op, Path::new("/r/src/secret/foo.md"));
+        assert!(
+            result.is_ok(),
+            "read op {op} should be allowed; got: {:?}",
+            result.err(),
+        );
     }
 }
 
@@ -164,6 +183,7 @@ fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
             },
             source_file: PathBuf::from("/r/.remargin.yaml"),
         }],
+        trusted_roots_lock: None,
     };
     let system = MockSystem::new();
     check_against_resolved(
@@ -263,9 +283,11 @@ fn is_mutating_op_recognises_full_set() {
     assert!(!is_mutating_op("query"));
 }
 
-/// Read-side ops bypass the dot-folder default-deny as well.
+/// rem-djfx: reads see the same dot-folder default-deny as writes.
+/// Path inside an unlisted dot-folder under a trusted subtree is
+/// refused for read ops too.
 #[test]
-fn dot_folder_denial_only_active_for_mutating_ops() {
+fn dot_folder_denial_active_for_read_ops() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: Vec::new(),
@@ -277,9 +299,12 @@ fn dot_folder_denial_only_active_for_mutating_ops() {
             },
             source_file: PathBuf::from("/r/.remargin.yaml"),
         }],
+        trusted_roots_lock: None,
     };
     let system = MockSystem::new();
-    check_against_resolved(&system, "get", Path::new("/r/src/.git/x.md"), &resolved).unwrap();
+    let err = check_against_resolved(&system, "get", Path::new("/r/src/.git/x.md"), &resolved)
+        .unwrap_err();
+    assert!(dot_folder_match(&err, ".git", "/r/.remargin.yaml"));
 }
 
 #[test]
@@ -449,6 +474,7 @@ fn deny_ops_to_matches_caller_in_strict_mode_refuses() {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice"]),
         trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
     let system = MockSystem::new();
@@ -471,6 +497,7 @@ fn deny_ops_to_does_not_match_caller_in_strict_mode_allows() {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
         trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
     let system = MockSystem::new();
@@ -490,6 +517,7 @@ fn deny_ops_to_is_ignored_in_open_mode() {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
         trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
     };
     let caller = caller("alice", AuthorType::Human, Mode::Open);
     let system = MockSystem::new();
@@ -558,6 +586,7 @@ fn strict_agent_default_ssh_override_via_explicit_to_with_empty_ops() {
             to: vec![String::from("nimbus")],
         }],
         trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
     };
     let caller = caller("nimbus", AuthorType::Agent, Mode::Strict);
     check_against_resolved_for_caller(
@@ -591,6 +620,7 @@ fn deny_ops_to_matches_id_when_name_does_not() {
         allow_dot_folders: Vec::new(),
         deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice-id"]),
         trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
     };
     let caller = CallerInfo {
         author_type: Some(AuthorType::Human),
@@ -609,4 +639,94 @@ fn deny_ops_to_matches_id_when_name_does_not() {
     .unwrap_err();
     let chain = format!("{err:#}");
     assert!(chain.contains("alice-id"), "{chain}");
+}
+
+// ---------------------------------------------------------------------
+// rem-djfx: trusted_roots three-state semantics
+// ---------------------------------------------------------------------
+
+/// `permissions:` block with no `trusted_roots:` key behaves like
+/// open mode — reads + writes anywhere are allowed (the implicit
+/// allow-listed root is supplied at the call-site boundary, not by
+/// the per-op guard).
+#[test]
+fn rem_djfx_trusted_roots_key_absent_falls_back_to_open() {
+    let system = realm_with("permissions:\n  allow_dot_folders: ['.git']\n");
+    pre_mutate_check(&system, "write", Path::new("/r/anywhere/foo.md")).unwrap();
+    pre_mutate_check(&system, "get", Path::new("/elsewhere/x.md")).unwrap();
+}
+
+/// `trusted_roots: []` locks the realm — every read and write
+/// outside any inherited parent root is denied with the locker as
+/// the source.
+#[test]
+fn rem_djfx_explicit_empty_trusted_roots_locks_reads_and_writes() {
+    let system = realm_with("permissions:\n  trusted_roots: []\n");
+    let err_w = pre_mutate_check(&system, "write", Path::new("/r/foo.md")).unwrap_err();
+    assert!(outside_allowed_match(&err_w, "write", "/r/.remargin.yaml"));
+    let err_r = pre_mutate_check(&system, "get", Path::new("/r/foo.md")).unwrap_err();
+    assert!(outside_allowed_match(&err_r, "get", "/r/.remargin.yaml"));
+}
+
+/// `trusted_roots: []` at the deepest level locks even though a
+/// parent declared a non-empty list — but inherited entries from
+/// shallower files still survive in the resolved set, so paths
+/// inside them remain reachable.
+#[test]
+fn rem_djfx_lock_does_not_drop_inherited_parent_roots() {
+    let parent = "permissions:\n  trusted_roots:\n    - path: top\n";
+    let child = "permissions:\n  trusted_roots: []\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/r/sub"))
+        .unwrap()
+        .with_file(Path::new("/r/.remargin.yaml"), parent.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/r/sub/.remargin.yaml"), child.as_bytes())
+        .unwrap();
+    // `/r/top` is still reachable via inheritance.
+    pre_mutate_check(&system, "write", Path::new("/r/top/foo.md")).unwrap();
+    // `/r/sub/foo.md` is outside every inherited entry → denied.
+    let err = pre_mutate_check(&system, "write", Path::new("/r/sub/foo.md")).unwrap_err();
+    assert!(matches!(
+        err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::OutsideAllowedRoots { .. })
+    ));
+}
+
+/// `deny_ops` still gates reads even when `trusted_roots` would
+/// have admitted the path.
+#[test]
+fn rem_djfx_deny_ops_wins_for_reads() {
+    let system = realm_with(
+        "permissions:\n  trusted_roots:\n    - path: '*'\n  deny_ops:\n    - path: secret\n      ops: [get]\n",
+    );
+    let err = pre_mutate_check(&system, "get", Path::new("/r/secret/x.md")).unwrap_err();
+    assert!(denied_op_match(&err, "get", "/r/.remargin.yaml"));
+}
+
+/// `.remargin/` reads are admitted just like writes — parity
+/// against the dot-folder default-deny.
+#[test]
+fn rem_djfx_remargin_dot_folder_read_parity() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: Vec::new(),
+        trusted_roots: vec![ResolvedTrustedRoot {
+            also_deny_bash: Vec::new(),
+            cli_allowed: false,
+            path: TrustedRootPath::Wildcard {
+                realm_root: PathBuf::from("/r"),
+            },
+            source_file: PathBuf::from("/r/.remargin.yaml"),
+        }],
+        trusted_roots_lock: None,
+    };
+    let system = MockSystem::new();
+    check_against_resolved(
+        &system,
+        "get",
+        Path::new("/r/.remargin/state.yaml"),
+        &resolved,
+    )
+    .unwrap();
 }

@@ -105,10 +105,18 @@ pub struct ResolvedPermissions {
     pub deny_ops: Vec<ResolvedDenyOps>,
 
     /// Paths where remargin is sanctioned to operate, in walk order
-    /// (deepest first). Non-empty → allow-list mode for the per-op
-    /// guard; empty → open mode. Also drives the MCP sandbox boundary
-    /// and Claude-side rule emission.
+    /// (deepest first). Drives the per-op guard for both reads and
+    /// writes (rem-djfx), the Claude-side rule emission, and (until
+    /// rem-08w0) the MCP sandbox boundary.
     pub trusted_roots: Vec<ResolvedTrustedRoot>,
+
+    /// `Some(source_file)` when at least one `.remargin.yaml` in the
+    /// walk declared `trusted_roots: []` (rem-djfx). An explicit empty
+    /// list locks the realm: every read and write outside any
+    /// inherited parent root is denied. The first locker (deepest in
+    /// walk order) is recorded so refusal messages can name where the
+    /// lock came from.
+    pub trusted_roots_lock: Option<PathBuf>,
 }
 
 impl ResolvedPermissions {
@@ -118,6 +126,18 @@ impl ResolvedPermissions {
             .iter()
             .flat_map(|entry| entry.names.iter().cloned())
             .collect()
+    }
+
+    /// `true` when `trusted_roots` carries no opinion: the field was
+    /// absent in every `.remargin.yaml` on the walk and no file locked
+    /// the realm with `trusted_roots: []`.
+    ///
+    /// Open mode → the per-op guard treats the field as silent and
+    /// callers (CLI / MCP) supply the implicit allow-listed root (cwd)
+    /// at boundary time.
+    #[must_use]
+    pub const fn trusted_roots_unconstrained(&self) -> bool {
+        self.trusted_roots.is_empty() && self.trusted_roots_lock.is_none()
     }
 }
 
@@ -157,21 +177,31 @@ fn extend_resolved(
 ) {
     let source_dir = source_file.parent().unwrap_or(source_file);
 
-    for entry in &block.trusted_roots {
-        let raw_path = entry.path();
-        let resolved_path = if raw_path == TRUSTED_ROOT_WILDCARD {
-            TrustedRootPath::Wildcard {
-                realm_root: source_dir.to_path_buf(),
-            }
-        } else {
-            TrustedRootPath::Absolute(resolve_relative(system, source_dir, raw_path))
-        };
-        acc.trusted_roots.push(ResolvedTrustedRoot {
-            also_deny_bash: entry.also_deny_bash().to_vec(),
-            cli_allowed: entry.cli_allowed(),
-            path: resolved_path,
-            source_file: source_file.to_path_buf(),
-        });
+    if let Some(entries) = block.trusted_roots.as_ref() {
+        // `trusted_roots: []` (Some, empty) explicitly locks the realm
+        // (rem-djfx). Record the deepest locker as the canonical
+        // source so refusal messages point at it. Walk order is
+        // deepest-first, so the first observed lock is also the
+        // closest to start_dir.
+        if entries.is_empty() && acc.trusted_roots_lock.is_none() {
+            acc.trusted_roots_lock = Some(source_file.to_path_buf());
+        }
+        for entry in entries {
+            let raw_path = entry.path();
+            let resolved_path = if raw_path == TRUSTED_ROOT_WILDCARD {
+                TrustedRootPath::Wildcard {
+                    realm_root: source_dir.to_path_buf(),
+                }
+            } else {
+                TrustedRootPath::Absolute(resolve_relative(system, source_dir, raw_path))
+            };
+            acc.trusted_roots.push(ResolvedTrustedRoot {
+                also_deny_bash: entry.also_deny_bash().to_vec(),
+                cli_allowed: entry.cli_allowed(),
+                path: resolved_path,
+                source_file: source_file.to_path_buf(),
+            });
+        }
     }
 
     for entry in &block.deny_ops {
@@ -366,15 +396,23 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
 }
 
 /// MCP / `allowlist::resolve_sandboxed` boundary set for `cwd`. Reads
-/// `permissions.trusted_roots` from the parent walk; falls back to
-/// `[cwd]` when none declared.
+/// `permissions.trusted_roots` from the parent walk.
+///
+/// Three states (rem-djfx):
+/// - **Unconstrained** (no `.remargin.yaml` declared the field) →
+///   falls back to `[cwd]` so back-compat sessions keep working.
+/// - **Locked** (`trusted_roots: []` somewhere in the walk) → returns
+///   exactly the inherited entries from shallower files (may be
+///   empty), so the MCP / allowlist boundary tightens to those paths
+///   only.
+/// - **Constrained** (non-empty list) → returns those entries.
 ///
 /// # Errors
 ///
 /// Surfaces the same parse-time errors as [`resolve_permissions`].
 pub fn resolve_trusted_roots_for_cwd(system: &dyn System, cwd: &Path) -> Result<Vec<PathBuf>> {
     let resolved = resolve_permissions(system, cwd)?;
-    if resolved.trusted_roots.is_empty() {
+    if resolved.trusted_roots_unconstrained() {
         Ok(vec![canonicalize_or_passthrough(system, cwd.to_path_buf())])
     } else {
         Ok(resolved

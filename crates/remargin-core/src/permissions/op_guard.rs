@@ -1,9 +1,16 @@
 //! Per-op permission guard.
 //!
-//! `restrict` is an allow-list: at least one entry in the parent walk
-//! engages allow-list mode (target must lie inside some entry); zero
-//! entries = open mode. `deny_ops` is evaluated regardless and is the
-//! escape hatch for blocking specific ops including reads.
+//! `trusted_roots` is the single allow-list for both reads and writes
+//! (rem-djfx). Three on-disk states:
+//! - **Absent** in every `.remargin.yaml` on the walk → open mode →
+//!   neither reads nor writes are gated by `trusted_roots`.
+//! - **Explicit empty list** (`trusted_roots: []`) anywhere in the
+//!   walk → realm locked → every read and write outside any inherited
+//!   parent root is denied.
+//! - **Non-empty list** → exactly those paths are reachable.
+//!
+//! `deny_ops` is evaluated regardless and is the escape hatch for
+//! blocking specific ops on top of (or instead of) `trusted_roots`.
 
 #[cfg(test)]
 mod tests;
@@ -26,11 +33,11 @@ use crate::parser::AuthorType;
 const REMARGIN_DOT_FOLDER: &str = ".remargin";
 
 /// Canonical names of every read-side op recognised by the guard.
-/// Read ops bypass `restrict` and the dot-folder default-deny. They
-/// are still subject to `deny_ops`. Keep alphabetical.
 ///
-/// The contents must match [`OpName::READ`] — a parity test in the
-/// adjacent `tests` module enforces this.
+/// Reads are gated by `trusted_roots` and the dot-folder default-deny
+/// just like writes (rem-djfx); they are also subject to `deny_ops`.
+/// Keep alphabetical. The contents must match [`OpName::READ`] — a
+/// parity test in the adjacent `tests` module enforces this.
 pub const READ_OPS: &[&str] = &[
     "comments", "get", "lint", "ls", "metadata", "query", "search", "verify",
 ];
@@ -65,16 +72,16 @@ pub const DENY_OPS_DENIAL_TEMPLATE: &str =
 
 /// Read-vs-write classification for an op.
 ///
-/// Drives whether `restrict` gates the op; `deny_ops` is evaluated
-/// for both kinds.
+/// Both kinds are gated by `trusted_roots`, the dot-folder default-
+/// deny, and `deny_ops` (rem-djfx). The classification is preserved so
+/// callers and projection surfaces can reason about op shape, but the
+/// guard treats them symmetrically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OpKind {
-    /// Read-side op. Bypasses `restrict` and the dot-folder default-
-    /// deny. Still gated by explicit `deny_ops` entries.
+    /// Read-side op (no on-disk mutation).
     Read,
-    /// Write-side op. Gated by `restrict`, the dot-folder default-deny,
-    /// and `deny_ops`.
+    /// Write-side op.
     Write,
 }
 
@@ -209,12 +216,16 @@ fn format_to_clause(to: &[String]) -> String {
     }
 }
 
-/// `true` when `op` is the canonical name of a mutating op (and hence
-/// subject to `restrict`).
+/// `true` when `op` is the canonical name of a mutating op.
 ///
-/// Unknown op names default to `true` so a missing classification fails
-/// closed under `restrict`. Callers should ensure new ops are added to
-/// [`READ_OPS`] or [`MUTATING_OPS`].
+/// Unknown op names default to `true` so a missing classification
+/// fails closed (treated as a write for projection / classification
+/// surfaces). Callers should ensure new ops are added to [`READ_OPS`]
+/// or [`MUTATING_OPS`].
+///
+/// Note: since rem-djfx the per-op guard treats reads and writes
+/// symmetrically against `trusted_roots`; this helper survives for
+/// projection / dispatch surfaces that still need to know op shape.
 #[must_use]
 pub fn is_mutating_op(op: &str) -> bool {
     !matches!(op_kind(op), Some(OpKind::Read))
@@ -238,21 +249,24 @@ pub fn op_kind(op: &str) -> Option<OpKind> {
     }
 }
 
-/// Run Layer 1 enforcement for an upcoming mutating op.
+/// Run Layer 1 enforcement for an upcoming op (read or write).
 ///
 /// `target` is the absolute path of the file the op will operate on.
-/// `op` is the canonical op name (`comment`, `write`, etc. — the same
-/// names the `plan` surface uses).
+/// `op` is the canonical op name (`comment`, `write`, `get`, etc. —
+/// the same names the `plan` surface uses). The function name is kept
+/// for back-compat: as of rem-djfx the guard gates reads as well, but
+/// renaming the entry point would touch every call site.
 ///
 /// # Errors
 ///
 /// - I/O / parse failures from [`resolve_permissions`].
-/// - [`OpGuardError::RestrictedPath`] when a mutating op's target is
-///   covered by any `restrict` entry.
+/// - [`OpGuardError::OutsideAllowedRoots`] when the target is outside
+///   the inherited `trusted_roots` set (or the realm is locked via
+///   `trusted_roots: []`).
 /// - [`OpGuardError::DeniedOp`] when a `deny_ops` entry covers the
 ///   target and lists `op`.
 /// - [`OpGuardError::DotFolderDenied`] when the target is inside a
-///   dot-folder under a restricted subtree and that dot-folder is not
+///   dot-folder under a trusted subtree and that dot-folder is not
 ///   in `allow_dot_folders`.
 pub fn pre_mutate_check(system: &dyn System, op: &str, target: &Path) -> Result<()> {
     pre_mutate_check_for_caller(system, op, target, &CallerInfo::default())
@@ -326,22 +340,25 @@ pub fn check_against_resolved_for_caller(
         return Err(violation.into());
     }
 
-    if is_mutating_op(op) {
-        if let Some(violation) =
-            find_trusted_roots_violation(op, target, &permissions.trusted_roots)
-        {
-            return Err(violation.into());
-        }
+    // rem-djfx: trusted_roots gates BOTH reads and writes when the
+    // walk produced any opinion (a non-empty list or an explicit lock
+    // via `trusted_roots: []`). Open mode (no opinion anywhere on the
+    // walk) leaves the guard silent and the boundary check at the
+    // call site (CLI cwd / MCP spawn cwd) supplies the implicit root.
+    if !permissions.trusted_roots_unconstrained()
+        && let Some(violation) = find_trusted_roots_violation(op, target, permissions)
+    {
+        return Err(violation.into());
+    }
 
-        let allow_dot_folder_names = permissions.allow_dot_folder_names();
-        if let Some(violation) = find_dot_folder_violation(
-            op,
-            target,
-            &permissions.trusted_roots,
-            &allow_dot_folder_names,
-        ) {
-            return Err(violation.into());
-        }
+    let allow_dot_folder_names = permissions.allow_dot_folder_names();
+    if let Some(violation) = find_dot_folder_violation(
+        op,
+        target,
+        &permissions.trusted_roots,
+        &allow_dot_folder_names,
+    ) {
+        return Err(violation.into());
     }
 
     Ok(())
@@ -431,9 +448,14 @@ fn find_deny_ops_violation(
         })
 }
 
-/// `true` when `target` is inside at least one `trusted_roots` entry,
-/// or when the list is empty (open mode). Shared by `op_guard` and
-/// `inspect::check` so the two layers can't drift.
+/// `true` when `target` is inside at least one `trusted_roots` entry.
+///
+/// An empty list returns `true` here — callers decide what that
+/// means: the per-op guard treats it as "no opinion stated when not
+/// locked, deny everything when locked"; `inspect::check` keeps the
+/// historic open-mode reading. Shared by `op_guard` and
+/// `inspect::check` so the two layers cannot drift on the
+/// covers-an-entry predicate.
 #[must_use]
 pub fn target_is_sanctioned(target: &Path, trusted_roots: &[ResolvedTrustedRoot]) -> bool {
     if trusted_roots.is_empty() {
@@ -470,15 +492,25 @@ fn find_dot_folder_violation(
 fn find_trusted_roots_violation(
     op: &str,
     target: &Path,
-    trusted_roots: &[ResolvedTrustedRoot],
+    permissions: &ResolvedPermissions,
 ) -> Option<OpGuardError> {
-    if target_is_sanctioned(target, trusted_roots) {
+    // `target_is_sanctioned` returns `true` for an empty list (open
+    // mode), so the lock case (`trusted_roots: []` with no inherited
+    // entries) needs an explicit check: any target outside the empty
+    // set is denied.
+    let inside = !permissions.trusted_roots.is_empty()
+        && target_is_sanctioned(target, &permissions.trusted_roots);
+    if inside {
         return None;
     }
-    let first = trusted_roots.first()?;
+    let source_file = permissions
+        .trusted_roots
+        .first()
+        .map(|entry| entry.source_file.clone())
+        .or_else(|| permissions.trusted_roots_lock.clone())?;
     Some(OpGuardError::OutsideAllowedRoots {
         op: String::from(op),
-        source_file: first.source_file.clone(),
+        source_file,
         target: target.to_path_buf(),
     })
 }

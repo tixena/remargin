@@ -233,14 +233,12 @@ mod tests {
         );
         assert_ne!(blocked.status.code(), Some(0_i32));
 
-        // Hand-edit the YAML to drop the entry. We don't touch the
-        // sidecar or Claude settings — the per-op guard reads only
-        // the YAML.
-        fs::write(
-            realm.path().join(".remargin.yaml"),
-            "permissions:\n  trusted_roots: []\n",
-        )
-        .unwrap();
+        // Hand-edit the YAML to drop the trusted_roots key entirely
+        // (rem-djfx: an explicitly empty list now LOCKS the realm; the
+        // back-compat "open mode" requires the key be absent). We
+        // don't touch the sidecar or Claude settings — the per-op
+        // guard reads only the YAML.
+        fs::write(realm.path().join(".remargin.yaml"), "permissions: {}\n").unwrap();
 
         let allowed = run_in(
             realm.path(),

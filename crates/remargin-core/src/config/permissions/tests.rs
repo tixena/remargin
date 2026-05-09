@@ -37,13 +37,11 @@ permissions:
     - .github
 ";
     let cfg: Config = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(cfg.permissions.trusted_roots.len(), 1);
-    assert_eq!(cfg.permissions.trusted_roots[0].path(), "*");
-    assert_eq!(
-        cfg.permissions.trusted_roots[0].also_deny_bash(),
-        &[String::from("rm")]
-    );
-    assert!(cfg.permissions.trusted_roots[0].cli_allowed());
+    let roots = cfg.permissions.trusted_roots.as_ref().unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].path(), "*");
+    assert_eq!(roots[0].also_deny_bash(), &[String::from("rm")]);
+    assert!(roots[0].cli_allowed());
     assert_eq!(cfg.permissions.deny_ops.len(), 1);
     assert_eq!(cfg.permissions.deny_ops[0].path, "src/secret");
     assert_eq!(cfg.permissions.deny_ops[0].ops, vec![OpName::Purge]);
@@ -78,6 +76,8 @@ permissions:
     let paths: Vec<&str> = cfg
         .permissions
         .trusted_roots
+        .as_ref()
+        .unwrap()
         .iter()
         .map(TrustedRootEntry::path)
         .collect();
@@ -482,4 +482,86 @@ fn trusted_roots_expand_tilde_against_mock_home() {
         .unwrap();
     let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/realm")).unwrap();
     assert_eq!(resolved, vec![PathBuf::from("/home/alice/notes")]);
+}
+
+// ---------------------------------------------------------------------
+// rem-djfx: schema distinguishes absent vs explicitly empty list.
+// ---------------------------------------------------------------------
+
+#[test]
+fn permissions_block_with_no_trusted_roots_key_parses_to_none() {
+    let yaml = "permissions:\n  allow_dot_folders: ['.git']\n";
+    let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+    assert!(cfg.permissions.trusted_roots.is_none());
+}
+
+#[test]
+fn permissions_block_with_empty_trusted_roots_list_parses_to_some_empty() {
+    let yaml = "permissions:\n  trusted_roots: []\n";
+    let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+    let roots = cfg.permissions.trusted_roots.as_ref().unwrap();
+    assert!(roots.is_empty());
+}
+
+#[test]
+fn resolver_records_lock_when_trusted_roots_explicitly_empty() {
+    let yaml = "permissions:\n  trusted_roots: []\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+    let resolved = resolve_permissions(&system, Path::new("/realm")).unwrap();
+    assert_eq!(
+        resolved.trusted_roots_lock,
+        Some(PathBuf::from("/realm/.remargin.yaml"))
+    );
+    assert!(resolved.trusted_roots.is_empty());
+    assert!(!resolved.trusted_roots_unconstrained());
+}
+
+#[test]
+fn resolver_leaves_lock_unset_when_key_absent() {
+    let yaml = "permissions:\n  allow_dot_folders: ['.git']\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+    let resolved = resolve_permissions(&system, Path::new("/realm")).unwrap();
+    assert!(resolved.trusted_roots_lock.is_none());
+    assert!(resolved.trusted_roots_unconstrained());
+}
+
+#[test]
+fn resolver_records_deepest_lock_first_in_walk() {
+    // Both files lock; deepest (child) should be recorded as the
+    // canonical locker source.
+    let parent = "permissions:\n  trusted_roots: []\n";
+    let child = "permissions:\n  trusted_roots: []\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm/sub"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), parent.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/realm/sub/.remargin.yaml"), child.as_bytes())
+        .unwrap();
+    let resolved = resolve_permissions(&system, Path::new("/realm/sub")).unwrap();
+    assert_eq!(
+        resolved.trusted_roots_lock,
+        Some(PathBuf::from("/realm/sub/.remargin.yaml"))
+    );
+}
+
+#[test]
+fn resolve_trusted_roots_for_cwd_locked_returns_empty() {
+    // No inherited entries + lock → empty Vec, NOT a cwd fallback.
+    let yaml = "permissions:\n  trusted_roots: []\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+    let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/realm")).unwrap();
+    assert!(resolved.is_empty());
 }

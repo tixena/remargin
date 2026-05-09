@@ -144,17 +144,30 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
         });
     }
 
-    if !target_is_sanctioned(canonical, &resolved.trusted_roots)
-        && let Some(first) = resolved.trusted_roots.first()
-    {
-        return Some(MatchingRule {
-            kind: "trusted_roots",
-            rule_text: format!(
-                "outside trusted_roots (target {} is not inside any entry)",
-                canonical.display(),
-            ),
-            source_file: first.source_file.clone(),
-        });
+    // rem-djfx: report restricted when the target is outside the
+    // declared trusted_roots set OR the realm is locked
+    // (`trusted_roots: []` somewhere in the walk). Routes through the
+    // same predicate as the per-op guard so the two layers cannot
+    // drift on the covers-an-entry rule.
+    if !resolved.trusted_roots_unconstrained() {
+        let inside = !resolved.trusted_roots.is_empty()
+            && target_is_sanctioned(canonical, &resolved.trusted_roots);
+        if !inside
+            && let Some(source) = resolved
+                .trusted_roots
+                .first()
+                .map(|entry| entry.source_file.clone())
+                .or_else(|| resolved.trusted_roots_lock.clone())
+        {
+            return Some(MatchingRule {
+                kind: "trusted_roots",
+                rule_text: format!(
+                    "outside trusted_roots (target {} is not inside any entry)",
+                    canonical.display(),
+                ),
+                source_file: source,
+            });
+        }
     }
 
     None
