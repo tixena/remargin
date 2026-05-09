@@ -147,7 +147,7 @@ pub fn set_sandbox_on_mapping(mapping: &mut Mapping, entries: &[SandboxEntry]) {
 }
 
 /// Append a sandbox entry for `identity`, OR refresh the existing
-/// entry's timestamp when it already exists (rem-g3sy.1 / T31).
+/// entry's timestamp when it already exists.
 ///
 /// Returns:
 /// - `true` when the entries vector was mutated (push OR ts update).
@@ -229,7 +229,7 @@ pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
 
     // Collect unique "to" recipients on unacked comments. An unacked
     // comment with no recipients (`to: []`) surfaces under the literal
-    // sentinel `<unassigned>` (rem-ytbc) so triage tooling sees the
+    // sentinel `<unassigned>` so triage tooling sees the
     // pending entry instead of an invisibly-empty bucket. The angle
     // brackets keep the sentinel unambiguously distinguishable from
     // any registered identity (the registry rejects identities that

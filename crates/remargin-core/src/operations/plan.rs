@@ -1,4 +1,4 @@
-//! Core infrastructure for the `remargin plan` subcommand (rem-bhk / rem-2qr).
+//! Core infrastructure for the `remargin plan` subcommand.
 //!
 //! `plan` answers the question "what would this op do?" without committing
 //! anything to disk. Given a before/after pair of [`ParsedDocument`]s and
@@ -13,12 +13,8 @@
 //! - A `would_commit` verdict plus human-readable `reject_reason` when the
 //!   projected verify would fail.
 //!
-//! Per-op wiring lives in follow-up issues (rem-imc, rem-3uo, rem-qll).
 //! This module is intentionally pure: it never reads the filesystem,
 //! never calls into the signing key, and never mutates either input.
-//!
-//! The [`PlanReport`] shape matches the JSON payload documented in
-//! rem-bhk.
 
 extern crate alloc;
 
@@ -136,18 +132,18 @@ impl PlanIdentity {
     /// Canonical builder shared by every adapter (CLI + MCP).
     ///
     /// `would_sign` is `true` when a key path is configured. The key is
-    /// not loaded here — `plan` stays side-effect-free per rem-bhk. Both
+    /// not loaded here — `plan` stays side-effect-free Both
     /// adapters must use this constructor so plan reports are byte-
-    /// identical across surfaces (rem-3a2).
+    /// identical across surfaces.
     #[must_use]
     pub fn from_config(cfg: &ResolvedConfig) -> Self {
         let author_type = cfg.author_type.as_ref().map(|t| String::from(t.as_str()));
         Self::new(cfg.identity.clone(), author_type, cfg.key_path.is_some())
     }
 
-    /// Build a [`PlanIdentity`] from the three fields documented in
-    /// rem-bhk. The constructor exists so external crates can populate
-    /// the struct without tripping `#[non_exhaustive]`.
+    /// Build a [`PlanIdentity`] from the three fields. The
+    /// constructor exists so external crates can populate the struct
+    /// without tripping `#[non_exhaustive]`.
     #[must_use]
     pub const fn new(name: Option<String>, author_type: Option<String>, would_sign: bool) -> Self {
         Self {
@@ -161,10 +157,9 @@ impl PlanIdentity {
 /// Structured prediction of what a mutating op would do against a
 /// [`ParsedDocument`], without touching disk.
 ///
-/// Mirrors the JSON payload documented in rem-bhk. Populated by
-/// [`project_report`] for the in-memory diff fields; per-op wiring layers
-/// on top to populate [`PlanReport::identity`] and any op-specific
-/// metadata.
+/// Populated by [`project_report`] for the in-memory diff fields;
+/// per-op wiring layers on top to populate [`PlanReport::identity`]
+/// and any op-specific metadata.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanReport {
@@ -180,7 +175,7 @@ pub struct PlanReport {
     /// Partition of comment ids across the projection. See
     /// [`CommentDiff`].
     pub comments: CommentDiff,
-    /// Config-mutation projection for the `restrict` op (rem-puy5).
+    /// Config-mutation projection for the `restrict` op.
     /// `None` for every Markdown op (the document-level fields above
     /// describe those) AND for `unprotect` (which carries a typed
     /// reverse projection in [`PlanReport::unprotect_diff`] instead).
@@ -189,11 +184,11 @@ pub struct PlanReport {
     /// Which identity the plan was computed under. `would_sign` reports
     /// whether signing would succeed without actually invoking the key.
     pub identity: PlanIdentity,
-    /// File-relocation projection emitted by the `plan mv` op
-    /// (rem-0j2x / T44). `None` for every other op. The document-level
-    /// fields (`comments`, `changed_line_ranges`, `checksum_*`,
-    /// `verify_after`) are vacuously empty for `mv` — the bytes do not
-    /// change, only the file's location.
+    /// File-relocation projection emitted by the `plan mv` op. `None`
+    /// for every other op. The document-level fields (`comments`,
+    /// `changed_line_ranges`, `checksum_*`, `verify_after`) are
+    /// vacuously empty for `mv` — the bytes do not change, only the
+    /// file's location.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mv_diff: Option<MvDiff>,
     /// `true` when the projected content is byte-identical to the source
@@ -201,11 +196,11 @@ pub struct PlanReport {
     pub noop: bool,
     /// The mutating op label (`write`, `comment`, `ack`, `batch`, ...).
     pub op: String,
-    /// Recursive-purge projection emitted by `plan purge --recursive`
-    /// (rem-nrjy). `None` for the single-file purge case AND every
-    /// other op. The document-level fields stay vacuously empty in the
-    /// recursive case — each per-file projection inside this struct
-    /// carries its own counters and refusal reason.
+    /// Recursive-purge projection emitted by `plan purge --recursive`.
+    /// `None` for the single-file purge case AND every other op. The
+    /// document-level fields stay vacuously empty in the recursive
+    /// case — each per-file projection inside this struct carries its
+    /// own counters and refusal reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub purge_dir_diff: Option<PurgeDirDiff>,
     /// Human-readable reason when `would_commit` is `false`. `None` when
@@ -229,7 +224,7 @@ pub struct PlanReport {
     pub would_commit: bool,
 }
 
-/// Per-file projection emitted by the `plan restrict` op (rem-puy5).
+/// Per-file projection emitted by the `plan restrict` op.
 ///
 /// `restrict` is a sanctioned config write that touches four files in
 /// one go: `<anchor>/.remargin.yaml`, the project + user-scope
@@ -337,13 +332,13 @@ pub struct SidecarDiff {
 pub enum ConfigConflict {
     /// An existing rule in `permissions.allow` overlaps a rule the
     /// projection would add to `permissions.deny` in the same settings
-    /// file. The motivating bug for rem-puy5 — Claude's settings
+    /// file. The motivating bug for — Claude's settings
     /// semantics resolve allow-vs-deny in ways the user may not
     /// expect, so the conflict is surfaced for review before
     /// committing.
     ///
     /// `overlap_kind` distinguishes exact matches from prefix /
-    /// subtree overlap (rem-aovx) so callers can tailor the message.
+    /// subtree overlap so callers can tailor the message.
     AllowDenyOverlap {
         /// Existing allow rule string.
         allow_rule: String,
@@ -368,7 +363,7 @@ pub enum ConfigConflict {
     },
     /// `permissions.restrict` already has an entry for the same path
     /// but with different `also_deny_bash` / `cli_allowed`. Surfaced
-    /// because the live op silently overwrites (rem-yj1j.5 / rem-aqnn).
+    /// because the live op silently overwrites.
     YamlEntryWouldChange {
         /// On-disk path of the existing entry.
         path: String,
@@ -393,7 +388,7 @@ pub enum EntryAction {
     Updated,
 }
 
-/// Reverse projection emitted by the `plan unprotect` op (rem-6eop / T43).
+/// Reverse projection emitted by the `plan unprotect` op.
 ///
 /// Symmetric mirror of [`ConfigPlanDiff`] for the reverse direction.
 /// `unprotect` is the explicit, sanctioned reversal of a previous
@@ -528,8 +523,7 @@ pub enum UnprotectConflict {
     },
 }
 
-/// Recursive-purge projection emitted by `plan purge --recursive`
-/// (rem-nrjy).
+/// Recursive-purge projection emitted by `plan purge --recursive`.
 ///
 /// Mirrors the read-only side of
 /// [`crate::operations::purge::purge_dir`]: enumerates every visible
@@ -598,18 +592,17 @@ pub enum PurgeDirFileOutcome {
     WouldPurge,
 }
 
-/// File-relocation projection emitted by the `plan mv` op
-/// (rem-0j2x / T44, rem-jc82).
+/// File-relocation projection emitted by the `plan mv` op.
 ///
 /// Mirrors the read-only side of [`crate::operations::mv::mv`]: names
 /// the canonical src/dst, whether the destination already exists (and
 /// would therefore require `--force` to overwrite), whether the
 /// call would be a same-path no-op or an idempotent re-run after a
 /// previous successful move, and — when the source is a directory
-/// (rem-jc82) — the count of nested files that would move with it.
+/// — the count of nested files that would move with it.
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "each bool is a documented JSON output field (rem-0j2x / rem-jc82)"
+    reason = "each bool is a documented JSON output field"
 )]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
@@ -624,12 +617,12 @@ pub struct MvDiff {
     /// exists at the requested path. The live op would settle as a
     /// `bytes_moved = 0` success.
     pub idempotent_already_settled: bool,
-    /// `true` when the source resolves to a directory (rem-jc82).
+    /// `true` when the source resolves to a directory.
     /// The live op renames the directory + every nested file as a
     /// unit. Mirrors [`crate::operations::mv::MvOutcome::is_directory`].
     pub is_directory: bool,
     /// Number of regular files that would move with the directory
-    /// source (rem-jc82). `0` for the file-mv case AND for the no-op /
+    /// source. `0` for the file-mv case AND for the no-op /
     /// already-settled branches. Mirrors
     /// [`crate::operations::mv::MvOutcome::nested_files_moved`].
     pub nested_files_moved: usize,
@@ -644,7 +637,7 @@ pub struct MvDiff {
 }
 
 /// A `plan` request for a single mutating op, normalized so CLI + MCP
-/// can share one dispatch path (rem-oqv / rem-3a2).
+/// can share one dispatch path.
 ///
 /// Each variant mirrors one mutating op. Adapters construct the variant
 /// from their native input shape; [`dispatch`] converts it to a
@@ -689,7 +682,7 @@ pub enum PlanRequest<'req> {
         /// `legacy-user` / `legacy-agent` placeholder behaviour.
         identities: MigrateIdentities,
     },
-    /// `plan mv` — projects a file relocation (rem-0j2x / T44).
+    /// `plan mv` — projects a file relocation.
     /// Produces an [`MvDiff`] in [`PlanReport::mv_diff`] describing
     /// the resolved src/dst paths, whether the destination already
     /// exists, and whether the live op would settle as a no-op.
@@ -706,8 +699,8 @@ pub enum PlanRequest<'req> {
     },
     /// `plan purge` — projects removal of all comments. When
     /// `recursive` is true, `path` is treated as a directory and the
-    /// projection enumerates every visible `.md` file under it
-    /// (rem-nrjy). The report carries a [`PurgeDirDiff`] in
+    /// projection enumerates every visible `.md` file under it. The
+    /// report carries a [`PurgeDirDiff`] in
     /// [`PlanReport::purge_dir_diff`] in the recursive case; the
     /// document-level fields stay vacuously empty.
     Purge {
@@ -723,10 +716,10 @@ pub enum PlanRequest<'req> {
         /// `true` to remove the reaction; `false` to add.
         remove: bool,
     },
-    /// `plan restrict` — projects a config-mutation `restrict` op
-    /// (rem-puy5). Unlike the document plans above, this variant
-    /// produces a [`ConfigPlanDiff`] in [`PlanReport::config_diff`]
-    /// describing every file the live op would touch.
+    /// `plan restrict` — projects a config-mutation `restrict` op.
+    /// Unlike the document plans above, this variant produces a
+    /// [`ConfigPlanDiff`] in [`PlanReport::config_diff`] describing
+    /// every file the live op would touch.
     Restrict {
         /// Caller's working directory; used for anchor discovery.
         cwd: PathBuf,
@@ -741,7 +734,7 @@ pub enum PlanRequest<'req> {
     /// `plan sandbox-remove` — projects unstaging the file from the caller's sandbox.
     SandboxRemove { path: PathBuf },
     /// `plan sign` — projects back-signing missing-signature comments
-    /// authored by the current identity (rem-7y3). Unlike most plan ops,
+    /// authored by the current identity. Unlike most plan ops,
     /// this loads the configured signing key and attaches real
     /// signatures to the projected `after` document so `verify_after`
     /// can faithfully predict the post-op gate.
@@ -752,9 +745,9 @@ pub enum PlanRequest<'req> {
         /// `sign` op.
         selection: SignSelection,
     },
-    /// `plan unprotect` — projects a config-mutation `unprotect` op
-    /// (rem-6eop). Symmetric mirror of [`PlanRequest::Restrict`] for
-    /// the reverse direction. Produces an [`UnprotectConfigDiff`] in
+    /// `plan unprotect` — projects a config-mutation `unprotect` op.
+    /// Symmetric mirror of [`PlanRequest::Restrict`] for the reverse
+    /// direction. Produces an [`UnprotectConfigDiff`] in
     /// [`PlanReport::unprotect_diff`] describing every file the live
     /// op would touch and every drift conflict it would surface.
     Unprotect {
@@ -858,7 +851,7 @@ pub fn project_report(
     }
 }
 
-/// Canonical plan dispatcher shared by CLI + MCP (rem-oqv / rem-3a2).
+/// Canonical plan dispatcher shared by CLI + MCP.
 ///
 /// Runs the right `project_*` helper for the requested op, folds the
 /// result through [`project_report`] with [`PlanIdentity::from_config`],
@@ -959,9 +952,9 @@ pub fn dispatch(
     }
 }
 
-/// Build a [`PlanReport`] from the `restrict` projection's verdict
-/// (rem-puy5). Mirrors [`dispatch_write_projection`]'s handling of the
-/// document `Unsupported` arm: a hard reject from
+/// Build a [`PlanReport`] from the `restrict` projection's verdict.
+/// Mirrors [`dispatch_write_projection`]'s handling of the document
+/// `Unsupported` arm: a hard reject from
 /// [`projections::project_restrict`] flips `would_commit` to false and
 /// surfaces the carried reason verbatim.
 fn dispatch_restrict(
@@ -988,11 +981,11 @@ fn dispatch_restrict(
     Ok(report)
 }
 
-/// Build a [`PlanReport`] from the `unprotect` projection's verdict
-/// (rem-6eop). Symmetric mirror of [`dispatch_restrict`] for the
-/// reverse direction: a hard reject from
-/// [`projections::project_unprotect`] flips `would_commit` to false
-/// and surfaces the carried reason verbatim.
+/// Build a [`PlanReport`] from the `unprotect` projection's verdict.
+/// Symmetric mirror of [`dispatch_restrict`] for the reverse
+/// direction: a hard reject from [`projections::project_unprotect`]
+/// flips `would_commit` to false and surfaces the carried reason
+/// verbatim.
 fn dispatch_unprotect(
     system: &dyn System,
     cfg: &ResolvedConfig,
@@ -1017,7 +1010,7 @@ fn dispatch_unprotect(
     Ok(report)
 }
 
-/// Build a [`PlanReport`] for the `mv` op (rem-0j2x / T44).
+/// Build a [`PlanReport`] for the `mv` op.
 ///
 /// Pure: no disk writes, no identity load. Resolves both endpoints
 /// through the same sandbox boundary the live op uses, surfaces a
@@ -1025,7 +1018,7 @@ fn dispatch_unprotect(
 /// failures (path escape, forbidden basename, restrict-guard violation,
 /// source-and-dest both missing, dst-is-a-directory while src is a
 /// file), and otherwise returns a populated [`MvDiff`] with
-/// `would_commit = true`. With rem-jc82 a directory source is no
+/// `would_commit = true`. With a directory source is no
 /// longer rejected — the diff carries `is_directory: true` and the
 /// nested file count.
 #[expect(
@@ -1179,7 +1172,7 @@ fn mv_directory_size(system: &dyn System, dir: &Path) -> usize {
         .map_or(0, |entries| entries.iter().filter(|e| e.is_file).count())
 }
 
-/// Build a [`PlanReport`] for the recursive `purge` op (rem-nrjy).
+/// Build a [`PlanReport`] for the recursive `purge` op.
 ///
 /// Pure: no disk writes. Walks the directory the same way
 /// [`crate::operations::purge::purge_dir`] does, runs the same per-file

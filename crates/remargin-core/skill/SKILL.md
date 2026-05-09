@@ -67,7 +67,7 @@ stop at the first match:
   `restrict` denial.** `restrict` is user intent. Reversing it without
   explicit consent is the worst failure mode of the permissions
   system. **Ask before `unprotect`.** This rule applies regardless of
-  surface: MCP doesn't expose the tool (rem-888p removed it), but the
+  surface: MCP doesn't expose the tool, but the
   Bash subprocess path to the CLI is still reachable — and the
   prohibition stands there too. The fence is your behavior, not the
   surface.
@@ -308,7 +308,7 @@ remargin batch --ops '[
 
 ```
 remargin write --lines 16-16 src/discussions/roadmap.md <<'EOF'
-- Status: `open` ([rem-8cnc](bd://rem-8cnc))
+- Status: `open`
 EOF
 ```
 
@@ -388,7 +388,7 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 | Op | Purpose |
 |----|---------|
-| `identity_create` | Render a ready-to-use identity YAML block. Returns `{identity, type, key, yaml}`. Caller writes the YAML to disk; `rem-is4z` bans agents writing to `.remargin.yaml` directly. `mode:` is never emitted. |
+| `identity_create` | Render a ready-to-use identity YAML block. Returns `{identity, type, key, yaml}`. Caller writes the YAML to disk; agents are banned from writing to `.remargin.yaml` directly. `mode:` is never emitted. |
 
 ### Search and quality
 
@@ -423,8 +423,8 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 | Need | MCP tool | CLI |
 |---|---|---|
-| Restrict a path | _CLI-only (rem-888p)_ | `remargin restrict` |
-| Unprotect a path | _CLI-only (rem-888p)_ | `remargin unprotect` |
+| Restrict a path | _CLI-only_ | `remargin restrict` |
+| Unprotect a path | _CLI-only_ | `remargin unprotect` |
 | Show resolved permissions | `mcp__remargin__permissions_show` | `remargin permissions show` |
 | Check if path is restricted | `mcp__remargin__permissions_check` | `remargin permissions check` |
 
@@ -535,8 +535,7 @@ them. Suggest, but do not assume, that they add this block to
 Approves all remargin tools at once. The wildcard automatically covers
 the read-only inspection tools (`mcp__remargin__permissions_show`,
 `mcp__remargin__permissions_check`) — no edit needed when new commands
-ship. (`restrict` / `unprotect` are CLI-only — rem-888p — and not
-exposed via MCP.)
+ship. (`restrict` / `unprotect` are CLI-only and not exposed via MCP.)
 
 When `remargin restrict <path>` itself runs, it APPENDS deny rules
 (plus any explicit `allow_dot_folders` re-allows) to the same
@@ -556,7 +555,7 @@ Three modes resolved by walking up for `.remargin.yaml`:
 - `registered` — only identities in the registry may post; no signatures.
 - `strict` — registered identities only, every comment carries a valid Ed25519 signature.
 
-In strict mode, the verify gate runs before every write (`rem-ef1`); unsigned/unregistered posts are rejected.
+In strict mode, the verify gate runs before every write; unsigned/unregistered posts are rejected.
 
 ---
 

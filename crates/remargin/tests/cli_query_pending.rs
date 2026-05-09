@@ -1,6 +1,6 @@
 //! End-to-end CLI tests for the new `--pending-for-me` /
 //! `--pending-broadcast` flags and the `--pending` broadcast-inclusion
-//! bug fix (rem-4j91).
+//! bug fix.
 //!
 //! These tests exercise the binary (not just core) to prove the CLI
 //! adapter wires the flags through and picks up the caller's identity
@@ -112,7 +112,7 @@ Directed to bob, no ack.
 
     #[test]
     fn pending_flag_includes_broadcast_rem_4j91() {
-        // Before rem-4j91: --pending silently excluded broadcasts.
+        // : --pending silently excluded broadcasts.
         // After: a fresh broadcast (empty `to`, no acks) must surface.
         let (_tmp, cwd) = setup_realm(ALICE_CONFIG);
         seed(&cwd, "broadcast.md", BROADCAST_DOC);

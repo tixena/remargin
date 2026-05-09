@@ -82,7 +82,7 @@ pub struct Comment {
     pub checksum: String,
     pub content: String,
     /// Set by [`crate::operations::edit_comment`] on every successful
-    /// edit (rem-g3sy.2 / T32). `None` for comments that have never
+    /// edit. `None` for comments that have never
     /// been edited. Pretty-print + the activity command surface this
     /// when present. Deliberately NOT included in the signed payload
     /// (see [`crate::crypto::signature_payload`] for the rationale).
@@ -120,7 +120,7 @@ pub struct Comment {
 impl Comment {
     /// `max(ts, edited_at)` — the timestamp consumers should use
     /// when deciding whether the comment is "newer than X." The
-    /// activity command (rem-g3sy.3) uses this to surface edited
+    /// activity command uses this to surface edited
     /// comments under their edit time rather than the original
     /// creation time.
     #[must_use]
@@ -393,7 +393,7 @@ fn serialize_comment(cm: &Comment, out: &mut String) {
             }
         }
     }
-    // Writer-side dedupe (rem-gx9v): the on-disk ack list always carries
+    // Writer-side dedupe: the on-disk ack list always carries
     // at most one entry per identity, with the latest timestamp. The
     // helper lives in `crate::writer` because every public write path
     // funnels through it (`writer::write_document` and the sandbox/purge

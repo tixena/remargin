@@ -1,4 +1,4 @@
-//! Projection-only siblings of the lightweight mutating ops (rem-3uo).
+//! Projection-only siblings of the lightweight mutating ops.
 //!
 //! Each `project_*` function here mirrors the same-named mutating op in
 //! [`crate::operations`] up through `ensure_frontmatter`, but stops
@@ -49,7 +49,7 @@ use crate::writer::{self, InsertPosition};
 #[non_exhaustive]
 pub struct ProjectBatchOp {
     pub after_comment: Option<String>,
-    /// Heading-anchored insertion (rem-5oqx). Mutually exclusive with
+    /// Heading-anchored insertion. Mutually exclusive with
     /// `after_comment` and `after_line`.
     pub after_heading: Option<String>,
     pub after_line: Option<usize>,
@@ -98,7 +98,7 @@ impl ProjectBatchOp {
             .and_then(serde_json::Value::as_u64)
             .and_then(|n| usize::try_from(n).ok());
 
-        // rem-5oqx: at most one position anchor per op (matches
+        // at most one position anchor per op (matches
         // [`crate::operations::batch::BatchCommentOp::from_json_object`]).
         let anchor_count = usize::from(after_comment.is_some())
             + usize::from(after_heading.is_some())
@@ -176,7 +176,7 @@ pub struct ProjectCommentParams<'params> {
     pub auto_ack: bool,
     pub content: &'params str,
     pub position: &'params InsertPosition,
-    /// Optional classification tags (rem-49w0). Validated before the
+    /// Optional classification tags. Validated before the
     /// projection runs so a malformed tag cannot produce a misleading
     /// preview.
     pub remargin_kind: &'params [String],
@@ -299,7 +299,7 @@ pub fn project_ack(
 /// using the same `after_line` shift bookkeeping the real op does. No
 /// disk writes, no attachment copies, no signatures.
 ///
-/// Per rem-qll, the real `batch_comment` is atomic: if any sub-op fails,
+/// the real `batch_comment` is atomic: if any sub-op fails,
 /// nothing is written. The projection mirrors that: the first sub-op
 /// whose preflight rejects stops the walk — earlier sub-ops remain
 /// applied in the returned `after` so the caller can see the partial
@@ -348,8 +348,8 @@ pub fn project_batch(
     for (idx, op) in operations.iter().enumerate() {
         let existing_ids = after.comment_ids();
         let new_id = id::generate(&existing_ids);
-        // rem-n4x7: remargin_kind is not yet wired through the batch
-        // projection op surface; rem-49w0 adds it to `BatchCommentOp`.
+        // remargin_kind is not yet wired through the batch
+        // projection op surface adds it to `BatchCommentOp`.
         // `None` preserves the pre-field checksum shape and leaves the
         // projected YAML without a `remargin_kind:` line.
         let remargin_kind: Option<Vec<String>> = None;
@@ -445,7 +445,7 @@ pub fn project_batch(
 /// the mutating op runs.
 ///
 /// Signatures are also skipped: `plan` must not load the signing key.
-/// Per rem-bhk, `would_sign` on the resulting `PlanReport` reports
+/// `would_sign` on the resulting `PlanReport` reports
 /// whether a key is configured, not whether signing would succeed.
 ///
 /// # Errors
@@ -478,7 +478,7 @@ pub fn project_comment(
     let existing_ids = after.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    // rem-49w0: thread remargin_kind through the plan projection so
+    // thread remargin_kind through the plan projection so
     // the preview matches the real-op output exactly. Validated before
     // any side-effect work, same as `create_comment`. Empty slice
     // becomes `None` so the projected YAML matches what `create_comment`
@@ -763,8 +763,7 @@ pub fn project_react(
     Ok((before, after))
 }
 
-/// Projection sibling of [`crate::operations::sign::sign_comments`]
-/// (rem-7y3).
+/// Projection sibling of [`crate::operations::sign::sign_comments`].
 ///
 /// Returns the `(before, after)` pair without touching disk. Unlike the
 /// other plan projections, `project_sign` **does** load the signing key
@@ -822,8 +821,7 @@ pub fn project_sign(
     // here — plan surfaces already-signed ids via `comments.preserved`.
     // The plan projection treats already-signed ids under `--ids` as
     // skipped regardless of the actual op's `--repair-checksum` flag:
-    // this projection does not yet surface a "would re-sign" signal
-    // (tracked under rem-7y3).
+    // this projection does not yet surface a "would re-sign" signal.
     let (targets, _skipped) = sign::classify_candidates(&after, identity, selection, false)?;
     let target_ids: HashSet<String> = targets.iter().map(|(id, _)| id.clone()).collect();
 

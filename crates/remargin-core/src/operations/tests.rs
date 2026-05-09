@@ -267,7 +267,7 @@ fn create_comment_with_sandbox_stages_and_writes_together() {
     assert_eq!(doc.comments()[0].content, "Staged with sandbox.");
 }
 
-/// rem-g3sy.1 / T31: the sandbox roster stays one-entry-per-
+/// the sandbox roster stays one-entry-per-
 /// identity, and the timestamp refreshes on every sandbox-add path
 /// (including the `comment --sandbox` shortcut). Pre-existing
 /// timestamp at 10:00:00 is replaced by `now`; the roster size
@@ -309,7 +309,7 @@ Body.
     .unwrap();
 
     // Pre-existing 10:00:00 timestamp is replaced (refresh
-    // semantics from rem-g3sy.1).
+    // semantics ).
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert!(
         !content.contains("eduardo@2026-04-11T10:00:00+00:00"),
@@ -534,7 +534,7 @@ Original content.
     assert!(cm.ack.is_empty(), "ack should be cleared after edit");
 }
 
-/// rem-g3sy.2 / T32: every successful edit stamps `edited_at` on
+/// every successful edit stamps `edited_at` on
 /// the comment so the activity command can surface the edit. The
 /// original `ts` (creation time) stays put; only `edited_at`
 /// advances.
@@ -586,7 +586,7 @@ Original.
     assert!(content.contains("edited_at:"));
 }
 
-/// rem-g3sy.2 / T32: comments parsed from older docs without an
+/// comments parsed from older docs without an
 /// `edited_at:` line round-trip with `edited_at = None`. No
 /// fabricated value, no extra YAML line, no checksum drift.
 #[test]
@@ -1433,7 +1433,7 @@ fn auto_ack_on_reply() {
 
 #[test]
 fn auto_ack_reply_delete_reply_does_not_double_ack_parent() {
-    // rem-gx9v reproduction: a reply auto-acks the parent; deleting the
+    // reproduction: a reply auto-acks the parent; deleting the
     // reply leaves the parent's ack in place; replying a second time
     // would historically push a second ack from the same author. The
     // writer-side dedupe collapses to one entry.
@@ -1606,7 +1606,7 @@ fn auto_ack_without_reply_to_no_file_modification() {
 }
 
 // ===========================================================================
-// Reply-to auto-populate `to` tests (rem-3nm)
+// Reply-to auto-populate `to` tests
 // ===========================================================================
 
 #[test]
@@ -1645,7 +1645,7 @@ fn reply_auto_populates_to() {
 
 #[test]
 fn reply_explicit_to_prepends_parent_author() {
-    // Updated invariant (rem-kja): the parent author is always first
+    // Updated invariant: the parent author is always first
     // in `to:`; explicit `--to` entries are appended after it.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
@@ -1848,7 +1848,7 @@ fn reply_auto_populates_to_different_author() {
     );
 }
 
-// --- Projection tests (rem-3uo) ---
+// --- Projection tests ---
 //
 // Each `project_*` helper returns a `(before, after)` pair suitable for
 // feeding into `plan_ops::project_report`. These tests pin the invariant
@@ -2047,7 +2047,7 @@ fn project_ack_matches_real_ack_comments_after_output() {
     assert_eq!(real_ack[0].author, proj_ack[0].author);
 }
 
-// --- project_comment / project_edit (rem-3fp) ---
+// --- project_comment / project_edit ---
 
 #[test]
 fn project_comment_appends_without_mutating_disk() {
@@ -2271,7 +2271,7 @@ fn project_edit_cascades_ack_clear_to_descendants() {
 
 // --------------------------------------------------------------------
 // project_batch / project_purge / project_migrate / project_sandbox_*
-// (rem-qll): composite + destructive ops that sit on top of the
+//: composite + destructive ops that sit on top of the
 // lightweight projections.
 // --------------------------------------------------------------------
 
@@ -2469,7 +2469,7 @@ fn project_sandbox_add_projects_frontmatter_entry() {
     );
 }
 
-/// rem-g3sy.1 / T31: `project_sandbox_add` now projects a timestamp
+/// `project_sandbox_add` now projects a timestamp
 /// refresh when an entry already exists (only a no-op when the
 /// existing ts is identical to `now` — vanishingly unlikely in
 /// practice, since `Utc::now()` advances every call). The roster
@@ -2551,7 +2551,7 @@ fn project_sandbox_add_rejects_non_markdown_path() {
 }
 
 // ---- project_sign ---------------------------------------------------------
-// Exercises the `plan sign` projection added under rem-7y3. Unlike the
+// Exercises the `plan sign` projection added Unlike the
 // other `project_*` helpers, project_sign deliberately loads the signing
 // key because its whole purpose is the signature — a projection that
 // skipped key loading would produce misleading `noop: true` plans.
@@ -2794,7 +2794,7 @@ fn project_sign_already_signed_stays_preserved() {
 }
 
 // ---------------------------------------------------------------------
-// Writer ban (rem-is4z): every mutating operation must refuse to touch
+// Writer ban: every mutating operation must refuse to touch
 // `.remargin.yaml` / `.remargin-registry.yaml` — the canonical config
 // and participant registry files. Each subcommand is exercised here
 // against both forbidden basenames; the resulting error message must
@@ -3033,13 +3033,13 @@ fn read_file(system: &MockSystem, path: &Path) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------
-// Layer 1 op-guard wiring (rem-mu9h / scenarios 15, 16, 18).
+// Layer 1 op-guard wiring.
 //
 // `purge` already has its own restrict / deny_ops integration tests
 // in operations/purge/tests.rs; the rest of the mutating ops are
 // covered here. Each op gets at minimum:
-//   - a restrict-blocks test (mutating-only: `restrict: ['*']`)
-//   - a deny_ops-blocks test (`deny_ops: [{path: ., ops: [<op>]}]`)
+// - a restrict-blocks test (mutating-only: `restrict: ['*']`)
+// - a deny_ops-blocks test (`deny_ops: [{path: ., ops: [<op>]}]`)
 // Where the op signature makes one of those obvious to add but not
 // trivial to spell, the test is omitted in favor of the broader
 // scenario-15 sweep below (`all_mutating_ops_refused_under_wildcard`)

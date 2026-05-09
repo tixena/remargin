@@ -1,4 +1,4 @@
-//! Integration tests for path expansion (rem-3xo).
+//! Integration tests for path expansion.
 //!
 //! Covers the adapter-boundary behaviour described in the task:
 //!
@@ -7,7 +7,7 @@
 //!   dispatches.
 //! - MCP tools receive already-expanded paths through the in-process
 //!   `mcp::process_request` entry point.
-//! - Both surfaces agree on the same inputs (adapter parity, rem-3a2).
+//! - Both surfaces agree on the same inputs (adapter parity).
 //! - Undefined env vars and `~user` produce a clear named error.
 //!
 //! Env-var manipulation is done via a hermetic fixture home: we set

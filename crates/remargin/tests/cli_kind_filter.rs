@@ -1,4 +1,4 @@
-//! End-to-end CLI tests for the `remargin_kind` surface (rem-49w0).
+//! End-to-end CLI tests for the `remargin_kind` surface.
 //!
 //! Exercises the CLI binary to prove:
 //!

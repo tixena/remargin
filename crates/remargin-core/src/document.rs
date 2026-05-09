@@ -31,7 +31,7 @@ use crate::writer::ensure_not_forbidden_target;
 
 /// Bytes + mime + size for a binary file read.
 ///
-/// Returned by [`read_binary`] (rem-cdr). Callers decide how to surface the
+/// Returned by [`read_binary`]. Callers decide how to surface the
 /// payload: base64 in JSON, raw bytes to stdout, or written to a caller-named
 /// file. The helper deliberately does not special-case image/* vs other
 /// binary mimes — that is an adapter-level concern (e.g. MCP returning an
@@ -77,7 +77,7 @@ pub struct RmResult {
 /// `noop == true` means the prospective content was byte-identical to the
 /// on-disk file and no disk write was performed. Retries and idempotent
 /// re-submits of the same content settle here, keeping file mtime stable
-/// and avoiding downstream watcher/reload noise (rem-1f2).
+/// and avoiding downstream watcher/reload noise.
 #[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct WriteOutcome {
@@ -106,7 +106,7 @@ impl WriteOutcome {
 
 /// Metadata for a single document.
 ///
-/// Shape-switches on file type (rem-lqz):
+/// Shape-switches on file type:
 /// - File-level fields (`binary`, `mime`, `path`, `size_bytes`) are always
 ///   populated so callers can peek at any allowlisted file.
 /// - Markdown-only fields (`comment_count`, `frontmatter`, `last_activity`,
@@ -142,7 +142,7 @@ pub struct WriteOptions {
     /// When set, replace only lines `[start..=end]` (1-indexed, inclusive)
     /// with the provided content and leave the rest of the file
     /// byte-identical. Incompatible with `create`, `raw`, and `binary`.
-    /// See rem-24p.
+    ///
     pub lines: Option<(usize, usize)>,
     /// Skip frontmatter/comment management.
     pub raw: bool,
@@ -184,7 +184,7 @@ impl WriteOptions {
     }
 }
 
-/// Projection result for a planned `write` op (rem-imc).
+/// Projection result for a planned `write` op.
 ///
 /// Returned by [`project_write`] — the projection-only sibling of
 /// [`write`] — so the `plan write` subcommand can report what the op
@@ -362,7 +362,7 @@ pub fn get(
 /// Mime is derived from the file extension; unknown extensions map to
 /// `application/octet-stream`. This is symmetric with [`write`]'s `binary`
 /// option and is the shared core for CLI `get --binary` and MCP `get` with
-/// `binary: true` (rem-cdr).
+/// `binary: true`.
 ///
 /// # Errors
 ///
@@ -595,7 +595,7 @@ pub fn write(
     let mut final_doc = new_doc;
     frontmatter::ensure_frontmatter(&mut final_doc, config)?;
 
-    // No-op detection (rem-1f2): if the canonical output would be
+    // No-op detection: if the canonical output would be
     // byte-identical to what is already on disk, skip both the disk
     // write AND the post-write verify gate. The verify gate is
     // semantically satisfied: the file is already in the verified state
@@ -620,7 +620,7 @@ pub fn write(
 /// does up through `ensure_frontmatter`, but stops before invoking
 /// [`commit_with_verify`] and never calls `system.write`.
 ///
-/// Used by the `remargin plan write` subcommand (rem-imc) to feed a
+/// Used by the `remargin plan write` subcommand to feed a
 /// before/after pair into
 /// [`crate::operations::plan::project_report`]. The returned
 /// [`WriteProjection::Markdown::before`] is the on-disk document (empty
@@ -736,7 +736,7 @@ fn is_byte_identical(system: &dyn System, path: &Path, new_bytes: &[u8]) -> bool
 }
 
 /// Validate mutually-exclusive `WriteOptions` combinations up front so
-/// both CLI and MCP callers surface identical diagnostics (rem-24p).
+/// both CLI and MCP callers surface identical diagnostics.
 fn validate_write_opts(path: &Path, opts: &WriteOptions) -> Result<()> {
     let is_md = path
         .extension()

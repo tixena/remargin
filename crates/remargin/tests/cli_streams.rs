@@ -1,4 +1,4 @@
-//! Regression tests for rem-1jy / rem-26w: non-JSON mode emits no
+//! Regression tests for: non-JSON mode emits no
 //! `elapsed` footer on any stream; the timing value only survives as
 //! the `elapsed_ms` key inside the JSON payload.
 //!

@@ -34,7 +34,7 @@ use crate::reactions::ReactionEntry;
 ///
 /// `pending` (the broad form) includes BOTH directed comments with
 /// unacked recipients AND broadcast comments (empty `to`) that have
-/// not been acked by anyone. Before rem-4j91 the broad form silently
+/// not been acked by anyone. the broad form silently
 /// excluded broadcasts; the bug-fix semantics match the help text
 /// ("Only documents with pending (unacked) comments") without the
 /// implicit directed-only carve-out.
@@ -52,7 +52,7 @@ pub struct QueryFilter {
     /// Include individual matching comments in each result.
     pub expanded: bool,
     /// Only include documents with pending (unacked) comments. Matches
-    /// both directed and broadcast comments (rem-4j91).
+    /// both directed and broadcast comments.
     pub pending: bool,
     /// Surface broadcast (empty-`to`) comments that the given identity
     /// has not acknowledged yet. Set by the CLI's `--pending-broadcast`
@@ -70,7 +70,7 @@ pub struct QueryFilter {
     /// Shares a matcher with the `comments` CLI command via
     /// [`crate::kind::matches_kind_filter`], so both surfaces stay on
     /// par — divergence between them was explicitly called out in the
-    /// rem-49w0 design.
+    /// design.
     pub remargin_kind: Vec<String>,
     /// Only include documents with activity after this timestamp.
     pub since: Option<DateTime<FixedOffset>>,
@@ -116,7 +116,7 @@ impl QueryFilter {
     /// Identity-scoped pending-flavor label preferred for pretty-print
     /// headers. Returns the explicit `--pending-for` name when set,
     /// falling back to the caller identity attached by
-    /// `--pending-for-me` / `--pending-broadcast` (rem-4j91).
+    /// `--pending-for-me` / `--pending-broadcast`.
     #[must_use]
     pub fn pending_label(&self) -> Option<&str> {
         self.pending_for
@@ -128,7 +128,7 @@ impl QueryFilter {
     /// Attach the caller's identity to the identity-scoped pending
     /// flavors (`pending_for_me`, `pending_broadcast`) when those flags
     /// were requested. Returns an error when a flag is set but no
-    /// identity was provided (rem-4j91).
+    /// identity was provided.
     ///
     /// # Errors
     ///
@@ -196,10 +196,9 @@ pub struct ExpandedComment {
     pub checksum: String,
     /// Comment body text.
     pub content: String,
-    /// Edit timestamp set by [`crate::operations::edit_comment`]
-    /// (rem-g3sy.2 / T32). `None` for comments that have never been
-    /// edited. Pretty-print and the activity command both surface
-    /// this when present.
+    /// Edit timestamp set by [`crate::operations::edit_comment`].
+    /// `None` for comments that have never been edited. Pretty-print
+    /// and the activity command both surface this when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<DateTime<FixedOffset>>,
     /// Relative path to the file this comment belongs to.
@@ -210,7 +209,7 @@ pub struct ExpandedComment {
     pub line: usize,
     /// Emoji reactions, each carrying per-author timestamps.
     pub reactions: BTreeMap<String, Vec<ReactionEntry>>,
-    /// Comment classification tags (rem-n4x7). Absent when the
+    /// Comment classification tags. Absent when the
     /// underlying comment had no `remargin_kind:` line so pre-field
     /// comments round-trip without a visible change on the JSON wire.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -317,7 +316,7 @@ pub fn query(
         // Apply the pending-flavor union filter at the file level: when
         // any of `pending`, `pending_for`, `pending_for_me`, or
         // `pending_broadcast` is set, the document must have at least
-        // one comment that matches the union (rem-4j91).
+        // one comment that matches the union.
         if filter.any_pending_active()
             && !comments.iter().any(|cm| filter.matches_pending_union(cm))
         {
@@ -433,7 +432,7 @@ fn collect_pending_recipients(pending: &[&&parser::Comment]) -> Vec<String> {
 /// Directed comments (`to` non-empty) are pending when at least one
 /// named recipient has not acknowledged. Broadcast comments (`to`
 /// empty) are pending when nobody has acknowledged yet — any ack is
-/// enough to close a broadcast conversation. Before rem-4j91 the
+/// enough to close a broadcast conversation. the
 /// broad form silently excluded broadcasts; the current semantics
 /// match the documented "pending (unacked) comments" language.
 fn is_pending(cm: &parser::Comment) -> bool {

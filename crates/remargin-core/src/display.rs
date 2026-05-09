@@ -78,7 +78,7 @@ pub(crate) fn build_comment_tree<'cm>(comments: &[&'cm Comment]) -> Vec<CommentN
 /// A comment is pending when the conversation is still open: a
 /// directed comment (`to` non-empty) with at least one recipient who
 /// has not acknowledged, or a broadcast (`to` empty) with no acks at
-/// all (rem-4j91).
+/// all.
 pub(crate) fn count_pending(comments: &[&Comment]) -> usize {
     comments.iter().filter(|cm| is_pending(cm)).count()
 }

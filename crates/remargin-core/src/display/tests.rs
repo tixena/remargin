@@ -399,7 +399,7 @@ fn render_footer() {
         ack: vec![ack],
         ..TestComment::default()
     });
-    // Post-rem-4j91: broadcasts count as pending unless acked. Close
+    // broadcasts count as pending unless acked. Close
     // these two so the footer still asserts "2 pending" (from cm1/cm2).
     let ack4 = make_ack("dave", "2026-04-06T15:10:00-04:00");
     let cm4 = build_comment(TestComment {
@@ -442,7 +442,7 @@ fn render_no_pending() {
         ack: vec![ack1],
         ..TestComment::default()
     });
-    // Post-rem-4j91: a broadcast (no `to`) counts as pending unless
+    // a broadcast (no `to`) counts as pending unless
     // somebody has acked it. Close both broadcasts with an ack so the
     // footer reads "0 pending".
     let ack2 = make_ack("bob", "2026-04-06T14:10:00-04:00");
@@ -500,9 +500,8 @@ fn render_orphan_mixed_with_roots() {
 
 #[test]
 fn broadcast_no_ack_is_pending() {
-    // Broadcast (empty `to`) with no acks is pending under the
-    // post-rem-4j91 semantics: a fresh broadcast keeps the
-    // conversation open until somebody acks.
+    // Broadcast (empty `to`) with no acks is pending: a fresh
+    // broadcast keeps the conversation open until somebody acks.
     let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
     assert!(is_pending(&cm));
     assert_eq!(count_pending(&[&cm]), 1);
@@ -626,7 +625,7 @@ fn query_pretty_single_file() {
     let result = make_query_result("docs/design.md", vec![cm]);
     let output = format_query_pretty(&[result], None);
 
-    // Post-rem-4j91: a broadcast (empty `to`) with no acks counts as
+    // a broadcast (empty `to`) with no acks counts as
     // pending, so "1 pending" here (one broadcast, unacked).
     assert!(output.contains("docs/design.md (1 comments, 1 pending)"));
     assert!(output.contains("docs/design.md:10"));
@@ -666,7 +665,7 @@ fn query_pretty_multi_file() {
     let pos_a = output.find("src/a.md (1 comments").unwrap();
     let pos_b = output.find("src/b.md (1 comments").unwrap();
     assert!(pos_a < pos_b, "Files should be sorted alphabetically");
-    // Post-rem-4j91: broadcasts with no acks count as pending.
+    // broadcasts with no acks count as pending.
     assert!(output.contains("2 pending across 2 files"));
 }
 
@@ -835,7 +834,7 @@ fn query_pretty_no_filter() {
     let output = format_query_pretty(&[result], None);
 
     // Without filter_name, footer should just say "N pending" not "pending for <name>".
-    // Post-rem-4j91: the unacked broadcast contributes one pending.
+    // the unacked broadcast contributes one pending.
     assert!(output.contains("1 pending\n"));
     assert!(!output.contains("pending for"));
 }

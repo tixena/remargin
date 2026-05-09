@@ -1,4 +1,4 @@
-//! `remargin plan unprotect` integration tests (rem-6eop / T43).
+//! `remargin plan unprotect` integration tests.
 //!
 //! Mirrors the `cli_plan_restrict.rs` patterns: real-filesystem temp
 //! dirs, `assert_cmd` invocations, JSON output assertions. Covers

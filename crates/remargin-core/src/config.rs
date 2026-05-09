@@ -37,7 +37,7 @@ pub struct Config {
     pub key: Option<String>,
     #[serde(default = "default_mode")]
     pub mode: Mode,
-    /// Permissions block (rem-yj1j.1 / T22). Missing in legacy
+    /// Permissions block. Missing in legacy
     /// `.remargin.yaml` files; defaults to an empty
     /// [`Permissions`] so back-compat parsing stays lossless.
     /// Enforcement is added in T23 and beyond — this loader is data-
@@ -77,7 +77,7 @@ impl Mode {
     /// realm-mode floor: when a caller's CWD-resolved mode is weaker
     /// than the doc's realm-resolved mode, the doc's mode wins so a
     /// caller standing in an open-mode dir cannot silently write
-    /// unsigned comments into a strict-mode realm (rem-90tr).
+    /// unsigned comments into a strict-mode realm.
     #[must_use]
     const fn strictness_rank(&self) -> u8 {
         match self {
@@ -124,7 +124,7 @@ pub struct ResolvedConfig {
 
 impl ResolvedConfig {
     /// Build the [`CallerInfo`] view of this config so the per-op
-    /// guard can evaluate identity-scoped `deny_ops` (rem-egp9). Pure
+    /// guard can evaluate identity-scoped `deny_ops`. Pure
     /// projection — no I/O.
     #[must_use]
     pub fn caller_info(&self) -> CallerInfo {
@@ -140,7 +140,7 @@ impl ResolvedConfig {
     ///
     /// Kept as a crate-private helper used by [`Self::resolve`] as a
     /// belt-and-braces final gate. Op handlers do NOT call this directly
-    /// (rem-xc8x); they consume a pre-validated [`ResolvedConfig`].
+    ///; they consume a pre-validated [`ResolvedConfig`].
     ///
     /// # Errors
     ///
@@ -170,7 +170,7 @@ impl ResolvedConfig {
     /// Return a config whose mode is the stricter of `self.mode` and
     /// the mode declared by the realm containing `doc_path`.
     ///
-    /// This implements the realm-mode floor (rem-90tr): a caller
+    /// This implements the realm-mode floor: a caller
     /// standing in an open-mode directory who writes into a doc whose
     /// realm declares `mode: strict` must not silently write unsigned
     /// comments. The doc's realm wins, the resulting [`ResolvedConfig`]
@@ -343,7 +343,7 @@ impl ResolvedConfig {
     /// signing, otherwise `None`.
     ///
     /// This is a trivial accessor: the key-presence fail-fast that used
-    /// to live here has moved into [`Self::validate_identity`] (rem-xc8x),
+    /// to live here has moved into [`Self::validate_identity`],
     /// so every caller-visible [`ResolvedConfig`] has already been
     /// verified to carry a key path when strict mode requires one.
     /// Unregistered authors in strict mode return `None` here because
@@ -362,7 +362,7 @@ impl ResolvedConfig {
     /// (strict).
     ///
     /// Invoked automatically by [`Self::resolve`] so every surface that
-    /// produces a [`ResolvedConfig`] runs the same gate (rem-xc8x).
+    /// produces a [`ResolvedConfig`] runs the same gate.
     /// Absent identity is not an error here — some read-only commands
     /// intentionally resolve without one; op handlers check for the
     /// identity they need separately.
@@ -380,10 +380,9 @@ impl ResolvedConfig {
 
         self.can_post(identity)?;
 
-        // Strict + registered active identity but no key path: fail-fast
-        // (rem-dyz). We use `requires_signature` so unregistered authors
-        // in strict (already rejected by can_post above) do not reach
-        // this branch.
+        // Strict + registered active identity but no key path: fail-fast.
+        // Use `requires_signature` so unregistered authors in strict
+        // (already rejected by can_post above) do not reach this branch.
         if self.mode == Mode::Strict && self.requires_signature(identity) && self.key_path.is_none()
         {
             bail!(
@@ -642,7 +641,7 @@ pub fn parse_author_type(type_str: &str) -> Result<AuthorType> {
 /// - Plain name (no `/` or `~` or `$`) maps to `~/.ssh/<name>`.
 /// - Anything else is treated as a literal path and run through
 ///   [`expand_path`] so `~`, `$VAR`, and `${VAR}` resolve
-///   identically to every other path surface (rem-3xo).
+///   identically to every other path surface.
 ///
 /// # Errors
 ///

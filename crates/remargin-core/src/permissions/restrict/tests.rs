@@ -1,9 +1,8 @@
-//! Unit tests for [`crate::permissions::restrict`] (rem-yj1j.5 /
-//! rem-aqnn).
+//! Unit tests for [`crate::permissions::restrict`].
 //!
-//! Covers scenarios 1-13 from the rem-yj1j.5 testing plan: anchor
-//! discovery, wildcard support, .remargin.yaml mutation (create +
-//! merge + idempotency), Claude-sync invocation through `apply_rules`.
+//! Covers anchor discovery, wildcard support, .remargin.yaml mutation
+//! (create + merge + idempotency), Claude-sync invocation through
+//! `apply_rules`.
 
 use std::path::{Path, PathBuf};
 
@@ -176,7 +175,7 @@ fn duplicate_path_does_not_create_second_entry() {
     assert_eq!(restricts.len(), 1, "{value:#?}");
 }
 
-/// Scenario 9 (rem-egp9): re-running after a manually-deleted Claude
+/// Scenario 9: re-running after a manually-deleted Claude
 /// rule backfills the missing rule (`apply_rules` dedupes against
 /// existing entries; the second call still writes any missing strings).
 /// Uses the coarse `Bash(remargin *)` deny — the only rule the
@@ -281,10 +280,9 @@ fn outcome_lists_files_and_rules() {
 
 /// Scenario 13: the dedicated `write_remargin_yaml` helper is the
 /// only path used; the public write / edit ops still refuse
-/// `.remargin.yaml` by virtue of `rem-is4z`. We pin this by checking
-/// that the file landed (the bypass works) AND the helper is not
-/// re-exported beyond the permissions namespace (no other module can
-/// invoke it).
+/// `.remargin.yaml`. We pin this by checking that the file landed
+/// (the bypass works) AND the helper is not re-exported beyond the
+/// permissions namespace (no other module can invoke it).
 #[test]
 fn write_remargin_yaml_bypass_is_scoped_to_this_module() {
     let (system, anchor) = realm_with_claude(&[]);

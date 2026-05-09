@@ -1,7 +1,6 @@
-//! `remargin permissions show / check` CLI + MCP integration tests
-//! (rem-yj1j.7 / T28 / rem-8y1h).
+//! `remargin permissions show / check` CLI + MCP integration tests.
 //!
-//! Covers spec scenarios 20-22 of T28's testing plan:
+//! Covers:
 //!
 //! - Scenario 20: `permissions show` and `permissions check`
 //!   surface the parent-walked `.remargin.yaml` permissions correctly
@@ -32,7 +31,7 @@ mod tests {
     use serde_json::{Value, json};
     use tempfile::TempDir;
 
-    // ---- rem-k7e5: schema mirrors for `permissions show --json` ----
+    // ----: schema mirrors for `permissions show --json` ----
     //
     // The mirrors below are `#[serde(deny_unknown_fields)]` so any
     // new field on the corresponding Rust type fails the build until
@@ -343,7 +342,7 @@ mod tests {
         assert_eq!(cli_miss_body, mcp_miss_body);
     }
 
-    /// rem-k7e5: pin the canonical `permissions show --json` schema
+    /// pin the canonical `permissions show --json` schema
     /// against the doc in `permissions/inspect.rs`. Strict-mode
     /// deserialise into [`ShowSchema`] aborts the test if any new
     /// undocumented field appears in the output. Per-entry semantics
@@ -450,7 +449,7 @@ mod tests {
         assert!(saw_absolute, "missing absolute-path restrict entry");
     }
 
-    /// rem-k7e5: empty config still respects the canonical schema —
+    /// empty config still respects the canonical schema —
     /// every documented top-level key is present (with empty
     /// arrays) plus `elapsed_ms`.
     #[test]
@@ -527,7 +526,7 @@ mod tests {
         assert_status(&out, 0);
     }
 
-    // --- rem-w6m1: McpSandbox boundary -------------------------------------
+    // ---: McpSandbox boundary -------------------------------------
 
     fn extract_tool_text(result: &Value) -> String {
         let content = result.get("content").and_then(Value::as_array).unwrap();

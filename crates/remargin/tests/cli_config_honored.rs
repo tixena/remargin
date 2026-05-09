@@ -1,4 +1,4 @@
-//! Per-subcommand `--config` happy-path tests (rem-58d6).
+//! Per-subcommand `--config` happy-path tests.
 //!
 //! The previous resolver silently dropped `--config` on every
 //! identity-aware subcommand. These tests lock in the fix by setting
@@ -322,7 +322,7 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 
     #[test]
     fn identity_reports_config_declaration() {
-        // rem-3dw0: `identity --config <path>` must return the identity
+        // `identity --config <path>` must return the identity
         // declared in that file, not whatever the walk-up finds. This
         // is the regression the Obsidian plugin hits: its `me` is
         // driven by `backend.identity()` and must agree with the

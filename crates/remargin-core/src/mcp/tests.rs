@@ -51,7 +51,7 @@ Acked comment from bob.
 ";
 
 /// A four-shape fixture used by the `pending_for_me` / `pending_broadcast`
-/// tests (rem-4j91). Covers: fresh broadcast (no acks), broadcast the
+/// tests. Covers: fresh broadcast (no acks), broadcast the
 /// caller already acked, directed-to-caller, and directed-to-someone-else.
 const DOC_FOUR_SHAPES: &str = "\
 ---
@@ -131,7 +131,7 @@ Original comment.
 Body paragraph two.
 ";
 
-/// rem-5oqx: doc with two top-level sections each containing a sibling
+/// doc with two top-level sections each containing a sibling
 /// heading whose label collides — used to exercise the path-disambiguation
 /// resolver and the multi-anchor `batch` flow.
 const DOC_WITH_HEADINGS: &str = "\
@@ -290,7 +290,7 @@ fn tools_list_returns_all_tools() {
     assert!(names.contains(&"sandbox_list"));
     assert!(names.contains(&"identity_create"));
 
-    // rem-888p: restrict and unprotect are intentionally CLI-only.
+    // restrict and unprotect are intentionally CLI-only.
     assert!(!names.contains(&"restrict"));
     assert!(!names.contains(&"unprotect"));
 }
@@ -630,7 +630,7 @@ fn unknown_tool_returns_error() {
     assert!(is_tool_error(&response));
 }
 
-/// rem-888p: `restrict` is intentionally absent from the MCP surface;
+/// `restrict` is intentionally absent from the MCP surface;
 /// dispatching it returns a tool error pointing the caller at the CLI.
 #[test]
 fn restrict_tool_dispatch_rejected() {
@@ -663,7 +663,7 @@ fn restrict_tool_dispatch_rejected() {
     assert!(text.contains("remargin restrict"), "got: {text}");
 }
 
-/// rem-888p: `unprotect` is intentionally absent from the MCP surface;
+/// `unprotect` is intentionally absent from the MCP surface;
 /// dispatching it returns a tool error pointing the caller at the CLI.
 #[test]
 fn unprotect_tool_dispatch_rejected() {
@@ -696,7 +696,7 @@ fn unprotect_tool_dispatch_rejected() {
     assert!(text.contains("remargin unprotect"), "got: {text}");
 }
 
-/// rem-888p: `plan` with `op="restrict"` rejects with a CLI-pointing
+/// `plan` with `op="restrict"` rejects with a CLI-pointing
 /// error; the projection itself stays reachable via the CLI.
 #[test]
 fn plan_restrict_op_rejected_via_mcp() {
@@ -729,7 +729,7 @@ fn plan_restrict_op_rejected_via_mcp() {
     assert!(text.contains("remargin plan restrict"), "got: {text}");
 }
 
-/// rem-888p: `plan` with `op="unprotect"` rejects with a CLI-pointing
+/// `plan` with `op="unprotect"` rejects with a CLI-pointing
 /// error; the projection itself stays reachable via the CLI.
 #[test]
 fn plan_unprotect_op_rejected_via_mcp() {
@@ -843,7 +843,7 @@ fn verify_checks_checksum_integrity() {
     assert!(result["ok"].as_bool().unwrap(), "verify should pass");
 }
 
-// Note: the purge `dry_run` smoke test was removed in rem-0ry along
+// Note: the purge `dry_run` smoke test was removed in along
 // with the flag itself; `plan` with op="purge" is the preview path.
 
 #[test]
@@ -887,7 +887,7 @@ fn metadata_returns_document_info() {
     assert_eq!(result["comment_count"], 1_i32);
     assert_eq!(result["pending_count"], 1_i32);
     assert!(result["line_count"].as_u64().unwrap() > 0_u64);
-    // File-level fields from rem-lqz are always present.
+    // File-level fields are always present.
     assert_eq!(result["binary"], false);
     assert_eq!(result["mime"], "text/markdown");
     assert!(result["path"].is_string());
@@ -1919,7 +1919,7 @@ fn mcp_write_binary_rejected_for_md() {
 
 #[test]
 fn mcp_write_partial_params_splice_range() {
-    // rem-24p: MCP `write` accepts start_line/end_line and splices the
+    // MCP `write` accepts start_line/end_line and splices the
     // provided content into that range, mirroring CLI --lines semantics.
     let base = Path::new("/docs");
     let original = "\
@@ -2007,7 +2007,7 @@ fn mcp_write_partial_rejects_missing_end_line() {
 
 #[test]
 fn mcp_write_reports_noop_true_on_identical_content() {
-    // rem-1f2: the `write` tool response must carry `noop: true` when
+    // the `write` tool response must carry `noop: true` when
     // the proposed content is byte-identical to what's on disk so
     // agents can branch on it (e.g. skip follow-up verification).
     let base = Path::new("/docs");
@@ -2075,7 +2075,7 @@ fn mcp_write_reports_noop_false_on_real_change() {
 
 #[test]
 fn mcp_reply_prepends_parent_author_to_list() {
-    // Parity test for rem-kja: the MCP `comment` tool inherits the
+    // Parity test for: the MCP `comment` tool inherits the
     // "parent author always first in `to:`" invariant from operations.
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
@@ -2282,7 +2282,7 @@ fn mcp_plan_rejects_missing_comment_id() {
 
 #[test]
 fn mcp_plan_write_markdown_create_projects_without_writing_disk() {
-    // rem-bhk: `plan write` now projects the same PlanReport the CLI
+    // `plan write` now projects the same PlanReport the CLI
     // emits, without touching disk. Use `create: true` against a fresh
     // filename so the preservation check has no prior comments to
     // enforce.
@@ -2626,7 +2626,7 @@ fn mcp_plan_purge_destroys_every_comment_id() {
 }
 
 // ---------------------------------------------------------------------
-// Recursive purge MCP coverage (rem-nrjy). Confirms the directory form
+// Recursive purge MCP coverage. Confirms the directory form
 // is wired through the MCP surface and produces the documented
 // per-file outcome shape.
 // ---------------------------------------------------------------------
@@ -2905,7 +2905,7 @@ fn mcp_plan_rejects_unknown_op() {
     );
 }
 
-// ---------- rem-x2bw: identity-declaration schema parity ----------
+// ----------: identity-declaration schema parity ----------
 
 /// Every mutating tool that accepts a per-tool identity declaration must
 /// advertise the four-field contract (`config_path`, `identity`, `type`,
@@ -2987,7 +2987,7 @@ fn identity_declaration_schema_present_on_mutating_tools() {
 }
 
 /// No MCP tool schema may surface a `mode` or `dry_run` field. Mode is a
-/// tree property (rem-wws) and `dry_run` migrated to `plan` (rem-0ry).
+/// tree property and `dry_run` migrated to `plan`.
 #[test]
 fn no_mode_or_dry_run_in_any_schema() {
     let base = Path::new("/docs");
@@ -3176,7 +3176,7 @@ fn comment_rejects_unknown_type_value() {
 }
 
 // ===========================================================================
-// query.pending_for_me + pending_broadcast MCP tests (rem-4j91)
+// query.pending_for_me + pending_broadcast MCP tests
 // ===========================================================================
 
 #[test]
@@ -3367,7 +3367,7 @@ fn mcp_query_pending_for_me_errors_without_identity() {
 }
 
 // ===========================================================================
-// identity_create MCP tests (rem-8cnc)
+// identity_create MCP tests
 // ===========================================================================
 
 #[test]
@@ -3531,7 +3531,7 @@ fn mcp_identity_create_missing_identity_errors() {
     assert!(is_tool_error(&response));
 }
 
-// ---------- remargin_kind surface (rem-49w0) ----------
+// ---------- remargin_kind surface ----------
 
 #[test]
 fn mcp_comment_accepts_remargin_kind_and_persists_to_yaml() {
@@ -3949,7 +3949,7 @@ fn mcp_batch_rejects_multiple_anchors_per_op() {
 }
 
 /// `mv` MCP tool moves a file and reports the documented outcome
-/// shape (rem-0j2x / T44).
+/// shape.
 #[test]
 fn mcp_mv_renames_file() {
     let base = Path::new("/docs");
@@ -4096,7 +4096,7 @@ fn mcp_plan_mv_emits_mv_diff() {
 }
 
 // ---------------------------------------------------------------------
-// Directory mv MCP coverage (rem-jc82). Confirms the directory form is
+// Directory mv MCP coverage. Confirms the directory form is
 // auto-detected and produces the documented `is_directory` /
 // `nested_files_moved` outcome shape — same surface CLI emits.
 // ---------------------------------------------------------------------

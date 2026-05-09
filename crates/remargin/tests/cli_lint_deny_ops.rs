@@ -1,4 +1,4 @@
-//! `remargin lint` end-to-end coverage for the rem-welo
+//! `remargin lint` end-to-end coverage for the
 //! permissions-aware op-name validation.
 //!
 //! - A typo in `permissions.deny_ops.ops` (`purg`) inside an ambient

@@ -1,4 +1,4 @@
-//! End-to-end CLI tests for `--after-heading` (rem-5oqx).
+//! End-to-end CLI tests for `--after-heading`.
 //!
 //! Covers the singular `comment` subcommand, the `batch` subcommand,
 //! and the clap-level mutual-exclusion guard. Uses `assert_cmd` against
@@ -20,7 +20,7 @@ mod tests {
 
     /// A short multi-section doc with two `## A10.` / `## P11.` style
     /// sub-headings under different `#` parents: matches the path-syntax
-    /// disambiguation case in the rem-5oqx test plan.
+    /// disambiguation case in the test plan.
     const HEADINGS_DOC: &str = "\
 ---
 title: Headings

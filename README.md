@@ -407,7 +407,7 @@ Rust types without updating the doc fails the build.
 
 The read-only inspection surfaces are exposed via MCP as
 `mcp__remargin__permissions_show` and `mcp__remargin__permissions_check`.
-`restrict` and `unprotect` are intentionally CLI-only (rem-888p): they
+`restrict` and `unprotect` are intentionally CLI-only: they
 mutate permission policy and that decision belongs to the human, not
 to the agent. `mcp__remargin__plan` likewise rejects `op="restrict"`
 and `op="unprotect"`.

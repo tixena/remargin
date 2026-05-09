@@ -1,5 +1,4 @@
-//! Unit tests for [`crate::operations::projections::restrict::project_restrict`]
-//! (rem-puy5).
+//! Unit tests for [`crate::operations::projections::restrict::project_restrict`].
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -267,7 +266,7 @@ fn allow_deny_overlap_surfaces_when_existing_allow_matches_projected_deny() {
     );
 }
 
-/// rem-aovx scenario 17: format-drift tolerance — a user-scope allow
+/// scenario 17: format-drift tolerance — a user-scope allow
 /// with the legacy single-slash prefix still surfaces as an overlap
 /// against the projection's `///`-prefixed deny rules.
 #[test]
@@ -302,7 +301,7 @@ fn allow_deny_overlap_handles_legacy_single_slash_format() {
     );
 }
 
-/// rem-aovx scenario 18: a more-specific allow shadowed by the
+/// scenario 18: a more-specific allow shadowed by the
 /// realm-wide projected deny (subtree shadow) is reported as
 /// `AllowShadowedByBroaderDeny`.
 #[test]
@@ -340,7 +339,7 @@ fn allow_deny_overlap_subtree_shadow_kind() {
     );
 }
 
-/// rem-aovx scenario 19 negative: an existing `Edit` allow does not
+/// scenario 19 negative: an existing `Edit` allow does not
 /// produce an overlap against the projected `Read` denies — tools are
 /// kept distinct in the comparison key.
 #[test]
@@ -377,7 +376,7 @@ fn allow_deny_overlap_cross_tool_does_not_fire() {
     );
 }
 
-/// rem-aovx scenario 20: component-confusion guard — an allow on
+/// scenario 20: component-confusion guard — an allow on
 /// `/realm-extra/**` does NOT overlap a restrict that targets
 /// `/realm`.
 #[test]

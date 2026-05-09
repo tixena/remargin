@@ -1,4 +1,4 @@
-//! Regression test for rem-1are: `remargin comment <file> "- bullet"`
+//! Regression test for: `remargin comment <file> "- bullet"`
 //! must accept content that starts with a hyphen.
 //!
 //! Clap rejects positional values starting with `-` by default. The

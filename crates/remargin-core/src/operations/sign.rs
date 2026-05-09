@@ -1,9 +1,8 @@
 //! Back-sign missing-signature comments authored by the current
-//! identity (rem-1ec).
+//! identity.
 //!
 //! Recovery primitive for documents that carry unsigned comments from
-//! prior broken code paths (e.g. Obsidian plugin bug rem-ce4 or the
-//! fail-fast regression rem-dyz fixed). Signing is a pure additive
+//! prior broken code paths. Signing is a pure additive
 //! operation on a comment: the canonical signed payload is computed
 //! over fields that do not change post-creation (id, author, type, ts,
 //! to, reply-to, thread, attachments, content — see [`crypto`]), so
@@ -27,7 +26,7 @@
 //!
 //! # Verify gate
 //!
-//! The write routes through [`commit_with_verify`] (rem-ef1) so the
+//! The write routes through [`commit_with_verify`] so the
 //! post-op document must pass the mode-driven severity check — exactly
 //! the same gate every other mutating op uses. A `sign` run that would
 //! somehow leave the document in a bad state is rejected before any
@@ -156,8 +155,8 @@ pub struct SignOptions {
 /// already-signed id under `skipped` on the second.
 ///
 /// Callers who want to preview the outcome without writing should use
-/// `remargin plan sign` (rem-0ry dropped the per-op `--dry-run` flag
-/// in favour of the uniform plan projection).
+/// `remargin plan sign`; the per-op `--dry-run` flag has been
+/// dropped in favour of the uniform plan projection.
 ///
 /// # Errors
 ///
@@ -165,7 +164,7 @@ pub struct SignOptions {
 /// - The config has no resolved identity (a signature needs an
 ///   author).
 /// - The config has no resolvable signing key. Note: for strict mode
-///   this was already enforced by the resolver (rem-xc8x); `sign`
+///   this was already enforced by the resolver; `sign`
 ///   additionally refuses to run in open / registered mode when no
 ///   key is configured, because its job is to attach one.
 /// - The file cannot be read or parsed.
@@ -293,7 +292,7 @@ pub fn sign_comments(
 /// would re-sign every existing valid signature on every run.
 ///
 /// Shared between [`sign_comments`] and the `plan sign` projection
-/// (rem-7y3) so both surfaces reject and skip under identical rules.
+/// so both surfaces reject and skip under identical rules.
 pub(crate) fn classify_candidates(
     doc: &parser::ParsedDocument,
     identity: &str,

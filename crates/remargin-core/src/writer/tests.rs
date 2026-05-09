@@ -567,7 +567,7 @@ fn round_trip_append_code_block_all_comments_preserved() {
     );
 }
 
-// rem-gx9v: writer-side ack dedupe invariant. Every write produces a
+// writer-side ack dedupe invariant. Every write produces a
 // document whose `ack:` lists carry at most one entry per identity, with
 // the latest timestamp. Reads tolerate legacy duplicates so existing
 // on-disk files do not error; writes self-heal them.

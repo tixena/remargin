@@ -1,8 +1,8 @@
-//! `remargin restrict` integration tests (rem-yj1j.5 / rem-rdjy).
+//! `remargin restrict` integration tests.
 //!
 //! Exercises the CLI subcommand and the matching MCP tool against
 //! real-filesystem temp dirs. Covers scenarios 14-20 of the
-//! rem-yj1j.5 testing plan: end-to-end restrict + Layer 1
+//! testing plan: end-to-end restrict + Layer 1
 //! enforcement, settings-file and sidecar updates, gitignore
 //! automation, wildcard, --json output, MCP parity.
 
@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(value["yaml_was_created"], json!(true));
     }
 
-    /// rem-888p: `restrict` is intentionally absent from the MCP
+    /// `restrict` is intentionally absent from the MCP
     /// surface. `tools/list` must not advertise it, and dispatching it
     /// must return a CLI-pointing tool error. Replaces the previous
     /// MCP-parity test (`mcp_restrict_matches_cli_json`).
@@ -260,7 +260,7 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(
             !names.contains(&"restrict"),
-            "restrict must not appear in tools/list (rem-888p), got: {names:?}"
+            "restrict must not appear in tools/list, got: {names:?}"
         );
 
         // tools/call with name=restrict returns a CLI-pointing tool error.
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(
             call_response["result"]["isError"].as_bool(),
             Some(true),
-            "restrict dispatch must surface as a tool error (rem-888p)"
+            "restrict dispatch must surface as a tool error"
         );
         let text = call_response["result"]["content"][0]["text"]
             .as_str()
@@ -293,7 +293,7 @@ mod tests {
         assert!(text.contains("remargin restrict"), "got: {text}");
     }
 
-    /// rem-ss9s: helper that runs `restrict src/secret` with the
+    /// helper that runs `restrict src/secret` with the
     /// given `--also-deny-bash` argv and returns the resulting
     /// `permissions.restrict[0].also_deny_bash` list parsed from
     /// `.remargin.yaml`.
@@ -319,7 +319,7 @@ mod tests {
             .unwrap_or_default()
     }
 
-    /// rem-ss9s scenario 1: repeated `--also-deny-bash` flags emit
+    /// scenario 1: repeated `--also-deny-bash` flags emit
     /// each token (regression check).
     #[test]
     fn also_deny_bash_repeated_flags() {
@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(tokens, vec!["curl".to_owned(), "wget".to_owned()]);
     }
 
-    /// rem-ss9s scenario 2: comma-separated values are split
+    /// scenario 2: comma-separated values are split
     /// equivalently to repeated flags.
     #[test]
     fn also_deny_bash_comma_separated() {
@@ -335,7 +335,7 @@ mod tests {
         assert_eq!(tokens, vec!["curl".to_owned(), "wget".to_owned()]);
     }
 
-    /// rem-ss9s scenario 3: mixing comma-separated values and
+    /// scenario 3: mixing comma-separated values and
     /// repeated flags concatenates in argv order.
     #[test]
     fn also_deny_bash_mixed_csv_and_repeated() {
@@ -347,7 +347,7 @@ mod tests {
         );
     }
 
-    /// rem-ss9s scenario 4: when the flag is absent the yaml
+    /// scenario 4: when the flag is absent the yaml
     /// has no `also_deny_bash` key (or an empty list, depending on
     /// serializer; check both forms).
     #[test]
@@ -359,7 +359,7 @@ mod tests {
         );
     }
 
-    /// rem-ss9s scenario 5: a single token still parses cleanly
+    /// scenario 5: a single token still parses cleanly
     /// (no delimiter triggers).
     #[test]
     fn also_deny_bash_single_value() {
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(tokens, vec!["curl".to_owned()]);
     }
 
-    /// rem-e6yd / T42: `cd` and `pushd` denies are emitted by default
+    /// `cd` and `pushd` denies are emitted by default
     /// so the `cd /restricted && rm file` bypass class is closed. Both
     /// the bare form (`cd /path`) and the with-flag form (`cd -P /path`)
     /// are covered by emitting both `cd <path>/**` and `cd * <path>/**`.
@@ -423,7 +423,7 @@ mod tests {
         }
     }
 
-    /// rem-e6yd / T42: cd / pushd denies installed by `restrict` are
+    /// cd / pushd denies installed by `restrict` are
     /// scrubbed cleanly by `unprotect` via the sidecar — no leftovers.
     #[test]
     fn cd_pushd_denies_round_trip_through_unprotect() {
@@ -496,7 +496,7 @@ mod tests {
         }
     }
 
-    /// rem-e6yd / T42: `plan restrict` reflects the cd/pushd defaults
+    /// `plan restrict` reflects the cd/pushd defaults
     /// in its `deny_rules_to_add` projection. Pin both the bare and
     /// with-flag forms so the plan output stays in sync with what the
     /// live `restrict` would emit.
@@ -541,7 +541,7 @@ mod tests {
                 to_add
                     .iter()
                     .any(|v| v.as_str() == Some("Bash(remargin *)")),
-                "rem-egp9: plan restrict should still project the coarse remargin-cli deny, got {to_add:?}"
+                "plan restrict should still project the coarse remargin-cli deny, got {to_add:?}"
             );
         }
     }

@@ -4,7 +4,7 @@
 //! document with only body content and user-owned frontmatter.
 //!
 //! Supports both single-file purge (the default) and recursive directory
-//! purge (rem-nrjy): `purge_dir` walks a directory, applies a per-file
+//! purge: `purge_dir` walks a directory, applies a per-file
 //! `op_guard` check to every visible `.md` file, and returns aggregate
 //! per-file outcomes so a partial-block scenario surfaces cleanly to
 //! callers.
@@ -148,8 +148,8 @@ fn strip_prefix_display(path: &Path, base: &Path) -> String {
 /// Remove all Remargin comment blocks from a document.
 ///
 /// Callers who want to preview the outcome without writing should use
-/// `remargin plan purge` (rem-0ry dropped the per-op `--dry-run` flag
-/// in favour of the uniform plan projection).
+/// `remargin plan purge`; the per-op `--dry-run` flag has been
+/// dropped in favour of the uniform plan projection.
 ///
 /// # Errors
 ///
@@ -314,7 +314,7 @@ fn collapse_body_segments(segments: &mut Vec<Segment>) {
 }
 
 /// Recursively walk `dir` and purge every visible markdown file under
-/// it (rem-nrjy).
+/// it.
 ///
 /// Behaviour:
 ///

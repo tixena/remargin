@@ -308,7 +308,7 @@ fn refuses_path_escape_on_source() {
     assert!(msg.contains("path escapes"), "got: {msg}");
 }
 
-/// rem-jc82: directory sources are now supported. Renaming an empty
+/// directory sources are now supported. Renaming an empty
 /// directory succeeds and reports `is_directory = true`.
 #[test]
 fn renames_empty_directory() {
@@ -363,7 +363,7 @@ fn same_path_is_noop() {
 }
 
 // ---------------------------------------------------------------------
-// Directory rename coverage (rem-jc82). The op auto-detects a directory
+// Directory rename coverage. The op auto-detects a directory
 // source and renames the dir + nested files atomically. Same op_guard /
 // sandbox / forbidden-target gates as the file path.
 // ---------------------------------------------------------------------

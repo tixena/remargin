@@ -1,4 +1,4 @@
-//! `remargin unprotect` core (rem-yj1j.6 / T27, slice 1 — `rem-3p2v`).
+//! `remargin unprotect` core.
 //!
 //! [`unprotect`] is the public entry point: anchor discovery (walk
 //! up to the nearest `.claude/` ancestor), sidecar lookup, removal
@@ -31,7 +31,7 @@
 //! reach the cleanest possible final state, not to police prior
 //! edits.
 //!
-//! ## rem-is4z bypass
+//! ## bypass
 //!
 //! Same scoping as `restrict`: this module is the only place
 //! besides [`crate::permissions::restrict`] that writes

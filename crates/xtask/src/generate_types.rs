@@ -2,8 +2,7 @@
 //!
 //! Mirrors the legacy `generate_types` binary that used to live under
 //! `crates/remargin/src/bin/`. Moving it here ensures `cargo install
-//! remargin` no longer pollutes `~/.cargo/bin/` with a dev-time tool
-//! (rem-o2p).
+//! remargin` no longer pollutes `~/.cargo/bin/` with a dev-time tool.
 
 use std::fs;
 use std::path::Path;

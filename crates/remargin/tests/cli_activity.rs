@@ -1,5 +1,4 @@
-//! `remargin activity` CLI + MCP integration tests (rem-g3sy.4 /
-//! T34).
+//! `remargin activity` CLI + MCP integration tests.
 
 #[cfg(test)]
 mod tests {
@@ -82,7 +81,7 @@ mod tests {
 
     /// `--pretty` switches to the human-readable timeline; output
     /// goes to stderr so stdout stays clean for CLI piping.
-    /// rem-gb5j: each per-file block opens with a cutoff header so
+    ///: each per-file block opens with a cutoff header so
     /// the reader can tell which timeline they are looking at; the
     /// initial-touch fallback (caller has no prior activity in the
     /// file) renders the explicit "since the beginning" wording.
@@ -114,7 +113,7 @@ mod tests {
         );
     }
 
-    /// rem-gb5j: explicit `--since` echoes the cutoff in the
+    ///: explicit `--since` echoes the cutoff in the
     /// `--pretty` header line so the reader can confirm it.
     #[test]
     fn pretty_output_renders_explicit_since_header() {

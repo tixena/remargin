@@ -1525,10 +1525,10 @@ fn unrestricted_create_absolute() {
 }
 
 // ---------------------------------------------------------------------
-// rem-egp9 — per-op sandbox consults trusted_roots
+// — per-op sandbox consults trusted_roots
 // ---------------------------------------------------------------------
 
-/// rem-egp9: a path inside `base_dir` is allowed (existing behaviour).
+/// a path inside `base_dir` is allowed (existing behaviour).
 #[test]
 fn sandbox_under_base_allowed_with_no_trusted_roots() {
     let system = MockSystem::new()
@@ -1547,7 +1547,7 @@ fn sandbox_under_base_allowed_with_no_trusted_roots() {
     assert_eq!(result, Path::new("/project/doc.md"));
 }
 
-/// rem-egp9: an absolute path INSIDE a declared trusted root that
+/// an absolute path INSIDE a declared trusted root that
 /// lives OUTSIDE `base_dir` is allowed.
 #[test]
 fn sandbox_under_trusted_root_outside_base_allowed() {
@@ -1570,7 +1570,7 @@ fn sandbox_under_trusted_root_outside_base_allowed() {
     assert_eq!(result, Path::new("/notes/widening.md"));
 }
 
-/// rem-egp9: an absolute path NEITHER under base nor any trusted root
+/// an absolute path NEITHER under base nor any trusted root
 /// is rejected.
 #[test]
 fn sandbox_outside_base_and_trusted_roots_rejected() {
@@ -1596,7 +1596,7 @@ fn sandbox_outside_base_and_trusted_roots_rejected() {
     );
 }
 
-/// rem-egp9: a brand-new file under a trusted root that lives outside
+/// a brand-new file under a trusted root that lives outside
 /// `base_dir` is allowed by `resolve_sandboxed_create`.
 #[test]
 fn sandbox_create_under_trusted_root_outside_base_allowed() {
@@ -1929,7 +1929,7 @@ fn rm_rejects_directory() {
 }
 
 // ---------------------------------------------------------------------
-// Partial writes (rem-24p): `--lines START-END` replaces a range of
+// Partial writes: `--lines START-END` replaces a range of
 // lines in place, leaving every other byte identical. Comment blocks
 // inside the range must be re-included by id, and the post-write verify
 // gate still runs. Tests cover the happy path, preservation rejects,
@@ -2233,7 +2233,7 @@ fn write_partial_rejects_start_zero() {
 
 #[test]
 fn write_whole_file_unchanged_when_lines_omitted() {
-    // Regression guard: omitting --lines preserves the pre-rem-24p
+    // Regression guard: omitting --lines preserves the earlier
     // whole-file write semantics exactly.
     let system = MockSystem::new()
         .with_current_dir("/project")
@@ -2259,7 +2259,7 @@ fn write_whole_file_unchanged_when_lines_omitted() {
     assert!(result.contains("id: def"));
 }
 
-// ---------- no-op detection (rem-1f2) ----------
+// ---------- no-op detection ----------
 
 #[test]
 fn write_noop_when_identical_bytes_back_to_back() {
@@ -2495,17 +2495,17 @@ fn list_entry_json_shape_matches_schema() {
     }
 }
 
-// --- project_write tests (rem-imc) ---
+// --- project_write tests ---
 //
 // `project_write` is the projection-only sibling of `write` used by the
 // `remargin plan write` subcommand. These tests pin three invariants:
 //
 // 1. The disk state is never mutated (file bytes stay byte-identical).
 // 2. Binary / raw modes degrade to `WriteProjection::Unsupported` with a
-//    human-readable reason, never to a bogus `Markdown` projection.
+// human-readable reason, never to a bogus `Markdown` projection.
 // 3. The returned `before` / `after` pair mirrors what `write` would
-//    actually parse — same frontmatter normalization, same comment-
-//    preservation rejection, same empty-doc shape for `--create`.
+// actually parse — same frontmatter normalization, same comment-
+// preservation rejection, same empty-doc shape for `--create`.
 
 #[test]
 fn project_write_happy_path_projects_markdown_without_mutating_disk() {
@@ -2781,7 +2781,7 @@ fn project_write_missing_comment_rejected_like_real_write() {
 }
 
 // ---------------------------------------------------------------------
-// Writer ban (rem-is4z): remargin must refuse to modify its own config
+// Writer ban: remargin must refuse to modify its own config
 // and participant registry under any circumstances. The ban is on exact
 // basenames — `.remargin.yaml` and `.remargin-registry.yaml` — and
 // fires before any bytes hit disk on every mutating entry point. The

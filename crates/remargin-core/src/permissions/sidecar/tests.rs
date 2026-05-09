@@ -1,10 +1,8 @@
-//! Unit tests for [`crate::permissions::sidecar`] (rem-yj1j.4 /
-//! rem-70za).
+//! Unit tests for [`crate::permissions::sidecar`].
 //!
-//! Covers scenarios 14-17 from the rem-yj1j.4 testing plan
-//! (.gitignore idempotency, gitignore creation, sidecar version
-//! mismatch, malformed JSON) plus the basic add / remove / round-trip
-//! invariants the apply / revert callers (slice 3) will rely on.
+//! Covers .gitignore idempotency, gitignore creation, sidecar version
+//! mismatch, malformed JSON, and the basic add / remove / round-trip
+//! invariants the apply / revert callers rely on.
 
 use std::path::{Path, PathBuf};
 
@@ -23,7 +21,7 @@ fn empty_anchor() -> (MockSystem, PathBuf) {
 }
 
 fn sample_entry() -> SidecarEntry {
-    // rem-si27: the projected allow set is empty by default now that
+    // the projected allow set is empty by default now that
     // `restrict` no longer auto-emits `mcp__remargin__*`. Pinning a
     // single editor-tool re-allow here keeps the round-trip exercised
     // with a non-empty allow vector.

@@ -1,7 +1,4 @@
-//! Unit tests for [`crate::activity::gather_activity`] (rem-g3sy.3 /
-//! T33).
-//!
-//! Covers scenarios 1-21 from the rem-g3sy.3 plan.
+//! Unit tests for [`crate::activity::gather_activity`].
 
 use std::path::{Path, PathBuf};
 
@@ -307,10 +304,9 @@ fn comment_without_reply_to_omits_field_in_json() {
     assert!(!json.contains("reply_to"), "{json}");
 }
 
-/// rem-k93j: every change-kind exposes the actor under the field
-/// name `author`. The previous `by` name on `sandbox` and `ack` is
-/// gone — JSON shape is uniform across kinds so consumers can read
-/// the actor without case-analysing on `kind`.
+/// Every change-kind exposes the actor under the field name
+/// `author` (uniform JSON shape) so consumers do not case-analyse on
+/// `kind`.
 #[test]
 fn every_change_kind_serialises_actor_as_author() {
     let prefix = "---\ntitle: t\nsandbox:\n  - bob@2026-04-06T13:00:00-04:00\n---\n\n# Body\n";
@@ -338,9 +334,9 @@ fn every_change_kind_serialises_actor_as_author() {
     }
 }
 
-/// rem-k93j: when the registry resolves the actor, sandbox and ack
-/// records carry `author_type`. When the registry is silent, the
-/// field is omitted (skipped on serialise) rather than guessed.
+/// When the registry resolves the actor, sandbox and ack records
+/// carry `author_type`. When the registry is silent, the field is
+/// omitted (skipped on serialise) rather than guessed.
 #[test]
 fn sandbox_and_ack_carry_author_type_when_registry_resolves() {
     let registry =
@@ -399,10 +395,9 @@ fn sandbox_and_ack_carry_author_type_when_registry_resolves() {
     );
 }
 
-/// rem-gb5j: implicit cutoff for a caller whose most recent
-/// action was an edit pins to `edited_at`, not the original `ts`.
-/// Earlier activity from the same caller is correctly excluded
-/// from the cutoff fold.
+/// Implicit cutoff for a caller whose most recent action was an
+/// edit pins to `edited_at`, not the original `ts`. Earlier
+/// activity from the same caller is excluded from the cutoff fold.
 #[test]
 fn cutoff_uses_edited_at_when_caller_last_action_was_an_edit() {
     let alice_edit = "```remargin\n---\nid: a1\nauthor: alice\ntype: human\nts: 2026-04-06T08:00:00-04:00\nedited_at: 2026-04-06T16:00:00-04:00\nchecksum: sha256:t\n---\nMine.\n```";
@@ -434,9 +429,9 @@ fn cutoff_uses_edited_at_when_caller_last_action_was_an_edit() {
     );
 }
 
-/// rem-gb5j: explicit `--since` propagates `cutoff_explicit=true`
-/// onto the result and the same explicit cutoff lands on every
-/// per-file record.
+/// Explicit `--since` propagates `cutoff_explicit=true` onto the
+/// result and the same explicit cutoff lands on every per-file
+/// record.
 #[test]
 fn explicit_since_marks_result_cutoff_explicit() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -447,9 +442,9 @@ fn explicit_since_marks_result_cutoff_explicit() {
     assert_eq!(result.files[0].cutoff_applied, Some(cutoff));
 }
 
-/// rem-gb5j: implicit cutoff with no prior caller activity
-/// surfaces `cutoff_applied=None` (the initial-touch fallback)
-/// and `cutoff_explicit=false`.
+/// Implicit cutoff with no prior caller activity surfaces
+/// `cutoff_applied=None` (the initial-touch fallback) and
+/// `cutoff_explicit=false`.
 #[test]
 fn implicit_initial_touch_records_no_cutoff() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);

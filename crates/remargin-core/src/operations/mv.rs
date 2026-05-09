@@ -1,4 +1,4 @@
-//! Move / rename a tracked file or directory (rem-0j2x / T44, rem-jc82).
+//! Move / rename a tracked file or directory.
 //!
 //! `remargin mv <src> <dst>` is the remargin-blessed alternative to Bash
 //! `mv` on a restricted realm. It performs an atomic rename when src
@@ -16,7 +16,7 @@
 //! references resolving against the destination directory's assets
 //! folder, mirroring how a hand-edited `mv` would behave.
 //!
-//! **Directory source (rem-jc82).** When `src` resolves to a directory
+//! **Directory source.** When `src` resolves to a directory
 //! the op renames the directory atomically via [`os_shim::System::rename`]
 //! (filesystem-level rename of the dir as a unit). Every nested file
 //! moves with the dir; comment threads / acks / signatures keep their
@@ -77,14 +77,14 @@ impl MvArgs {
 /// Outcome of a successful [`mv`] call.
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "each bool is a documented JSON output field (rem-0j2x / rem-jc82)"
+    reason = "each bool is a documented JSON output field"
 )]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvOutcome {
     /// Bytes moved (file size at the source). `0` for a same-path no-op
     /// or for an idempotent `src missing, dst already at destination`
-    /// re-run. For the directory case (rem-jc82) this is the sum of
+    /// re-run. For the directory case this is the sum of
     /// the sizes of every regular file inside the directory at rename
     /// time.
     pub bytes_moved: u64,
@@ -93,7 +93,7 @@ pub struct MvOutcome {
     /// `true` when the rename fell back to `copy + remove` because the
     /// in-process rename returned `EXDEV` (cross-filesystem move).
     pub fallback_copy: bool,
-    /// `true` when the source resolved to a directory (rem-jc82): the
+    /// `true` when the source resolved to a directory: the
     /// op renamed the directory + every nested file as a unit.
     pub is_directory: bool,
     /// Number of regular files inside the source directory at rename
@@ -158,7 +158,7 @@ pub struct MvOutcome {
 /// - `args.src` is a file AND `args.dst` is an existing directory
 ///   (file-into-directory moves require an explicit destination
 ///   path; only directory-into-empty-or-non-existent is supported
-///   without it, see rem-jc82).
+///   without it, ).
 /// - `args.dst` already exists and `args.force` is `false`.
 /// - The underlying `rename` (and, on `EXDEV` fallback, `copy` /
 ///   `remove_file`) fails.
@@ -395,7 +395,7 @@ fn perform_move(system: &dyn System, src: &Path, dst: &Path) -> Result<bool> {
     }
 }
 
-/// Move / rename a directory atomically (rem-jc82). Mirrors the
+/// Move / rename a directory atomically. Mirrors the
 /// file-mv path: same `op_guard` / sandbox / forbidden-target gates,
 /// same `--force` semantics, but operates on a directory tree as a
 /// single unit via [`os_shim::System::rename`].

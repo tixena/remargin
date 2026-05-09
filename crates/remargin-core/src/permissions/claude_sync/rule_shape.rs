@@ -1,5 +1,5 @@
 //! Structural decomposition of Claude permission rule strings used by
-//! the `plan restrict` conflict detector (rem-aovx).
+//! the `plan restrict` conflict detector.
 //!
 //! The original detector compared rule bodies as raw strings. That
 //! caught only exact-format matches: a hand-edited rule, a legacy

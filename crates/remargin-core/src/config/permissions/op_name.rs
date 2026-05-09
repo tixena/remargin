@@ -1,4 +1,4 @@
-//! Single-source-of-truth registry of canonical op names (rem-welo).
+//! Single-source-of-truth registry of canonical op names.
 //!
 //! Every op the remargin CLI / MCP surface dispatches to remargin-core
 //! has a [`OpName`] variant. Configuration surfaces — currently
@@ -59,7 +59,7 @@ pub enum OpName {
     Metadata,
     /// Write: schema migration over a doc.
     Migrate,
-    /// Write: rename / move a file or directory (rem-0j2x / rem-jc82).
+    /// Write: rename / move a file or directory.
     Mv,
     /// Write: purge tombstoned content.
     Purge,

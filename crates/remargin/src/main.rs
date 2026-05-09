@@ -54,7 +54,7 @@ const EXIT_SKILL: u8 = 6;
 const EXIT_NOT_FOUND: u8 = 7;
 const EXIT_AMBIGUOUS: u8 = 8;
 /// Gitignore-style "no match" sentinel returned by
-/// `permissions check` when the path is unrestricted (rem-yj1j.7 / T28).
+/// `permissions check` when the path is unrestricted.
 /// Numerically equal to [`EXIT_ERROR`] so existing tooling that branches
 /// on `1 vs 0` still works; the `main` harness recognises the sentinel
 /// to skip the "error: ..." render that would otherwise prepend the
@@ -85,7 +85,7 @@ struct Cli {
     command: Commands,
 }
 
-/// Per-subcommand identity group (rem-zlx3).
+/// Per-subcommand identity group.
 ///
 /// Flattened only into subcommands that resolve an author identity
 /// (comment, edit, ack, react, sign, write, delete, batch, purge,
@@ -113,13 +113,13 @@ struct IdentityArgs {
     r#type: Option<String>,
 }
 
-/// Per-subcommand output group (rem-zlx3).
+/// Per-subcommand output group.
 ///
 /// Controls how the subcommand renders its result. Flattened into
 /// every subcommand that emits a payload. Unlike the old
 /// `GlobalFlags`, these flags are scoped to the subcommand — this
 /// matches the "per-concern, per-subcommand" structure the rest of
-/// the refactor establishes. Invocations that pre-rem-zlx3 placed
+/// the refactor establishes. Invocations that previously placed
 /// `--json` before the subcommand must now place it after.
 #[derive(clap::Args, Default)]
 struct OutputArgs {
@@ -132,7 +132,7 @@ struct OutputArgs {
     verbose: bool,
 }
 
-/// Per-subcommand `--assets-dir` flag (rem-zlx3).
+/// Per-subcommand `--assets-dir` flag.
 ///
 /// Flattened ONLY into subcommands that write attachments: comment,
 /// edit, batch. Everything else errors at parse time. Supplied as the
@@ -145,7 +145,7 @@ struct AssetsArgs {
     assets_dir: Option<String>,
 }
 
-/// Per-subcommand unrestricted escape hatch (rem-zlx3).
+/// Per-subcommand unrestricted escape hatch.
 ///
 /// Compile-gated behind the `unrestricted` feature; flattened into the
 /// ops that touch arbitrary filesystem paths (get, ls, metadata, rm,
@@ -202,8 +202,7 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Show "what's new since X" across managed `.md` files
-    /// (rem-g3sy.4 / T34).
+    /// Show "what's new since X" across managed `.md` files.
     ///
     /// Walks `<path>` (file or directory; defaults to cwd) and
     /// returns per-file change records (comments, acks,
@@ -254,7 +253,7 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["after_heading", "after_line"])]
         after_comment: Option<String>,
         /// Insert after the ATX heading addressed by this `>`-separated
-        /// path (rem-5oqx). Setext (underline) headings are NOT
+        /// path. Setext (underline) headings are NOT
         /// supported in v1.
         #[arg(long, conflicts_with_all = ["after_comment", "after_line"])]
         after_heading: Option<String>,
@@ -332,7 +331,7 @@ enum Commands {
         /// `--kind ""` to clear — validation rejects empty strings so
         /// a single `--kind ''` errors; the right way to clear today
         /// is to run `remargin edit` without any `--kind` flags, then
-        /// use the forthcoming rem-u8br tag editor to drop entries.
+        /// use the forthcoming tag editor to drop entries.
         #[arg(long = "kind")]
         remargin_kind: Vec<String>,
         #[command(flatten)]
@@ -376,7 +375,7 @@ enum Commands {
     ///
     /// With no subcommand (or `show`), resolves and prints the
     /// effective identity under the supplied [`IdentityArgs`] — the
-    /// pre-rem-8cnc diagnostic surface that tooling (Obsidian plugin,
+    /// pre-existing diagnostic surface that tooling (Obsidian plugin,
     /// scripts) polls on startup.
     ///
     /// With `create`, prints a ready-to-use identity YAML block to
@@ -387,12 +386,12 @@ enum Commands {
     /// ```
     ///
     /// Resolution for `show` routes through the same three-branch
-    /// resolver every mutating subcommand uses (see rem-58d6):
-    /// `--config` (branch 1), manual `--identity/--type/--key`
-    /// (branch 2), or walk-up (branch 3).
+    /// resolver every mutating subcommand uses: `--config` (branch 1),
+    /// manual `--identity/--type/--key` (branch 2), or walk-up
+    /// (branch 3).
     Identity {
         /// Subcommand. Omit to invoke `show` (backward-compatible
-        /// with the pre-rem-8cnc surface).
+        /// with the pre-existing surface).
         #[command(subcommand)]
         action: Option<IdentityAction>,
         #[command(flatten)]
@@ -472,7 +471,7 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Move or rename a single tracked file (rem-0j2x / T44).
+    /// Move or rename a single tracked file.
     ///
     /// Same-FS moves use an atomic filesystem rename. Cross-FS moves
     /// fall back to copy + remove (the source is removed only after
@@ -507,8 +506,7 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Inspect the resolved permissions for the current directory
-    /// (rem-yj1j.7 / T28).
+    /// Inspect the resolved permissions for the current directory.
     ///
     /// Read-only surface over `permissions::inspect`. `show` prints the
     /// parent-walked `.remargin.yaml` permissions (with `trusted_roots`
@@ -521,17 +519,16 @@ enum Commands {
         #[command(subcommand)]
         action: PermissionsAction,
     },
-    /// Structured pre-commit prediction for a mutating op (rem-bhk).
+    /// Structured pre-commit prediction for a mutating op.
     ///
     /// Per-op subcommand routing wires this to the in-memory projection
     /// of each mutating op. This crate ships the shared shape +
-    /// subcommand tree (rem-2qr); individual op wiring lands in
-    /// rem-imc, rem-3uo, rem-qll.
+    /// subcommand tree; individual op wiring lands in follow-ups.
     ///
     /// Identity is flattened on the parent so every projection inherits
     /// the same `--identity` / `--type` / `--config` / `--key`. Output
     /// flags, by contrast, belong on each sub-action so `remargin plan
-    /// <op> … --json` parses cleanly (rem-zlx3).
+    /// <op> … --json` parses cleanly.
     Plan {
         /// Which mutating op to plan.
         #[command(subcommand)]
@@ -542,7 +539,7 @@ enum Commands {
     /// Strip all comments from a document.
     ///
     /// With `--recursive`, treat `file` as a directory and purge every
-    /// visible markdown file under it (rem-nrjy). Per-file `op_guard`
+    /// visible markdown file under it. Per-file `op_guard`
     /// checks fire individually so a single `deny_ops` or allow-list
     /// refusal does not abort the whole batch.
     Purge {
@@ -578,7 +575,7 @@ enum Commands {
         ignore_case: bool,
         /// Only documents with pending (unacked) comments. Matches
         /// both directed (unacked recipients) and broadcast (no acks
-        /// at all) shapes — fixed in rem-4j91.
+        /// at all) shapes.
         #[arg(long)]
         pending: bool,
         /// Only surface unacked broadcast (no-`to`) comments the
@@ -654,7 +651,7 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Restrict an agent-edit subpath (rem-yj1j.5 / T26).
+    /// Restrict an agent-edit subpath.
     ///
     /// Adds a `permissions.restrict` entry to the nearest
     /// `.claude/`-bearing ancestor's `.remargin.yaml` and projects
@@ -677,7 +674,7 @@ enum Commands {
         /// Comma-separated or repeat the flag:
         /// `--also-deny-bash curl,wget` or
         /// `--also-deny-bash curl --also-deny-bash wget`.
-        /// Both forms are equivalent (rem-ss9s).
+        /// Both forms are equivalent.
         #[arg(long = "also-deny-bash", value_delimiter = ',')]
         also_deny_bash: Vec<String>,
         /// When set, allow `Bash(remargin *)` on the path so the CLI
@@ -736,7 +733,7 @@ enum Commands {
         output_args: OutputArgs,
     },
     /// Back-sign missing-signature comments authored by the current
-    /// identity (rem-1ec).
+    /// identity.
     ///
     /// Adds an SSH signature to each selected comment. The canonical
     /// signed payload excludes ack / reactions / checksum, so signing
@@ -778,7 +775,7 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Reverse a previous `restrict` (rem-yj1j.6 / T27).
+    /// Reverse a previous `restrict`.
     ///
     /// Removes the matching `permissions.restrict` entry from the
     /// nearest `.claude/`-bearing ancestor's `.remargin.yaml` AND
@@ -857,11 +854,11 @@ enum Commands {
 }
 
 /// Registry subcommands.
-/// Plan subcommands (rem-bhk). One variant per mutating op; per-op
-/// wiring is tracked under rem-imc / rem-3uo / rem-qll.
+/// Plan subcommands. One variant per mutating op; per-op
+/// wiring is tracked /.
 #[derive(clap::Subcommand)]
 enum PlanAction {
-    /// Project an `ack` op (rem-3uo).
+    /// Project an `ack` op.
     Ack {
         /// Path to the document.
         path: String,
@@ -874,7 +871,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `batch` op (rem-qll).
+    /// Project a `batch` op.
     ///
     /// Reads the sub-op list from a JSON file (same shape as the
     /// `batch` subcommand): an array of objects with `content` (required)
@@ -888,7 +885,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `comment` creation op (rem-3fp).
+    /// Project a `comment` creation op.
     Comment {
         /// Path to the document.
         path: String,
@@ -898,7 +895,7 @@ enum PlanAction {
         #[arg(long, conflicts_with_all = ["after_heading", "after_line"])]
         after_comment: Option<String>,
         /// Project insertion after the ATX heading addressed by this
-        /// `>`-separated path (rem-5oqx). Setext (underline) headings
+        /// `>`-separated path. Setext (underline) headings
         /// are NOT supported in v1.
         #[arg(long, conflicts_with_all = ["after_comment", "after_line"])]
         after_heading: Option<String>,
@@ -926,7 +923,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `delete` op (rem-3uo).
+    /// Project a `delete` op.
     Delete {
         /// Path to the document.
         path: String,
@@ -936,7 +933,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project an `edit` op (rem-3fp).
+    /// Project an `edit` op.
     Edit {
         /// Path to the document.
         path: String,
@@ -947,7 +944,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `migrate` op (rem-qll).
+    /// Project a `migrate` op.
     Migrate {
         /// Path to the document.
         path: String,
@@ -962,7 +959,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project an `mv` op (rem-0j2x / T44).
+    /// Project an `mv` op.
     ///
     /// Surfaces the canonical src/dst, whether the destination exists
     /// (and would therefore require `--force`), and whether the live
@@ -981,8 +978,8 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `purge` op (rem-qll). Pass `--recursive` to project
-    /// a directory-level purge (rem-nrjy).
+    /// Project a `purge` op. Pass `--recursive` to project
+    /// a directory-level purge.
     Purge {
         /// Path to the document (or directory when `--recursive` is set).
         path: String,
@@ -993,7 +990,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `react` op (rem-3uo).
+    /// Project a `react` op.
     React {
         /// Path to the document.
         path: String,
@@ -1007,7 +1004,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `restrict` op (rem-puy5).
+    /// Project a `restrict` op.
     ///
     /// Mirrors `remargin restrict` arg-for-arg: the projection
     /// describes every file the live op would touch
@@ -1020,7 +1017,7 @@ enum PlanAction {
         /// realm-wide. Same shape as `remargin restrict`.
         path: String,
         /// Extra Bash commands to deny on the restricted path,
-        /// layered on top of the broad default deny list (rem-p74a).
+        /// layered on top of the broad default deny list.
         /// Comma-separated or repeat the flag.
         #[arg(long = "also-deny-bash", value_delimiter = ',')]
         also_deny_bash: Vec<String>,
@@ -1036,21 +1033,21 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `sandbox add` op (rem-qll).
+    /// Project a `sandbox add` op.
     SandboxAdd {
         /// Path to the document.
         path: String,
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `sandbox remove` op (rem-qll).
+    /// Project a `sandbox remove` op.
     SandboxRemove {
         /// Path to the document.
         path: String,
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `sign` op (rem-7y3).
+    /// Project a `sign` op.
     Sign {
         /// Path to the document.
         path: String,
@@ -1064,7 +1061,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project an `unprotect` op (rem-6eop / T43).
+    /// Project an `unprotect` op.
     ///
     /// Symmetric mirror of `plan restrict` for the reverse direction:
     /// describes every file the live op would touch
@@ -1088,7 +1085,7 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `write` op (rem-imc).
+    /// Project a `write` op.
     Write {
         /// Path to the file.
         path: String,
@@ -1124,7 +1121,7 @@ enum RegistryAction {
     Show,
 }
 
-/// `remargin permissions` subcommands (rem-yj1j.7 / T28).
+/// `remargin permissions` subcommands.
 #[derive(clap::Subcommand)]
 enum PermissionsAction {
     /// Gitignore-style: exit 0 when `path` is restricted, 1 otherwise.
@@ -1146,13 +1143,13 @@ enum PermissionsAction {
     },
 }
 
-/// `remargin identity` subcommands (rem-8cnc). Default action
-/// (no subcommand) is `show` — the pre-rem-8cnc diagnostic surface.
+/// `remargin identity` subcommands. Default action
+/// (no subcommand) is `show` — the pre-existing diagnostic surface.
 #[derive(clap::Subcommand)]
 enum IdentityAction {
     /// Print a ready-to-use identity YAML block to stdout. Users
     /// redirect to `.remargin.yaml` themselves (no `--write` flag —
-    /// rem-is4z bans writes to `.remargin.yaml`).
+    /// bans writes to `.remargin.yaml`).
     ///
     /// `--identity` and `--type` are required; `--key` is optional
     /// (valid in non-strict modes — pairs with `remargin keygen`).
@@ -1174,7 +1171,7 @@ enum IdentityAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Resolve and print the effective identity (pre-rem-8cnc
+    /// Resolve and print the effective identity (pre-existing
     /// behavior). Kept as an explicit alternative to the bare
     /// `remargin identity` form.
     Show {
@@ -1535,7 +1532,7 @@ fn truncate_content(content: &str, max_len: usize) -> String {
     }
 }
 
-/// Parse the `--lines START-END` argument used by `remargin write` (rem-24p).
+/// Parse the `--lines START-END` argument used by `remargin write`.
 ///
 /// Accepts `START-END` with 1-indexed inclusive bounds, both required.
 /// Returns `(start, end)`; further validation (start <= end, start >= 1)
@@ -1611,7 +1608,7 @@ const fn permissions_action_output(action: &PermissionsAction) -> &OutputArgs {
 }
 
 /// Pull the per-action [`OutputArgs`] from a [`PlanAction`] variant.
-/// Every plan sub-action flattens an `OutputArgs` (rem-zlx3).
+/// Every plan sub-action flattens an `OutputArgs`.
 const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
     match action {
         PlanAction::Ack { output_args, .. }
@@ -1662,9 +1659,9 @@ fn main() -> ExitCode {
         }
     };
 
-    // Non-JSON mode does not emit a timing footer on any stream (rem-26w):
+    // Non-JSON mode does not emit a timing footer on any stream:
     // stdout stays pure command output and stderr stays clean. The timing
-    // value survives as `elapsed_ms` inside the JSON payload (rem-4ay).
+    // value survives as `elapsed_ms` inside the JSON payload.
     match run(&cli, &system, &cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -1672,7 +1669,7 @@ fn main() -> ExitCode {
             let is_silent_sentinel = err_msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER);
             let exit_code = classify_error(&err);
             if is_silent_sentinel {
-                // Sentinel for `permissions check` (rem-yj1j.7 / T28).
+                // Sentinel for `permissions check`.
                 // Output already emitted on the success path; we only
                 // need the gitignore-style exit code, no "error: ..."
                 // render.
@@ -1770,7 +1767,7 @@ fn build_identity_flags(
 /// `Identity` is a read-only diagnostic — it calls
 /// [`config::ResolvedConfig::resolve`] inside its own handler so a
 /// branch-3 walk miss surfaces as `{ "found": false }` instead of
-/// bailing the whole process (rem-3dw0). Returning `true` here
+/// bailing the whole process. Returning `true` here
 /// short-circuits the config load in [`run`].
 const fn subcommand_is_config_free(cmd: &Commands) -> bool {
     match cmd {
@@ -2557,7 +2554,7 @@ fn cmd_comments(
     let path = resolve_doc_path(system, cwd, file)?;
     let doc = parser::parse_file(system, &path)?;
     // Apply the shared kind filter from `remargin-core::kind` so this
-    // surface stays in lockstep with `remargin query` — the rem-49w0
+    // surface stays in lockstep with `remargin query` — the
     // design doc explicitly calls out the previous divergence as a bug.
     let comments: Vec<_> = doc
         .comments()
@@ -2681,7 +2678,7 @@ fn cmd_get(
     }
 }
 
-/// Binary-mode `get` dispatch (rem-cdr). Reads bytes once through the shared
+/// Binary-mode `get` dispatch. Reads bytes once through the shared
 /// core helper, then surfaces them in the caller's chosen shape:
 /// - `--out <path>` — write bytes to disk, stdout shows `{path, size_bytes, mime}`.
 /// - `--json` — base64-encoded `content` in the payload alongside mime / size.
@@ -2749,7 +2746,7 @@ fn cmd_get_binary(
 /// Routes through the same [`ResolvedConfig::resolve`][config::ResolvedConfig::resolve]
 /// every mutating op uses, so `remargin identity --config <path>` (or
 /// `--identity` + `--type` manual, or a `--type`-filtered walk) returns
-/// the same identity the next write would attribute to (rem-3dw0).
+/// the same identity the next write would attribute to.
 ///
 /// A branch-3 walk that cannot match the supplied filters is treated as
 /// "nothing found" rather than an error: the JSON output collapses to
@@ -2793,7 +2790,7 @@ fn cmd_identity_show(
             // Walk-based "no matching config" is a soft miss on a
             // read-only diagnostic. Emit `found: false` and exit
             // cleanly so tooling that polls identity during startup
-            // (the Obsidian plugin, rem-3dw0) does not see a hard
+            // (the Obsidian plugin) does not see a hard
             // error for the "no config yet" state.
             render_identity_not_found(json_mode)
         }
@@ -2801,7 +2798,7 @@ fn cmd_identity_show(
     }
 }
 
-/// Print a ready-to-use identity YAML block to stdout (rem-8cnc).
+/// Print a ready-to-use identity YAML block to stdout.
 ///
 /// `mode:` is deliberately omitted — mode is a tree property resolved
 /// by walk-up, not an identity-level declaration. `key:` is emitted
@@ -2895,14 +2892,14 @@ fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
         || msg.contains("no .remargin.yaml matched the supplied filters")
 }
 
-/// Dispatch `remargin permissions <show|check>` (rem-yj1j.7 / T28).
+/// Dispatch `remargin permissions <show|check>`.
 ///
 /// `show` prints the resolved permissions tree at `cwd`. `check`
 /// canonicalises its target path, asks the inspector whether any
 /// `restrict` or `deny_ops` rule covers it, and exits gitignore-style:
 /// 0 when restricted, 1 when not. Both paths support `--json`.
 /// Wire the CLI `activity` subcommand to the
-/// [`activity::gather_activity`] core (rem-g3sy.4 / T34).
+/// [`activity::gather_activity`] core.
 ///
 /// Output mode follows the workspace `--json` convention:
 /// `--json` (default) emits the structured `ActivityResult`;
@@ -3024,8 +3021,8 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
     }
 }
 
-/// Render the per-file cutoff header line for `activity --pretty`
-/// (rem-gb5j). The wording reflects which path produced the cutoff:
+/// Render the per-file cutoff header line for `activity --pretty`.
+/// The wording reflects which path produced the cutoff:
 ///
 /// - explicit `--since`: `(since 2026-04-27 02:09)` so the header
 ///   echoes the user's input.
@@ -3185,7 +3182,7 @@ fn emit_permissions_check_text(report: &permissions_inspect::CheckOutput, why: b
 }
 
 /// Wire the CLI `restrict` subcommand to the
-/// [`permissions_restrict::restrict`] core (rem-yj1j.5 / T26).
+/// [`permissions_restrict::restrict`] core.
 ///
 /// `user_settings_explicit` lets tests pin a hermetic location for
 /// the user-scope file. When `None`, the function expands
@@ -3269,13 +3266,13 @@ fn emit_restrict_summary(outcome: &permissions_restrict::RestrictOutcome) {
 }
 
 /// Wire the CLI `unprotect` subcommand to the
-/// [`permissions_unprotect::unprotect`] core (rem-yj1j.6 / T27).
+/// [`permissions_unprotect::unprotect`] core.
 ///
 /// `_user_settings_explicit` is accepted on the CLI for symmetry
 /// with `restrict` but ignored here: the unprotect path consults
-/// the sidecar's `added_to_files` list (rem-7m4u captured the
-/// resolved settings paths at apply time), so the reversal
-/// scrubs exactly the files the corresponding `restrict` touched.
+/// the sidecar's `added_to_files` list (the resolved settings paths
+/// captured at apply time), so the reversal scrubs exactly the files
+/// the corresponding `restrict` touched.
 fn cmd_unprotect(
     system: &dyn System,
     cwd: &Path,
@@ -3457,7 +3454,7 @@ fn cmd_metadata(
     )?;
 
     // File-level fields are always present. Markdown fields are only emitted
-    // when the file was parsed (rem-lqz).
+    // when the file was parsed.
     let mut result = json!({
         "binary": meta.binary,
         "mime": meta.mime,
@@ -3588,10 +3585,9 @@ fn resolve_role_identity(
 
 /// Route a `plan` subcommand to the correct per-op projection.
 ///
-/// Lightweight ops that have not yet been wired (tracked under rem-3uo /
-/// rem-qll) surface a deliberate "not yet landed" error so callers
-/// discover the subcommand tree and failures are loud. `plan write` is
-/// fully wired per rem-imc.
+/// Lightweight ops that have not yet been wired surface a deliberate
+/// "not yet landed" error so callers discover the subcommand tree and
+/// failures are loud. `plan write` is fully wired.
 #[expect(
     clippy::too_many_lines,
     reason = "single dispatch match is clearer than per-op helpers here"
@@ -3795,7 +3791,7 @@ fn cmd_plan(
     let report = plan_ops::dispatch(system, cwd, config, &request)?;
     let value = serde_json::to_value(&report).context("serializing plan report")?;
 
-    // Config-mutation plans (rem-puy5 / rem-6eop) get a structured
+    // Config-mutation plans get a structured
     // text block in text mode so the multi-file projection is
     // readable. JSON mode still emits the full PlanReport payload.
     if !json_mode {
@@ -3810,11 +3806,11 @@ fn cmd_plan(
     print_output(json_mode, &value)
 }
 
-/// Render a `plan restrict` [`PlanReport`] as a structured text block
-/// (rem-puy5). Mirrors the JSON shape: anchor + `would_commit`/`noop`
-/// header, one section per touched file, then conflicts. Emitted on
-/// stdout via the standard `out` helper so existing pipe-friendly
-/// behaviour is preserved.
+/// Render a `plan restrict` [`PlanReport`] as a structured text block.
+/// Mirrors the JSON shape: anchor + `would_commit`/`noop` header, one
+/// section per touched file, then conflicts. Emitted on stdout via
+/// the standard `out` helper so existing pipe-friendly behaviour is
+/// preserved.
 fn emit_plan_restrict_text(report: &plan_ops::PlanReport) -> Result<()> {
     let Some(diff) = report.config_diff.as_ref() else {
         return Ok(());
@@ -3941,10 +3937,10 @@ fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
     Ok(())
 }
 
-/// Render a `plan unprotect` [`PlanReport`] as a structured text block
-/// (rem-6eop / T43). Symmetric mirror of [`emit_plan_restrict_text`]
-/// for the reverse direction: anchor + `would_commit`/`noop` header,
-/// one section per touched file, then drift conflicts.
+/// Render a `plan unprotect` [`PlanReport`] as a structured text block.
+/// Symmetric mirror of [`emit_plan_restrict_text`] for the reverse
+/// direction: anchor + `would_commit`/`noop` header, one section per
+/// touched file, then drift conflicts.
 fn emit_plan_unprotect_text(report: &plan_ops::PlanReport) -> Result<()> {
     let Some(diff) = report.unprotect_diff.as_ref() else {
         return Ok(());
@@ -4878,7 +4874,7 @@ fn cmd_write(
     // A no-op prints a one-line human message in text mode instead of
     // the usual "written: ... / binary: ... / raw: ..." block; JSON mode
     // still returns a single payload, now with `noop: true` alongside
-    // the existing fields so callers can branch on it (rem-1f2).
+    // the existing fields so callers can branch on it.
     if outcome.noop && !wp.json_mode {
         return out(&format!("{}: no changes (already up to date)", wp.path));
     }
@@ -4907,7 +4903,7 @@ mod tests {
         chrono::DateTime::parse_from_rfc3339(s).unwrap()
     }
 
-    /// rem-gb5j: implicit cutoff with a caller-last-action ts
+    /// implicit cutoff with a caller-last-action ts
     /// renders as "(since you last touched this file: …)".
     #[test]
     fn cutoff_header_implicit_with_last_action() {
@@ -4918,7 +4914,7 @@ mod tests {
         );
     }
 
-    /// rem-gb5j: implicit cutoff with no prior activity renders
+    /// implicit cutoff with no prior activity renders
     /// the initial-touch fallback message.
     #[test]
     fn cutoff_header_implicit_initial_touch() {
@@ -4933,7 +4929,7 @@ mod tests {
         );
     }
 
-    /// rem-gb5j: explicit `--since` echoes the cutoff with the
+    /// explicit `--since` echoes the cutoff with the
     /// "(since …)" wording, matching the user's input.
     #[test]
     fn cutoff_header_explicit_since() {
@@ -4941,7 +4937,7 @@ mod tests {
         assert_eq!(header, "(since 2026-04-27 02:09)");
     }
 
-    /// rem-gb5j: the placeholder string `YOUR-LAST-ACTION` from
+    /// the placeholder string `YOUR-LAST-ACTION` from
     /// the design discussion must never reach user-visible output.
     #[test]
     fn cutoff_header_never_emits_placeholder() {

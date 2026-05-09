@@ -1,6 +1,4 @@
-//! Unit tests for [`crate::permissions::claude_sync::rules_for`]
-//! (rem-yj1j.4 / rem-wv71; minimised by rem-egp9 slice A; native-tool
-//! fences restored by rem-qjqu).
+//! Unit tests for [`crate::permissions::claude_sync::rules_for`].
 //!
 //! Pure-data round-trips: every test feeds a hand-rolled
 //! [`ResolvedTrustedRoot`] in and asserts the returned rule strings.
@@ -58,7 +56,7 @@ fn subpath_no_extras_emits_full_default_set() {
 
     // deny: 4 editor-tool path denies + 4 dot-folder wildcards +
     // BASH_MUTATORS.len() bash mutators + 3 source-side mv shapes
-    // (rem-0j2x / T44) + 1 global remargin-cli deny.
+    // + 1 global remargin-cli deny.
     let expected = 4 + 4 + BASH_MUTATORS.len() + 3 + 1;
     assert_eq!(rules.deny.len(), expected, "{:#?}", rules.deny);
 
@@ -84,11 +82,11 @@ fn subpath_no_extras_emits_full_default_set() {
     // Membership check (not exact index) so reordering inside
     // BASH_MUTATORS does not break the test.
     let must_contain = [
-        // Plain `sed *` (rem-p74a special case).
+        // Plain `sed *` (special case).
         "Bash(sed * /a/b/**)",
-        // Delete (rem-djqy adds the bare forms; the with-flag form
-        // is preserved verbatim so older settings files do not churn
-        // on re-runs).
+        // Delete: bare forms are added; the with-flag form is
+        // preserved verbatim so older settings files do not churn on
+        // re-runs.
         "Bash(rm /a/b/**)",
         "Bash(rm * /a/b/**)",
         "Bash(rmdir /a/b/**)",
@@ -126,9 +124,9 @@ fn subpath_no_extras_emits_full_default_set() {
         // Network downloads.
         "Bash(curl * /a/b/**)",
         "Bash(wget * /a/b/**)",
-        // Arg fan-out (rem-djqy).
+        // Arg fan-out.
         "Bash(xargs * /a/b/**)",
-        // Find (rem-djqy). Coarse: covers `-delete`, `-exec`, etc.
+        // Find. Coarse: covers `-delete`, `-exec`, etc.
         "Bash(find * /a/b/**)",
         // Shells.
         "Bash(bash * /a/b/**)",
@@ -138,14 +136,14 @@ fn subpath_no_extras_emits_full_default_set() {
         "Bash(make * /a/b/**)",
         // Disk / write.
         "Bash(dd * /a/b/**)",
-        // Directory navigation (rem-e6yd / T42). Closes the
+        // Directory navigation. Closes the
         // `cd /restricted && rm file` shell-relative bypass. Both
         // bare and with-flag forms must be denied.
         "Bash(cd /a/b/**)",
         "Bash(cd * /a/b/**)",
         "Bash(pushd /a/b/**)",
         "Bash(pushd * /a/b/**)",
-        // Windows CMD file-mutation surface (rem-djqy).
+        // Windows CMD file-mutation surface.
         "Bash(attrib /a/b/**)",
         "Bash(attrib * /a/b/**)",
         "Bash(copy /a/b/**)",
@@ -166,7 +164,7 @@ fn subpath_no_extras_emits_full_default_set() {
         "Bash(robocopy * /a/b/**)",
         "Bash(type * /a/b/**)",
         "Bash(xcopy * /a/b/**)",
-        // PowerShell cmdlet surface (rem-djqy). Each cmdlet is a
+        // PowerShell cmdlet surface. Each cmdlet is a
         // file-mutation primitive that the Unix list above misses.
         "Bash(Add-Content /a/b/**)",
         "Bash(Add-Content * /a/b/**)",
@@ -186,7 +184,7 @@ fn subpath_no_extras_emits_full_default_set() {
         "Bash(Rename-Item * /a/b/**)",
         "Bash(Set-Content /a/b/**)",
         "Bash(Set-Content * /a/b/**)",
-        // Source-side mv coverage (rem-0j2x / T44). The `mv *`
+        // Source-side mv coverage. The `mv *`
         // template emits the destination-side shape via BASH_MUTATORS;
         // these three close the source-side hole the original list
         // missed.
@@ -203,22 +201,20 @@ fn subpath_no_extras_emits_full_default_set() {
     }
 
     // Global `Bash(remargin *)` deny (no path tail) lands last when
-    // `cli_allowed = false` (rem-egp9 slice A keeper).
+    // `cli_allowed = false`.
     assert_eq!(rules.deny[expected - 1], "Bash(remargin *)");
 
-    // Allow set: empty by default (rem-si27 dropped the implicit
-    // `mcp__remargin__*` allow so users keep per-call oversight of
-    // remargin's MCP tools under a blanket restrict; rem-2plr removed
-    // the implicit `.remargin/` editor-tool re-allow).
+    // Allow set: empty by default — no implicit `mcp__remargin__*`
+    // allow, no implicit `.remargin/` editor-tool re-allow.
     assert!(rules.allow.is_empty(), "{:#?}", rules.allow);
     assert!(
         !rules.allow.iter().any(|r| r.contains(".remargin")),
-        "rem-2plr: no implicit .remargin/ re-allow expected, got: {:#?}",
+        "no implicit .remargin/ re-allow expected, got: {:#?}",
         rules.allow
     );
     assert!(
         !rules.allow.iter().any(|r| r.contains("mcp__remargin__")),
-        "rem-si27: no implicit mcp__remargin__* allow expected, got: {:#?}",
+        "no implicit mcp__remargin__* allow expected, got: {:#?}",
         rules.allow
     );
 }
@@ -259,7 +255,7 @@ fn cli_allowed_skips_remargin_cli_deny() {
         rules.deny
     );
     // 4 editor + 4 dot-folder + BASH_MUTATORS.len() + 3 source-side
-    // mv shapes (rem-0j2x / T44). One fewer than when
+    // mv shapes. One fewer than when
     // cli_allowed=false: the `Bash(remargin *)` deny is dropped.
     let expected = 4 + 4 + BASH_MUTATORS.len() + 3;
     assert_eq!(rules.deny.len(), expected);
@@ -268,7 +264,7 @@ fn cli_allowed_skips_remargin_cli_deny() {
 /// Scenario 4 — `also_deny_bash` adds extra Bash denies right after
 /// the standard mutators. Uses commands NOT in the default
 /// [`BASH_MUTATORS`] list so the test exercises the extras path even
-/// after rem-p74a expanded the defaults to cover most common
+/// expanded the defaults to cover most common
 /// file-modifying commands.
 #[test]
 fn also_deny_bash_extras_appended() {
@@ -303,7 +299,7 @@ fn also_deny_bash_extras_appended() {
 }
 
 /// Scenario 5 — `allow_dot_folders` re-allows the named folders on top
-/// of the wildcard deny. `.remargin/` is NOT auto-allowed (rem-2plr).
+/// of the wildcard deny. `.remargin/` is NOT auto-allowed.
 #[test]
 fn allow_dot_folders_emits_re_allows() {
     let entry = restrict_subpath("/a/b", &[], false);
@@ -326,7 +322,7 @@ fn allow_dot_folders_emits_re_allows() {
         .count();
     assert_eq!(
         remargin_allow_count, 0,
-        "rem-2plr: .remargin must NOT be auto-allowed unless explicitly listed"
+        ".remargin must NOT be auto-allowed unless explicitly listed"
     );
 }
 
@@ -345,9 +341,9 @@ fn explicit_remargin_in_allow_list_emits_re_allows() {
     assert_eq!(count, 4, "{:#?}", rules.allow);
 }
 
-/// rem-djqy: deletion family emits BOTH bare and `*`-flag forms so
+/// deletion family emits BOTH bare and `*`-flag forms so
 /// `rm <path>` (with no intervening flag tokens) is denied alongside
-/// `rm -rf <path>`. Mirrors the rem-e6yd / T42 doubling rationale for
+/// `rm -rf <path>`. Mirrors the / T42 doubling rationale for
 /// `cd` / `pushd`.
 #[test]
 fn deletion_family_emits_bare_and_flagged_forms() {
@@ -370,7 +366,7 @@ fn deletion_family_emits_bare_and_flagged_forms() {
     }
 }
 
-/// rem-djqy: every Windows CMD mutator is projected. The list mirrors
+/// every Windows CMD mutator is projected. The list mirrors
 /// the cross-platform decision in the audit (default-on, no per-realm
 /// opt-in) so an agent on Windows cannot route around the deny-list
 /// with native shell tools.
@@ -409,7 +405,7 @@ fn windows_cmd_mutators_projected() {
     }
 }
 
-/// rem-djqy: every PowerShell cmdlet mutator is projected with both
+/// every PowerShell cmdlet mutator is projected with both
 /// the bare and flagged shapes (PowerShell's `-Path` style means a
 /// `cmdlet <path>` invocation is common and the bare form is needed
 /// for the same reason as the Unix delete family).
@@ -443,7 +439,7 @@ fn powershell_cmdlet_mutators_projected() {
     }
 }
 
-/// rem-djqy: `xargs` and `find` close the arg-fan-out / find-exec
+/// `xargs` and `find` close the arg-fan-out / find-exec
 /// gaps in the original Unix list. `xargs <path>` could deliver a
 /// restricted path to another command, dodging the per-cmd denies
 /// unless `xargs` itself is gated.
@@ -465,7 +461,7 @@ fn xargs_and_find_projected() {
     );
 }
 
-/// rem-2plr / rem-si27 negative-presence guard: by default, neither
+/// / negative-presence guard: by default, neither
 /// settings array (deny/allow) contains the four native-tool
 /// `.remargin/**` allows, and no `mcp__remargin__*` allow either.
 #[test]
@@ -477,13 +473,13 @@ fn no_implicit_remargin_native_allows_emitted() {
         let needle = format!("{tool}(/a/b/.remargin/**)");
         assert!(
             !rules.allow.iter().any(|r| r == &needle),
-            "rem-2plr: {needle} must not appear in allow, got: {:#?}",
+            "{needle} must not appear in allow, got: {:#?}",
             rules.allow
         );
     }
     assert!(
         !rules.allow.iter().any(|r| r.contains("mcp__remargin__")),
-        "rem-si27: no implicit mcp__remargin__* allow expected, got: {:#?}",
+        "no implicit mcp__remargin__* allow expected, got: {:#?}",
         rules.allow
     );
 }
@@ -566,7 +562,7 @@ fn apply_creates_missing_settings_files_and_sidecar() {
         let value = read_settings(&system, file);
         let deny = value["permissions"]["deny"].as_array().unwrap();
         assert_eq!(deny.len(), 2, "{file:?} -> {value:#?}");
-        // rem-si27 / rem-egp9: `restrict` no longer auto-emits any
+        // `restrict` no longer auto-emits any
         // allow rule. The settings file's `permissions.allow` slot is
         // initialised as an empty array regardless.
         let allow = value["permissions"]["allow"].as_array().unwrap();
@@ -847,31 +843,31 @@ fn sidecar_records_resolved_settings_file_paths() {
 }
 
 // ---------------------------------------------------------------------
-// canonicalize_rule + cross-format membership (rem-em33)
+// canonicalize_rule + cross-format membership
 // ---------------------------------------------------------------------
 
-/// rem-em33 #7: triple slash collapses to single slash.
+/// #7: triple slash collapses to single slash.
 #[test]
 fn canonicalize_rule_collapses_triple_slash() {
     use crate::permissions::claude_sync::canonicalize_rule;
     assert_eq!(canonicalize_rule("Read(///foo/**)"), "Read(/foo/**)");
 }
 
-/// rem-em33 #8: double slash collapses to single slash.
+/// #8: double slash collapses to single slash.
 #[test]
 fn canonicalize_rule_collapses_double_slash() {
     use crate::permissions::claude_sync::canonicalize_rule;
     assert_eq!(canonicalize_rule("Read(//foo/**)"), "Read(/foo/**)");
 }
 
-/// rem-em33 #9: single-slash rule is unchanged (idempotent).
+/// #9: single-slash rule is unchanged (idempotent).
 #[test]
 fn canonicalize_rule_is_noop_on_canonical_form() {
     use crate::permissions::claude_sync::canonicalize_rule;
     assert_eq!(canonicalize_rule("Read(/foo/**)"), "Read(/foo/**)");
 }
 
-/// rem-em33 #10: `simulate_apply_rules` treats the legacy double-slash
+/// #10: `simulate_apply_rules` treats the legacy double-slash
 /// form as already-present (no `_to_add`, populated `_already_present`).
 #[test]
 fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
@@ -901,7 +897,7 @@ fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
     assert_eq!(sim.deny_rules_already_present.len(), 2);
 }
 
-/// rem-em33 #12 / acceptance: live `apply_rules` against a settings
+/// #12 / acceptance: live `apply_rules` against a settings
 /// file with the legacy double-slash form does not duplicate the rule.
 #[test]
 fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
@@ -943,7 +939,7 @@ fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
     assert_eq!(edit_rules[0], "Edit(//r/secret/**)");
 }
 
-/// rem-em33 acceptance: `revert_rules` strips a legacy double-slash
+/// acceptance: `revert_rules` strips a legacy double-slash
 /// rule the projection's canonical form would emit.
 #[test]
 fn revert_rules_strips_legacy_double_slash_rule() {
@@ -953,7 +949,7 @@ fn revert_rules_strips_legacy_double_slash_rule() {
     let prior = json!({
         "permissions": {
             // Legacy double-slash deny rules, written by an older
-            // apply. rem-si27 dropped the implicit `mcp__remargin__*`
+            // apply. dropped the implicit `mcp__remargin__*`
             // allow, so the seeded allow set is empty.
             "deny": ["Edit(//r/secret/**)", "Write(//r/secret/**)"],
             "allow": []
@@ -988,7 +984,7 @@ fn revert_rules_strips_legacy_double_slash_rule() {
 }
 
 // ---------------------------------------------------------------------
-// rule_shape: PathGlob / RuleShape / overlap (rem-aovx)
+// rule_shape: PathGlob / RuleShape / overlap
 // ---------------------------------------------------------------------
 
 /// `PathGlob` #1: canonical recursive glob.
@@ -999,7 +995,7 @@ fn path_glob_parse_canonical_recursive() {
     assert!(p.recursive);
 }
 
-/// `PathGlob` #2: extra leading slashes collapse — the rem-em33 case.
+/// `PathGlob` #2: extra leading slashes collapse — the case.
 #[test]
 fn path_glob_parse_collapses_runs_of_slash() {
     let p = PathGlob::parse("///foo/**");

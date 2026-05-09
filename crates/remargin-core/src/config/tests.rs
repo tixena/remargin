@@ -618,7 +618,7 @@ fn agent_type_filter_does_not_inherit_human_identity() {
     //
     // Expected: the walk exhausts with no match. The resolver does NOT
     // silently borrow the human identity with a swapped author_type —
-    // the three-branch design (rem-11u) makes this a hard error instead
+    // the three-branch design makes this a hard error instead
     // of a silent misattribution.
     let system = MockSystem::new()
         .with_dir(Path::new("/home/user/project/src"))
@@ -697,7 +697,7 @@ participants:
     );
 }
 
-// ---------- resolve_signing_key: rem-dyz fail-fast contract ----------
+// ---------- resolve_signing_key: fail-fast contract ----------
 
 #[test]
 fn resolve_signing_key_returns_none_in_open_mode() {
@@ -705,7 +705,7 @@ fn resolve_signing_key_returns_none_in_open_mode() {
     // config do not "require" a signature from the op's perspective. The
     // helper must return Ok(None) so create_comment skips signing.
     //
-    // Mode is sourced from the config file (rem-wws). No config → default
+    // Mode is sourced from the config file. No config → default
     // mode is Open.
     let system = MockSystem::new();
     let resolved = ResolvedConfig::resolve(
@@ -723,10 +723,10 @@ fn resolve_signing_key_returns_none_in_open_mode() {
 fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
     // Strict + unregistered author: `requires_signature` is false
     // (author not registered active), so the helper short-circuits with
-    // `None`. The resolver itself would reject an unregistered identity
-    // (rem-xc8x), so in practice this code path is only reached for
-    // arbitrary author names the op layer looks up (e.g. verifying
-    // siblings authored by someone else).
+    // `None`. The resolver itself would reject an unregistered identity,
+    // so in practice this code path is only reached for arbitrary
+    // author names the op layer looks up (e.g. verifying siblings
+    // authored by someone else).
     let system = MockSystem::new()
         .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
         .unwrap()
@@ -790,9 +790,9 @@ fn resolve_signing_key_returns_key_when_present() {
 #[test]
 fn resolve_bails_when_strict_identity_has_no_key() {
     // Strict + registered active identity + NO key_path: the resolver
-    // itself now fails fast (rem-xc8x). Previously `create_comment`
+    // itself now fails fast. Previously `create_comment`
     // silently wrote an unsigned artifact here and the post-write gate
-    // tripped on the NEXT mutation (rem-dyz). After rem-xc8x the gate
+    // tripped on the NEXT mutation. the gate
     // moves to construction time so ops never see an invalid config.
     let system = MockSystem::new()
         .with_file(
@@ -834,7 +834,7 @@ fn resolve_bails_when_strict_identity_has_no_key() {
 
 #[test]
 fn resolve_bails_when_revoked_identity_in_strict_mode() {
-    // rem-xc8x acceptance: a revoked participant in strict mode causes
+    // acceptance: a revoked participant in strict mode causes
     // `ResolvedConfig::resolve` to error, not the op handler. This
     // replaces the equivalent op-level `can_post` check.
     let system = MockSystem::new()

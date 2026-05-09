@@ -1,6 +1,5 @@
 //! MCP sandbox boundary built from the parent-walked
-//! `permissions.trusted_roots` block (rem-yj1j.3 / T24, slice 1 — see
-//! `rem-v0ky` for this module, `rem-w6m1` for the actual MCP wiring).
+//! `permissions.trusted_roots` block.
 //!
 //! [`McpSandbox::from_walk`] runs once at server startup and resolves
 //! the set of canonical absolute paths the MCP is allowed to serve

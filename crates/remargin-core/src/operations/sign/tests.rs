@@ -1,4 +1,4 @@
-//! Tests for the `sign_comments` operation (rem-1ec).
+//! Tests for the `sign_comments` operation.
 //!
 //! Coverage matrix:
 //! - happy path: unsigned comment authored by caller gets signed and
@@ -14,7 +14,7 @@
 //!   error regardless of mode (stricter than create/edit's fail-fast —
 //!   sign without a key has nothing to do)
 //!
-//! Dry-run coverage: the per-op `--dry-run` flag was removed in rem-0ry
+//! Dry-run coverage: the per-op `--dry-run` flag was removed in
 //! in favour of `remargin plan sign`. The projection test lives in
 //! `operations/tests.rs::project_sign_*`.
 
@@ -434,7 +434,7 @@ fn signed_comment_survives_reparse_with_signature() {
     assert_eq!(signed_count, 1, "exactly one signed comment expected");
 }
 
-// ---- repair_checksum (rem-x072) --------------------------------------
+// ---- repair_checksum --------------------------------------
 
 /// Substitute every occurrence of `needle` inside a `remargin` fence in
 /// `doc` with `replacement`. Simulates an out-of-band edit (e.g. a text
@@ -483,14 +483,14 @@ fn sign_refuses_tampered_content_without_repair_checksum() {
 #[test]
 fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
     // Full scenario:
-    //   1. Place a comment (two_author_doc seeds alice's "alice's note"
-    //      with a matching checksum).
-    //   2. Something alters the comment (simulated here by a direct
-    //      byte substitution on the on-disk file, as an editor or
-    //      merge tool would).
-    //   3. Sign the comment with --repair-checksum.
-    //   4. The stored checksum is recomputed from the new content,
-    //      the signature is attached, and verify passes.
+    // 1. Place a comment (two_author_doc seeds alice's "alice's note"
+    // with a matching checksum).
+    // 2. Something alters the comment (simulated here by a direct
+    // byte substitution on the on-disk file, as an editor or
+    // merge tool would).
+    // 3. Sign the comment with --repair-checksum.
+    // 4. The stored checksum is recomputed from the new content,
+    // the signature is attached, and verify passes.
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
@@ -586,7 +586,7 @@ fn sign_with_repair_checksum_on_already_valid_checksum_reports_no_repair() {
 
 #[test]
 fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
-    // The real-world shape (the scenario that drove rem-x072): a
+    // The real-world shape (the scenario that drove): a
     // comment was signed at creation, then edited out-of-band. The
     // stored signature is now invalid (covers pre-edit content) and
     // the stored checksum is stale. Default sign skips the comment

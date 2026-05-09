@@ -1,4 +1,4 @@
-//! Cross-surface parity harness for CLI + MCP `plan` ops (rem-9ey).
+//! Cross-surface parity harness for CLI + MCP `plan` ops.
 //!
 //! For each mutating `plan` op we invoke the CLI binary via `assert_cmd`
 //! AND the in-process MCP handler via `mcp::process_request` against a
@@ -11,7 +11,7 @@
 //! wall-clock dependent (`ts`, `elapsed_ms`) — [`normalize`] strips
 //! them before the `assert_eq!`. Any *other* divergence indicates
 //! adapter drift and is the regression this harness is designed to
-//! catch (rem-3a2).
+//! catch.
 //!
 //! Covers the deterministic ops `delete`, `edit`, `migrate` (no legacy
 //! input), `purge`, and `write` (markdown + raw). `ack`, `react`,
@@ -92,7 +92,7 @@ Body paragraph two.
     /// it is piped in as the command's stdin (used when the content would
     /// look like a flag to clap).
     ///
-    /// Post-rem-zlx3 `--json` is per-subcommand, not a top-level flag, so
+    /// `--json` is per-subcommand, not a top-level flag, so
     /// append it at the end where every subcommand accepts trailing
     /// options.
     #[expect(clippy::panic, reason = "integration test assertion helper")]

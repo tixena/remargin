@@ -926,7 +926,7 @@ a2
 fn migrate_done_marker_and_threading_coexist() {
     // Parent has a `[done:DATE]` AND gets an implicit-from-reply ack.
     // Both acks come from the same author (`legacy-agent` since no agent
-    // config). Per rem-gx9v the writer collapses same-identity acks to a
+    // config). the writer collapses same-identity acks to a
     // single entry with the latest timestamp, so what survives in the
     // on-disk doc is one ack, not two.
     let doc = "\

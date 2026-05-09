@@ -1,4 +1,4 @@
-//! `remargin mv` integration tests (rem-0j2x / T44).
+//! `remargin mv` integration tests.
 //!
 //! Exercises the CLI subcommand against real-filesystem temp dirs.
 //! The unit-test layer (`crates/remargin-core/src/operations/mv/tests.rs`)
@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(value["mv_diff"]["dst_exists"], json!(true));
     }
 
-    /// rem-jc82: directory rename preserves comments / frontmatter on
+    /// directory rename preserves comments / frontmatter on
     /// every nested file. The comments survive byte-for-byte because
     /// the rename is filesystem-level — no re-serialisation runs.
     #[test]
@@ -281,7 +281,7 @@ mod tests {
         assert!(!realm.path().join("notes").exists());
     }
 
-    /// rem-jc82: same-path directory rename is a no-op.
+    /// same-path directory rename is a no-op.
     #[test]
     fn directory_same_path_is_noop_via_cli() {
         let realm = TempDir::new().unwrap();
@@ -297,7 +297,7 @@ mod tests {
         assert!(realm.path().join("notes/a.md").exists());
     }
 
-    /// rem-jc82: `--force` overwrites an existing destination dir.
+    /// `--force` overwrites an existing destination dir.
     #[test]
     fn directory_force_overwrites_via_cli() {
         let realm = TempDir::new().unwrap();
@@ -321,7 +321,7 @@ mod tests {
         );
     }
 
-    /// rem-jc82: `plan mv <dir> <new>` reports `is_directory` plus the
+    /// `plan mv <dir> <new>` reports `is_directory` plus the
     /// nested-file count without writing anything.
     #[test]
     fn plan_mv_for_directory_emits_is_directory() {
@@ -347,11 +347,11 @@ mod tests {
         assert!(!realm.path().join("dst").exists());
     }
 
-    /// rem-qjqu: `remargin restrict` projects the full native-tool
+    /// `remargin restrict` projects the full native-tool
     /// fence into Claude settings — editor-tool denies, dot-folder
     /// defaults, the `BASH_MUTATORS` list (including dest-side `mv *`),
-    /// and source-side `mv` patterns (rem-0j2x / T44). Slice A of
-    /// `rem-egp9` removed these along with the remargin-specific
+    /// and source-side `mv` patterns. Slice A of
+    /// removed these along with the remargin-specific
     /// rules; this task restored the native-tool half.
     #[test]
     fn restrict_projects_full_mv_deny_set() {
@@ -391,7 +391,7 @@ mod tests {
 
         // Dest-side from BASH_MUTATORS (`mv *`):
         let dest_pattern = format!("Bash(mv * {target_root}/**)");
-        // Source-side trio (rem-0j2x / T44):
+        // Source-side trio:
         let src_bare = format!("Bash(mv {target_root}/**)");
         let src_to_anywhere = format!("Bash(mv {target_root}/** *)");
         let src_to_self = format!("Bash(mv {target_root}/** {target_root}/**)");

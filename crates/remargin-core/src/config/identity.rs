@@ -1,4 +1,4 @@
-//! Three-branch identity resolver (rem-11u).
+//! Three-branch identity resolver.
 //!
 //! A strict, disjoint flow that cannot produce a partially-inherited
 //! identity. CLI args declare identity — they are either:
@@ -12,7 +12,7 @@
 //!    the file never matches a concrete value in the flag.
 //!
 //! Replaces the earlier field-by-field CLI overlay onto a walked config,
-//! which let rem-ce4 silently misattribute by mixing halves of two
+//! which let silently misattribute by mixing halves of two
 //! different identities.
 
 use core::fmt;

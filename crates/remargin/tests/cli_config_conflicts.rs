@@ -1,11 +1,11 @@
-//! rem-11u / rem-zlx3: `--config` must clap-conflict with `--identity`,
+//! `--config` must clap-conflict with `--identity`,
 //! `--type`, and `--key` on every identity-aware subcommand. Mixing a
 //! whole-identity declaration with partial-identity flags produces the
 //! "inherited-part-from-walk, replaced-part-from-flag" class of silent
-//! misattribution (rem-ce4). Clap rejects the combination at parse time
+//! misattribution. Clap rejects the combination at parse time
 //! rather than letting the three-branch resolver see it.
 //!
-//! Post-rem-zlx3 the identity group is per-subcommand (not global), so
+//! the identity group is per-subcommand (not global), so
 //! the flags go AFTER the subcommand name. This file iterates over
 //! every subcommand that flattens `IdentityArgs` and locks the conflict
 //! in — regressing any of them would silently drop `--config` for that

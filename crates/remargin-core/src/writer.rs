@@ -36,10 +36,10 @@ pub const FORBIDDEN_TARGETS: &[&str] = &[".remargin.yaml", ".remargin-registry.y
 pub enum InsertPosition {
     /// Place after the comment with this ID.
     AfterComment(String),
-    /// Place after the ATX heading addressed by this `>`-separated path
-    /// (rem-5oqx). The resolver runs at write time against the current
-    /// document state; `--after-heading` is a lookup convenience and
-    /// the comment's stored `line` field still holds the resolved line.
+    /// Place after the ATX heading addressed by this `>`-separated path.
+    /// The resolver runs at write time against the current document
+    /// state; `--after-heading` is a lookup convenience and the
+    /// comment's stored `line` field still holds the resolved line.
     AfterHeading(String),
     /// Place after this line number (1-indexed).
     AfterLine(usize),
@@ -50,8 +50,7 @@ pub enum InsertPosition {
 impl InsertPosition {
     /// Canonical priority-based builder used by every adapter (CLI + MCP)
     /// to turn the four placement knobs (`reply_to`, `after_comment`,
-    /// `after_heading`, `after_line`) into an [`InsertPosition`]
-    /// (rem-3a2 / rem-5oqx).
+    /// `after_heading`, `after_line`) into an [`InsertPosition`].
     ///
     /// Precedence: replies always go after their parent (explicit
     /// placement is ignored for replies); `after_comment` beats
@@ -81,7 +80,7 @@ impl InsertPosition {
 /// Collapse an ack list to one entry per identity, preserving the latest
 /// timestamp.
 ///
-/// Remargin's invariant (see rem-gx9v): every write produces a document
+/// Remargin's invariant: every write produces a document
 /// whose `ack:` lists are deduped per identity. Parsed docs may carry
 /// legacy duplicates (older bug accumulated multiple acks for the same
 /// author when an auto-ack fired more than once); writes call this helper
@@ -216,7 +215,7 @@ pub fn insert_comment(
     comment: Comment,
     position: &InsertPosition,
 ) -> Result<()> {
-    // rem-5oqx: resolve heading-anchored placement up front and recurse
+    // resolve heading-anchored placement up front and recurse
     // with the concrete line. Resolution walks the document's current
     // markdown, so prior batch insertions that shifted the body are
     // picked up transparently — heading anchors do not need their own

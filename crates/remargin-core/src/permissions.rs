@@ -1,4 +1,4 @@
-//! Layer 1 permissions enforcement (rem-yj1j.2 / T23).
+//! Layer 1 permissions enforcement.
 //!
 //! Every mutating remargin op (CLI or MCP) must call [`op_guard::pre_mutate_check`]
 //! immediately after resolving its target path. The check parent-walks

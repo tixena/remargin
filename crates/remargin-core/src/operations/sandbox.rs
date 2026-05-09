@@ -4,7 +4,7 @@
 //! `sandbox: [author@timestamp, ...]` frontmatter key. Shape mirrors comment
 //! `ack` but lives on the document rather than on a comment.
 //!
-//! Semantics (see task rem-iow):
+//! Semantics:
 //!
 //! - **Idempotent**: adding twice as the same identity preserves the
 //!   original timestamp. "Is it staged" is the observable state, not

@@ -34,7 +34,7 @@ use crate::writer::{self, InsertPosition};
 pub struct BatchCommentOp {
     /// ID of a comment this should appear after (position).
     pub after_comment: Option<String>,
-    /// Heading-anchored insertion point (rem-5oqx). `>`-separated path
+    /// Heading-anchored insertion point. `>`-separated path
     /// of prefix segments resolved against ATX headings at write time.
     /// Mutually exclusive with `after_comment` and `after_line`.
     pub after_heading: Option<String>,
@@ -87,7 +87,7 @@ impl BatchCommentOp {
             .and_then(Value::as_u64)
             .and_then(|n| usize::try_from(n).ok());
 
-        // rem-5oqx: at most one position anchor per op. The three
+        // at most one position anchor per op. The three
         // fields share storage at write time; passing more than one
         // is a hard error before any byte hits disk.
         let anchor_count = usize::from(after_comment.is_some())
@@ -173,12 +173,11 @@ pub fn batch_comment(
 ) -> Result<Vec<String>> {
     writer::ensure_not_forbidden_target(path)?;
     // All sub-ops mutate the same `path`, so one guard call covers
-    // every sub-op (rem-mu9h scenario 18 — atomic refusal). If the
-    // path becomes restricted, the entire batch is rejected before
-    // any I/O.
+    // every sub-op (atomic refusal). If the path becomes restricted,
+    // the entire batch is rejected before any I/O.
     pre_mutate_check_for_caller(system, "batch", path, &config.caller_info())?;
 
-    // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
+    // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
 
@@ -188,7 +187,7 @@ pub fn batch_comment(
         .context("identity is required to create comments")?;
 
     // Registry + strict-mode key presence are validated at resolve time
-    // (rem-xc8x); this just fetches the signing key when the op needs one.
+    //; this just fetches the signing key when the op needs one.
     let signing_key = cfg.resolve_signing_key(identity);
 
     let author_type = cfg.author_type.clone().unwrap_or(AuthorType::Human);
@@ -209,7 +208,7 @@ pub fn batch_comment(
     let mut created_ids: Vec<String> = Vec::new();
 
     // Track line shifts from previous AfterLine insertions so subsequent
-    // AfterLine targets can be adjusted.  Each entry is (original_target_line,
+    // AfterLine targets can be adjusted. Each entry is (original_target_line,
     // number_of_lines_added_by_that_insertion).
     let mut line_shifts: Vec<(usize, usize)> = Vec::new();
 
@@ -217,9 +216,9 @@ pub fn batch_comment(
         let existing_ids = doc.comment_ids();
         let new_id = id::generate(&existing_ids);
 
-        // rem-n4x7: batch does not yet surface remargin_kind; `None`
+        // batch does not yet surface remargin_kind; `None`
         // keeps the checksum identical to the pre-field implementation.
-        // rem-49w0 threads kinds through `BatchCommentOp`.
+        // threads kinds through `BatchCommentOp`.
         let remargin_kind: Option<Vec<String>> = None;
         let checksum = compute_checksum(&op.content, &[]);
 
@@ -332,7 +331,7 @@ pub fn batch_comment(
 /// Write the batch result with preservation check + post-mutation verify gate.
 ///
 /// Per the "verify runs once after all ops complete in-memory" rule in
-/// rem-ef1 — batch is atomic end-to-end.
+/// — batch is atomic end-to-end.
 fn write_batch_result(
     system: &dyn System,
     path: &Path,
@@ -357,11 +356,11 @@ fn write_batch_result(
 /// `AfterLine` targets for lines added by previous insertions.
 ///
 /// `line_shifts` contains `(original_target_line, lines_added)` from
-/// prior `AfterLine` insertions in this batch.  Any new `AfterLine`
+/// prior `AfterLine` insertions in this batch. Any new `AfterLine`
 /// whose target is >= a prior target gets shifted by that insertion's
 /// line count. `AfterHeading` does not need a shift table — the
 /// resolver runs against the document's current state at insertion
-/// time, so prior body shifts are picked up transparently (rem-5oqx).
+/// time, so prior body shifts are picked up transparently.
 fn resolve_position_adjusted(
     op: &BatchCommentOp,
     line_shifts: &[(usize, usize)],

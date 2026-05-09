@@ -1,7 +1,7 @@
 //! Tests for `verify_document` and `commit_with_verify`.
 //!
 //! The severity matrix is exercised as one test per (status × mode) cell
-//! per rem-ef1's acceptance criteria. `RowStatus` / `SignatureStatus`
+//! 's acceptance criteria. `RowStatus` / `SignatureStatus`
 //! rendering is also exercised.
 
 extern crate alloc;
@@ -511,7 +511,7 @@ fn ack_op_gate_blocks_when_existing_comment_has_bad_checksum() {
     // integrity incident. Any subsequent mutation must be blocked and
     // leave the file byte-identical (the gate catches it on the way out).
     //
-    // This is the "bad checksum on disk" regression guard from rem-ef1's
+    // This is the "bad checksum on disk" regression guard 's
     // acceptance list.
     let corrupted = "\
 ---
@@ -552,7 +552,7 @@ alice's note
     );
 }
 
-// ---------- rem-dyz: strict mode fails fast at creation time ----------
+// ----------: strict mode fails fast at creation time ----------
 //
 // Creation-time fail-fast is paired with the post-write verify gate. The
 // verify gate catches unsigned artifacts on the NEXT mutation (too late,
@@ -572,7 +572,7 @@ fn strict_cfg_with_alice_no_key() -> ResolvedConfig {
 
 #[test]
 fn create_comment_strict_registered_active_no_key_file_byte_identical() {
-    // The headline rem-dyz scenario: strict + registered active + no key
+    // The headline scenario: strict + registered active + no key
     // configured must never corrupt disk.
     //
     // Post-xc8x the primary gate is at resolve time (the paired test

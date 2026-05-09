@@ -115,11 +115,11 @@ fn frontmatter_cleanup() {
     assert!(!content.contains("remargin_last_activity"));
 }
 
-// Note: per-op `--dry-run` was removed in rem-0ry; `plan purge` covers
+// Note: per-op `--dry-run` was removed in; `plan purge` covers
 // that preview path now.
 
 // ---------------------------------------------------------------------
-// Layer 1 op-guard wiring (rem-yj1j.2 / T23) — purge is the
+// Layer 1 op-guard wiring — purge is the
 // representative integration. The follow-up ticket wires the remaining
 // mutating ops; the op_guard helper itself is exhaustively tested under
 // `permissions::op_guard::tests`.
@@ -202,7 +202,7 @@ fn no_excessive_blank_lines() {
 }
 
 // ---------------------------------------------------------------------
-// Directory purge (rem-nrjy). Recursive `purge --recursive` walks a
+// Directory purge. Recursive `purge --recursive` walks a
 // directory and applies a per-file op_guard check + purge to every
 // visible `.md` file under it. Per-file refusals never abort the
 // rest of the walk.

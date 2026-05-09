@@ -97,7 +97,7 @@ pub fn is_text(path: &Path) -> bool {
 /// When `unrestricted` is `true`, the sandbox check is skipped and the
 /// path is resolved directly (absolute paths bypass the base join).
 ///
-/// `trusted_roots` (rem-egp9): when the resolved path is not under
+/// `trusted_roots`: when the resolved path is not under
 /// `base` but IS under one of the declared trusted roots, the call
 /// succeeds. This is what makes `mcp__remargin__write` to a path
 /// inside a declared trusted root that lives outside the spawn cwd
@@ -159,7 +159,7 @@ pub fn resolve_sandboxed(
 /// When `unrestricted` is `true`, the sandbox check is skipped
 /// (absolute paths bypass the base join).
 ///
-/// `trusted_roots` (rem-egp9): when the parent / nearest ancestor is
+/// `trusted_roots`: when the parent / nearest ancestor is
 /// not under `base` but IS under one of the declared trusted roots,
 /// the call succeeds and the missing directories are created. This
 /// lets `mcp__remargin__write` create new files inside a declared

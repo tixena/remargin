@@ -35,7 +35,7 @@ use anyhow::{Result, bail};
 
 /// Hard upper bound on kind string length.
 ///
-/// Matches the acceptance criteria for rem-n4x7 (`[a-zA-Z0-9_\- ]{1,15}`).
+/// Matches the acceptance criteria for (`[a-zA-Z0-9_\- ]{1,15}`).
 /// Keeps tags short enough to render as compact chips in the Obsidian
 /// sidebar and to discourage abuse as free-text mini-content.
 pub const MAX_KIND_LENGTH: usize = 15;
@@ -126,7 +126,7 @@ pub fn validate_single(kind: &str) -> Result<()> {
 ///
 /// Kept in this module so the `comments` list-a-single-file path and
 /// the `query` walk-the-tree path share a single implementation — the
-/// design doc for rem-49w0 explicitly calls out the previous divergence
+/// design doc for explicitly calls out the previous divergence
 /// between those two surfaces as a bug.
 #[must_use]
 pub fn matches_kind_filter(comment_kinds: &[String], filter: &[String]) -> bool {

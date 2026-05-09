@@ -1,4 +1,4 @@
-//! `plan unprotect` projection (rem-6eop / T43).
+//! `plan unprotect` projection.
 //!
 //! [`project_unprotect`] mirrors [`crate::permissions::unprotect::unprotect`]
 //! up through the lookup / rule-discovery step, but never writes. The
@@ -233,7 +233,7 @@ fn read_yaml_entry(
 ///
 /// Mirrors the live `revert_rules` membership check via
 /// [`canonicalize_rule`] so legacy `//` / `///` prefix forms still
-/// match (rem-em33).
+/// match.
 fn simulate_settings_scrub(
     system: &dyn System,
     settings_file: &Path,

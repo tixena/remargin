@@ -1,6 +1,6 @@
 //! Cross-mode realm hazard for the singular `remargin comment` path.
 //!
-//! Companion to `cli_batch_strict_realm.rs` (rem-90tr). Same scenario,
+//! Companion to `cli_batch_strict_realm.rs`. Same scenario,
 //! same invariant: a caller standing in an open-mode dir who writes a
 //! single comment into a strict-mode realm must not leave an unsigned
 //! comment in that realm. Either the write escalates to strict (signs)

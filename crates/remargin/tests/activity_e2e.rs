@@ -1,8 +1,8 @@
-//! End-to-end activity integration tests (rem-g3sy.5 / T35).
+//! End-to-end activity integration tests.
 //!
 //! Exercises the full stack — sandbox-add timestamp refresh
-//! (rem-g3sy.1), edit-stamps-`edited_at` (rem-g3sy.2),
-//! `gather_activity` (rem-g3sy.3), CLI / MCP wiring (rem-g3sy.4) —
+//!, edit-stamps-`edited_at`,
+//! `gather_activity`, CLI / MCP wiring —
 //! against real-filesystem temp dirs.
 
 #[cfg(test)]

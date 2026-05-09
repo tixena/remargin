@@ -291,7 +291,7 @@ fn signature_with_all_fields() {
 /// silently invalidating every comment on disk.
 #[test]
 fn empty_kinds_produce_legacy_checksum() {
-    // Pre-computed on 0.1.6 (pre-rem-n4x7) via the old one-arg API.
+    // Pre-computed on 0.1.6 via the old one-arg API.
     let expected_hello = "sha256:64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c";
     assert_eq!(compute_checksum("Hello world", &[]), expected_hello);
 }
@@ -347,14 +347,14 @@ fn signature_back_compat_with_empty_kinds() {
 
     // The stored signature still verifies against the (still-empty)
     // kinds list — this is the guarantee that keeps existing comments
-    // verifiable after rem-n4x7 lands.
+    // verifiable.
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(result, "signature with empty kinds should verify");
 }
 
 /// Checksum back-compat: two calls with the same content and no
 /// kinds must be byte-identical — and adding a kind must change the
-/// hash. Without this equivalence every pre-rem-n4x7 comment on disk
+/// hash. Without this equivalence every earlier comment on disk
 /// would fail `verify_checksum` after the field landed.
 #[test]
 fn compute_checksum_with_empty_kinds_ignores_the_suffix() {

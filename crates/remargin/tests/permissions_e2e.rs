@@ -1,6 +1,6 @@
-//! End-to-end permissions integration tests (rem-yj1j.8 / rem-637x).
+//! End-to-end permissions integration tests.
 //!
-//! Covers the cross-cutting scenarios from the rem-yj1j.8 plan that
+//! Covers the cross-cutting scenarios from the plan that
 //! the per-feature integration files (`cli_restrict.rs`,
 //! `cli_unprotect.rs`, `cli_permissions.rs`) do not exercise on
 //! their own:
@@ -90,7 +90,7 @@ mod tests {
         serde_json::from_str(&body).unwrap()
     }
 
-    /// E3 (rem-888p): the MCP `restrict` tool is intentionally absent
+    /// E3: the MCP `restrict` tool is intentionally absent
     /// from the surface. Calling it leaves the realm completely
     /// untouched (no .remargin.yaml, no settings file mutation), and
     /// the response is a CLI-pointing tool error. Replaces the
@@ -126,7 +126,7 @@ mod tests {
         assert_eq!(
             response["result"]["isError"].as_bool(),
             Some(true),
-            "MCP restrict must surface as a tool error (rem-888p)"
+            "MCP restrict must surface as a tool error"
         );
 
         // No realm artifacts may have been created by the rejected
@@ -355,9 +355,9 @@ mod tests {
 
     /// E16: `also_deny_bash` lands in the Claude settings as
     /// `Bash(<cmd> * //...)` denies. Uses commands that are NOT in
-    /// the default deny list (rem-p74a expanded the defaults to cover
-    /// `curl` / `wget` and friends, so the original test would pass
-    /// even if `--also-deny-bash` was a no-op).
+    /// the default deny list (the defaults cover `curl` / `wget` and
+    /// friends, so the original test would pass even if
+    /// `--also-deny-bash` was a no-op).
     #[test]
     fn also_deny_bash_propagates_into_settings() {
         let realm = realm_with_claude();

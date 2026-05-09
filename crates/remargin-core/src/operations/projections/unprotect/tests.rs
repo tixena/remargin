@@ -1,5 +1,4 @@
-//! Unit tests for [`crate::operations::projections::unprotect::project_unprotect`]
-//! (rem-6eop / T43).
+//! Unit tests for [`crate::operations::projections::unprotect::project_unprotect`].
 
 use std::io;
 use std::path::{Path, PathBuf};

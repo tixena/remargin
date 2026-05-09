@@ -1,7 +1,7 @@
 //! Extension-based MIME type detection.
 //!
 //! Source of truth is the file extension — no content-sniffing. Used by
-//! `metadata` (rem-lqz) and, once it lands, `get --binary` (rem-cdr) so
+//! `metadata` and, once it lands, `get --binary` so
 //! agents can decide whether a file is worth fetching before pulling bytes.
 
 use std::path::Path;

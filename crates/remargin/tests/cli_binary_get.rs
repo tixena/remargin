@@ -1,4 +1,4 @@
-//! End-to-end tests for `remargin get --binary` (rem-cdr).
+//! End-to-end tests for `remargin get --binary`.
 //!
 //! Verifies the three binary-mode output shapes described in the task:
 //! - Default (no `--out`, no `--json`): raw bytes to stdout.

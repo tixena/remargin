@@ -1,5 +1,4 @@
-//! `remargin purge` integration tests, focused on the directory form
-//! introduced by rem-nrjy.
+//! `remargin purge` integration tests, focused on the directory form.
 //!
 //! The unit-test layer
 //! (`crates/remargin-core/src/operations/purge/tests.rs`) covers the

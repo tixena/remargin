@@ -1,4 +1,4 @@
-//! `remargin restrict` core (rem-yj1j.5 / T26, slice 1 — `rem-aqnn`).
+//! `remargin restrict` core.
 //!
 //! [`restrict`] is the public entry point: anchor discovery (walk up
 //! to the nearest `.claude/` ancestor), path canonicalisation, an
@@ -18,9 +18,9 @@
 //! because `.remargin.yaml` is a config file, not a comment-managed
 //! markdown document.
 //!
-//! ## rem-is4z bypass
+//! ## bypass
 //!
-//! `rem-is4z` (the agent-side guard against writing `.remargin.yaml`
+//! (the agent-side guard against writing `.remargin.yaml`
 //! through the `write` / `edit` ops) intentionally does NOT cover this
 //! module. `restrict` (and the future `unprotect`) is the explicit,
 //! sanctioned write path: the user invokes it deliberately through a
@@ -160,7 +160,7 @@ pub struct RestrictOutcome {
 /// `settings_files` is supplied by the caller so the CLI can pass
 /// the resolved project + user-scope paths and tests can pass a
 /// hermetic in-mock pair. The function does NOT do `~` expansion;
-/// the caller (rem-rdjy) is responsible for that.
+/// the caller is responsible for that.
 ///
 /// # Errors
 ///
@@ -267,7 +267,7 @@ pub fn find_claude_anchor(system: &dyn System, cwd: &Path) -> Result<PathBuf> {
 
 /// Sanctioned in-place editor for `<anchor>/.remargin.yaml`.
 ///
-/// Bypasses the rem-is4z guard (which blocks the public `write` /
+/// Bypasses the guard (which blocks the public `write` /
 /// `edit` ops on `.remargin.yaml`). Restricted to this module so the
 /// audit boundary stays explicit: only `restrict` and (later)
 /// `unprotect` may use it.
@@ -441,7 +441,7 @@ pub fn simulate_upsert_remargin_yaml(
 
 /// Persist the YAML body produced by [`simulate_upsert_remargin_yaml`].
 ///
-/// Sanctioned write that bypasses the rem-is4z agent guard. Returns
+/// Sanctioned write that bypasses the agent guard. Returns
 /// `true` when the file did not exist before this call.
 ///
 /// # Errors

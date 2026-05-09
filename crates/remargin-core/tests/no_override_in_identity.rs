@@ -1,13 +1,13 @@
-//! Structural guard: System B must not come back (rem-58d6).
+//! Structural guard: System B must not come back.
 //!
-//! System B was the pre-rem-11u identity overlay model (`CliOverrides` +
+//! System B was the earlier identity overlay model (`CliOverrides` +
 //! `ResolvedConfig::resolve(cli: &CliOverrides)` + a `cli.*.or(base.*)`
 //! merge + `with_identity_overrides` + `build_overrides`). The CLI's
 //! `--config` flag silently dropped on 15 subcommands because that
 //! model had nowhere to put a whole-config pointer. The three-branch
 //! resolver (`config::identity::resolve_identity`, System A) was
 //! supposed to replace it but the CLI adapter was not rewired until
-//! rem-58d6.
+//! later.
 //!
 //! This test grep-gates the whole `crates/` tree. It fails CI if any of
 //! the deleted System B symbols are reintroduced OR if the word
@@ -153,7 +153,7 @@ mod tests {
         assert!(
             hits.is_empty(),
             "the word \"override\" has no place in identity resolution \
-             code (rem-58d6). Rename / rephrase the offenders, or add \
+             code. Rename / rephrase the offenders, or add \
              them to ALLOWLIST with a reason. Offenders:\n{}",
             hits.join("\n")
         );

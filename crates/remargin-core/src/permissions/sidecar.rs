@@ -1,5 +1,4 @@
-//! Sidecar manager for `restrict` reversal (rem-yj1j.4 / T25, slice 2 —
-//! `rem-70za`).
+//! Sidecar manager for `restrict` reversal.
 //!
 //! `remargin restrict` writes Claude permission rules into both
 //! `.claude/settings.local.json` (project-scope) and
@@ -17,18 +16,18 @@
 //!
 //! ```json
 //! {
-//!   "version": 1,
-//!   "entries": {
-//!     "/abs/path/to/restricted": {
-//!       "added_at": "2026-04-26T10:00:00Z",
-//!       "added_to_files": [
-//!         ".claude/settings.local.json",
-//!         "/home/u/.claude/settings.json"
-//!       ],
-//!       "allow": [],
-//!       "deny": ["Edit(/abs/path/to/restricted/**)", "..."]
-//!     }
-//!   }
+//! "version": 1,
+//! "entries": {
+//! "/abs/path/to/restricted": {
+//! "added_at": "2026-04-26T10:00:00Z",
+//! "added_to_files": [
+//! ".claude/settings.local.json",
+//! "/home/u/.claude/settings.json"
+//! ],
+//! "allow": [],
+//! "deny": ["Edit(/abs/path/to/restricted/**)", "..."]
+//! }
+//! }
 //! }
 //! ```
 //!
@@ -178,7 +177,7 @@ pub fn remove_entry(
 ///
 /// JSON is pretty-printed for diff-friendly inspection. Writes go
 /// through `system.write` directly — atomic write-then-rename lives
-/// with slice 3 (`rem-7m4u`) since it needs careful coordination with
+/// with slice 3 since it needs careful coordination with
 /// the settings-file merge.
 ///
 /// # Errors

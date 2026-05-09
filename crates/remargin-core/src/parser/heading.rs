@@ -7,7 +7,7 @@
 //! returns the line of the first heading whose text matches the
 //! requested path.
 //!
-//! ## Match rules (rem-5oqx)
+//! ## Match rules
 //!
 //! - Only ATX headings (`#` … `######`) outside fenced code blocks and
 //!   outside the YAML frontmatter participate in the walk. Setext

@@ -1,8 +1,8 @@
-//! `remargin unprotect` integration tests (rem-yj1j.6 / rem-hsg4).
+//! `remargin unprotect` integration tests.
 //!
 //! Exercises the CLI subcommand and the matching MCP tool against
 //! real-filesystem temp dirs. Covers scenarios 12-16 of the
-//! rem-yj1j.6 plan: end-to-end restrict + unprotect round-trip,
+//! plan: end-to-end restrict + unprotect round-trip,
 //! Layer 1 enforcement transitions, wildcard cycle, --json output,
 //! MCP parity.
 
@@ -67,7 +67,7 @@ mod tests {
         assert_status(&out, 0);
     }
 
-    /// Scenario 12 (rem-egp9): end-to-end restrict + unprotect leaves
+    /// Scenario 12: end-to-end restrict + unprotect leaves
     /// the realm in a state that no longer carries the projected rule.
     /// Under the minimised projection the only deny `restrict` emits
     /// is `Bash(remargin *)`.
@@ -158,7 +158,7 @@ mod tests {
     }
 
     /// Scenario 14: wildcard restrict + wildcard unprotect cycle.
-    /// After rem-bimq the YAML compaction prunes the empty restrict
+    /// the YAML compaction prunes the empty restrict
     /// array AND the now-empty permissions block.
     #[test]
     fn wildcard_restrict_and_unprotect_cycle() {
@@ -194,7 +194,7 @@ mod tests {
         assert!(value.get("warnings").and_then(Value::as_array).is_some());
     }
 
-    /// rem-888p: `unprotect` is intentionally absent from the MCP
+    /// `unprotect` is intentionally absent from the MCP
     /// surface. `tools/list` must not advertise it, and dispatching it
     /// must return a CLI-pointing tool error. Replaces the previous
     /// MCP-parity test (`mcp_unprotect_matches_cli_json`).
@@ -223,7 +223,7 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(
             !names.contains(&"unprotect"),
-            "unprotect must not appear in tools/list (rem-888p), got: {names:?}"
+            "unprotect must not appear in tools/list, got: {names:?}"
         );
 
         // tools/call with name=unprotect returns a CLI-pointing tool error.
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(
             call_response["result"]["isError"].as_bool(),
             Some(true),
-            "unprotect dispatch must surface as a tool error (rem-888p)"
+            "unprotect dispatch must surface as a tool error"
         );
         let text = call_response["result"]["content"][0]["text"]
             .as_str()
@@ -256,13 +256,12 @@ mod tests {
         assert!(text.contains("remargin unprotect"), "got: {text}");
     }
 
-    /// rem-s669 (rem-egp9 update): when the projected deny rule has
-    /// been hand-deleted from BOTH the realm-local and the user-scope
-    /// settings file between `restrict` and `unprotect`, the warning
-    /// emitter must surface both — one warning per file — and the
-    /// rest of the unprotect work (yaml + sidecar) must complete
-    /// cleanly. Under the minimised projection the only deny is
-    /// `Bash(remargin *)`.
+    /// When the projected deny rule has been hand-deleted from BOTH
+    /// the realm-local and the user-scope settings file between
+    /// `restrict` and `unprotect`, the warning emitter must surface
+    /// both — one warning per file — and the rest of the unprotect
+    /// work (yaml + sidecar) must complete cleanly. Under the
+    /// minimised projection the only deny is `Bash(remargin *)`.
     #[test]
     fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
         let realm = realm_with_claude();
@@ -362,7 +361,7 @@ mod tests {
         );
     }
 
-    /// rem-bimq: `--strict` against an unrestricted path exits
+    /// `--strict` against an unrestricted path exits
     /// non-zero with a clear error. The yaml stays untouched.
     #[test]
     fn cli_unprotect_strict_unrestricted_path_fails() {
@@ -378,19 +377,19 @@ mod tests {
         assert!(!yaml_path.exists(), "no .remargin.yaml should be created");
     }
 
-    // rem-888p: the previous `mcp_unprotect_strict_unrestricted_path_returns_error`
-    // (rem-bimq MCP parity) is gone — `unprotect` is no longer exposed
-    // via MCP. Strict-mode error coverage now lives in the CLI-only
+    // The previous `mcp_unprotect_strict_unrestricted_path_returns_error`
+    // is gone — `unprotect` is no longer exposed via MCP. Strict-mode
+    // error coverage now lives in the CLI-only
     // `cli_unprotect_strict_unrestricted_path_fails` above; the surface
     // removal itself is asserted by `unprotect_absent_from_mcp_surface`.
 
     // -----------------------------------------------------------------
-    // rem-egp9 — legacy projected rules scrubbed by unprotect via the
+    // — legacy projected rules scrubbed by unprotect via the
     // existing sidecar mechanism.
     // -----------------------------------------------------------------
 
-    /// rem-egp9 acceptance: the legacy ~80 projected deny rules
-    /// emitted by pre-rem-egp9 `restrict` (per-tool path denies,
+    /// acceptance: the legacy ~80 projected deny rules
+    /// emitted by older `restrict` runs (per-tool path denies,
     /// dot-folder defaults, ~70 Bash-mutator entries, source-side mv
     /// patterns) are scrubbed cleanly when `unprotect` runs against
     /// the matching sidecar.
@@ -398,7 +397,7 @@ mod tests {
     /// Migration story: users who restrict-then-unprotect-after-upgrade
     /// get all their legacy rules cleaned up via the existing sidecar
     /// machinery, with no special-case migration code. The drift
-    /// detector (rem-lwxa) flags users who never run unprotect.
+    /// detector flags users who never run unprotect.
     #[test]
     fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
         // Load the fixture files.

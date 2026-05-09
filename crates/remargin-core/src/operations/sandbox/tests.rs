@@ -153,7 +153,7 @@ fn add_to_new_file_adds_entry() {
     assert!(content.contains("eduardo@"));
 }
 
-/// rem-g3sy.1 / T31: re-adding the same identity refreshes its
+/// re-adding the same identity refreshes its
 /// timestamp (so the activity command can surface re-sandboxing as a
 /// distinct event). The roster stays one-entry-per-identity, but
 /// the entry's `ts` field advances on every successful call.

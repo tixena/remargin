@@ -171,7 +171,7 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
 }
 
 fn group_allow_dot_folders(resolved: &ResolvedPermissions) -> Vec<AllowDotFoldersView> {
-    // Per rem-qdrw the resolver now preserves one entry per declaring
+    // the resolver now preserves one entry per declaring
     // `.remargin.yaml` so each view's `source_file` mirrors the
     // provenance already carried by `restrict` and `deny_ops`.
     resolved

@@ -88,7 +88,7 @@ impl<'params> CreateCommentParams<'params> {
 /// - The linter detects structural issues
 #[expect(
     clippy::too_many_lines,
-    reason = "linear comment-creation pipeline; rem-90tr added the realm-mode floor block at the top"
+    reason = "linear comment-creation pipeline added the realm-mode floor block at the top"
 )]
 pub fn create_comment(
     system: &dyn System,
@@ -99,7 +99,7 @@ pub fn create_comment(
     writer::ensure_not_forbidden_target(path)?;
     pre_mutate_check(system, "comment", path)?;
 
-    // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
+    // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
 
@@ -109,7 +109,7 @@ pub fn create_comment(
         .context("identity is required to create a comment")?;
 
     // Registry membership and strict-mode key presence are validated at
-    // `ResolvedConfig::resolve` time (rem-xc8x); the op just reads the
+    // `ResolvedConfig::resolve` time; the op just reads the
     // signing key it needs.
     let signing_key = cfg.resolve_signing_key(identity);
 
@@ -128,7 +128,7 @@ pub fn create_comment(
     let existing_ids = doc.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    // rem-49w0: accept `remargin_kind` from params. Validate before
+    // accept `remargin_kind` from params. Validate before
     // doing any work so a malformed tag never touches the document.
     // An empty slice becomes `None` on the comment so the YAML writer
     // emits no `remargin_kind:` line — preserving pre-kind comments
@@ -452,13 +452,13 @@ pub fn edit_comment(
     writer::ensure_not_forbidden_target(path)?;
     pre_mutate_check(system, "edit", path)?;
 
-    // Realm-mode floor (rem-90tr): doc's realm wins if stricter than caller-mode.
+    // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
 
     let identity = cfg.identity.as_deref();
 
-    // Strict-mode key presence is validated at resolve time (rem-xc8x);
+    // Strict-mode key presence is validated at resolve time;
     // the op just reads the key when it needs one.
     let signing_key = identity.and_then(|author| cfg.resolve_signing_key(author));
 
@@ -481,14 +481,14 @@ pub fn edit_comment(
             Some(kinds.to_vec())
         };
     }
-    // rem-n4x7: rehash against the (possibly replaced, possibly
+    // rehash against the (possibly replaced, possibly
     // preserved) kinds so the fresh checksum stays consistent with
     // the persisted YAML. `kinds()` returns `&[]` when the field is
     // absent, matching the pre-kind back-compat hinge in
     // [`compute_checksum`].
     cm.checksum = compute_checksum(new_content, cm.kinds());
 
-    // rem-g3sy.2 / T32: stamp the edit time so the activity command
+    // stamp the edit time so the activity command
     // can surface this edit as a distinct event. Original `ts`
     // (creation time) is preserved; `edited_at` is the new field.
     // The signature payload deliberately excludes `edited_at` so

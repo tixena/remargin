@@ -3,7 +3,7 @@
 //! Convert legacy inline comments (`user comments` / `agent comments`) to the
 //! Remargin format with proper IDs, checksums, and metadata.
 //!
-//! Two extras shipped together (rem-mxxx):
+//! Two extras shipped together:
 //!
 //! 1. **Per-role identities.** Callers may supply a `MigrateIdentities`
 //!    carrying a fully-resolved identity (author + optional signing key)
@@ -18,19 +18,19 @@
 //!    comments are treated as a conversation: the second comment
 //!    replies to the first, the third replies to the second, and so on.
 //!    The chain breaks on:
-//!    - any ATX heading at any level in body between two consecutive
-//!      legacy comments
-//!    - any non-whitespace prose in body between them (whitespace-only
-//!      body is *not* a break — adjacent fences with blank lines stay
-//!      linked)
-//!    - an already-Remargin `Segment::Comment` between them (foreign
-//!      conversation; do not splice through it)
-//!    - same role consecutively (`U → U` / `A → A`) — the second comment
-//!      starts a new root.
+//! - any ATX heading at any level in body between two consecutive
+//!   legacy comments
+//! - any non-whitespace prose in body between them (whitespace-only
+//!   body is *not* a break — adjacent fences with blank lines stay
+//!   linked)
+//! - an already-Remargin `Segment::Comment` between them (foreign
+//!   conversation; do not splice through it)
+//! - same role consecutively (`U → U` / `A → A`) — the second comment
+//!   starts a new root.
 //!
-//!    Each link also pushes an implicit `Acknowledgment` from the
-//!    replier onto the parent's `ack` list, since under the legacy
-//!    convention a reply *was* the acknowledgment.
+//! Each link also pushes an implicit `Acknowledgment` from the
+//! replier onto the parent's `ack` list, since under the legacy
+//! convention a reply *was* the acknowledgment.
 
 #[cfg(test)]
 mod tests;
@@ -142,8 +142,8 @@ struct ChainLink {
 /// the historical `legacy-user` / `legacy-agent` fallback.
 ///
 /// Callers who want to preview the outcome without writing should use
-/// `remargin plan migrate` (rem-0ry dropped the per-op `--dry-run` flag
-/// in favour of the uniform plan projection).
+/// `remargin plan migrate`; the per-op `--dry-run` flag has been
+/// dropped in favour of the uniform plan projection.
 ///
 /// # Errors
 ///
@@ -262,7 +262,7 @@ pub(crate) fn build_migrated_segments(
                 // Legacy migration never produces remargin_kind — those
                 // are a post-migration concept. `None` keeps the
                 // migrated-comment checksum byte-for-byte identical to
-                // the pre-rem-n4x7 implementation and leaves the
+                // the original implementation and leaves the
                 // `remargin_kind:` YAML line absent from the migrated
                 // block.
                 let remargin_kind: Option<Vec<String>> = None;

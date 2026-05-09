@@ -162,7 +162,7 @@ fn pending_for() {
 
 #[test]
 fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
-    // rem-ytbc test plan #1: only an unaddressed pending comment.
+    // test plan #1: only an unaddressed pending comment.
     let cm = make_comment("u", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -180,7 +180,7 @@ fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
 
 #[test]
 fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
-    // rem-ytbc test plan #2: addressed + unaddressed mixed; sorted.
+    // test plan #2: addressed + unaddressed mixed; sorted.
     // `<unassigned>` < `eduardo` lexicographically (`<` is U+003C,
     // before any ASCII letter), so the sentinel comes first.
     let addressed = make_comment(
@@ -206,7 +206,7 @@ fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
 
 #[test]
 fn pending_for_two_unaddressed_dedupes_sentinel() {
-    // rem-ytbc test plan #3: two unaddressed unacked comments produce
+    // test plan #3: two unaddressed unacked comments produce
     // a single `<unassigned>` entry.
     let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let cm2 = make_comment("b", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
@@ -226,7 +226,7 @@ fn pending_for_two_unaddressed_dedupes_sentinel() {
 
 #[test]
 fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
-    // rem-ytbc test plan #4: unaddressed but acked is no longer
+    // test plan #4: unaddressed but acked is no longer
     // pending; `<unassigned>` does not appear.
     let cm = make_comment(
         "a",
@@ -405,7 +405,7 @@ fn sandbox_non_sequence_errors() {
 }
 
 // -------------------------------------------------------------------
-// rem-g3sy.1 / T31: add_sandbox_entry_for refresh semantics.
+// add_sandbox_entry_for refresh semantics.
 //
 // Roster stays one-entry-per-identity, but the entry's `ts` field
 // advances on every successful call. The ts-equality short-circuit

@@ -1,42 +1,11 @@
-//! `remargin activity` core (rem-g3sy.3 / T33).
+//! `remargin activity` core. [`gather_activity`] walks managed `.md`
+//! under a starting path and returns per-file "what's changed" —
+//! comments, ack-roster entries, sandbox-roster entries past a cutoff.
 //!
-//! [`gather_activity`] is the single public entry point. Given a
-//! starting path (file or directory) and an optional `since` cutoff,
-//! it walks managed `.md` files and returns a structured per-file
-//! list of "what's changed" — comments, ack-roster entries, and
-//! sandbox-roster entries whose timestamp is after the cutoff.
-//!
-//! When `since` is `None`, the per-file cutoff is derived from the
-//! caller's last action in that file (latest of: a comment they
-//! authored, an ack they signed, or a sandbox roster entry they
-//! own). Files where the caller has never acted return everything
-//! (the "initial-touch" fallback). The design lives in
-//! `discussions/2026-04-26__activity_command_design.md` (eburgos
-//! notes vault).
-//!
-//! ## Surface boundaries
-//!
-//! - **Comments**: when [`crate::parser::Comment::edited_at`] is
-//!   set, the surface predicate uses `max(ts, edited_at)` and the
-//!   carried `ts` on the Change is that max so consumers see the
-//!   timestamp that triggered the surface (rem-g3sy.2).
-//! - **Acks**: each entry on a comment's ack roster is its own
-//!   change record (multiple acks on one comment → multiple
-//!   `Change::Ack` entries).
-//! - **Sandbox**: each sandbox-roster entry is its own change
-//!   record. Re-sandboxing is visible because rem-g3sy.1 makes the
-//!   timestamp refresh on every successful add.
-//!
-//! ## Out of scope
-//!
-//! Per the design doc:
-//! - No event framing — output is "changes," not events with deltas.
-//! - No body content hashing.
-//! - Deletions are silent (no tombstones in the data layer).
-//! - Reactions are NOT in v1.
-//!
-//! CLI / MCP wiring + `--pretty` formatting belong to T34
-//! (`rem-g3sy.4`).
+//! With `since = None` the per-file cutoff is the caller's last
+//! action in that file (comment authored, ack signed, or sandbox
+//! roster entry owned). Files the caller has never touched return
+//! everything (initial-touch fallback).
 
 #[cfg(test)]
 mod tests;
@@ -70,7 +39,7 @@ pub struct FileChanges {
     /// when `since` was `None`, this is the caller's last-action
     /// timestamp (or `None` for the initial-touch fallback).
     /// Surfaced so `--pretty` can announce the cutoff to the
-    /// reader and so JSON consumers can mirror it (rem-gb5j).
+    /// reader and so JSON consumers can mirror it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_applied: Option<DateTime<FixedOffset>>,
     /// Latest ts across all changes in this file. Mirrors the max
@@ -84,18 +53,10 @@ pub struct FileChanges {
 
 /// Discriminated change record. `kind` field is the JSON tag.
 ///
-/// Every variant exposes the actor under the **same field name**:
-/// `author`. Where the actor's type is knowable, `author_type` is
-/// also surfaced (matching [`crate::parser::AuthorType::as_str`] —
-/// `"human"` or `"agent"`). Field names are uniform on purpose so
-/// JSON consumers can read the actor without case-analysing on
-/// `kind` (rem-k93j).
-///
-/// `author_type` is `Option<String>` on non-comment kinds because
-/// the registry is the source of truth and may not contain every
-/// historical participant; when the registry has no entry for the
-/// actor, the field is omitted from the JSON output rather than
-/// silently defaulting.
+/// Every variant exposes the actor under the same field name:
+/// `author`, with optional `author_type` (`"human"` / `"agent"`).
+/// `author_type` is omitted when the registry has no entry for the
+/// actor (rather than silently defaulting).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 #[non_exhaustive]
@@ -124,8 +85,8 @@ pub enum Change {
         to: Vec<String>,
         ts: DateTime<FixedOffset>,
     },
-    /// A sandbox-roster entry landed (or refreshed via rem-g3sy.1)
-    /// after the cutoff. One record per (file, identity) pair.
+    /// A sandbox-roster entry landed (or refreshed) after the
+    /// cutoff. One record per (file, identity) pair.
     Sandbox {
         author: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -168,8 +129,7 @@ pub struct ActivityResult {
     /// `true` when the caller passed an explicit `since` cutoff;
     /// `false` when the per-file caller-last-action default was
     /// used. Drives the wording of the `--pretty` cutoff header
-    /// (rem-gb5j) — JSON consumers can read it as well to mirror
-    /// the same distinction.
+    /// and JSON consumers can mirror the same distinction.
     pub cutoff_explicit: bool,
     /// Files with at least one change. Sorted by path so the
     /// output is deterministic.
@@ -383,8 +343,7 @@ fn past_cutoff(ts: DateTime<FixedOffset>, cutoff: Option<DateTime<FixedOffset>>)
 /// Resolve `author_type` for a sandbox / ack actor against the
 /// loaded registry. Returns `None` when the registry is absent or
 /// has no entry for `identity` so the JSON output omits the field
-/// rather than guessing — consumers see a clear "unknown" signal
-/// (rem-k93j).
+/// rather than guessing — consumers see a clear "unknown" signal.
 fn lookup_author_type(registry: Option<&Registry>, identity: &str) -> Option<String> {
     registry?
         .participants

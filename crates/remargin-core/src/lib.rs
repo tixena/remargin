@@ -5,9 +5,8 @@
 //! signatures, and cross-document queries.
 
 // The `plan` tool's MCP schema is built from a single `serde_json::json!`
-// macro invocation that grew large enough to require a higher recursion
-// limit (rem-0j2x added the `mv` op fields to it). 256 keeps headroom for
-// further plan-op additions without the per-call cost of restructuring
+// macro invocation large enough to require a higher recursion limit. 256
+// keeps headroom for further plan-op additions without restructuring
 // the macro into smaller pieces.
 #![recursion_limit = "256"]
 

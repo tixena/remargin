@@ -562,7 +562,7 @@ fn query_expanded_comment_fields_complete() {
 }
 
 // ===========================================================================
-// Pending count bug-fix tests (rem-s6f)
+// Pending count bug-fix tests
 // ===========================================================================
 
 /// Document with a broadcast comment (no `to` field) plus a directed comment.
@@ -667,7 +667,7 @@ fn setup_pending_system() -> MockSystem {
 
 #[test]
 fn broadcast_counts_as_pending_after_rem_4j91() {
-    // Regression for rem-4j91. Before the fix, broadcast comments
+    // Regression for. Before the fix, broadcast comments
     // (empty `to`) were silently excluded from `--pending`. Now they
     // count as pending when unacked: mixed.md has one broadcast
     // (bcast, no acks) AND one directed pending (dir1), so
@@ -698,7 +698,7 @@ fn to_with_no_ack_is_pending() {
         .find(|r| r.path.to_str().unwrap().contains("mixed.md"))
         .unwrap();
 
-    // rem-4j91: bcast (broadcast, no acks) + dir1 (directed, no ack
+    // bcast (broadcast, no acks) + dir1 (directed, no ack
     // from eduardo) → 2 pending. pending_for only lists directed
     // recipients; the broadcast has no named recipients.
     assert_eq!(mixed.pending_count, 2);
@@ -784,7 +784,7 @@ fn pending_for_excludes_fully_acked() {
 
 #[test]
 fn unacked_broadcast_counts_as_pending() {
-    // rem-4j91: a fresh broadcast comment (empty `to`, no acks)
+    // a fresh broadcast comment (empty `to`, no acks)
     // must surface under `--pending`. Before the fix the broadcast
     // was silently excluded.
     let broadcast_only = "\
@@ -920,7 +920,7 @@ fn expanded_pending_for_partial_ack() {
 }
 
 // ===========================================================================
-// Default expanded + file path tests (rem-frc)
+// Default expanded + file path tests
 // ===========================================================================
 
 #[test]
@@ -1066,7 +1066,7 @@ fn query_result_json_shape_matches_schema() {
     let first = results.first().unwrap();
 
     // Serialize the whole result via serde (this is what the CLI's
-    // `--json query` output relies on after rem-w0b).
+    // `--json query` output relies on ).
     let value = serde_json::to_value(first).unwrap();
     let obj = value.as_object().unwrap();
 
@@ -1180,7 +1180,7 @@ Minimal.
 }
 
 // ===========================================================================
-// content_regex tests (rem-0vh)
+// content_regex tests
 // ===========================================================================
 
 #[test]
@@ -1307,7 +1307,7 @@ fn content_regex_no_match_yields_empty_results() {
 }
 
 // ===========================================================================
-// pending_for_me + pending_broadcast tests (rem-4j91)
+// pending_for_me + pending_broadcast tests
 // ===========================================================================
 
 /// Fixture covering the four pending shapes simultaneously:
@@ -1554,7 +1554,7 @@ fn pending_union_composes_with_author_filter() {
     assert_eq!(ids, vec!["dir_alice"]);
 }
 
-// ---------- kind filter (rem-49w0) ----------
+// ---------- kind filter ----------
 
 /// Build a document that carries two remargin blocks with distinct
 /// `remargin_kind` lists so the OR-semantics filter can be exercised

@@ -1,9 +1,9 @@
-//! Regression guard for CLI/MCP adapter bloat (rem-wpq).
+//! Regression guard for CLI/MCP adapter bloat.
 //!
 //! Every mutating surface in this workspace is implemented twice: once
 //! as a clap `cmd_*` helper in the CLI binary, and once as a `handle_*`
-//! tool handler in the in-process MCP server. After the rem-3a2 audit
-//! (and its follow-ups rem-oqv / rem-2ji / rem-e9c / rem-9ey), both
+//! tool handler in the in-process MCP server. After the audit
+//! (and its ), both
 //! adapter layers are meant to stay genuinely thin: argument extraction
 //! plus response formatting, with any non-trivial logic living once in
 //! core.
@@ -70,12 +70,12 @@ mod tests {
         // CLI: plan dispatcher — consolidated match over all PlanAction
         // variants, one arm per op. Shrinking further would duplicate
         // argument unwrapping between cmd_plan and core dispatch; the
-        // match itself is low-density mapping code (rem-oqv, rem-9ey).
+        // match itself is low-density mapping code.
         m.insert(
             "cmd_plan",
             (
                 215_usize,
-                "consolidated PlanAction -> PlanRequest match (plan migrate resolves two per-role configs inline; plan restrict resolves anchor + user/project settings inline, rem-puy5; plan unprotect builds UnprotectArgs inline, rem-6eop; plan mv adds a 5-line src/dst/force unwrap, rem-0j2x)",
+                "consolidated PlanAction -> PlanRequest match (plan migrate resolves two per-role configs inline; plan restrict resolves anchor + user/project settings inline; plan unprotect builds UnprotectArgs inline; plan mv adds a 5-line src/dst/force unwrap)",
             ),
         );
         // CLI: sandbox top-level command dispatches across four
@@ -109,7 +109,7 @@ mod tests {
             "handle_plan",
             (
                 115,
-                "mirrors cmd_plan PlanAction dispatch (plan migrate resolves two per-role configs inline; plan mv adds a 4-line src/dst/force unwrap, rem-0j2x)",
+                "mirrors cmd_plan PlanAction dispatch (plan migrate resolves two per-role configs inline; plan mv adds a 4-line src/dst/force unwrap)",
             ),
         );
         // MCP: search handler extracts eight optional filter fields.
@@ -119,35 +119,35 @@ mod tests {
         );
         // CLI: get adapter splits json+line-numbers from the default
         // path, both branches threading the trusted_roots slice through
-        // the resolved-config-aware document::get (rem-egp9). The split
+        // the resolved-config-aware document::get. The split
         // is shape-shifting on flag combos, not logic; pushing it into
         // core would force the adapter to teach core about JSON output.
         m.insert(
             "cmd_get",
             (
                 60,
-                "two-branch get adapter (json+line-numbers vs default), threading trusted_roots through document::get (rem-egp9)",
+                "two-branch get adapter (json+line-numbers vs default), threading trusted_roots through document::get",
             ),
         );
         // CLI: get binary adapter dispatches across --out / --json /
         // raw-bytes shapes, threading trusted_roots through
-        // document::read_binary (rem-egp9).
+        // document::read_binary.
         m.insert(
             "cmd_get_binary",
             (
                 55,
-                "binary get dispatch (--out vs --json vs raw bytes), threading trusted_roots through read_binary (rem-egp9)",
+                "binary get dispatch (--out vs --json vs raw bytes), threading trusted_roots through read_binary",
             ),
         );
         // MCP: get handler likewise splits binary vs text response
         // shaping, both branches threading trusted_roots through
-        // document::read_binary / document::get (rem-egp9). Shape-only
+        // document::read_binary / document::get. Shape-only
         // adapter glue.
         m.insert(
             "handle_get",
             (
                 65,
-                "binary vs text response split, threading trusted_roots through read_binary/get (rem-egp9)",
+                "binary vs text response split, threading trusted_roots through read_binary/get",
             ),
         );
         m

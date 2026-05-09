@@ -703,7 +703,7 @@ body
 
 #[test]
 fn legacy_reactions_round_trip_to_new_shape() {
-    // A doc written under the pre-rem-f9qq schema (`reactions: {emoji: [author]}`)
+    // A doc written under the earlier schema (`reactions: {emoji: [author]}`)
     // must parse, then serialize back in the new shape with a synthesized
     // ts taken from the comment's own ts (no matching ack).
     let doc = "\
@@ -731,7 +731,7 @@ hello
     assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
     assert_eq!(entries[1].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
 
-    // Serialize back. New shape (`- author:` / `  ts:`) must appear; the
+    // Serialize back. New shape (`- author:` / ` ts:`) must appear; the
     // legacy `[eduardo, claude]` flow form must NOT.
     let written = parsed.to_markdown();
     assert!(

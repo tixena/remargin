@@ -1,8 +1,8 @@
-//! `remargin plan restrict` integration tests (rem-puy5).
+//! `remargin plan restrict` integration tests.
 //!
 //! Mirrors the `cli_restrict.rs` patterns: real-filesystem temp dirs,
 //! `assert_cmd` invocations, JSON output assertions. Covers
-//! scenarios 16-22 of the rem-puy5 testing plan: plan + apply parity,
+//! scenarios 16-22 of the testing plan: plan + apply parity,
 //! the no-write invariant, the noop covenant, allow-vs-deny overlap
 //! detection, anchor-surprise detection, MCP/CLI parity, and the
 //! wildcard projection.
@@ -134,7 +134,7 @@ mod tests {
         }
     }
 
-    /// rem-egp9: the projection no longer emits per-tool path denies,
+    /// the projection no longer emits per-tool path denies,
     /// so a user-scope `Read(<path>/**)` allow has nothing on the
     /// projected deny side to overlap with.
     #[test]
@@ -174,7 +174,7 @@ mod tests {
         );
     }
 
-    /// rem-em33: format-drift case — a single-slash `Read(/realm/**)`
+    /// format-drift case — a single-slash `Read(/realm/**)`
     /// allow on disk still surfaces an overlap against the projected
     /// `Read(/realm/**)` deny because the conflict detector
     /// canonicalises both forms.
@@ -212,7 +212,7 @@ mod tests {
         );
     }
 
-    /// rem-em33: emitted deny rules carry exactly one leading slash
+    /// emitted deny rules carry exactly one leading slash
     /// before the path glob (no `//`, no `///`), matching Claude's
     /// documented format and the user-scope settings file's rules.
     #[test]

@@ -4,8 +4,8 @@
 //!
 //! 1. [`verify_document`] — the pure, registry-driven function that walks
 //!    every comment in a [`ParsedDocument`] and returns a row-per-comment
-//!    [`RowStatus`] plus an aggregated `ok` flag. The aggregation uses the
-//!    mode-driven severity table described in rem-ef1.
+//!    [`RowStatus`] plus an aggregated `ok` flag. The aggregation uses
+//!    a mode-driven severity table.
 //!
 //! 2. [`commit_with_verify`] — a one-shot helper every mutating op wraps
 //!    its write call in. It runs [`verify_document`] against the staged
@@ -16,13 +16,13 @@
 //!
 //! The severity table (status × mode → bad?):
 //!
-//! | status           | Open    | Registered | Strict                               |
+//! | status | Open | Registered | Strict |
 //! |------------------|---------|------------|--------------------------------------|
-//! | `Valid`          | neutral | neutral    | neutral                              |
-//! | `Invalid`        | bad     | bad        | bad                                  |
-//! | `Missing`        | neutral | neutral    | bad (for registered active authors)  |
-//! | `UnknownAuthor`  | neutral | bad        | bad                                  |
-//! | `BadChecksum`    | bad     | bad        | bad                                  |
+//! | `Valid` | neutral | neutral | neutral |
+//! | `Invalid` | bad | bad | bad |
+//! | `Missing` | neutral | neutral | bad (for registered active authors) |
+//! | `UnknownAuthor` | neutral | bad | bad |
+//! | `BadChecksum` | bad | bad | bad |
 //!
 //! `Invalid` (crypto mismatch) and `BadChecksum` are always bad: those are
 //! forgery / corruption signals regardless of mode.
@@ -233,7 +233,7 @@ fn resolve_signature(cm: &Comment, registry: Option<&Registry>) -> SignatureStat
     }
 
     // Only active pubkeys count. Revoked participants were rejected at
-    // identity-resolve time (rem-xc8x) before the op even ran; but
+    // identity-resolve time before the op even ran; but
     // historical signed comments from a now-revoked participant should
     // still resolve as `UnknownAuthor` because none of their keys are
     // active anymore.

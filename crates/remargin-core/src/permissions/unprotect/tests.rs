@@ -1,9 +1,7 @@
-//! Unit tests for [`crate::permissions::unprotect`] (rem-yj1j.6 /
-//! rem-3p2v).
+//! Unit tests for [`crate::permissions::unprotect`].
 //!
-//! Covers scenarios 1-11 from the rem-yj1j.6 testing plan: clean
-//! reverse, idempotency, hand-edited divergences (YAML-without-
-//! sidecar, sidecar-without-YAML, manual rule deletion in
+//! Covers clean reverse, idempotency, hand-edited divergences (YAML-
+//! without-sidecar, sidecar-without-YAML, manual rule deletion in
 //! settings), wildcard, anchor-not-found.
 
 use std::path::{Path, PathBuf};
@@ -59,7 +57,7 @@ fn clean_reverse_restores_state() {
     assert!(outcome.yaml_entry_removed);
     assert!(outcome.warnings.is_empty(), "{:#?}", outcome.warnings);
 
-    // After rem-bimq the empty restrict array (and the wrapping
+    // the empty restrict array (and the wrapping
     // permissions: block, since it has no other sub-keys) gets
     // compacted out of the YAML. The body should no longer mention
     // either key.
@@ -76,7 +74,7 @@ fn clean_reverse_restores_state() {
     assert!(sc.entries.is_empty());
 
     // Project-scope settings file no longer carries the restrict
-    // rule. Under rem-egp9 the projection is the coarse
+    // rule. the projection is the coarse
     // `Bash(remargin *)` deny when `cli_allowed = false`.
     let settings_body = system.read_to_string(&files[0]).unwrap();
     assert!(!settings_body.contains("Bash(remargin *)"));
@@ -138,7 +136,7 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
     );
 
     // Settings still carry the rule because we couldn't know which
-    // ones to scrub without the sidecar. Under rem-egp9 the projected
+    // ones to scrub without the sidecar. the projected
     // rule is the coarse `Bash(remargin *)` deny.
     let body = system.read_to_string(&files[0]).unwrap();
     assert!(body.contains("Bash(remargin *)"));
@@ -169,7 +167,7 @@ fn yaml_missing_sidecar_present_reverts_settings_only() {
     );
 
     // Settings WERE scrubbed because the sidecar told us which
-    // rules to remove. Under rem-egp9 the projected rule is the
+    // rules to remove. the projected rule is the
     // coarse `Bash(remargin *)` deny.
     let body = system.read_to_string(&files[0]).unwrap();
     assert!(!body.contains("Bash(remargin *)"));
@@ -185,7 +183,7 @@ fn manual_rule_deletion_surfaces_warning() {
     restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();
 
     // Hand-delete the projected rule from the project-scope file.
-    // Under rem-egp9 the projection is the coarse `Bash(remargin *)`
+    // the projection is the coarse `Bash(remargin *)`
     // deny when `cli_allowed = false` and there are no extras.
     let local = files[0].clone();
     let body = system.read_to_string(&local).unwrap();
@@ -222,7 +220,7 @@ fn wildcard_restrict_and_unprotect_round_trip() {
     assert!(outcome.yaml_entry_removed);
     assert!(outcome.warnings.is_empty(), "{:#?}", outcome.warnings);
 
-    // After rem-bimq the wildcard-only realm collapses entirely:
+    // the wildcard-only realm collapses entirely:
     // the empty restrict array gets pruned and the now-empty
     // permissions: block is removed.
     let body = system
@@ -302,9 +300,9 @@ fn other_restrict_entries_are_preserved() {
     assert_eq!(restricts[0]["path"], Value::String(String::from("archive")));
 }
 
-/// Scenario 10 (rem-bimq update): removing the only entry compacts
-/// the empty array out of the YAML. Since `permissions:` had no
-/// other sub-keys, the wrapping mapping is also removed.
+/// Removing the only entry compacts the empty array out of the YAML.
+/// Since `permissions:` had no other sub-keys, the wrapping mapping
+/// is also removed.
 #[test]
 fn last_removal_compacts_permissions_block_out_of_yaml() {
     let (system, anchor) = realm_with_claude();
@@ -327,10 +325,10 @@ fn last_removal_compacts_permissions_block_out_of_yaml() {
 }
 
 // ---------------------------------------------------------------------
-// rem-bimq scenarios (compaction + --strict).
+// scenarios (compaction + --strict).
 // ---------------------------------------------------------------------
 
-/// rem-bimq scenario 3: removing the last `restrict` while
+/// scenario 3: removing the last `restrict` while
 /// `deny_ops` still has entries prunes only the empty `restrict`,
 /// leaving the rest of the `permissions:` block intact.
 #[test]
@@ -382,7 +380,7 @@ fn last_restrict_removal_keeps_other_permissions_subkeys() {
     );
 }
 
-/// rem-bimq scenario 4: hand-edited YAML carrying an empty
+/// scenario 4: hand-edited YAML carrying an empty
 /// `restrict: []` next to a populated `deny_ops:` is compacted on
 /// the next unprotect call, even when no entry matches.
 #[test]
@@ -416,7 +414,7 @@ fn next_unprotect_compacts_pre_existing_empty_restrict() {
     );
 }
 
-/// rem-bimq scenario 5: when every `permissions:` sub-array winds
+/// scenario 5: when every `permissions:` sub-array winds
 /// up empty (e.g. `restrict: []`, `allow_dot_folders: []`) the
 /// whole `permissions:` block is removed.
 #[test]
@@ -442,7 +440,7 @@ fn empty_permissions_block_is_removed_entirely() {
     );
 }
 
-/// rem-bimq scenario 6: `--strict` against an unrestricted path
+/// scenario 6: `--strict` against an unrestricted path
 /// returns an error.
 #[test]
 fn strict_unprotect_against_unrestricted_path_errors() {
@@ -460,7 +458,7 @@ fn strict_unprotect_against_unrestricted_path_errors() {
     );
 }
 
-/// rem-bimq scenario 7: default (non-strict) unprotect against an
+/// scenario 7: default (non-strict) unprotect against an
 /// unrestricted path is still a warn-and-no-op (regression check).
 #[test]
 fn default_unprotect_against_unrestricted_path_is_still_warn_noop() {
@@ -482,7 +480,7 @@ fn default_unprotect_against_unrestricted_path_is_still_warn_noop() {
     );
 }
 
-/// Scenario 11: the rem-is4z bypass stays scoped to the dedicated
+/// Scenario 11: the bypass stays scoped to the dedicated
 /// helper. We verify the public surface works (which means the
 /// helper was used internally) and pin that the helper itself is
 /// callable from this module — any future re-export would break
@@ -500,7 +498,7 @@ fn rem_is4z_bypass_uses_dedicated_helper() {
     .unwrap();
 
     // The bypass succeeded — the YAML was rewritten without going
-    // through the public `write` op (which rem-is4z guards).
+    // through the public `write` op (which guards).
     system
         .read_to_string(&anchor.join(".remargin.yaml"))
         .unwrap();

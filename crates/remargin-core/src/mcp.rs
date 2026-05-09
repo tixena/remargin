@@ -62,7 +62,7 @@ const SERVER_NAME: &str = "remargin";
 /// a deliberate act, and it belongs here.
 ///
 /// `config_path` and `key` are the per-tool identity-declaration fields
-/// (rem-x2bw / rem-zlx3): they are pre-expanded here so the identity resolver sees the
+///: they are pre-expanded here so the identity resolver sees the
 /// same already-canonical paths the CLI feeds to [`resolve_identity`].
 const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "dst", "file", "key", "path", "src"];
 
@@ -70,11 +70,11 @@ const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "dst", "file", "key", "path
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 
 /// Tools that take no path-shaped argument OR whose own validation
-/// supersedes the `McpSandbox` boundary (rem-w6m1). Listed
+/// supersedes the `McpSandbox` boundary. Listed
 /// alphabetically.
 ///
 /// `restrict` and `unprotect` are intentionally absent from the MCP
-/// surface (rem-888p): they mutate permission policy and must only be
+/// surface: they mutate permission policy and must only be
 /// invokable by the human via the CLI.
 const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show"];
 
@@ -151,7 +151,7 @@ fn with_identity_flag_schema(mut base: Value) -> Value {
     base
 }
 
-/// Build the `activity` tool descriptor (rem-g3sy.4 / T34).
+/// Build the `activity` tool descriptor.
 fn desc_activity() -> ToolDesc {
     ToolDesc {
         name: "activity",
@@ -212,7 +212,7 @@ fn desc_batch() -> ToolDesc {
                             "attachments": { "type": "array", "items": { "type": "string" }, "default": [] },
                             "after_line": { "type": "integer" },
                             "after_comment": { "type": "string" },
-                            "after_heading": { "type": "string", "description": "ATX heading path (rem-5oqx); resolved at write time. Mutually exclusive with after_line/after_comment." },
+                            "after_heading": { "type": "string", "description": "ATX heading path; resolved at write time. Mutually exclusive with after_line/after_comment." },
                             "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying", "default": false }
                         },
                         "required": ["content"]
@@ -251,12 +251,12 @@ fn desc_comment() -> ToolDesc {
                 },
                 "after_line": { "type": "integer", "description": "Insert after this line number (1-indexed)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID" },
-                "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path (rem-5oqx). Mutually exclusive with after_line/after_comment." },
+                "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path. Mutually exclusive with after_line/after_comment." },
                 "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false },
                 "remargin_kind": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Classification tags (rem-n4x7). Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+                    "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
                     "default": []
                 }
             },
@@ -278,7 +278,7 @@ fn desc_comments() -> ToolDesc {
                 "remargin_kind": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "OR-semantics filter (rem-49w0): only return comments whose remargin_kind contains at least one of these values. Empty = no filter.",
+                    "description": "OR-semantics filter: only return comments whose remargin_kind contains at least one of these values. Empty = no filter.",
                     "default": []
                 }
             },
@@ -321,7 +321,7 @@ fn desc_edit() -> ToolDesc {
                 "remargin_kind": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Replacement classification tags (rem-49w0). Omit to preserve the stored list; pass [] to clear. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries."
+                    "description": "Replacement classification tags. Omit to preserve the stored list; pass [] to clear. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries."
                 }
             },
             "required": ["file", "id", "content"]
@@ -419,11 +419,11 @@ fn desc_migrate() -> ToolDesc {
     }
 }
 
-/// Build the `mv` tool descriptor (rem-0j2x / T44, rem-jc82).
+/// Build the `mv` tool descriptor.
 fn desc_mv() -> ToolDesc {
     ToolDesc {
         name: "mv",
-        description: "Move or rename a tracked file or directory (rem-0j2x / rem-jc82). Auto-detects a directory source and renames the directory + every nested file as an atomic unit; comments / threads / acks survive because the path of every nested file changes consistently. Atomic same-FS rename, copy+remove fallback on cross-filesystem (EXDEV) for files. Both endpoints flow through the same sandbox / forbidden-target / restrict-guard checks every other mutating op uses. Idempotent: same-path no-op; src missing AND dst already in place returns success with bytes_moved=0.",
+        description: "Move or rename a tracked file or directory. Auto-detects a directory source and renames the directory + every nested file as an atomic unit; comments / threads / acks survive because the path of every nested file changes consistently. Atomic same-FS rename, copy+remove fallback on cross-filesystem (EXDEV) for files. Both endpoints flow through the same sandbox / forbidden-target / restrict-guard checks every other mutating op uses. Idempotent: same-path no-op; src missing AND dst already in place returns success with bytes_moved=0.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -440,14 +440,14 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops (rem-bhk). Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv (rem-0j2x / T44) - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (restrict / unprotect) are CLI-only - use `remargin plan restrict` / `remargin plan unprotect` (rem-888p).",
+        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (restrict / unprotect) are CLI-only - use `remargin plan restrict` / `remargin plan unprotect`.",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
                 "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | mv | purge | sandbox-add | sandbox-remove | sign | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
-                "src": { "type": "string", "description": "For mv: source path (rem-0j2x)." },
-                "dst": { "type": "string", "description": "For mv: destination path (rem-0j2x)." },
+                "src": { "type": "string", "description": "For mv: source path." },
+                "dst": { "type": "string", "description": "For mv: destination path." },
                 "force": { "type": "boolean", "description": "For mv: project the --force overwrite semantics.", "default": false },
                 "ids": {
                     "type": "array",
@@ -464,7 +464,7 @@ fn desc_plan() -> ToolDesc {
                 },
                 "reply_to": { "type": "string", "description": "Parent comment ID (used by comment)" },
                 "after_comment": { "type": "string", "description": "Insert after this comment ID (used by comment)" },
-                "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path (used by comment, rem-5oqx)" },
+                "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path (used by comment)" },
                 "after_line": { "type": "integer", "description": "Insert after this 1-indexed line (used by comment)" },
                 "attach_names": {
                     "type": "array",
@@ -507,7 +507,7 @@ fn desc_plan() -> ToolDesc {
 fn desc_purge() -> ToolDesc {
     ToolDesc {
         name: "purge",
-        description: "Strip all comments from a document, or every .md file in a directory when `recursive` is true (rem-nrjy). To preview without writing, use `plan` with op=\"purge\".",
+        description: "Strip all comments from a document, or every .md file in a directory when `recursive` is true. To preview without writing, use `plan` with op=\"purge\".",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
@@ -519,12 +519,12 @@ fn desc_purge() -> ToolDesc {
     }
 }
 
-/// Build the `identity_create` tool descriptor (rem-8cnc).
+/// Build the `identity_create` tool descriptor.
 ///
 /// Mirrors the CLI `remargin identity create` surface: prints a
 /// ready-to-use identity YAML block. `mode:` is deliberately omitted
-/// (tree property, resolved by walk). No `--write` equivalent (rem-is4z
-/// bans MCP writes to `.remargin.yaml`).
+/// (tree property, resolved by walk). No `--write` equivalent — MCP
+/// writes to `.remargin.yaml` are banned.
 fn desc_identity_create() -> ToolDesc {
     ToolDesc {
         name: "identity_create",
@@ -552,7 +552,7 @@ fn desc_query() -> ToolDesc {
              compose as a union when more than one is set. `pending` (broad form) includes \
              both directed comments with unacked recipients AND broadcast (no-`to`) comments \
              that nobody has acked. `pending_for_me` and `pending_broadcast` use the MCP \
-             server's configured identity (rem-4j91).",
+             server's configured identity.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -561,7 +561,7 @@ fn desc_query() -> ToolDesc {
                 "content_regex": { "type": "string", "description": "Regex applied to comment content; composes with metadata filters" },
                 "expanded": { "type": "boolean", "description": "Include individual matching comments in each result (default: true via non-summary mode)", "default": false },
                 "ignore_case": { "type": "boolean", "description": "Case-insensitive match for content_regex", "default": false },
-                "pending": { "type": "boolean", "description": "Only documents with pending (unacked) comments. Matches both directed and broadcast shapes (rem-4j91).", "default": false },
+                "pending": { "type": "boolean", "description": "Only documents with pending (unacked) comments. Matches both directed and broadcast shapes.", "default": false },
                 "pending_broadcast": { "type": "boolean", "description": "Only surface broadcast (no-`to`) comments the server identity has not acked yet.", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "pending_for_me": { "type": "boolean", "description": "Sugar for pending_for=<server identity>. Surfaces directed comments addressed to the caller and not yet acked.", "default": false },
@@ -570,7 +570,7 @@ fn desc_query() -> ToolDesc {
                 "remargin_kind": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "OR-semantics filter (rem-49w0): only surface comments whose remargin_kind contains at least one of these values. Empty = no filter.",
+                    "description": "OR-semantics filter: only surface comments whose remargin_kind contains at least one of these values. Empty = no filter.",
                     "default": []
                 },
                 "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" },
@@ -680,7 +680,7 @@ fn desc_verify() -> ToolDesc {
     }
 }
 
-/// Build the `permissions_show` tool descriptor (rem-yj1j.7 / T28).
+/// Build the `permissions_show` tool descriptor.
 fn desc_permissions_show() -> ToolDesc {
     ToolDesc {
         name: "permissions_show",
@@ -695,7 +695,7 @@ fn desc_permissions_show() -> ToolDesc {
     }
 }
 
-/// Build the `permissions_check` tool descriptor (rem-yj1j.7 / T28).
+/// Build the `permissions_check` tool descriptor.
 fn desc_permissions_check() -> ToolDesc {
     ToolDesc {
         name: "permissions_check",
@@ -855,7 +855,7 @@ fn tool_result_success(content: &Value) -> Value {
 /// Build an MCP tool result (success) with raw text content.
 ///
 /// Unlike [`tool_result_success`], this puts the string directly into the
-/// `text` field without JSON-encoding it.  Use this for pre-formatted,
+/// `text` field without JSON-encoding it. Use this for pre-formatted,
 /// human-readable output.
 fn tool_result_text(text: &str) -> Value {
     json!({
@@ -953,10 +953,9 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Build the CLI-equivalent [`IdentityFlags`] from a tool params map
-/// (rem-x2bw). Returns `None` when no identity-declaration field is
-/// present, so handlers can fast-path the "use the base config as-is"
-/// case.
+/// Build the CLI-equivalent [`IdentityFlags`] from a tool params map.
+/// Returns `None` when no identity-declaration field is present, so
+/// handlers can fast-path the "use the base config as-is" case.
 ///
 /// Enforces the same exclusivity rule clap enforces on the CLI: when
 /// `config_path` is supplied, none of `identity`, `type`, `key` may be.
@@ -992,8 +991,7 @@ fn identity_flags_from_params(params: &Map<String, Value>) -> Result<Option<Iden
 }
 
 /// Resolve a per-tool identity declaration from tool parameters and
-/// replace the identity fields on a cloned base [`ResolvedConfig`]
-/// (rem-x2bw).
+/// replace the identity fields on a cloned base [`ResolvedConfig`].
 ///
 /// Extracts `{config_path | identity, type, key}` via
 /// [`identity_flags_from_params`] and — when any field is present —
@@ -1115,7 +1113,7 @@ fn check_one(system: &dyn System, base_dir: &Path, sandbox: &McpSandbox, raw: &s
 
 /// Resolve insertion position from tool parameters.
 ///
-/// Shim around [`InsertPosition::from_hints`] (rem-3a2): extracts the
+/// Shim around [`InsertPosition::from_hints`]: extracts the
 /// three placement fields from the JSON params map and delegates the
 /// actual precedence rule to core so CLI + MCP cannot disagree on where
 /// a comment lands.
@@ -1141,7 +1139,7 @@ fn dispatch_tool(
 ) -> Value {
     // Normalize path-like fields (`~`, `$VAR`, `${VAR}`) before dispatch
     // so every downstream handler sees already-expanded paths. Keeps CLI +
-    // MCP in lockstep (rem-3a2). A normalization failure is reported as a
+    // MCP in lockstep. A normalization failure is reported as a
     // tool-level error with the same surface as any other invalid param.
     let normalized = match normalize_path_fields(system, params) {
         Ok(map) => map,
@@ -1149,7 +1147,7 @@ fn dispatch_tool(
     };
     let p = &normalized;
 
-    // rem-w6m1 / T24: outer boundary check. Every path-shaped param is
+    // outer boundary check. Every path-shaped param is
     // canonicalised against the McpSandbox roots (built from
     // permissions.trusted_roots at server boot) before the per-tool
     // handler runs. Tools that take no path (identity_create,
@@ -1182,7 +1180,7 @@ fn dispatch_tool(
         "restrict" | "unprotect" => {
             return tool_result_error(&format!(
                 "tool '{tool_name}' is not available via MCP - use the CLI: 'remargin {tool_name}' \
-                 or 'remargin plan {tool_name}' (rem-888p)"
+                 or 'remargin plan {tool_name}'"
             ));
         }
         "rm" => handle_rm(system, base_dir, config, p),
@@ -1199,7 +1197,7 @@ fn dispatch_tool(
     match result {
         Ok(value) => {
             // If the handler returned a pre-built MCP response (has "content"
-            // array), pass it through unchanged.  Otherwise wrap it.
+            // array), pass it through unchanged. Otherwise wrap it.
             if value.get("content").is_some_and(Value::is_array) {
                 value
             } else {
@@ -1210,7 +1208,7 @@ fn dispatch_tool(
     }
 }
 
-/// Handle the `activity` tool (rem-g3sy.4 / T34).
+/// Handle the `activity` tool.
 fn handle_activity(
     system: &dyn System,
     base_dir: &Path,
@@ -1341,7 +1339,7 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    // rem-49w0: MCP parity with the `--kind` CLI flag. Accepts either
+    // MCP parity with the `--kind` CLI flag. Accepts either
     // `remargin_kind: ["question", "todo"]` or the more natural
     // `kind: [...]` alias; validation happens inside `create_comment`.
     let remargin_kind_raw = string_array(params, "remargin_kind");
@@ -1383,7 +1381,7 @@ fn handle_comments(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let pretty = optional_bool(params, "pretty");
-    // rem-49w0: shared kind filter with the CLI path. Accepts either
+    // shared kind filter with the CLI path. Accepts either
     // `remargin_kind` or `kind` as the MCP key.
     let kind_filter = {
         let raw = string_array(params, "remargin_kind");
@@ -1440,7 +1438,7 @@ fn handle_edit(
     let file = required_str(params, "file")?;
     let comment_id = required_str(params, "id")?;
     let new_content = required_str(params, "content")?;
-    // rem-49w0: optional replacement kind list. When the key is absent
+    // optional replacement kind list. When the key is absent
     // we pass `None` so the stored list is preserved; an empty array
     // explicitly clears (validate_kinds accepts `[]`).
     let remargin_kind_value = params.get("remargin_kind").or_else(|| params.get("kind"));
@@ -1474,7 +1472,7 @@ fn handle_edit(
 /// When `binary: true`, bytes are read through the shared `read_binary`
 /// core helper (symmetric with CLI `get --binary`) and returned base64-
 /// encoded alongside size + mime. Markdown files are rejected in this mode
-/// so comment-preservation is never bypassed (rem-cdr).
+/// so comment-preservation is never bypassed.
 fn handle_get(
     system: &dyn System,
     base_dir: &Path,
@@ -1536,7 +1534,7 @@ fn handle_get(
     }
 }
 
-/// Handle the `identity_create` tool (rem-8cnc).
+/// Handle the `identity_create` tool.
 ///
 /// Mirrors the CLI `remargin identity create` surface: validates the
 /// author type and returns both the rendered YAML text and the
@@ -1599,7 +1597,7 @@ fn handle_metadata(
     let meta = document::metadata(system, base_dir, target, false, &config.trusted_roots)?;
 
     // File-level fields are always present; markdown fields are emitted only
-    // when the file was parsed (rem-lqz).
+    // when the file was parsed.
     let mut result = json!({
         "binary": meta.binary,
         "mime": meta.mime,
@@ -1729,17 +1727,15 @@ fn resolve_role_identity_for_mcp(
 
 /// Build the canonical "this plan op is CLI-only" error returned when
 /// `mcp__remargin__plan` is called with `op="restrict"` or
-/// `op="unprotect"` (rem-888p). Pulled out so [`handle_plan`] stays
+/// `op="unprotect"`. Pulled out so [`handle_plan`] stays
 /// under the adapter LOC cap.
 fn plan_op_cli_only_error(op: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "plan op '{op}' is not available via MCP - use the CLI: 'remargin plan {op}' (rem-888p)"
-    )
+    anyhow::anyhow!("plan op '{op}' is not available via MCP - use the CLI: 'remargin plan {op}'")
 }
 
 /// Handle the `plan` tool: parse the request shape, build a
 /// [`plan_ops::PlanRequest`], and delegate to the canonical
-/// [`plan_ops::dispatch`] (rem-oqv / rem-3a2). The adapter-layer work is
+/// [`plan_ops::dispatch`]. The adapter-layer work is
 /// limited to JSON field extraction and the final `serde_json::to_value`.
 fn handle_plan(
     system: &dyn System,
@@ -1895,8 +1891,7 @@ fn parse_plan_line_range(raw: &str) -> Result<(usize, usize)> {
 }
 
 /// Handle the `purge` tool: strip all comments from a document, or
-/// every visible `.md` file in a directory when `recursive` is true
-/// (rem-nrjy).
+/// every visible `.md` file in a directory when `recursive` is true.
 fn handle_purge(
     system: &dyn System,
     base_dir: &Path,
@@ -1952,7 +1947,7 @@ fn handle_query(
 }
 
 /// Translate `query` tool params into a [`QueryFilter`]. Pulled out so
-/// `handle_query` stays under the adapter LOC cap (rem-wpq).
+/// `handle_query` stays under the adapter LOC cap.
 fn build_query_filter_from_params(
     params: &Map<String, Value>,
     caller_identity: Option<String>,
@@ -1993,7 +1988,7 @@ fn build_query_filter_from_params(
     Ok(filter)
 }
 
-/// Handle the `permissions_show` tool (rem-yj1j.7 / T28).
+/// Handle the `permissions_show` tool.
 ///
 /// Pure read-only inspection — no identity resolution, no config
 /// load. Returns the parent-walked `.remargin.yaml` permissions tree
@@ -2003,7 +1998,7 @@ fn handle_permissions_show(system: &dyn System, base_dir: &Path) -> Result<Value
     serde_json::to_value(&report).context("serializing permissions show output")
 }
 
-/// Handle the `permissions_check` tool (rem-yj1j.7 / T28).
+/// Handle the `permissions_check` tool.
 ///
 /// Returns `restricted=true` when any `restrict` or `deny_ops` rule
 /// covers the supplied path. With `why=true`, the closest matching
@@ -2063,7 +2058,7 @@ fn handle_rm(
     }))
 }
 
-/// Handle the `mv` tool (rem-0j2x / T44): move or rename a tracked file.
+/// Handle the `mv` tool: move or rename a tracked file.
 fn handle_mv(
     system: &dyn System,
     base_dir: &Path,
@@ -2223,7 +2218,7 @@ fn handle_search(
 }
 
 /// Resolve the `ids` / `all_mine` selection shared by `sign` and
-/// `plan sign` (rem-7y3). `op` labels the error messages so callers can
+/// `plan sign`. `op` labels the error messages so callers can
 /// tell the two tools apart.
 fn build_sign_selection(
     params: &Map<String, Value>,
@@ -2602,7 +2597,7 @@ pub fn run(
     let reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    // rem-w6m1 / T24 (Decision 13): the sandbox is captured once at
+    // / T24 (Decision 13): the sandbox is captured once at
     // server boot and never reloaded. Edits to `trusted_roots` only
     // take effect on the next remargin mcp invocation. Per-op
     // permissions (restrict, deny_ops) still re-resolve through the

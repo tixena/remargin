@@ -1,4 +1,4 @@
-//! `plan restrict` projection (rem-puy5).
+//! `plan restrict` projection.
 //!
 //! [`project_restrict`] mirrors [`crate::permissions::restrict::restrict`]
 //! up through the merge / rule-generation step, but never writes. The
@@ -19,7 +19,7 @@
 //!
 //! ## Why pure-with-respect-to-writes (not pure)
 //!
-//! Per rem-bhk the document-projection helpers in
+//! the document-projection helpers in
 //! [`crate::operations::projections`] are pure: they accept a parsed
 //! document in memory and never read disk. Config projections are
 //! different — the entire point of `plan restrict` is to compare the
@@ -201,9 +201,9 @@ fn detect_conflicts(
     cwd: &Path,
     anchor: &Path,
 ) {
-    // Allow/deny overlap: structural `(tool, path-glob)` comparison
-    // (rem-aovx). Replaces the original exact-string body match
-    // (rem-puy5) which silently missed format-equivalent rules — a
+    // Allow/deny overlap: structural `(tool, path-glob)` comparison.
+    // Replaces the original exact-string body match which silently
+    // missed format-equivalent rules — a
     // hand-edited rule, a legacy `//` prefix, a trailing-slash
     // difference. The structural parser collapses runs of `/`,
     // resolves `.` / `..`, and treats `/**` as the recursive-subtree
@@ -212,9 +212,8 @@ fn detect_conflicts(
     // rejected.
     detect_allow_deny_overlap(diff, settings_sims);
 
-    // YAML entry would change with different shape (rem-puy5 acceptance
-    // #7). Skip the overwrite-with-identical-args case (caught by
-    // `would_be_noop`).
+    // YAML entry would change with different shape. Skip the
+    // overwrite-with-identical-args case (caught by `would_be_noop`).
     if !yaml_sim.would_be_noop
         && let Some(previous) = &yaml_sim.previous_entry
     {
@@ -324,7 +323,7 @@ fn resolve_path(system: &dyn System, anchor: &Path, args: &RestrictArgs) -> Resu
     })
 }
 
-/// Path-aware allow/deny overlap detector (rem-aovx).
+/// Path-aware allow/deny overlap detector.
 ///
 /// For every projected deny rule, parses the rule into a [`RuleShape`]
 /// and walks every existing allow rule on the same settings file

@@ -1018,7 +1018,7 @@ fn batch_auto_ack_without_reply_to_errors() {
 }
 
 // ===========================================================================
-// Batch reply-to auto-populate `to` tests (rem-3nm)
+// Batch reply-to auto-populate `to` tests
 // ===========================================================================
 
 #[test]

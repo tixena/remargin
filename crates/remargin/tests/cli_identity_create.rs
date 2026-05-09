@@ -1,4 +1,4 @@
-//! `remargin identity create` integration tests (rem-8cnc).
+//! `remargin identity create` integration tests.
 //!
 //! The subcommand prints an identity YAML block to stdout. These
 //! tests cover the happy path, the `--key` branch, the `--json` shape,
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn create_does_not_emit_mode_line() {
         // Mode is a tree property, not identity-scoped — never appears
-        // in the emitted YAML (rem-8cnc).
+        // in the emitted YAML.
         let out = run(&[
             "identity",
             "create",
@@ -168,10 +168,10 @@ mod tests {
 
     #[test]
     fn bare_identity_still_works_backward_compat() {
-        // Pre-rem-8cnc callers invoked `remargin identity` (no
-        // subcommand) to resolve the active identity. That surface must
-        // keep working — `identity` without a subcommand defaults to
-        // the show action.
+        // Older callers invoked `remargin identity` (no subcommand) to
+        // resolve the active identity. That surface must keep working
+        // — `identity` without a subcommand defaults to the show
+        // action.
         let tmp = TempDir::new().unwrap();
         fs::write(
             tmp.path().join(".remargin.yaml"),
