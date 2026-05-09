@@ -260,11 +260,12 @@ describe("commentWidget buildDecorations", () => {
     assert.equal(decorations.size, 1);
   });
 
-  // AC: A block whose comment is a reply with parent in the same doc
-  // does NOT get a decoration — the parent's widget renders it nested.
-  // Regression for the rem-u25n shipped behavior where reply blocks
-  // still rendered as their own top-level rows.
-  it("test #4b: reply block whose parent is in the doc emits NO decoration", () => {
+  // AC: A reply block whose parent is in the same doc gets a HIDDEN
+  // decoration (EmptyWidget) so the raw YAML source doesn't render
+  // below the parent's widget. The parent's widget renders the reply
+  // nested. Regression for the bug where reply blocks rendered as raw
+  // YAML in the editor.
+  it("test #4b: reply block whose parent is in the doc emits a hidden EmptyWidget decoration", () => {
     const plugin = makePlugin(true);
     const REPLY_TO_C1 = [
       "```remargin",
@@ -284,17 +285,26 @@ describe("commentWidget buildDecorations", () => {
       state as unknown as EditorState,
       plugin as unknown as RemarginPlugin
     );
-    // Only the parent block (c1) gets a decoration. The reply block (c2)
-    // is suppressed because its parent is in the same document.
-    assert.equal(decorations.size, 1, "exactly one decoration: the parent root, not the reply");
+    // Two decorations: the parent's RemarginWidget and the reply's
+    // hidden EmptyWidget that suppresses its raw source range.
+    assert.equal(decorations.size, 2, "two decorations: parent RemarginWidget + reply EmptyWidget");
 
-    const collected: Array<{ widgetId: string }> = [];
+    const collected: Array<{ kind: "root" | "hidden"; id?: string }> = [];
     decorations.between(0, doc.length, (_from, _to, value) => {
       const widget = (value as { spec: { widget: WidgetType } }).spec.widget;
-      const node = (widget as unknown as { threadNode: ThreadNode }).threadNode;
-      collected.push({ widgetId: node.comment.id });
+      const maybeNode = widget as unknown as { threadNode?: ThreadNode };
+      if (maybeNode.threadNode) {
+        collected.push({ kind: "root", id: maybeNode.threadNode.comment.id });
+      } else {
+        // Anything not a RemarginWidget is the hidden EmptyWidget.
+        collected.push({ kind: "hidden" });
+      }
     });
-    assert.equal(collected[0].widgetId, "c1", "the surviving decoration belongs to the parent");
+    const roots = collected.filter((c) => c.kind === "root");
+    const hidden = collected.filter((c) => c.kind === "hidden");
+    assert.equal(roots.length, 1, "exactly one root widget");
+    assert.equal(roots[0].id, "c1", "the root widget belongs to the parent (c1)");
+    assert.equal(hidden.length, 1, "exactly one hidden suppression decoration for the reply");
   });
 
   // AC: An orphan reply (parent missing from doc) gets a decoration as

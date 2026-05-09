@@ -252,9 +252,18 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
   for (const block of blocks) {
     if (!block.valid || !block.comment.id) continue;
     const id = block.comment.id;
-    // Skip blocks whose comment is a non-orphan reply — its parent's
-    // widget will render it nested.
-    if (!rootIds.has(id)) continue;
+    if (!rootIds.has(id)) {
+      // Reply with parent in this doc — the parent's widget renders it
+      // nested. Replace the source range with a hidden empty widget so
+      // the raw YAML fence does NOT appear below the parent's widget.
+      // Without this decoration CM6 would render the source verbatim.
+      builder.add(
+        block.startOffset,
+        block.endOffset,
+        Decoration.replace({ widget: new EmptyWidget(), block: true, inclusive: true })
+      );
+      continue;
+    }
     const node = nodeById.get(id);
     if (!node) continue;
     const widget = new RemarginWidget(node, plugin, sourcePath);
@@ -277,6 +286,28 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
     );
   }
   return builder.finish();
+}
+
+/**
+ * Zero-height block widget used to suppress the raw YAML source of a
+ * reply block whose parent renders it nested. CM6 requires SOMETHING
+ * to fill a `Decoration.replace` range; this widget renders a
+ * `display: none` div so it consumes no vertical space and shows no
+ * content. `eq` always returns true for instances of this class so
+ * CM6 can reuse the DOM across rebuilds without churn.
+ */
+class EmptyWidget extends WidgetType {
+  toDOM(): HTMLElement {
+    const el = document.createElement("div");
+    el.style.display = "none";
+    return el;
+  }
+  ignoreEvent(): boolean {
+    return true;
+  }
+  eq(other: WidgetType): boolean {
+    return other instanceof EmptyWidget;
+  }
 }
 
 function collectNodes(node: ThreadNode, into: Map<string, ThreadNode>): void {
