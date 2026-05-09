@@ -145,6 +145,46 @@ describe("WidgetCommentView", () => {
     assert.deepStrictEqual(calls, [["abc", "notes/test.md"]]);
   });
 
+  // headerActions slot: when the prop is provided
+  // it must appear in the header subtree. When omitted, no action
+  // toolbar may leak in. We assert by rendering with a recognisable
+  // sentinel string and grepping the resulting markup.
+  it("renders headerActions when provided in the header row", () => {
+    __resetParticipantsCacheForTests();
+    const html = renderToStaticMarkup(
+      createElement(
+        PluginContext.Provider,
+        { value: pluginStub },
+        createElement(
+          BackendContext.Provider,
+          { value: backendStub },
+          createElement(WidgetCommentView, {
+            comment: fixture(),
+            sourcePath: "notes/test.md",
+            collapsed: true,
+            onToggle: noop,
+            onClick: noop,
+            headerActions: createElement("span", {
+              "data-testid": "header-actions-sentinel",
+            }),
+          })
+        )
+      )
+    );
+    assert.ok(
+      html.includes('data-testid="header-actions-sentinel"'),
+      `expected header actions sentinel in markup, got: ${html}`
+    );
+  });
+
+  it("does NOT render any header actions slot when headerActions prop is omitted", () => {
+    const html = render(fixture(), true);
+    assert.ok(
+      !html.includes("header-actions-sentinel"),
+      "no leaked header actions when prop omitted"
+    );
+  });
+
   // Test #4: clicking the CollapseToggle invokes onToggle and does NOT
   // bubble to onClick (event stopped at the toggle).
   it("CollapseToggle click invokes onToggle without firing onClick", () => {

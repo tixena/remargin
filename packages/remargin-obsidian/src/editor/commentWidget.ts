@@ -174,6 +174,7 @@ export class RemarginWidget extends WidgetType {
           onClick: (cid, file) => {
             this.plugin.focusComment(cid, file);
           },
+          isRoot: true,
         })
       )
     );

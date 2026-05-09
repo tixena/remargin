@@ -257,6 +257,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
           onClick: (cid, file) => {
             this.plugin.focusComment(cid, file);
           },
+          isRoot: true,
         })
       )
     );

@@ -154,6 +154,40 @@
   color: var(--text-normal);
 }
 
+/* Per-thread bulk expand/collapse icon pair, rendered only inside the
+ * ROOT widget's header row. `margin-left: auto` pushes the cluster to
+ * the far right edge of the flex header so it never crowds the
+ * comment metadata. Buttons keep their hit-area visually contained
+ * (small padding) but match the chevron toggle's muted styling so the
+ * controls read as a coherent set. */
+.remargin-widget-thread-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.remargin-widget-thread-actions__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.remargin-widget-thread-actions__btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.remargin-widget-thread-actions__btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
 /* Sidebar focus highlight: brief outline pulse applied for one second
  * after `plugin.focusComment` lands. Driven by SidebarShell on every
  * `remargin:focus` event. */
