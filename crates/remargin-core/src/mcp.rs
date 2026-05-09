@@ -3,7 +3,6 @@
 //! Implements the Model Context Protocol (MCP) over stdio transport using
 //! JSON-RPC 2.0. Each tool maps 1:1 to a library function.
 
-pub mod sandbox;
 #[cfg(test)]
 mod tests;
 
@@ -19,12 +18,12 @@ use serde_json::{Map, Value, json};
 
 use crate::activity;
 use crate::config::identity::{IdentityFlags, resolve_identity};
+use crate::config::permissions::resolve::{ResolvedPermissions, resolve_permissions};
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
 use crate::document;
 use crate::kind::matches_kind_filter;
 use crate::linter;
-use crate::mcp::sandbox::McpSandbox;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
 use crate::operations::migrate;
@@ -38,6 +37,7 @@ use crate::operations::search;
 use crate::parser;
 use crate::path::expand_path;
 use crate::permissions::inspect as permissions_inspect;
+use crate::permissions::op_guard::{CallerInfo, check_against_resolved_for_caller};
 use crate::writer::InsertPosition;
 
 /// Standard JSON-RPC: invalid params.
@@ -69,14 +69,19 @@ const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "dst", "file", "key", "path
 /// Array-valued path fields — each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 
-/// Tools that take no path-shaped argument OR whose own validation
-/// supersedes the `McpSandbox` boundary. Listed
-/// alphabetically.
+/// Tools that take no path-shaped argument OR whose semantics
+/// require querying paths outside the dispatch-time boundary.
+/// Listed alphabetically.
+///
+/// `permissions_check` is the read-only inspection surface — it is
+/// expected to answer "is this path restricted?" for any path the
+/// caller hands in, even one outside `trusted_roots`. Gating it
+/// would defeat its purpose. Other listed tools take no path at all.
 ///
 /// `restrict` and `unprotect` are intentionally absent from the MCP
 /// surface: they mutate permission policy and must only be
 /// invokable by the human via the CLI.
-const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_show"];
+const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_check", "permissions_show"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -1040,27 +1045,23 @@ fn effective_config<'cfg>(
     declared.unwrap_or(config)
 }
 
-/// Ensure every path-shaped argument in `params` lives inside the
-/// configured `McpSandbox` roots.
-///
-/// `tool_name` is consulted only for the path-free tool list. Path
-/// extraction uses the same field names as
-/// [`SCALAR_PATH_FIELDS`] / [`ARRAY_PATH_FIELDS`] so the boundary
-/// check sees exactly the values that downstream handlers will
-/// dispatch against.
+/// Dispatch-time boundary check. Mirrors the historic `McpSandbox` for
+/// unconstrained sessions (cwd fallback) and routes constrained / locked
+/// sessions through `op_guard` so `trusted_roots` and `deny_ops` drive
+/// the verdict. The per-tool handler still re-runs `op_guard` on the
+/// canonical target — this dispatch hop catches paths handlers like
+/// `lint` / `query` / `search` would not otherwise gate.
 ///
 /// Per-tool special cases:
 ///
-/// - `permissions_check`: the `path` field IS the target — the
-///   inspect surface has its own bypass logic for read-only checks
-///   but we still gate it through the sandbox so callers cannot
-///   probe arbitrary filesystem paths.
+/// - `permissions_check`: the `path` field IS the target; we still
+///   gate it so callers cannot probe arbitrary filesystem paths.
 /// - `search`, `query`, `ls`, `sandbox_list`: the `path` field is a
-///   base directory the op walks; sandbox check applies.
-fn ensure_sandbox_covers_request(
+///   base directory the op walks; the boundary check applies.
+fn ensure_path_in_scope(
     system: &dyn System,
     base_dir: &Path,
-    sandbox: &McpSandbox,
+    permissions: &ResolvedPermissions,
     tool_name: &str,
     params: &Map<String, Value>,
 ) -> Result<()> {
@@ -1072,19 +1073,19 @@ fn ensure_sandbox_covers_request(
         // `config_path` and `key` are identity-declaration paths that
         // legitimately point outside the sandbox (e.g. `~/.ssh/id_ed25519`
         // or a `.remargin.yaml` in the user's home). They are not the
-        // op's target, so the sandbox check skips them. The identity
+        // op's target, so the boundary check skips them. The identity
         // resolver's own validation handles their existence and
         // reachability.
         if matches!(*field, "config_path" | "key") {
             continue;
         }
         if let Some(raw) = params.get(*field).and_then(Value::as_str) {
-            check_one(system, base_dir, sandbox, raw)?;
+            check_one_path(system, base_dir, permissions, tool_name, raw)?;
         }
     }
     for field in ARRAY_PATH_FIELDS {
         // `attachments` are write-side asset sources whose existence
-        // is checked at the asset-copy step; the sandbox check focuses
+        // is checked at the asset-copy step; the boundary check focuses
         // on the canonical target paths in `files`.
         if *field == "attachments" {
             continue;
@@ -1092,7 +1093,7 @@ fn ensure_sandbox_covers_request(
         if let Some(items) = params.get(*field).and_then(Value::as_array) {
             for item in items {
                 if let Some(raw) = item.as_str() {
-                    check_one(system, base_dir, sandbox, raw)?;
+                    check_one_path(system, base_dir, permissions, tool_name, raw)?;
                 }
             }
         }
@@ -1101,14 +1102,70 @@ fn ensure_sandbox_covers_request(
     Ok(())
 }
 
-fn check_one(system: &dyn System, base_dir: &Path, sandbox: &McpSandbox, raw: &str) -> Result<()> {
+/// Boundary check for a single path. UNCONSTRAINED sessions get the
+/// cwd-fallback shape that `McpSandbox` used to enforce: the path must
+/// canonicalise under `base_dir`. CONSTRAINED / LOCKED sessions route
+/// through `op_guard` so violations carry the canonical
+/// `trusted_roots` / `deny_ops` error wording.
+fn check_one_path(
+    system: &dyn System,
+    base_dir: &Path,
+    permissions: &ResolvedPermissions,
+    tool_name: &str,
+    raw: &str,
+) -> Result<()> {
     let candidate = Path::new(raw);
     let absolute = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
         base_dir.join(candidate)
     };
-    sandbox.ensure_covers(system, &absolute)
+    let canonical = canonicalize_or_lexical(system, &absolute)?;
+
+    if permissions.trusted_roots_unconstrained() {
+        let canonical_base = system
+            .canonicalize(base_dir)
+            .unwrap_or_else(|_err| base_dir.to_path_buf());
+        if canonical == canonical_base || canonical.starts_with(&canonical_base) {
+            return Ok(());
+        }
+        anyhow::bail!("path escapes MCP sandbox: {raw}");
+    }
+
+    check_against_resolved_for_caller(
+        system,
+        tool_name,
+        &canonical,
+        permissions,
+        &CallerInfo::default(),
+    )
+}
+
+/// Canonicalise `target` if it exists; otherwise walk parents until one
+/// canonicalises and append the missing tail. Lets the boundary admit
+/// writes to not-yet-existing files inside a covered root while still
+/// rejecting paths outside it.
+fn canonicalize_or_lexical(system: &dyn System, target: &Path) -> Result<PathBuf> {
+    if let Ok(canonical) = system.canonicalize(target) {
+        return Ok(canonical);
+    }
+    let mut suffix = PathBuf::new();
+    let mut cursor = target.to_path_buf();
+    while let Some(parent) = cursor.parent().map(Path::to_path_buf) {
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        let tail = cursor
+            .file_name()
+            .map(PathBuf::from)
+            .with_context(|| format!("path missing file component: {}", target.display()))?;
+        suffix = tail.join(&suffix);
+        if let Ok(canonical_parent) = system.canonicalize(&parent) {
+            return Ok(canonical_parent.join(suffix));
+        }
+        cursor = parent;
+    }
+    Ok(target.to_path_buf())
 }
 
 /// Resolve insertion position from tool parameters.
@@ -1132,7 +1189,7 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
 fn dispatch_tool(
     system: &dyn System,
     base_dir: &Path,
-    sandbox: &McpSandbox,
+    permissions: &ResolvedPermissions,
     config: &ResolvedConfig,
     tool_name: &str,
     params: &Map<String, Value>,
@@ -1147,13 +1204,14 @@ fn dispatch_tool(
     };
     let p = &normalized;
 
-    // outer boundary check. Every path-shaped param is
-    // canonicalised against the McpSandbox roots (built from
-    // permissions.trusted_roots at server boot) before the per-tool
-    // handler runs. Tools that take no path (identity_create,
-    // permissions_show) skip this branch by virtue of having nothing
-    // to extract.
-    if let Err(err) = ensure_sandbox_covers_request(system, base_dir, sandbox, tool_name, p) {
+    // Dispatch-time boundary check. UNCONSTRAINED sessions get the
+    // cwd-fallback behaviour the historic `McpSandbox` enforced;
+    // CONSTRAINED / LOCKED sessions surface `op_guard` violations
+    // with the canonical `trusted_roots` / `deny_ops` wording. The
+    // per-tool handler still re-runs `op_guard` on the canonical
+    // target — this hop catches handlers like `lint` / `query` /
+    // `search` that would not otherwise gate.
+    if let Err(err) = ensure_path_in_scope(system, base_dir, permissions, tool_name, p) {
         return tool_result_error(&format!("{err:#}"));
     }
     let result = match tool_name {
@@ -2478,7 +2536,7 @@ fn serialize_expanded_comment(cm: &query::ExpandedComment) -> Value {
 fn process_message(
     system: &dyn System,
     base_dir: &Path,
-    sandbox: &McpSandbox,
+    permissions: &ResolvedPermissions,
     config: &ResolvedConfig,
     message: &Value,
 ) -> Option<Value> {
@@ -2542,7 +2600,7 @@ fn process_message(
 
             let start = Instant::now();
             let mut result =
-                dispatch_tool(system, base_dir, sandbox, config, tool_name, &arguments);
+                dispatch_tool(system, base_dir, permissions, config, tool_name, &arguments);
             let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
             // Inject elapsed_ms into the tool result's text JSON.
@@ -2597,13 +2655,6 @@ pub fn run(
     let reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    // The sandbox is captured once at server boot and never
-    // reloaded. Edits to `trusted_roots` only take effect on the
-    // next remargin mcp invocation. Per-op permissions
-    // (`trusted_roots`, `deny_ops`) still re-resolve through the
-    // op_guard parent walk; this static cap is intentional.
-    let sandbox = McpSandbox::from_walk(system, base_dir)?;
-
     for raw_line in reader.lines() {
         let line = raw_line.context("reading from stdin")?;
         let trimmed = line.trim();
@@ -2623,10 +2674,13 @@ pub fn run(
         };
 
         // Re-resolve on every request so changes to .remargin.yaml are
-        // picked up without restarting the MCP server.
+        // picked up without restarting the MCP server. The same walk
+        // feeds the dispatch-time boundary check so the boundary
+        // mirrors the per-op `op_guard` view of the world.
         let config = ResolvedConfig::resolve(system, base_dir, startup_flags, startup_assets_dir)?;
+        let permissions = resolve_permissions(system, base_dir)?;
 
-        if let Some(response) = process_message(system, base_dir, &sandbox, &config, &message) {
+        if let Some(response) = process_message(system, base_dir, &permissions, &config, &message) {
             writeln!(writer, "{response}").context("writing to stdout")?;
             writer.flush().context("flushing stdout")?;
         }
@@ -2649,8 +2703,8 @@ pub fn process_request(
     config: &ResolvedConfig,
     request_json: &str,
 ) -> Result<Option<String>> {
-    let sandbox = McpSandbox::from_walk(system, base_dir)?;
+    let permissions = resolve_permissions(system, base_dir)?;
     let message: Value = serde_json::from_str(request_json).context("parsing JSON-RPC request")?;
-    let response = process_message(system, base_dir, &sandbox, config, &message);
+    let response = process_message(system, base_dir, &permissions, config, &message);
     Ok(response.map(|val| val.to_string()))
 }

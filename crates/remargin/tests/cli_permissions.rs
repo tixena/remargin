@@ -526,7 +526,7 @@ mod tests {
         assert_status(&out, 0);
     }
 
-    // ---: McpSandbox boundary -------------------------------------
+    // ---: dispatch-time boundary -------------------------------------
 
     fn extract_tool_text(result: &Value) -> String {
         let content = result.get("content").and_then(Value::as_array).unwrap();
