@@ -213,7 +213,7 @@ describe("commentWidget buildDecorations", () => {
   });
 
   // AC: Live Preview + valid block → Decoration.replace with block:true,
-  // inclusive:false.
+  // inclusive:true.
   it("test #3: live preview + valid block → 1 replace decoration with block/inclusive flags", () => {
     const plugin = makePlugin(true);
     const state = makeState({
@@ -240,7 +240,7 @@ describe("commentWidget buildDecorations", () => {
     };
     assert.ok(spec.widget instanceof RemarginWidget, "widget is a RemarginWidget");
     assert.equal(spec.block, true, "block: true");
-    assert.equal(spec.inclusive, false, "inclusive: false");
+    assert.equal(spec.inclusive, true, "inclusive: true");
     // Range matches the parser's startOffset/endOffset for the single block.
     const parsed = parseRemarginBlocks(VALID_BLOCK)[0];
     assert.equal(collected[0].from, parsed.startOffset);
