@@ -21,6 +21,7 @@ pub mod id;
 pub mod kind;
 pub mod linter;
 pub mod mcp;
+pub mod on_disk_comment;
 pub mod operations;
 pub mod parser;
 pub mod path;
