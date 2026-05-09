@@ -19,6 +19,8 @@ import { PluginContext } from "./hooks/usePlugin";
 import { PortalContainerContext } from "./hooks/usePortalContainer";
 import { detectNewUpdates, type ReleasesFetcher, type UpdateComponent } from "./lib/githubReleases";
 import { snapAfterCommentBlock } from "./lib/line-snap";
+import { buildThreadTree } from "./lib/threadTree";
+import { parseRemarginBlocks } from "./parser/parseRemarginBlocks";
 import { CollapseState } from "./state/collapseState";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
@@ -329,6 +331,22 @@ export default class RemarginPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "expand-all-comments",
+      name: "Expand all comments in document",
+      callback: () => {
+        void this.setAllRootsCollapsed(false);
+      },
+    });
+
+    this.addCommand({
+      id: "collapse-all-comments",
+      name: "Collapse all comments in document",
+      callback: () => {
+        void this.setAllRootsCollapsed(true);
+      },
+    });
+
     this.addRibbonIcon("message-square", "Open Remargin", () => {
       this.activateView();
     });
@@ -442,6 +460,32 @@ export default class RemarginPlugin extends Plugin {
     // refresh the cached identity so widget threads pick up the new
     // "pending for me" identity on the next render.
     void this.refreshIdentity();
+  }
+
+  /**
+   * Drive every root comment in the active document to the given
+   * collapsed state. No-op when no markdown view is active, the active
+   * file can't be read, or the document has no parsable remargin blocks.
+   * Used by the `expand-all-comments` / `collapse-all-comments` commands.
+   */
+  private async setAllRootsCollapsed(collapsed: boolean): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file;
+    if (!file) return;
+    let text: string;
+    try {
+      text = await this.app.vault.cachedRead(file);
+    } catch {
+      return;
+    }
+    const blocks = parseRemarginBlocks(text);
+    const validComments = blocks
+      .filter((b) => b.valid && b.comment.id)
+      .map((b) => b.comment as { id: string; reply_to?: string });
+    const trees = buildThreadTree(validComments as Parameters<typeof buildThreadTree>[0]);
+    const rootIds = trees.map((n) => n.comment.id);
+    if (rootIds.length === 0) return;
+    this.collapseState.setMany(rootIds, collapsed);
   }
 
   /**

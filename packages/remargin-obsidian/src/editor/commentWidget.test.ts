@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { type EditorState, StateEffect, StateField } from "@codemirror/state";
 import type { WidgetType } from "@codemirror/view";
 import { editorInfoField, editorLivePreviewField } from "obsidian";
+import { WidgetCommentThread } from "../components/widget/WidgetCommentThread.tsx";
 import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
 import type { Comment } from "../generated/types.ts";
 import type { ThreadNode } from "../lib/threadTree.ts";
@@ -258,6 +259,67 @@ describe("commentWidget buildDecorations", () => {
     );
     assert.equal(decorations.size, 1);
   });
+
+  // AC: A block whose comment is a reply with parent in the same doc
+  // does NOT get a decoration — the parent's widget renders it nested.
+  // Regression for the rem-u25n shipped behavior where reply blocks
+  // still rendered as their own top-level rows.
+  it("test #4b: reply block whose parent is in the doc emits NO decoration", () => {
+    const plugin = makePlugin(true);
+    const REPLY_TO_C1 = [
+      "```remargin",
+      "---",
+      "id: c2",
+      "author: bob",
+      "author_type: human",
+      "ts: 2026-04-25T12:01:00-04:00",
+      "reply_to: c1",
+      "---",
+      "second comment",
+      "```",
+    ].join("\n");
+    const doc = `${VALID_BLOCK}\n${REPLY_TO_C1}`;
+    const state = makeState({ doc, livePreview: true });
+    const decorations = buildDecorations(
+      state as unknown as EditorState,
+      plugin as unknown as RemarginPlugin
+    );
+    // Only the parent block (c1) gets a decoration. The reply block (c2)
+    // is suppressed because its parent is in the same document.
+    assert.equal(decorations.size, 1, "exactly one decoration: the parent root, not the reply");
+
+    const collected: Array<{ widgetId: string }> = [];
+    decorations.between(0, doc.length, (_from, _to, value) => {
+      const widget = (value as { spec: { widget: WidgetType } }).spec.widget;
+      const node = (widget as unknown as { threadNode: ThreadNode }).threadNode;
+      collected.push({ widgetId: node.comment.id });
+    });
+    assert.equal(collected[0].widgetId, "c1", "the surviving decoration belongs to the parent");
+  });
+
+  // AC: An orphan reply (parent missing from doc) gets a decoration as
+  // a degraded root so it stays visible.
+  it("test #4c: orphan reply (parent absent) emits a decoration as a degraded root", () => {
+    const plugin = makePlugin(true);
+    const ORPHAN_REPLY = [
+      "```remargin",
+      "---",
+      "id: c2",
+      "author: bob",
+      "author_type: human",
+      "ts: 2026-04-25T12:01:00-04:00",
+      "reply_to: missing-parent",
+      "---",
+      "orphan reply",
+      "```",
+    ].join("\n");
+    const state = makeState({ doc: ORPHAN_REPLY, livePreview: true });
+    const decorations = buildDecorations(
+      state as unknown as EditorState,
+      plugin as unknown as RemarginPlugin
+    );
+    assert.equal(decorations.size, 1, "orphan reply still renders as a degraded root");
+  });
 });
 
 describe("commentWidgetPlugin StateField update lifecycle", () => {
@@ -473,28 +535,21 @@ describe("RemarginWidget", () => {
   it("test #12: widget onClick prop forwards to plugin.focusComment", () => {
     const plugin = makePlugin(true);
 
-    // Render tree: WidgetProviders > div > [WidgetThreadToolbar, WidgetCommentThread].
-    // The thread component carries the `onClick` prop.
+    // Render tree: WidgetProviders > WidgetCommentThread.
+    // The thread component carries the `onClick` prop directly.
     let captured: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
         const wrapper = element as {
           props?: {
             children?: {
-              props?: {
-                children?: Array<{
-                  props?: { onClick?: (id: string, file: string) => void };
-                }>;
-              };
+              props?: { onClick?: (id: string, file: string) => void };
             };
           };
         };
-        const blockDiv = wrapper.props?.children;
-        const children = blockDiv?.props?.children ?? [];
-        for (const child of children) {
-          if (typeof child?.props?.onClick === "function") {
-            captured = child.props.onClick;
-          }
+        const child = wrapper.props?.children;
+        if (typeof child?.props?.onClick === "function") {
+          captured = child.props.onClick;
         }
       },
       unmount: () => {
@@ -556,8 +611,8 @@ describe("RemarginWidget", () => {
     );
     assert.equal(
       wrapper.props.children.type,
-      "div",
-      "wrapper child must be the block container <div>"
+      WidgetCommentThread,
+      "wrapper child must be WidgetCommentThread (no intermediate block <div>)"
     );
   });
 

@@ -9,7 +9,6 @@ import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
 import { WidgetCommentThread } from "@/components/widget/WidgetCommentThread";
 import { WidgetProviders } from "@/components/widget/WidgetProviders";
-import { WidgetThreadToolbar } from "@/components/widget/WidgetThreadToolbar";
 import type { Comment } from "@/generated";
 import { buildThreadTree, type ThreadNode, walkThread } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
@@ -229,28 +228,19 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
       replies: [],
     };
     const me = this.plugin.currentIdentity ?? null;
-    const rootIds = Array.from(this.subtreeIds);
     this.root.render(
       createElement(
         WidgetProviders,
         { plugin: this.plugin, portalContainer: this.containerEl },
-        createElement(
-          "div",
-          { className: "remargin-widget-block" },
-          createElement(WidgetThreadToolbar, {
-            rootIds,
-            collapseState: this.plugin.collapseState,
-          }),
-          createElement(WidgetCommentThread, {
-            root: node,
-            sourcePath: this.sourcePath,
-            me,
-            collapseState: this.plugin.collapseState,
-            onClick: (cid, file) => {
-              this.plugin.focusComment(cid, file);
-            },
-          })
-        )
+        createElement(WidgetCommentThread, {
+          root: node,
+          sourcePath: this.sourcePath,
+          me,
+          collapseState: this.plugin.collapseState,
+          onClick: (cid, file) => {
+            this.plugin.focusComment(cid, file);
+          },
+        })
       )
     );
   }

@@ -11,7 +11,6 @@ import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
 import { WidgetCommentThread } from "@/components/widget/WidgetCommentThread";
 import { WidgetProviders } from "@/components/widget/WidgetProviders";
-import { WidgetThreadToolbar } from "@/components/widget/WidgetThreadToolbar";
 import type { Comment } from "@/generated";
 import { buildThreadTree, type ThreadNode } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
@@ -165,25 +164,17 @@ export class RemarginWidget extends WidgetType {
       createElement(
         WidgetProviders,
         { plugin: this.plugin, portalContainer: host },
-        createElement(
-          "div",
-          { className: "remargin-widget-block" },
-          createElement(WidgetThreadToolbar, {
-            rootIds: [this.id],
-            collapseState: this.plugin.collapseState,
-          }),
-          createElement(WidgetCommentThread, {
-            // The build path filters for `valid` blocks; the cast to
-            // full `Comment` is sound and matches the prior shape.
-            root: this.threadNode as { comment: Comment; replies: ThreadNode[] },
-            sourcePath: this.sourcePath,
-            me,
-            collapseState: this.plugin.collapseState,
-            onClick: (cid, file) => {
-              this.plugin.focusComment(cid, file);
-            },
-          })
-        )
+        createElement(WidgetCommentThread, {
+          // The build path filters for `valid` blocks; the cast to
+          // full `Comment` is sound and matches the prior shape.
+          root: this.threadNode as { comment: Comment; replies: ThreadNode[] },
+          sourcePath: this.sourcePath,
+          me,
+          collapseState: this.plugin.collapseState,
+          onClick: (cid, file) => {
+            this.plugin.focusComment(cid, file);
+          },
+        })
       )
     );
     return host;

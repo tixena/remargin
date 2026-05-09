@@ -300,29 +300,19 @@ afterEach(() => {
 
 /**
  * Pull the `onClick` prop from the wrapped widget tree. Both editor
- * surfaces now render `<WidgetProviders>` wrapping a thread block
- * `<div>` whose children include `WidgetThreadToolbar` and
- * `WidgetCommentThread`. The thread component carries the `onClick`
- * prop. Descend two levels (provider → div → children[]) to reach it.
+ * surfaces render `<WidgetProviders>` directly wrapping a single
+ * `<WidgetCommentThread>`; the thread component carries the `onClick`
+ * prop. Descend one level (provider → child) to reach it.
  */
 function findInnerOnClick(element: unknown): ((id: string, file: string) => void) | undefined {
   const wrapper = element as {
     props?: {
-      children?: {
-        props?: {
-          children?: Array<{
-            props?: { onClick?: (id: string, file: string) => void };
-          }>;
-        };
-      };
+      children?: { props?: { onClick?: (id: string, file: string) => void } };
     };
   };
-  const blockDiv = wrapper.props?.children;
-  const children = blockDiv?.props?.children ?? [];
-  for (const child of children) {
-    if (typeof child?.props?.onClick === "function") {
-      return child.props.onClick;
-    }
+  const child = wrapper.props?.children;
+  if (typeof child?.props?.onClick === "function") {
+    return child.props.onClick;
   }
   return undefined;
 }

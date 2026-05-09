@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
+import { WidgetCommentThread } from "../components/widget/WidgetCommentThread.tsx";
 import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
 import type RemarginPlugin from "../main.ts";
 import { CollapseState } from "../state/collapseState.ts";
@@ -534,28 +535,21 @@ describe("ReadingModeCommentChild", () => {
 
     // Capture the React element the child renders so we can fish out
     // the wired `onClick` prop and invoke it directly. The render tree
-    // is `WidgetProviders > div > [WidgetThreadToolbar, WidgetCommentThread]`
-    // — the thread component carries the `onClick` prop.
+    // is `WidgetProviders > WidgetCommentThread` — the thread component
+    // carries the `onClick` prop directly.
     let capturedOnClick: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
         const wrapper = element as {
           props?: {
             children?: {
-              props?: {
-                children?: Array<{
-                  props?: { onClick?: (id: string, file: string) => void };
-                }>;
-              };
+              props?: { onClick?: (id: string, file: string) => void };
             };
           };
         };
-        const blockDiv = wrapper.props?.children;
-        const children = blockDiv?.props?.children ?? [];
-        for (const child of children) {
-          if (typeof child?.props?.onClick === "function") {
-            capturedOnClick = child.props.onClick;
-          }
+        const child = wrapper.props?.children;
+        if (typeof child?.props?.onClick === "function") {
+          capturedOnClick = child.props.onClick;
         }
       },
       unmount: () => {
@@ -633,8 +627,8 @@ describe("ReadingModeCommentChild", () => {
       );
       assert.equal(
         wrapper.props.children.type,
-        "div",
-        "wrapper child must be the thread block <div>"
+        WidgetCommentThread,
+        "wrapper child must be WidgetCommentThread (no intermediate block <div>)"
       );
 
       child.onunload();
@@ -683,23 +677,16 @@ describe("ReadingModeCommentChild", () => {
         const wrapper = element as {
           props?: {
             children?: {
-              props?: {
-                children?: Array<{
-                  props?: { root?: { comment: { id: string }; replies: Array<unknown> } };
-                }>;
-              };
+              props?: { root?: { comment: { id: string }; replies: Array<unknown> } };
             };
           };
         };
-        const blockChildren = wrapper.props?.children?.props?.children ?? [];
-        for (const child of blockChildren) {
-          const root = child?.props?.root;
-          if (root) {
-            captured.push({
-              id: root.comment.id,
-              replyIds: root.replies.map((r) => (r as { comment: { id: string } }).comment.id),
-            });
-          }
+        const root = wrapper.props?.children?.props?.root;
+        if (root) {
+          captured.push({
+            id: root.comment.id,
+            replyIds: root.replies.map((r) => (r as { comment: { id: string } }).comment.id),
+          });
         }
       },
       unmount: () => {
@@ -849,23 +836,16 @@ describe("ReadingModeCommentChild", () => {
         const wrapper = element as {
           props?: {
             children?: {
-              props?: {
-                children?: Array<{
-                  props?: { root?: { comment: { id: string }; replies: Array<unknown> } };
-                }>;
-              };
+              props?: { root?: { comment: { id: string }; replies: Array<unknown> } };
             };
           };
         };
-        const blockChildren = wrapper.props?.children?.props?.children ?? [];
-        for (const child of blockChildren) {
-          const root = child?.props?.root;
-          if (root) {
-            captured.push({
-              id: root.comment.id,
-              replyIds: root.replies.map((r) => (r as { comment: { id: string } }).comment.id),
-            });
-          }
+        const root = wrapper.props?.children?.props?.root;
+        if (root) {
+          captured.push({
+            id: root.comment.id,
+            replyIds: root.replies.map((r) => (r as { comment: { id: string } }).comment.id),
+          });
         }
       },
       unmount: () => {
