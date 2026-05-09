@@ -32,6 +32,17 @@ export class CollapseState {
   }
 
   /**
+   * True when the user has explicitly set a collapse value for this id.
+   * Lets callers distinguish "user has not touched this" from "user
+   * explicitly collapsed it" — the auto-expand priming logic uses this
+   * so it doesn't override the user's deliberate collapse choice on
+   * subsequent re-mounts.
+   */
+  has(commentId: string): boolean {
+    return this.state.has(commentId);
+  }
+
+  /**
    * Flip the collapsed flag for the given id and notify every subscriber
    * with the new value. Toggling an unknown id seeds it as "expanded"
    * (the inverse of the default-collapsed read).
@@ -41,6 +52,48 @@ export class CollapseState {
     this.state.set(commentId, next);
     for (const listener of this.listeners) {
       listener(commentId, next);
+    }
+  }
+
+  /**
+   * Mark a single id as expanded (collapsed = false). No-op + no
+   * notification when the id is already known to be expanded — keeps
+   * the auto-expand priming idempotent across re-mounts.
+   */
+  setExpanded(commentId: string): void {
+    if (this.state.get(commentId) === false) return;
+    this.state.set(commentId, false);
+    for (const listener of this.listeners) {
+      listener(commentId, false);
+    }
+  }
+
+  /**
+   * Mark a single id as collapsed (collapsed = true). No-op + no
+   * notification when the id is already known to be collapsed.
+   */
+  setCollapsed(commentId: string): void {
+    if (this.state.get(commentId) === true) return;
+    this.state.set(commentId, true);
+    for (const listener of this.listeners) {
+      listener(commentId, true);
+    }
+  }
+
+  /**
+   * Bulk-set every id in `commentIds` to `collapsed`, firing one
+   * notification per id that actually changed value. Used by the
+   * per-block "Expand all" / "Collapse all" toolbar so a single click
+   * does not produce N React renders for the N untouched ids.
+   */
+  setMany(commentIds: readonly string[], collapsed: boolean): void {
+    for (const id of commentIds) {
+      const prev = this.state.get(id);
+      if (prev === collapsed) continue;
+      this.state.set(id, collapsed);
+      for (const listener of this.listeners) {
+        listener(id, collapsed);
+      }
     }
   }
 

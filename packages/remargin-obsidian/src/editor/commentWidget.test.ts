@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { type EditorState, StateEffect, StateField } from "@codemirror/state";
 import type { WidgetType } from "@codemirror/view";
 import { editorInfoField, editorLivePreviewField } from "obsidian";
-import { WidgetCommentView } from "../components/widget/WidgetCommentView.tsx";
 import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
+import type { Comment } from "../generated/types.ts";
+import type { ThreadNode } from "../lib/threadTree.ts";
 import type RemarginPlugin from "../main.ts";
 import { type ParsedBlock, parseRemarginBlocks } from "../parser/parseRemarginBlocks.ts";
 import { CollapseState } from "../state/collapseState.ts";
@@ -377,11 +378,22 @@ describe("RemarginWidget", () => {
     return result;
   }
 
+  /**
+   * Build a `ThreadNode` (no replies) from a parsed block, mirroring
+   * the production path where `buildThreadTree` wraps a comment in a
+   * node before the widget is constructed. Tests can still author the
+   * raw text via `block()`; this helper bridges to the new constructor
+   * without changing the test fixture.
+   */
+  function node(text = VALID_BLOCK): ThreadNode {
+    return { comment: block(text).comment as Comment, replies: [] };
+  }
+
   // AC: eq() is true when id + collapsed + content all match.
   it("test #7: eq() returns true for same id + same collapsed + same content", () => {
     const plugin = makePlugin(true);
-    const a = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "f.md");
-    const b = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "f.md");
+    const a = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "f.md");
+    const b = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "f.md");
     assert.equal(a.eq(b), true);
   });
 
@@ -391,18 +403,18 @@ describe("RemarginWidget", () => {
     const pluginA = makePlugin(true); // c1 collapsed by default (true)
     const pluginB = makePlugin(true);
     pluginB.collapseState.toggle("c1"); // c1 now expanded
-    const a = new RemarginWidget(block(), pluginA as unknown as RemarginPlugin, "f.md");
-    const b = new RemarginWidget(block(), pluginB as unknown as RemarginPlugin, "f.md");
+    const a = new RemarginWidget(node(), pluginA as unknown as RemarginPlugin, "f.md");
+    const b = new RemarginWidget(node(), pluginB as unknown as RemarginPlugin, "f.md");
     assert.equal(a.eq(b), false);
   });
 
-  // AC: eq() is false when content (raw text) differs for the same id.
-  it("test #9: eq() returns false when raw content differs for same id", () => {
+  // AC: eq() is false when content differs for the same id.
+  it("test #9: eq() returns false when content differs for same id", () => {
     const plugin = makePlugin(true);
-    const original = block();
-    const edited: ParsedBlock = {
-      ...original,
-      raw: `${original.raw}\nedited line`,
+    const original = node();
+    const edited: ThreadNode = {
+      comment: { ...original.comment, content: `${original.comment.content}\nedited line` },
+      replies: [],
     };
     const a = new RemarginWidget(original, plugin as unknown as RemarginPlugin, "f.md");
     const b = new RemarginWidget(edited, plugin as unknown as RemarginPlugin, "f.md");
@@ -412,7 +424,7 @@ describe("RemarginWidget", () => {
   // AC: ignoreEvent() returns true.
   it("test #10: ignoreEvent() returns true (does not eat keystrokes)", () => {
     const plugin = makePlugin(true);
-    const widget = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "f.md");
+    const widget = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "f.md");
     assert.equal(widget.ignoreEvent(), true);
   });
 
@@ -435,7 +447,7 @@ describe("RemarginWidget", () => {
       };
     }) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
 
-    const widget = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "f.md");
+    const widget = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "f.md");
     const dom = widget.toDOM();
     assert.equal(createRootCalls, 1);
     assert.equal(renderCalls, 1, "render must run once on mount");
@@ -461,35 +473,48 @@ describe("RemarginWidget", () => {
   it("test #12: widget onClick prop forwards to plugin.focusComment", () => {
     const plugin = makePlugin(true);
 
-    // Wrapper is `WidgetProviders` (added by ticket rem-ob35); the inner
-    // child is `WidgetCommentView`, which carries the `onClick` prop.
+    // Render tree: WidgetProviders > div > [WidgetThreadToolbar, WidgetCommentThread].
+    // The thread component carries the `onClick` prop.
     let captured: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
         const wrapper = element as {
-          props?: { children?: { props?: { onClick?: (id: string, file: string) => void } } };
+          props?: {
+            children?: {
+              props?: {
+                children?: Array<{
+                  props?: { onClick?: (id: string, file: string) => void };
+                }>;
+              };
+            };
+          };
         };
-        const inner = wrapper.props?.children;
-        if (typeof inner?.props?.onClick === "function") captured = inner.props.onClick;
+        const blockDiv = wrapper.props?.children;
+        const children = blockDiv?.props?.children ?? [];
+        for (const child of children) {
+          if (typeof child?.props?.onClick === "function") {
+            captured = child.props.onClick;
+          }
+        }
       },
       unmount: () => {
         /* test-only no-op */
       },
     })) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
 
-    const widget = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "notes/x.md");
+    const widget = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "notes/x.md");
     widget.toDOM();
-    assert.ok(captured, "expected an onClick prop on the rendered widget");
+    assert.ok(captured, "expected an onClick prop on the rendered widget thread");
     captured("c1", "notes/x.md");
     assert.deepStrictEqual(plugin.__focusCalls, [["c1", "notes/x.md"]]);
   });
 
-  // AC (rem-ob35): toDOM must wrap WidgetCommentView in WidgetProviders,
+  // AC (rem-ob35): toDOM must wrap the rendered tree in WidgetProviders,
   // passing `plugin: this.plugin` and `portalContainer: host`. Without
   // the wrapper, the React mount throws on first render with
   // "useBackend must be used within a BackendContext.Provider". The
   // wrapper presence is the structural fix this test guards.
-  it("test #12a: toDOM wraps WidgetCommentView in WidgetProviders with plugin + host as portal container", () => {
+  it("test #12a: toDOM wraps the rendered tree in WidgetProviders with plugin + host as portal container", () => {
     const plugin = makePlugin(true);
 
     let capturedElement: unknown;
@@ -506,7 +531,7 @@ describe("RemarginWidget", () => {
       };
     }) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
 
-    const widget = new RemarginWidget(block(), plugin as unknown as RemarginPlugin, "notes/x.md");
+    const widget = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "notes/x.md");
     const dom = widget.toDOM();
 
     const wrapper = capturedElement as {
@@ -531,8 +556,8 @@ describe("RemarginWidget", () => {
     );
     assert.equal(
       wrapper.props.children.type,
-      WidgetCommentView,
-      "wrapper child must be the WidgetCommentView element"
+      "div",
+      "wrapper child must be the block container <div>"
     );
   });
 

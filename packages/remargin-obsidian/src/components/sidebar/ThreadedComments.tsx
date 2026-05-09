@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Comment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 import { collectKinds, matchesKindFilter } from "@/lib/kindFilter";
+import { buildThreadTree, type ThreadNode } from "@/lib/threadTree";
 
 interface ThreadedCommentsProps {
   file: string;
@@ -45,33 +46,6 @@ interface ThreadedCommentsProps {
    * unions this with the Inbox section's set to drive the chip row.
    */
   onKindsDiscovered?: (kinds: string[]) => void;
-}
-
-interface ThreadNode {
-  comment: Comment;
-  replies: ThreadNode[];
-}
-
-function buildThreadTree(comments: Comment[]): ThreadNode[] {
-  const byId = new Map<string, ThreadNode>();
-  const roots: ThreadNode[] = [];
-
-  for (const c of comments) {
-    byId.set(c.id, { comment: c, replies: [] });
-  }
-
-  for (const c of comments) {
-    const node = byId.get(c.id);
-    if (!node) continue;
-    const parent = c.reply_to ? byId.get(c.reply_to) : undefined;
-    if (parent) {
-      parent.replies.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  return roots;
 }
 
 function errorMessage(err: unknown): string {

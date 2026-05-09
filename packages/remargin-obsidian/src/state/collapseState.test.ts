@@ -50,4 +50,51 @@ describe("CollapseState", () => {
     assert.deepStrictEqual(callsA, [["xyz", false]]);
     assert.deepStrictEqual(callsB, [["xyz", false]]);
   });
+
+  it("has returns false for untouched ids and true after any setter", () => {
+    const state = new CollapseState();
+    assert.equal(state.has("a"), false);
+    state.setExpanded("a");
+    assert.equal(state.has("a"), true);
+    const other = new CollapseState();
+    other.toggle("b");
+    assert.equal(other.has("b"), true);
+  });
+
+  it("setExpanded primes an unknown id as expanded and notifies once", () => {
+    const state = new CollapseState();
+    const calls: Array<[string, boolean]> = [];
+    state.subscribe((id, collapsed) => calls.push([id, collapsed]));
+    state.setExpanded("a");
+    assert.equal(state.isCollapsed("a"), false);
+    assert.deepStrictEqual(calls, [["a", false]]);
+    // Idempotent: second call notifies nothing.
+    state.setExpanded("a");
+    assert.deepStrictEqual(calls, [["a", false]]);
+  });
+
+  it("setCollapsed primes an unknown id as collapsed but emits notification", () => {
+    const state = new CollapseState();
+    const calls: Array<[string, boolean]> = [];
+    state.subscribe((id, collapsed) => calls.push([id, collapsed]));
+    state.setCollapsed("a");
+    assert.equal(state.isCollapsed("a"), true);
+    assert.deepStrictEqual(calls, [["a", true]]);
+    // Idempotent: second call notifies nothing.
+    state.setCollapsed("a");
+    assert.deepStrictEqual(calls, [["a", true]]);
+  });
+
+  it("setMany fires one notification per id that actually changed", () => {
+    const state = new CollapseState();
+    state.setExpanded("a"); // already expanded
+    const calls: Array<[string, boolean]> = [];
+    state.subscribe((id, collapsed) => calls.push([id, collapsed]));
+    state.setMany(["a", "b", "c"], false);
+    // 'a' was already expanded; only 'b' and 'c' fire.
+    assert.deepStrictEqual(calls, [
+      ["b", false],
+      ["c", false],
+    ]);
+  });
 });

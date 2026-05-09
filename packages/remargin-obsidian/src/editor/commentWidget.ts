@@ -9,11 +9,13 @@ import {
 import { editorInfoField, editorLivePreviewField } from "obsidian";
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
-import { WidgetCommentView } from "@/components/widget/WidgetCommentView";
+import { WidgetCommentThread } from "@/components/widget/WidgetCommentThread";
 import { WidgetProviders } from "@/components/widget/WidgetProviders";
+import { WidgetThreadToolbar } from "@/components/widget/WidgetThreadToolbar";
 import type { Comment } from "@/generated";
+import { buildThreadTree, type ThreadNode } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
-import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
+import { parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
 
 /**
  * Test seam for `react-dom/client`'s `createRoot`. Production code uses
@@ -78,8 +80,14 @@ function hashRaw(s: string): number {
 }
 
 /**
- * CM6 widget that mounts the shared `WidgetCommentView` React tree in
+ * CM6 widget that mounts the shared `WidgetCommentThread` React tree in
  * place of a remargin fenced block while in Live Preview.
+ *
+ * Each block decoration corresponds to one *root* in the document's
+ * thread forest: the parsed block is either an actual root (no
+ * `reply_to`) or an orphan reply whose parent is missing from the
+ * document. Replies whose parent IS in the document do not produce a
+ * decoration — the parent's widget renders them nested.
  *
  * Critical fixes vs. the v1 attempt (commit 25a612a, reverted in
  * 67ef39d):
@@ -95,10 +103,10 @@ function hashRaw(s: string): number {
  *    swap v1 used.
  */
 export class RemarginWidget extends WidgetType {
-  /** Cached id (always present — caller filters for `block.valid`). */
+  /** Cached id of this block's root (always present — caller filters). */
   private readonly id: string;
-  /** Cached body hash so `eq` doesn't recompute on every comparison. */
-  private readonly contentHash: number;
+  /** Hash of every descendant's raw text so `eq` rebuilds when ANY descendant changes. */
+  private readonly subtreeHash: number;
   /**
    * Collapsed state captured at *construction* time. Snapshotting here
    * (rather than reading `plugin.collapseState.isCollapsed` inside
@@ -110,17 +118,16 @@ export class RemarginWidget extends WidgetType {
   private readonly collapsedAtBuildTime: boolean;
 
   constructor(
-    private readonly parsed: ParsedBlock,
+    private readonly threadNode: ThreadNode,
     private readonly plugin: RemarginPlugin,
     private readonly sourcePath: string
   ) {
     super();
-    // The build path filters for `parsed.valid && parsed.comment.id`;
-    // the non-null assertion is sound but we still default to "" if
+    // The build path filters for `node.comment.id`; default to "" if
     // some future caller forgets — better to render an unfocused
     // widget than to throw inside CM6's decoration pipeline.
-    this.id = parsed.comment.id ?? "";
-    this.contentHash = hashRaw(parsed.raw);
+    this.id = threadNode.comment.id ?? "";
+    this.subtreeHash = hashSubtree(threadNode);
     this.collapsedAtBuildTime = plugin.collapseState.isCollapsed(this.id);
   }
 
@@ -137,7 +144,7 @@ export class RemarginWidget extends WidgetType {
     return (
       this.id === other.id &&
       this.collapsedAtBuildTime === other.collapsedAtBuildTime &&
-      this.contentHash === other.contentHash
+      this.subtreeHash === other.subtreeHash
     );
   }
 
@@ -153,26 +160,30 @@ export class RemarginWidget extends WidgetType {
     // an external map. The cast is intentional — CM6's WidgetType API
     // hands the same DOM node back to `destroy`.
     (host as HTMLElement & { __remarginRoot?: Root }).__remarginRoot = root;
+    const me = this.plugin.currentIdentity ?? null;
     root.render(
       createElement(
         WidgetProviders,
         { plugin: this.plugin, portalContainer: host },
-        createElement(WidgetCommentView, {
-          // The build path filters for `parsed.valid` so the cast to a
-          // full `Comment` is sound; missing optional fields default
-          // gracefully inside the header/body components.
-          comment: this.parsed.comment as Comment,
-          sourcePath: this.sourcePath,
-          // Use the snapshot from construction time. CM6 only calls
-          // `toDOM` when this widget is being mounted for the first
-          // time (or after `eq` returned false → rebuild), so the
-          // snapshot is the right value to render against.
-          collapsed: this.collapsedAtBuildTime,
-          onToggle: () => this.plugin.collapseState.toggle(this.id),
-          onClick: (cid, file) => {
-            this.plugin.focusComment(cid, file);
-          },
-        })
+        createElement(
+          "div",
+          { className: "remargin-widget-block" },
+          createElement(WidgetThreadToolbar, {
+            rootIds: [this.id],
+            collapseState: this.plugin.collapseState,
+          }),
+          createElement(WidgetCommentThread, {
+            // The build path filters for `valid` blocks; the cast to
+            // full `Comment` is sound and matches the prior shape.
+            root: this.threadNode as { comment: Comment; replies: ThreadNode[] },
+            sourcePath: this.sourcePath,
+            me,
+            collapseState: this.plugin.collapseState,
+            onClick: (cid, file) => {
+              this.plugin.focusComment(cid, file);
+            },
+          })
+        )
       )
     );
     return host;
@@ -193,10 +204,38 @@ export class RemarginWidget extends WidgetType {
 }
 
 /**
+ * Hash a thread node's full subtree raw text so `eq()` rebuilds when
+ * any descendant changes (a reply added, an existing reply edited,
+ * etc.). Cryptographic strength is unnecessary — collisions just
+ * cause an extra rebuild, never a correctness bug.
+ */
+function hashSubtree(node: ThreadNode): number {
+  let h = hashRaw(node.comment.id ?? "");
+  // Stir in every descendant's id + content hash so that mutations
+  // anywhere in the subtree force a rebuild.
+  for (const reply of node.replies) {
+    h = (h * 31 + hashSubtree(reply)) | 0;
+  }
+  // Mix the comment's content too so an edit-in-place rebuilds.
+  h = (h * 31 + hashRaw(node.comment.content ?? "")) | 0;
+  // Ack list affects pending badges; mix length + last ts.
+  h = (h * 31 + node.comment.ack.length) | 0;
+  return h;
+}
+
+/**
  * Build the decoration set for the current state. Skipped (returns
  * `Decoration.none`) when the feature toggle is off OR the editor is
  * in Source Mode — same fall-through to the raw fence as the
  * reading-mode widget (T37).
+ *
+ * Document-scope thread building: parse every block in the doc once,
+ * build the thread tree, then iterate blocks. For each block:
+ *   - Root in tree → emit a decoration that renders the full subtree.
+ *   - Reply with parent in this doc → emit NOTHING (parent's widget
+ *     nests it).
+ *   - Orphan reply (parent missing from doc) → emit a degraded-root
+ *     decoration so it stays visible.
  */
 export function buildDecorations(state: EditorState, plugin: RemarginPlugin): DecorationSet {
   if (!plugin.settings.editorWidgets) return Decoration.none;
@@ -206,9 +245,27 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
   const blocks = parseRemarginBlocks(text);
   const sourcePath = resolveSourcePath(state);
   const builder = new RangeSetBuilder<Decoration>();
+
+  // Build the document-scope thread tree from valid comments. The
+  // tree's roots are exactly the comments that should render at top
+  // level (real roots + orphan replies — see `buildThreadTree`).
+  const validComments: Comment[] = blocks
+    .filter((b) => b.valid && b.comment.id)
+    .map((b) => b.comment as Comment);
+  const trees = buildThreadTree(validComments);
+  const rootIds = new Set(trees.map((n) => n.comment.id));
+  const nodeById = new Map<string, ThreadNode>();
+  for (const node of trees) collectNodes(node, nodeById);
+
   for (const block of blocks) {
     if (!block.valid || !block.comment.id) continue;
-    const widget = new RemarginWidget(block, plugin, sourcePath);
+    const id = block.comment.id;
+    // Skip blocks whose comment is a non-orphan reply — its parent's
+    // widget will render it nested.
+    if (!rootIds.has(id)) continue;
+    const node = nodeById.get(id);
+    if (!node) continue;
+    const widget = new RemarginWidget(node, plugin, sourcePath);
     builder.add(
       block.startOffset,
       block.endOffset,
@@ -228,6 +285,13 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
     );
   }
   return builder.finish();
+}
+
+function collectNodes(node: ThreadNode, into: Map<string, ThreadNode>): void {
+  into.set(node.comment.id, node);
+  for (const reply of node.replies) {
+    collectNodes(reply, into);
+  }
 }
 
 /**

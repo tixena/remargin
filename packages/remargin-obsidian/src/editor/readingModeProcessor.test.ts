@@ -1,7 +1,6 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type MarkdownPostProcessorContext, MarkdownRenderChild } from "obsidian";
-import { WidgetCommentView } from "../components/widget/WidgetCommentView.tsx";
 import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
 import type RemarginPlugin from "../main.ts";
 import { CollapseState } from "../state/collapseState.ts";
@@ -500,19 +499,29 @@ describe("ReadingModeCommentChild", () => {
     const parsed = parseFromInnerContent(VALID_BLOCK)[0];
 
     // Capture the React element the child renders so we can fish out
-    // the wired `onClick` prop and invoke it directly. The wrapper is
-    // `WidgetProviders` (added by ticket rem-ob35); the child is the
-    // `WidgetCommentView` element where `onClick` lives. Descend one
-    // level via `props.children` to reach it.
+    // the wired `onClick` prop and invoke it directly. The render tree
+    // is `WidgetProviders > div > [WidgetThreadToolbar, WidgetCommentThread]`
+    // — the thread component carries the `onClick` prop.
     let capturedOnClick: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
         const wrapper = element as {
-          props?: { children?: { props?: { onClick?: (id: string, file: string) => void } } };
+          props?: {
+            children?: {
+              props?: {
+                children?: Array<{
+                  props?: { onClick?: (id: string, file: string) => void };
+                }>;
+              };
+            };
+          };
         };
-        const inner = wrapper.props?.children;
-        if (typeof inner?.props?.onClick === "function") {
-          capturedOnClick = inner.props.onClick;
+        const blockDiv = wrapper.props?.children;
+        const children = blockDiv?.props?.children ?? [];
+        for (const child of children) {
+          if (typeof child?.props?.onClick === "function") {
+            capturedOnClick = child.props.onClick;
+          }
         }
       },
       unmount: () => {
@@ -540,11 +549,12 @@ describe("ReadingModeCommentChild", () => {
   });
 
   // AC (rem-ob35): the rendered React element must be a `WidgetProviders`
-  // wrapping a `WidgetCommentView`, and `WidgetProviders` must receive
-  // the plugin + the host element as its portal container. Without the
-  // wrapper, mounting crashes with "useBackend must be used within a
-  // BackendContext.Provider" — so this assertion guards the runtime fix.
-  it("test #9: render wraps WidgetCommentView in WidgetProviders with plugin + host", async () => {
+  // wrapping the thread block (a <div> containing the toolbar + thread),
+  // and `WidgetProviders` must receive the plugin + the host element as
+  // its portal container. Without the wrapper, mounting crashes with
+  // "useBackend must be used within a BackendContext.Provider" — so this
+  // assertion guards the runtime fix.
+  it("test #9: render wraps the thread block in WidgetProviders with plugin + host", async () => {
     const plugin = makePlugin(true);
     const parsed = parseFromInnerContent(VALID_BLOCK)[0];
 
@@ -589,8 +599,8 @@ describe("ReadingModeCommentChild", () => {
       );
       assert.equal(
         wrapper.props.children.type,
-        WidgetCommentView,
-        "wrapper child must be the WidgetCommentView element"
+        "div",
+        "wrapper child must be the thread block <div>"
       );
 
       child.onunload();

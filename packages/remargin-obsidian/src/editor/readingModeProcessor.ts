@@ -5,9 +5,11 @@ import {
 } from "obsidian";
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
-import { WidgetCommentView } from "@/components/widget/WidgetCommentView";
+import { WidgetCommentThread } from "@/components/widget/WidgetCommentThread";
 import { WidgetProviders } from "@/components/widget/WidgetProviders";
+import { WidgetThreadToolbar } from "@/components/widget/WidgetThreadToolbar";
 import type { Comment } from "@/generated";
+import type { ThreadNode } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
 import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
 
@@ -52,7 +54,14 @@ export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): 
 /**
  * Reading-mode markdown post-processor that swaps each well-formed
  * `<pre><code class="language-remargin">…</code></pre>` block for the
- * shared `WidgetCommentView` React tree (T37).
+ * shared `WidgetCommentThread` React tree (T37).
+ *
+ * Each block is rendered as a single-comment thread root. Cross-block
+ * thread nesting (a reply rendered under its parent block) is not done
+ * in Reading Mode — Obsidian renders each preview chunk independently,
+ * so the post-processor sees one block at a time and cannot synthesise
+ * nested children without re-fetching the full file. The shared
+ * `CollapseState` still keeps Live Preview and Reading Mode in sync.
  *
  * Why this shape:
  *
@@ -144,25 +153,38 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     if (!this.root) return;
     const id = this.parsed.comment.id;
     if (!id) return;
+    const node: ThreadNode = {
+      // The widget expects a full `Comment`. The parser returns
+      // `Partial<Comment>` because malformed blocks may miss fields —
+      // but at this point we've already filtered to `valid && id`,
+      // so the cast is sound. The header/body components handle
+      // missing optional fields gracefully (defaults to empty
+      // string / array).
+      comment: this.parsed.comment as Comment,
+      replies: [],
+    };
+    const me = this.plugin.currentIdentity ?? null;
     this.root.render(
       createElement(
         WidgetProviders,
         { plugin: this.plugin, portalContainer: this.containerEl },
-        createElement(WidgetCommentView, {
-          // The widget expects a full `Comment`. The parser returns
-          // `Partial<Comment>` because malformed blocks may miss fields —
-          // but at this point we've already filtered to `valid && id`,
-          // so the cast is sound. The header/body components handle
-          // missing optional fields gracefully (defaults to empty
-          // string / array).
-          comment: this.parsed.comment as Comment,
-          sourcePath: this.sourcePath,
-          collapsed: this.plugin.collapseState.isCollapsed(id),
-          onToggle: () => this.plugin.collapseState.toggle(id),
-          onClick: (cid, file) => {
-            this.plugin.focusComment(cid, file);
-          },
-        })
+        createElement(
+          "div",
+          { className: "remargin-widget-block" },
+          createElement(WidgetThreadToolbar, {
+            rootIds: [id],
+            collapseState: this.plugin.collapseState,
+          }),
+          createElement(WidgetCommentThread, {
+            root: node,
+            sourcePath: this.sourcePath,
+            me,
+            collapseState: this.plugin.collapseState,
+            onClick: (cid, file) => {
+              this.plugin.focusComment(cid, file);
+            },
+          })
+        )
       )
     );
   }

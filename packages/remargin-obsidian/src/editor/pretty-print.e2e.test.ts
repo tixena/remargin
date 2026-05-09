@@ -289,18 +289,32 @@ afterEach(() => {
 });
 
 /**
- * Pull the `onClick` prop from the wrapped widget tree both editor
- * surfaces produce. After ticket rem-ob35, both sides render
- * `<WidgetProviders>` wrapping `<WidgetCommentView>`. The provider
- * wrapper has no `onClick`; the inner `WidgetCommentView` does.
- * Descend one level via `props.children` to reach it.
+ * Pull the `onClick` prop from the wrapped widget tree. Both editor
+ * surfaces now render `<WidgetProviders>` wrapping a thread block
+ * `<div>` whose children include `WidgetThreadToolbar` and
+ * `WidgetCommentThread`. The thread component carries the `onClick`
+ * prop. Descend two levels (provider → div → children[]) to reach it.
  */
 function findInnerOnClick(element: unknown): ((id: string, file: string) => void) | undefined {
   const wrapper = element as {
-    props?: { children?: { props?: { onClick?: (id: string, file: string) => void } } };
+    props?: {
+      children?: {
+        props?: {
+          children?: Array<{
+            props?: { onClick?: (id: string, file: string) => void };
+          }>;
+        };
+      };
+    };
   };
-  const inner = wrapper.props?.children;
-  return typeof inner?.props?.onClick === "function" ? inner.props.onClick : undefined;
+  const blockDiv = wrapper.props?.children;
+  const children = blockDiv?.props?.children ?? [];
+  for (const child of children) {
+    if (typeof child?.props?.onClick === "function") {
+      return child.props.onClick;
+    }
+  }
+  return undefined;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import type { Comment } from "@/generated/types";
+import type { PendingSummary } from "@/lib/pendingState";
 import { CollapseToggle } from "./CollapseToggle";
 
 export interface WidgetCommentViewProps {
@@ -16,6 +17,13 @@ export interface WidgetCommentViewProps {
    * (`plugin.focusComment`).
    */
   onClick: (commentId: string, file: string) => void;
+  /**
+   * Optional pending-stats badge surface. Rendered only when present
+   * AND the comment is collapsed AND `summary.totalReplies > 0`. The
+   * widget tree builder feeds this from `summarizeThread(node, me)`
+   * so callers do not have to recompute it.
+   */
+  summary?: PendingSummary;
 }
 
 /**
@@ -39,6 +47,7 @@ export function WidgetCommentView({
   collapsed,
   onToggle,
   onClick,
+  summary,
 }: WidgetCommentViewProps) {
   // Plain inline handler (no `useCallback`) keeps the component
   // hook-free, which lets unit tests call the function directly without
@@ -48,6 +57,8 @@ export function WidgetCommentView({
     onClick(comment.id, sourcePath);
   };
 
+  const showSummary = collapsed && summary !== undefined && summary.totalReplies > 0;
+
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: widget click forwards to the sidebar; keyboard users open the sidebar directly via the existing command (T36 ships only the click bridge).
     // biome-ignore lint/a11y/noStaticElementInteractions: as above — widget root is a structural container, not an interactive control.
@@ -56,6 +67,9 @@ export function WidgetCommentView({
         <CollapseToggle collapsed={collapsed} onToggle={onToggle} />
         <CommentHeader comment={comment} />
       </div>
+      {showSummary && summary !== undefined && (
+        <span className="remargin-widget-comment__summary">{formatSummary(summary)}</span>
+      )}
       {!collapsed && (
         <MarkdownContent
           content={comment.content ?? ""}
@@ -65,4 +79,13 @@ export function WidgetCommentView({
       )}
     </div>
   );
+}
+
+function formatSummary(summary: PendingSummary): string {
+  const noun = summary.totalReplies === 1 ? "reply" : "replies";
+  const base = `${summary.totalReplies} ${noun}`;
+  if (summary.pendingForMe > 0) {
+    return `${base} · ${summary.pendingForMe} pending for you`;
+  }
+  return base;
 }

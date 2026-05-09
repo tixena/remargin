@@ -183,6 +183,16 @@ export default class RemarginPlugin extends Plugin {
   collapseState!: CollapseState;
 
   /**
+   * Cached resolved identity for the active settings, used by the
+   * pretty-print thread widgets to compute "pending for me" auto-expand
+   * and the per-thread badge text without an async hop on every render.
+   * Refreshed by `refreshIdentity()` on plugin load and after settings
+   * saves. `null` means no identity is configured (or resolution is
+   * still in flight).
+   */
+  currentIdentity: string | null = null;
+
+  /**
    * Plugin-scoped event bus for sidebar-focus requests. `focusComment`
    * dispatches `remargin:focus` here, and the React `SidebarShell`
    * subscribes/unsubscribes on mount/unmount. Picked over the workspace
@@ -252,6 +262,13 @@ export default class RemarginPlugin extends Plugin {
     // setting at runtime takes effect on the next render — no need to
     // re-register.
     this.registerMarkdownPostProcessor(remarginPostProcessor(this));
+
+    // Resolve identity once at startup so the widget thread renderer
+    // has it without an async hop per block. Failures (no config yet,
+    // CLI missing) leave `currentIdentity` null — the widget falls
+    // back to broadcast-pending semantics, which match the no-identity
+    // case the user spec describes.
+    void this.refreshIdentity();
 
     this.registerView(VIEW_TYPE_REMARGIN, (leaf) => new RemarginView(leaf, this));
 
@@ -419,6 +436,28 @@ export default class RemarginPlugin extends Plugin {
         leaf.detach();
       }
       await this.activateView();
+    }
+
+    // Settings change may have flipped to a different identity config;
+    // refresh the cached identity so widget threads pick up the new
+    // "pending for me" identity on the next render.
+    void this.refreshIdentity();
+  }
+
+  /**
+   * Resolve the active identity through the backend and stash it on
+   * `currentIdentity` so the editor-side widgets can read it
+   * synchronously. Failures (CLI missing, no config) leave the field
+   * null — the widget falls back to broadcast-only auto-expand, which
+   * matches the no-identity case the user spec describes.
+   */
+  async refreshIdentity(): Promise<void> {
+    try {
+      const info = await this.backend.identity();
+      this.currentIdentity = info.identity ?? null;
+    } catch (err) {
+      console.error("RemarginPlugin.refreshIdentity failed:", err);
+      this.currentIdentity = null;
     }
   }
 
