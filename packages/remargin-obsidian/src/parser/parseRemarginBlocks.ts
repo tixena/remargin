@@ -1,6 +1,27 @@
-import type { AuthorType, Comment, ReactionEntry } from "@/generated";
+import type {
+  Acknowledgment,
+  AuthorType,
+  Comment,
+  OnDiskComment,
+  ReactionEntry,
+} from "@/generated";
 
 const LEGACY_REACTION_TS = "1970-01-01T00:00:00+00:00";
+
+function normalizeAcks(
+  raw: Array<string | { author: string; ts: string }> | undefined
+): Acknowledgment[] {
+  if (!raw) return [];
+  return raw.flatMap((entry) => {
+    if (typeof entry === "string") {
+      // Wire shape: "author@rfc3339-ts"
+      const at = entry.indexOf("@");
+      if (at < 0) return [];
+      return [{ author: entry.slice(0, at), ts: entry.slice(at + 1) }];
+    }
+    return [entry];
+  });
+}
 
 function normalizeReactions(
   raw: Record<string, Array<string | { author: string; ts: string }>> | undefined
@@ -34,25 +55,19 @@ const enum State {
   Content,
 }
 
-// Field names match the canonical on-disk YAML keys produced by the
-// Rust writer (`crates/remargin-core/src/writer.rs::serialize_comment`).
-// Two of them differ from the in-memory `Comment` field names — the
-// caller maps `type` → `author_type` and `reply-to` → `reply_to` after
-// parsing.
-interface YamlFields {
-  id?: string;
-  author?: string;
-  type?: string;
-  ts?: string;
-  "reply-to"?: string;
-  thread?: string;
-  to?: string[];
-  ack?: Array<{ author: string; ts: string }>;
+// The YAML header parses into a partial OnDiskComment — the field names
+// (e.g. `type`, `reply-to`) come straight from the generated TS
+// interface, which mirrors `OnDiskComment`'s serde renames in
+// `crates/remargin-core/src/on_disk_comment.rs`. The caller maps the
+// wire shape onto the in-memory `Comment` (e.g. `type` →
+// `author_type`).
+type YamlFields = Partial<OnDiskComment> & {
+  // The legacy on-disk `ack` shape allowed `{author, ts}` objects;
+  // current writes emit `"author@ts"` strings. Tolerate both during the
+  // YAML scan; the construction pass collapses the variation.
+  ack?: Array<string | { author: string; ts: string }>;
   reactions?: Record<string, Array<string | { author: string; ts: string }>>;
-  attachments?: string[];
-  checksum?: string;
-  signature?: string;
-}
+};
 
 function parseSimpleYaml(lines: string[]): YamlFields {
   const bag: Record<string, unknown> = {};
@@ -172,17 +187,16 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
             comment: {
               id: yaml.id,
               author: yaml.author,
-              // The on-disk YAML key is `type` (Rust writer line 149);
-              // the in-memory Comment field is `author_type`.
+              // OnDiskComment renames `author_type` → `type` for the
+              // wire form; map back to the in-memory field here.
               author_type: yaml.type as AuthorType | undefined,
               ts: yaml.ts,
               content,
-              // The on-disk YAML key is `reply-to` (Rust writer line
-              // 157); the in-memory Comment field is `reply_to`.
+              // OnDiskComment renames `reply_to` → `reply-to`; map back.
               reply_to: yaml["reply-to"],
               thread: yaml.thread,
               to: yaml.to ?? [],
-              ack: yaml.ack ?? [],
+              ack: normalizeAcks(yaml.ack),
               reactions: normalizeReactions(yaml.reactions),
               attachments: yaml.attachments ?? [],
               checksum: yaml.checksum,
