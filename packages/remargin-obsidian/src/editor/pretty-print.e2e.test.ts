@@ -128,7 +128,17 @@ const INVALID_BLOCK_NO_ID_INNER = [
  */
 function makeApp(): unknown {
   return {
-    vault: { adapter: { basePath: "/tmp/test-vault" } },
+    vault: {
+      adapter: { basePath: "/tmp/test-vault" },
+      // Reading-mode child issues `getAbstractFileByPath` + `cachedRead`
+      // to assemble the cross-block thread tree. The e2e harness keeps
+      // both as no-op-shaped stubs because no scenario here exercises
+      // the cross-block path.
+      getAbstractFileByPath: () => null,
+      cachedRead: async () => "",
+      on: () => ({}),
+      offref: () => undefined,
+    },
     workspace: {
       getActiveViewOfType: () => null,
       getLeavesOfType: () => [],

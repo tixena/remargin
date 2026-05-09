@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { type MarkdownPostProcessorContext, MarkdownRenderChild } from "obsidian";
+import { type MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
 import { WidgetProviders } from "../components/widget/WidgetProviders.tsx";
 import type RemarginPlugin from "../main.ts";
 import { CollapseState } from "../state/collapseState.ts";
@@ -118,10 +118,29 @@ interface MockPlugin {
   collapseState: CollapseState;
   focusComment: (id: string, file: string) => void;
   __focusCalls: Array<[string, string]>;
+  app: {
+    vault: {
+      getAbstractFileByPath: (path: string) => unknown;
+      cachedRead: (file: unknown) => Promise<string>;
+      on: (name: string, cb: unknown) => unknown;
+      offref: (ref: unknown) => void;
+    };
+  };
+  __vaultFiles: Map<string, string>;
 }
 
+/**
+ * Build a `MockPlugin` whose `app.vault` mimics the surface
+ * `ReadingModeCommentChild.loadTree` consults: `getAbstractFileByPath`
+ * returns a `TFile`-shaped object iff the path is registered via
+ * `__vaultFiles`, and `cachedRead` returns its registered contents.
+ * Tests that don't care about cross-block tree resolution can leave
+ * `__vaultFiles` empty — `loadTree` short-circuits when the path is
+ * not registered, falling back to the leaf-only first paint.
+ */
 function makePlugin(editorWidgets: boolean): MockPlugin {
   const focusCalls: Array<[string, string]> = [];
+  const vaultFiles = new Map<string, string>();
   const plugin: MockPlugin = {
     settings: { ...DEFAULT_SETTINGS, editorWidgets },
     collapseState: new CollapseState(),
@@ -129,6 +148,21 @@ function makePlugin(editorWidgets: boolean): MockPlugin {
       focusCalls.push([id, file]);
     },
     __focusCalls: focusCalls,
+    __vaultFiles: vaultFiles,
+    app: {
+      vault: {
+        getAbstractFileByPath: (path: string) => {
+          if (!vaultFiles.has(path)) return null;
+          return Object.assign(new TFile(), { path });
+        },
+        cachedRead: async (file: unknown) => {
+          const path = (file as { path?: string }).path ?? "";
+          return vaultFiles.get(path) ?? "";
+        },
+        on: () => ({}),
+        offref: () => undefined,
+      },
+    },
   };
   return plugin;
 }
@@ -602,6 +636,268 @@ describe("ReadingModeCommentChild", () => {
         "div",
         "wrapper child must be the thread block <div>"
       );
+
+      child.onunload();
+    } finally {
+      __setCreateRootForTests(null);
+    }
+  });
+
+  // AC: when the doc contains a reply whose parent is the block being
+  // rendered, the parent's host re-renders with the reply nested as
+  // `root.replies`. Mirrors the Live Preview cross-block tree behaviour.
+  it("test #10: parent block renders nested reply once cachedRead resolves", async () => {
+    const plugin = makePlugin(true);
+    plugin.__vaultFiles.set(
+      "notes/thread.md",
+      [
+        "```remargin",
+        "---",
+        "id: c1",
+        "author: alice",
+        "author_type: human",
+        "ts: 2026-04-25T12:00:00-04:00",
+        "---",
+        "hello widget",
+        "```",
+        "",
+        "```remargin",
+        "---",
+        "id: c2",
+        "author: bob",
+        "author_type: human",
+        "ts: 2026-04-25T12:01:00-04:00",
+        "reply_to: c1",
+        "---",
+        "second comment",
+        "```",
+        "",
+      ].join("\n")
+    );
+
+    // The render call captures the latest WidgetCommentThread root prop
+    // so we can assert post-resolution shape (replies populated).
+    const captured: Array<{ id: string; replyIds: string[] }> = [];
+    __setCreateRootForTests(((_el: unknown) => ({
+      render: (element: unknown) => {
+        const wrapper = element as {
+          props?: {
+            children?: {
+              props?: {
+                children?: Array<{
+                  props?: { root?: { comment: { id: string }; replies: Array<unknown> } };
+                }>;
+              };
+            };
+          };
+        };
+        const blockChildren = wrapper.props?.children?.props?.children ?? [];
+        for (const child of blockChildren) {
+          const root = child?.props?.root;
+          if (root) {
+            captured.push({
+              id: root.comment.id,
+              replyIds: root.replies.map((r) => (r as { comment: { id: string } }).comment.id),
+            });
+          }
+        }
+      },
+      unmount: () => {
+        /* test-only no-op */
+      },
+    })) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
+
+    try {
+      const parsed = parseFromInnerContent(VALID_BLOCK)[0];
+      const child = new ReadingModeCommentChild(
+        makeHost() as unknown as HTMLElement,
+        parsed,
+        "notes/thread.md",
+        plugin as unknown as RemarginPlugin
+      );
+      child.onload();
+
+      // Drain microtasks so the awaited cachedRead resolves and
+      // `loadTree` runs its post-await render.
+      await new Promise((r) => setTimeout(r, 0));
+
+      // First render is the leaf-only first paint; the second is the
+      // post-resolve render with replies populated.
+      const last = captured[captured.length - 1];
+      assert.ok(last, "expected at least one render after cachedRead resolved");
+      assert.equal(last.id, "c1", "post-resolve render keeps the parent root");
+      assert.deepStrictEqual(last.replyIds, ["c2"], "reply nests under parent post-resolve");
+
+      child.onunload();
+    } finally {
+      __setCreateRootForTests(null);
+    }
+  });
+
+  // AC: a block whose comment is a reply with parent in the same doc
+  // renders NOTHING — the parent's host owns it. The host is hidden so
+  // it doesn't reserve vertical space.
+  it("test #11: reply block whose parent is in the doc is suppressed (host hidden, root unmounted)", async () => {
+    const plugin = makePlugin(true);
+    plugin.__vaultFiles.set(
+      "notes/thread.md",
+      [
+        "```remargin",
+        "---",
+        "id: c1",
+        "author: alice",
+        "author_type: human",
+        "ts: 2026-04-25T12:00:00-04:00",
+        "---",
+        "hello widget",
+        "```",
+        "",
+        "```remargin",
+        "---",
+        "id: c2",
+        "author: bob",
+        "author_type: human",
+        "ts: 2026-04-25T12:01:00-04:00",
+        "reply_to: c1",
+        "---",
+        "second comment",
+        "```",
+        "",
+      ].join("\n")
+    );
+
+    let unmountCalls = 0;
+    __setCreateRootForTests(((_el: unknown) => ({
+      render: () => {
+        /* test-only no-op */
+      },
+      unmount: () => {
+        unmountCalls += 1;
+      },
+    })) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
+
+    try {
+      // Build the parsed block for c2 so the child believes it's
+      // rendering the reply chunk.
+      const c2Inner = [
+        "---",
+        "id: c2",
+        "author: bob",
+        "author_type: human",
+        "ts: 2026-04-25T12:01:00-04:00",
+        "reply_to: c1",
+        "---",
+        "second comment",
+      ].join("\n");
+      const parsed = parseFromInnerContent(c2Inner)[0];
+      assert.ok(parsed?.valid, "fixture must be a valid block");
+
+      const host = makeHost();
+      // The container's `style` shape is the surface `loadTree` mutates
+      // when it suppresses the host. The default mock host doesn't have
+      // one — splice it in so the assertion can read it.
+      (host as unknown as { style: Record<string, string> }).style = {};
+      const child = new ReadingModeCommentChild(
+        host as unknown as HTMLElement,
+        parsed,
+        "notes/thread.md",
+        plugin as unknown as RemarginPlugin
+      );
+      child.onload();
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      assert.equal(
+        (host as unknown as { style: { display?: string } }).style.display,
+        "none",
+        "reply host must be hidden once cross-block parent is detected"
+      );
+      assert.equal(unmountCalls, 1, "reply host's React root must be unmounted");
+
+      child.onunload();
+    } finally {
+      __setCreateRootForTests(null);
+    }
+  });
+
+  // AC: an orphan reply (parent NOT present in the doc) is promoted to
+  // a top-level root by buildThreadTree, so the reading-mode host
+  // renders it as a leaf rather than suppressing it.
+  it("test #12: orphan reply (parent missing from doc) renders as a leaf root", async () => {
+    const plugin = makePlugin(true);
+    // Doc contains ONLY the reply — its parent (c1) is missing.
+    plugin.__vaultFiles.set(
+      "notes/orphan.md",
+      [
+        "```remargin",
+        "---",
+        "id: c2",
+        "author: bob",
+        "author_type: human",
+        "ts: 2026-04-25T12:01:00-04:00",
+        "reply_to: c1",
+        "---",
+        "orphan reply",
+        "```",
+        "",
+      ].join("\n")
+    );
+
+    const captured: Array<{ id: string; replyIds: string[] }> = [];
+    __setCreateRootForTests(((_el: unknown) => ({
+      render: (element: unknown) => {
+        const wrapper = element as {
+          props?: {
+            children?: {
+              props?: {
+                children?: Array<{
+                  props?: { root?: { comment: { id: string }; replies: Array<unknown> } };
+                }>;
+              };
+            };
+          };
+        };
+        const blockChildren = wrapper.props?.children?.props?.children ?? [];
+        for (const child of blockChildren) {
+          const root = child?.props?.root;
+          if (root) {
+            captured.push({
+              id: root.comment.id,
+              replyIds: root.replies.map((r) => (r as { comment: { id: string } }).comment.id),
+            });
+          }
+        }
+      },
+      unmount: () => {
+        /* test-only no-op */
+      },
+    })) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
+
+    try {
+      const c2Inner = [
+        "---",
+        "id: c2",
+        "author: bob",
+        "author_type: human",
+        "ts: 2026-04-25T12:01:00-04:00",
+        "reply_to: c1",
+        "---",
+        "orphan reply",
+      ].join("\n");
+      const parsed = parseFromInnerContent(c2Inner)[0];
+      const child = new ReadingModeCommentChild(
+        makeHost() as unknown as HTMLElement,
+        parsed,
+        "notes/orphan.md",
+        plugin as unknown as RemarginPlugin
+      );
+      child.onload();
+      await new Promise((r) => setTimeout(r, 0));
+
+      const last = captured[captured.length - 1];
+      assert.ok(last, "orphan reply must still render");
+      assert.equal(last.id, "c2", "orphan reply is its own root");
+      assert.deepStrictEqual(last.replyIds, [], "orphan reply has no nested children");
 
       child.onunload();
     } finally {

@@ -2,6 +2,8 @@ import {
   type MarkdownPostProcessor,
   type MarkdownPostProcessorContext,
   MarkdownRenderChild,
+  type TAbstractFile,
+  TFile,
 } from "obsidian";
 import { createElement } from "react";
 import { createRoot as defaultCreateRoot, type Root } from "react-dom/client";
@@ -9,7 +11,7 @@ import { WidgetCommentThread } from "@/components/widget/WidgetCommentThread";
 import { WidgetProviders } from "@/components/widget/WidgetProviders";
 import { WidgetThreadToolbar } from "@/components/widget/WidgetThreadToolbar";
 import type { Comment } from "@/generated";
-import type { ThreadNode } from "@/lib/threadTree";
+import { buildThreadTree, type ThreadNode, walkThread } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
 import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
 
@@ -54,30 +56,15 @@ export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): 
 /**
  * Reading-mode markdown post-processor that swaps each well-formed
  * `<pre><code class="language-remargin">…</code></pre>` block for the
- * shared `WidgetCommentThread` React tree (T37).
+ * shared `WidgetCommentThread` React tree.
  *
- * Each block is rendered as a single-comment thread root. Cross-block
- * thread nesting (a reply rendered under its parent block) is not done
- * in Reading Mode — Obsidian renders each preview chunk independently,
- * so the post-processor sees one block at a time and cannot synthesise
- * nested children without re-fetching the full file. The shared
- * `CollapseState` still keeps Live Preview and Reading Mode in sync.
- *
- * Why this shape:
- *
- *  - Returns a fresh post-processor closure for every plugin so the
- *    `editorWidgets` setting is read on every render call. Toggling the
- *    setting at runtime takes effect on the next Obsidian render pass —
- *    no re-registration needed.
- *  - When the setting is off OR the block is malformed (parser returns
- *    not-exactly-one valid block with an `id`), we leave the raw `<pre>`
- *    untouched. This was the user-confirmed behaviour: a malformed
- *    block is not a real comment to remargin anyway, so showing it raw
- *    matches reality.
- *  - The replacement is a plain `<div>` host that gets handed to a
- *    `MarkdownRenderChild` via `ctx.addChild`, so Obsidian can tear the
- *    React subtree down on preview re-render. This is the lifecycle
- *    fix that the v1 attempt (commit 25a612a) missed.
+ * The structural replacement (host swap, `addChild`) happens
+ * synchronously per block. Cross-block thread nesting is resolved
+ * asynchronously inside `ReadingModeCommentChild.onload` by reading
+ * the full source via `vault.cachedRead` and rebuilding the document
+ * thread tree — replies whose parent is in the same file render
+ * NOTHING (the parent's host renders them nested), and root blocks
+ * render their full subtree.
  */
 export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProcessor {
   return (el: HTMLElement, ctx: MarkdownPostProcessorContext): void => {
@@ -99,7 +86,7 @@ export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProce
       const host = document.createElement("div");
       // `remargin-container` makes Tailwind utilities scoped via
       // tailwind.config.ts's `important: ".remargin-container"` apply
-      // to this widget's subtree (tooltips and all). See ticket rem-ob35.
+      // to this widget's subtree (tooltips and all).
       host.className = "remargin-reading-host remargin-container";
       host.dataset.remarginId = block.comment.id;
       pre.replaceWith(host);
@@ -111,15 +98,34 @@ export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProce
 
 /**
  * `MarkdownRenderChild` that owns the React root mounted into a
- * reading-mode host element. `onload` mounts the widget and subscribes
- * to the plugin-wide collapse store so the widget re-renders when the
- * comment's collapsed flag flips. `onunload` tears the subscription and
- * the root down — Obsidian calls this when the preview re-renders or
- * the leaf closes, so leaks are not possible.
+ * reading-mode host element.
+ *
+ * On load it renders a leaf-only thread immediately, then asynchronously
+ * fetches the full source via `vault.cachedRead` to rebuild the
+ * document-scope thread tree. Once resolved:
+ *   - non-orphan reply (parent in this doc) → unmount + hide host so
+ *     the parent's host owns the rendering.
+ *   - root or orphan reply → render the full subtree under our host.
+ *
+ * Subscribes to the plugin-wide collapse store so widget chevron flips
+ * trigger a re-render. `onunload` tears down the subscription, the
+ * vault listener, and the React root.
  */
 export class ReadingModeCommentChild extends MarkdownRenderChild {
   private root: Root | null = null;
-  private unsubscribe: (() => void) | null = null;
+  private unsubscribeCollapse: (() => void) | null = null;
+  private unsubscribeVault: (() => void) | null = null;
+  /** Resolved subtree once `cachedRead` returns. Null until then. */
+  private subtree: ThreadNode | null = null;
+  /**
+   * True when our id is a non-orphan reply: parent exists in the doc,
+   * so this host yields rendering to the parent.
+   */
+  private suppressed = false;
+  /** Ids covered by the current subtree — used to filter collapse notifications. */
+  private subtreeIds = new Set<string>();
+  /** Bumped on each `loadTree` call so stale resolutions are ignored. */
+  private loadGeneration = 0;
 
   constructor(
     el: HTMLElement,
@@ -132,38 +138,98 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
 
   onload(): void {
     this.root = createRootImpl(this.containerEl);
+    // Initial paint with a leaf-only thread so the user sees something
+    // before the async tree resolves.
+    this.subtreeIds = new Set([this.parsed.comment.id ?? ""]);
     this.render();
-    // Re-render only when the toggle is for OUR id. The collapse store
-    // notifies every subscriber on every flip, so other comments'
-    // toggles must be filtered out here — otherwise every widget on
-    // the page would re-render whenever any single one collapsed.
-    this.unsubscribe = this.plugin.collapseState.subscribe((id) => {
-      if (id === this.parsed.comment.id) this.render();
+    this.unsubscribeCollapse = this.plugin.collapseState.subscribe((id) => {
+      if (this.subtreeIds.has(id)) this.render();
     });
+    void this.loadTree();
+    // Refresh the tree if the source file mutates while we're mounted
+    // (e.g. another pane edits it). Reading-mode re-render handles most
+    // updates already, but the listener catches background edits.
+    const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+    if (file instanceof TFile) {
+      const handler = (modified: TAbstractFile) => {
+        if (modified.path === this.sourcePath) void this.loadTree();
+      };
+      const ref = this.plugin.app.vault.on("modify", handler);
+      this.unsubscribeVault = () => this.plugin.app.vault.offref(ref);
+    }
   }
 
   onunload(): void {
-    this.unsubscribe?.();
-    this.unsubscribe = null;
+    this.unsubscribeCollapse?.();
+    this.unsubscribeCollapse = null;
+    this.unsubscribeVault?.();
+    this.unsubscribeVault = null;
     this.root?.unmount();
     this.root = null;
   }
 
-  private render(): void {
-    if (!this.root) return;
+  private async loadTree(): Promise<void> {
     const id = this.parsed.comment.id;
     if (!id) return;
-    const node: ThreadNode = {
+    const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
+    if (!(file instanceof TFile)) return;
+    const generation = (this.loadGeneration += 1);
+    let text: string;
+    try {
+      text = await this.plugin.app.vault.cachedRead(file);
+    } catch {
+      // Best-effort: a read failure leaves the leaf-only render in
+      // place, which matches the pre-cross-block behaviour.
+      return;
+    }
+    // Bail if we were unloaded or a newer load superseded this one.
+    if (this.root === null) return;
+    if (generation !== this.loadGeneration) return;
+
+    const blocks = parseRemarginBlocks(text);
+    const validComments: Comment[] = blocks
+      .filter((b) => b.valid && b.comment.id)
+      .map((b) => b.comment as Comment);
+    const trees = buildThreadTree(validComments);
+    const nodeById = new Map<string, ThreadNode>();
+    for (const node of trees) collectNodes(node, nodeById);
+    const rootIds = new Set(trees.map((n) => n.comment.id));
+
+    if (!rootIds.has(id)) {
+      // Reply whose parent IS in the doc: yield to the parent's host.
+      this.suppressed = true;
+      this.subtree = null;
+      this.subtreeIds = new Set();
+      // Hide so the empty host doesn't reserve vertical space.
+      (this.containerEl as HTMLElement).style.display = "none";
+      this.root.unmount();
+      this.root = null;
+      return;
+    }
+
+    const node = nodeById.get(id);
+    if (!node) return;
+    this.subtree = node;
+    this.suppressed = false;
+    this.subtreeIds = collectIds(node);
+    this.render();
+  }
+
+  private render(): void {
+    if (!this.root) return;
+    if (this.suppressed) return;
+    const id = this.parsed.comment.id;
+    if (!id) return;
+    const node: ThreadNode = this.subtree ?? {
       // The widget expects a full `Comment`. The parser returns
       // `Partial<Comment>` because malformed blocks may miss fields —
-      // but at this point we've already filtered to `valid && id`,
-      // so the cast is sound. The header/body components handle
-      // missing optional fields gracefully (defaults to empty
-      // string / array).
+      // but the post-processor filters to `valid && id`, so the cast
+      // is sound. Header/body components handle missing optionals.
       comment: this.parsed.comment as Comment,
       replies: [],
     };
     const me = this.plugin.currentIdentity ?? null;
+    const rootIds = Array.from(this.subtreeIds);
     this.root.render(
       createElement(
         WidgetProviders,
@@ -172,7 +238,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
           "div",
           { className: "remargin-widget-block" },
           createElement(WidgetThreadToolbar, {
-            rootIds: [id],
+            rootIds,
             collapseState: this.plugin.collapseState,
           }),
           createElement(WidgetCommentThread, {
@@ -188,4 +254,17 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
       )
     );
   }
+}
+
+function collectNodes(node: ThreadNode, into: Map<string, ThreadNode>): void {
+  into.set(node.comment.id, node);
+  for (const reply of node.replies) {
+    collectNodes(reply, into);
+  }
+}
+
+function collectIds(node: ThreadNode): Set<string> {
+  const ids = new Set<string>();
+  for (const c of walkThread(node)) ids.add(c.id);
+  return ids;
 }
