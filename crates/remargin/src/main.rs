@@ -4,7 +4,7 @@
 mod obsidian;
 
 use std::env;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
@@ -1362,21 +1362,39 @@ struct MvParams<'cmd> {
     src: &'cmd str,
 }
 
-fn out(msg: &str) -> Result<()> {
-    let mut stdout = io::stdout().lock();
-    writeln!(stdout, "{msg}").context("writing to stdout")
+/// Bundle of writers for the CLI's stdout / stderr streams.
+///
+/// Allows the `cmd_*` functions and `run()` to be exercised in-process by
+/// tests with captured `Vec<u8>` buffers instead of writing to the real
+/// process streams.
+#[non_exhaustive]
+pub struct IoSinks<'sinks> {
+    pub stderr: &'sinks mut dyn Write,
+    pub stdout: &'sinks mut dyn Write,
 }
 
-fn out_raw(msg: &str) -> Result<()> {
-    let mut stdout = io::stdout().lock();
-    write!(stdout, "{msg}").context("writing to stdout")
+impl<'sinks> IoSinks<'sinks> {
+    pub fn new(stdout: &'sinks mut dyn Write, stderr: &'sinks mut dyn Write) -> Self {
+        Self { stderr, stdout }
+    }
+}
+
+fn out(sinks: &mut IoSinks<'_>, msg: &str) -> Result<()> {
+    writeln!(sinks.stdout, "{msg}").context("writing to stdout")
+}
+
+fn out_raw(sinks: &mut IoSinks<'_>, msg: &str) -> Result<()> {
+    write!(sinks.stdout, "{msg}").context("writing to stdout")
 }
 
 /// Decorates object payloads with an `elapsed_ms` field so every `--json`
 /// response carries timing info.
-fn out_json(value: &Value) -> Result<()> {
+fn out_json(sinks: &mut IoSinks<'_>, value: &Value) -> Result<()> {
     let decorated = inject_elapsed_ms(value);
-    out(&serde_json::to_string_pretty(&decorated).unwrap_or_default())
+    out(
+        sinks,
+        &serde_json::to_string_pretty(&decorated).unwrap_or_default(),
+    )
 }
 
 fn elapsed_ms() -> u64 {
@@ -1396,32 +1414,32 @@ fn inject_elapsed_ms(value: &Value) -> Value {
     value.clone()
 }
 
-fn print_output(json_mode: bool, value: &Value) -> Result<()> {
+fn print_output(sinks: &mut IoSinks<'_>, json_mode: bool, value: &Value) -> Result<()> {
     if json_mode {
-        out_json(value)
+        out_json(sinks, value)
     } else {
-        print_text_output(value)
+        print_text_output(sinks, value)
     }
 }
 
-fn print_text_output(value: &Value) -> Result<()> {
+fn print_text_output(sinks: &mut IoSinks<'_>, value: &Value) -> Result<()> {
     match value {
-        Value::String(s) => out(s),
+        Value::String(s) => out(sinks, s),
         Value::Object(map) => {
             for (key, val) in map {
                 if let Value::Array(arr) = val {
-                    out(&format!("{key}:"))?;
+                    out(sinks, &format!("{key}:"))?;
                     for item in arr {
-                        out(&format!("  {item}"))?;
+                        out(sinks, &format!("  {item}"))?;
                     }
                 } else {
-                    out(&format!("{key}: {val}"))?;
+                    out(sinks, &format!("{key}: {val}"))?;
                 }
             }
             Ok(())
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {
-            out(&value.to_string())
+            out(sinks, &value.to_string())
         }
     }
 }
@@ -1659,10 +1677,14 @@ fn main() -> ExitCode {
         }
     };
 
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    let mut sinks = IoSinks::new(&mut stdout, &mut stderr);
+
     // Non-JSON mode does not emit a timing footer on any stream:
     // stdout stays pure command output and stderr stays clean. The timing
     // value survives as `elapsed_ms` inside the JSON payload.
-    match run(&cli, &system, &cwd) {
+    match run(&cli, &system, &cwd, &mut sinks) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             let err_msg = format!("{err:#}");
@@ -1675,12 +1697,13 @@ fn main() -> ExitCode {
                 // render.
             } else if json_mode {
                 let error_json = inject_elapsed_ms(&json!({ "error": err_msg }));
-                eprintln!(
+                let _ = writeln!(
+                    sinks.stderr,
                     "{}",
                     serde_json::to_string_pretty(&error_json).unwrap_or_default()
                 );
             } else {
-                eprintln!("error: {err_msg}");
+                let _ = writeln!(sinks.stderr, "error: {err_msg}");
             }
             ExitCode::from(exit_code)
         }
@@ -1953,14 +1976,15 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
     clippy::too_many_lines,
     reason = "config-free subcommand short-circuit list grows linearly with commands"
 )]
-fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
+fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> Result<()> {
     let output = subcommand_output(&cli.command);
     let json_mode = output.is_some_and(|o| o.json);
 
     // Config-free subcommands short-circuit the config resolution path.
     match &cli.command {
         Commands::Version => {
-            eprintln!("remargin {}", env!("CARGO_PKG_VERSION"));
+            writeln!(sinks.stderr, "remargin {}", env!("CARGO_PKG_VERSION"))
+                .context("writing to stderr")?;
             return Ok(());
         }
         Commands::Identity {
@@ -1969,6 +1993,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             output_args,
         } => {
             return cmd_identity(
+                sinks,
                 system,
                 cwd,
                 action.as_ref(),
@@ -1985,26 +2010,26 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
                 .map(|c| expand_cli_pathbuf(system, c))
                 .transpose()?;
             let start_dir = cwd_expanded.as_deref().unwrap_or(cwd);
-            return cmd_resolve_mode(system, start_dir, output_args.json);
+            return cmd_resolve_mode(sinks, system, start_dir, output_args.json);
         }
         Commands::Keygen {
             output: keygen_output,
             ..
         } => {
             let expanded_output = expand_cli_pathbuf(system, keygen_output)?;
-            return cmd_keygen(system, &expanded_output);
+            return cmd_keygen(sinks, system, &expanded_output);
         }
         #[cfg(feature = "obsidian")]
         Commands::Obsidian {
             action,
             output_args,
         } => {
-            return cmd_obsidian(system, cwd, action, output_args.json);
+            return cmd_obsidian(sinks, system, cwd, action, output_args.json);
         }
         Commands::Skill {
             action,
             output_args,
-        } => return cmd_skill(system, action, output_args.json),
+        } => return cmd_skill(sinks, system, action, output_args.json),
         Commands::Activity {
             path,
             since,
@@ -2013,6 +2038,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             output_args,
         } => {
             return cmd_activity(
+                sinks,
                 system,
                 cwd,
                 path.as_deref(),
@@ -2023,7 +2049,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             );
         }
         Commands::Permissions { action } => {
-            return cmd_permissions(system, cwd, action);
+            return cmd_permissions(sinks, system, cwd, action);
         }
         Commands::Restrict {
             path,
@@ -2033,6 +2059,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             output_args,
         } => {
             return cmd_restrict(
+                sinks,
                 system,
                 cwd,
                 path,
@@ -2049,6 +2076,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
             output_args,
         } => {
             return cmd_unprotect(
+                sinks,
                 system,
                 cwd,
                 path,
@@ -2084,6 +2112,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     // Branch out early.
     if let Commands::Mcp { action, .. } = &cli.command {
         return cmd_mcp(
+            sinks,
             system,
             cwd,
             &flags,
@@ -2096,7 +2125,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     let mut final_config = ResolvedConfig::resolve(system, cwd, &flags, assets_dir.as_deref())?;
     final_config.unrestricted = unrestricted_args.unrestricted();
 
-    dispatch_with_config(cli, system, cwd, &final_config)
+    dispatch_with_config(sinks, cli, system, cwd, &final_config)
 }
 
 #[expect(
@@ -2104,6 +2133,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path) -> Result<()> {
     reason = "dispatch function maps all CLI subcommands"
 )]
 fn dispatch_with_config(
+    sinks: &mut IoSinks<'_>,
     cli: &Cli,
     system: &dyn System,
     cwd: &Path,
@@ -2125,14 +2155,14 @@ fn dispatch_with_config(
                 remove: *remove,
                 search_path: path,
             };
-            cmd_ack(system, cwd, config, &ap)
+            cmd_ack(sinks, system, cwd, config, &ap)
         }
         Commands::Batch {
             file,
             ops,
             output_args,
             ..
-        } => cmd_batch(system, cwd, config, file, ops, output_args.json),
+        } => cmd_batch(sinks, system, cwd, config, file, ops, output_args.json),
         Commands::Comment {
             file,
             content,
@@ -2165,20 +2195,28 @@ fn dispatch_with_config(
                 sandbox: *sandbox,
                 to,
             };
-            cmd_comment(system, cwd, config, &cp)
+            cmd_comment(sinks, system, cwd, config, &cp)
         }
         Commands::Comments {
             file,
             pretty,
             remargin_kind,
             output_args,
-        } => cmd_comments(system, cwd, file, remargin_kind, output_args.json, *pretty),
+        } => cmd_comments(
+            sinks,
+            system,
+            cwd,
+            file,
+            remargin_kind,
+            output_args.json,
+            *pretty,
+        ),
         Commands::Delete {
             file,
             ids,
             output_args,
             ..
-        } => cmd_delete(system, cwd, config, file, ids, output_args.json),
+        } => cmd_delete(sinks, system, cwd, config, file, ids, output_args.json),
         Commands::Edit {
             file,
             id,
@@ -2192,6 +2230,7 @@ fn dispatch_with_config(
             // full list — consistent with how `--to` works.
             let kind_replacement = (!remargin_kind.is_empty()).then_some(remargin_kind.as_slice());
             cmd_edit(
+                sinks,
                 system,
                 cwd,
                 config,
@@ -2221,15 +2260,17 @@ fn dispatch_with_config(
                 path,
                 start: *start,
             };
-            cmd_get(system, cwd, config, &gp)
+            cmd_get(sinks, system, cwd, config, &gp)
         }
-        Commands::Lint { file, output_args } => cmd_lint(system, cwd, file, output_args.json),
+        Commands::Lint { file, output_args } => {
+            cmd_lint(sinks, system, cwd, file, output_args.json)
+        }
         Commands::Ls {
             path, output_args, ..
-        } => cmd_ls(system, cwd, config, path, output_args.json),
+        } => cmd_ls(sinks, system, cwd, config, path, output_args.json),
         Commands::Metadata {
             path, output_args, ..
-        } => cmd_metadata(system, cwd, config, path, output_args.json),
+        } => cmd_metadata(sinks, system, cwd, config, path, output_args.json),
         Commands::Migrate {
             file,
             backup,
@@ -2246,6 +2287,7 @@ fn dispatch_with_config(
                 agent_config.as_deref(),
             )?;
             cmd_migrate(
+                sinks,
                 system,
                 cwd,
                 config,
@@ -2268,17 +2310,30 @@ fn dispatch_with_config(
                 json_mode: output_args.json,
                 src: src.as_str(),
             };
-            cmd_mv(system, cwd, config, &p)
+            cmd_mv(sinks, system, cwd, config, &p)
         }
-        Commands::Plan { action, .. } => {
-            cmd_plan(system, cwd, config, action, plan_action_output(action).json)
-        }
+        Commands::Plan { action, .. } => cmd_plan(
+            sinks,
+            system,
+            cwd,
+            config,
+            action,
+            plan_action_output(action).json,
+        ),
         Commands::Purge {
             file,
             output_args,
             recursive,
             ..
-        } => cmd_purge(system, cwd, config, file, *recursive, output_args.json),
+        } => cmd_purge(
+            sinks,
+            system,
+            cwd,
+            config,
+            file,
+            *recursive,
+            output_args.json,
+        ),
         Commands::Query {
             path,
             author,
@@ -2314,7 +2369,7 @@ fn dispatch_with_config(
                 since: since.as_deref(),
                 summary: *summary,
             };
-            cmd_query(system, cwd, config, &q)
+            cmd_query(sinks, system, cwd, config, &q)
         }
         Commands::React {
             file,
@@ -2331,20 +2386,20 @@ fn dispatch_with_config(
                 json_mode: output_args.json,
                 remove: *remove,
             };
-            cmd_react(system, cwd, config, &r)
+            cmd_react(sinks, system, cwd, config, &r)
         }
         Commands::Registry {
             action,
             output_args,
-        } => cmd_registry(system, cwd, action, output_args.json),
+        } => cmd_registry(sinks, system, cwd, action, output_args.json),
         Commands::Rm {
             file, output_args, ..
-        } => cmd_rm(system, cwd, config, file, output_args.json),
+        } => cmd_rm(sinks, system, cwd, config, file, output_args.json),
         Commands::Sandbox {
             action,
             output_args,
             ..
-        } => cmd_sandbox(system, cwd, config, action, output_args.json),
+        } => cmd_sandbox(sinks, system, cwd, config, action, output_args.json),
         Commands::Search {
             pattern,
             path,
@@ -2363,7 +2418,7 @@ fn dispatch_with_config(
                 regex: *regex,
                 scope: scope.as_str(),
             };
-            cmd_search(system, cwd, &s)
+            cmd_search(sinks, system, cwd, &s)
         }
         Commands::Sign {
             file,
@@ -2380,11 +2435,11 @@ fn dispatch_with_config(
                 json_mode: output_args.json,
                 repair_checksum: *repair_checksum,
             };
-            cmd_sign(system, cwd, config, &sp)
+            cmd_sign(sinks, system, cwd, config, &sp)
         }
         Commands::Verify {
             file, output_args, ..
-        } => cmd_verify(system, cwd, file, config, output_args.json),
+        } => cmd_verify(sinks, system, cwd, file, config, output_args.json),
         Commands::Write {
             path,
             content,
@@ -2397,6 +2452,7 @@ fn dispatch_with_config(
         } => {
             let line_range = lines.as_deref().map(parse_line_range).transpose()?;
             cmd_write(
+                sinks,
                 system,
                 cwd,
                 config,
@@ -2428,6 +2484,7 @@ fn dispatch_with_config(
 }
 
 fn cmd_ack(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2472,10 +2529,11 @@ fn cmd_ack(
     } else {
         "acknowledged"
     };
-    print_output(json_mode, &json!({ key: ids }))
+    print_output(sinks, json_mode, &json!({ key: ids }))
 }
 
 fn cmd_batch(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2496,7 +2554,7 @@ fn cmd_batch(
     }
 
     let created_ids = operations::batch::batch_comment(system, &path, config, &batch_ops)?;
-    print_output(json_mode, &json!({ "ids": created_ids }))
+    print_output(sinks, json_mode, &json!({ "ids": created_ids }))
 }
 
 fn resolve_comment_position(
@@ -2509,6 +2567,7 @@ fn resolve_comment_position(
 }
 
 fn cmd_comment(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2537,13 +2596,14 @@ fn cmd_comment(
     // Write to stdout if stdin mode.
     if cp.file == "-" {
         let updated = system.read_to_string(&path)?;
-        out_raw(&updated)?;
+        out_raw(sinks, &updated)?;
     }
 
-    print_output(cp.json_mode, &json!({ "id": new_id }))
+    print_output(sinks, cp.json_mode, &json!({ "id": new_id }))
 }
 
 fn cmd_comments(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     file: &str,
@@ -2564,9 +2624,9 @@ fn cmd_comments(
 
     if pretty {
         let formatted = display::format_comments_pretty(file, &comments);
-        out(&formatted)
+        out(sinks, &formatted)
     } else if json_mode {
-        out_json(&json!({ "comments": comments }))
+        out_json(sinks, &json!({ "comments": comments }))
     } else {
         for cm in &comments {
             let ack_status = if cm.ack.is_empty() {
@@ -2574,20 +2634,24 @@ fn cmd_comments(
             } else {
                 "acked"
             };
-            out(&format!(
-                "{} {} ({}) [{}] {}",
-                cm.id,
-                cm.author,
-                author_type_str(&cm.author_type),
-                ack_status,
-                truncate_content(&cm.content, 60_usize),
-            ))?;
+            out(
+                sinks,
+                &format!(
+                    "{} {} ({}) [{}] {}",
+                    cm.id,
+                    cm.author,
+                    author_type_str(&cm.author_type),
+                    ack_status,
+                    truncate_content(&cm.content, 60_usize),
+                ),
+            )?;
         }
         Ok(())
     }
 }
 
 fn cmd_delete(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2598,7 +2662,7 @@ fn cmd_delete(
     let path = resolve_doc_path(system, cwd, file)?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     operations::delete_comments(system, &path, config, &id_refs)?;
-    print_output(json_mode, &json!({ "deleted": ids }))
+    print_output(sinks, json_mode, &json!({ "deleted": ids }))
 }
 
 #[expect(
@@ -2607,6 +2671,7 @@ fn cmd_delete(
               into a struct adds more noise than it removes"
 )]
 fn cmd_edit(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2618,10 +2683,11 @@ fn cmd_edit(
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
     operations::edit_comment(system, &path, config, id, content, remargin_kind)?;
-    print_output(json_mode, &json!({ "edited": id }))
+    print_output(sinks, json_mode, &json!({ "edited": id }))
 }
 
 fn cmd_get(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2631,7 +2697,7 @@ fn cmd_get(
     let target = target_buf.as_path();
 
     if gp.binary {
-        return cmd_get_binary(system, cwd, config, gp, target);
+        return cmd_get_binary(sinks, system, cwd, config, gp, target);
     }
 
     if gp.out.is_some() {
@@ -2659,7 +2725,7 @@ fn cmd_get(
             .enumerate()
             .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
             .collect();
-        print_output(true, &json!({ "lines": json_lines }))
+        print_output(sinks, true, &json!({ "lines": json_lines }))
     } else {
         let content = document::get(
             system,
@@ -2671,9 +2737,9 @@ fn cmd_get(
             &config.trusted_roots,
         )?;
         if gp.json_mode {
-            print_output(true, &json!({ "content": content }))
+            print_output(sinks, true, &json!({ "content": content }))
         } else {
-            out_raw(&content)
+            out_raw(sinks, &content)
         }
     }
 }
@@ -2687,6 +2753,7 @@ fn cmd_get(
 /// Incompatible flags (`--start`, `--end`, `-n`) are rejected up front so
 /// binary requests never silently drop text-mode options.
 fn cmd_get_binary(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -2718,12 +2785,13 @@ fn cmd_get_binary(
             "path": payload.path,
             "size_bytes": payload.size_bytes,
         });
-        return print_output(gp.json_mode, &summary);
+        return print_output(sinks, gp.json_mode, &summary);
     }
 
     if gp.json_mode {
         let encoded = BASE64_STANDARD.encode(&payload.bytes);
         return print_output(
+            sinks,
             true,
             &json!({
                 "binary": true,
@@ -2736,7 +2804,8 @@ fn cmd_get_binary(
     }
 
     // Non-JSON, no --out: raw bytes to stdout so shell redirection works.
-    io::stdout()
+    sinks
+        .stdout
         .write_all(&payload.bytes)
         .context("writing bytes to stdout")
 }
@@ -2756,6 +2825,7 @@ fn cmd_get_binary(
 /// Other resolver errors (unknown type strings, strict-mode registry
 /// misses, etc.) still propagate.
 fn cmd_identity(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     action: Option<&IdentityAction>,
@@ -2768,16 +2838,17 @@ fn cmd_identity(
             r#type,
             key,
             output_args,
-        }) => cmd_identity_create(identity, r#type, key.as_deref(), output_args.json),
+        }) => cmd_identity_create(sinks, identity, r#type, key.as_deref(), output_args.json),
         Some(IdentityAction::Show {
             identity_args: nested,
             output_args,
-        }) => cmd_identity_show(system, cwd, nested, output_args.json),
-        None => cmd_identity_show(system, cwd, identity_args, json_mode),
+        }) => cmd_identity_show(sinks, system, cwd, nested, output_args.json),
+        None => cmd_identity_show(sinks, system, cwd, identity_args, json_mode),
     }
 }
 
 fn cmd_identity_show(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     identity_args: &IdentityArgs,
@@ -2785,14 +2856,14 @@ fn cmd_identity_show(
 ) -> Result<()> {
     let (flags, _assets_dir) = build_identity_flags(system, identity_args, None)?;
     match ResolvedConfig::resolve(system, cwd, &flags, None) {
-        Ok(cfg) => render_identity(&cfg, json_mode),
+        Ok(cfg) => render_identity(sinks, &cfg, json_mode),
         Err(err) if flags.is_empty() || looks_like_walk_miss(&err) => {
             // Walk-based "no matching config" is a soft miss on a
             // read-only diagnostic. Emit `found: false` and exit
             // cleanly so tooling that polls identity during startup
             // (the Obsidian plugin) does not see a hard
             // error for the "no config yet" state.
-            render_identity_not_found(json_mode)
+            render_identity_not_found(sinks, json_mode)
         }
         Err(err) => Err(err),
     }
@@ -2807,6 +2878,7 @@ fn cmd_identity_show(
 /// (the Obsidian plugin, scripts) can pick them up without re-parsing
 /// YAML.
 fn cmd_identity_create(
+    sinks: &mut IoSinks<'_>,
     identity: &str,
     author_type: &str,
     key: Option<&str>,
@@ -2819,6 +2891,7 @@ fn cmd_identity_create(
 
     if json_mode {
         return print_output(
+            sinks,
             true,
             &json!({
                 "identity": identity,
@@ -2832,12 +2905,16 @@ fn cmd_identity_create(
         use core::fmt::Write as _;
         let _ = writeln!(out_str, "key: {k}");
     }
-    out_raw(&out_str)
+    out_raw(sinks, &out_str)
 }
 
-fn render_identity(config: &ResolvedConfig, json_mode: bool) -> Result<()> {
+fn render_identity(
+    sinks: &mut IoSinks<'_>,
+    config: &ResolvedConfig,
+    json_mode: bool,
+) -> Result<()> {
     let Some(identity) = config.identity.as_deref() else {
-        return render_identity_not_found(json_mode);
+        return render_identity_not_found(sinks, json_mode);
     };
     let author_type_str = config
         .author_type
@@ -2848,6 +2925,7 @@ fn render_identity(config: &ResolvedConfig, json_mode: bool) -> Result<()> {
 
     if json_mode {
         return print_output(
+            sinks,
             true,
             &json!({
                 "found": true,
@@ -2861,24 +2939,25 @@ fn render_identity(config: &ResolvedConfig, json_mode: bool) -> Result<()> {
     }
 
     if let Some(p) = &path_display {
-        eprintln!("Found config: {p}");
+        writeln!(sinks.stderr, "Found config: {p}").context("writing to stderr")?;
     }
-    eprintln!("Identity:     {identity}");
+    writeln!(sinks.stderr, "Identity:     {identity}").context("writing to stderr")?;
     if let Some(t) = &author_type_str {
-        eprintln!("Type:         {t}");
+        writeln!(sinks.stderr, "Type:         {t}").context("writing to stderr")?;
     }
     if let Some(k) = &key_display {
-        eprintln!("Key:          {k}");
+        writeln!(sinks.stderr, "Key:          {k}").context("writing to stderr")?;
     }
-    eprintln!("Mode:         {}", config.mode.as_str());
+    writeln!(sinks.stderr, "Mode:         {}", config.mode.as_str())
+        .context("writing to stderr")?;
     Ok(())
 }
 
-fn render_identity_not_found(json_mode: bool) -> Result<()> {
+fn render_identity_not_found(sinks: &mut IoSinks<'_>, json_mode: bool) -> Result<()> {
     if json_mode {
-        return print_output(true, &json!({ "found": false }));
+        return print_output(sinks, true, &json!({ "found": false }));
     }
-    eprintln!("No identity config found.");
+    writeln!(sinks.stderr, "No identity config found.").context("writing to stderr")?;
     Ok(())
 }
 
@@ -2910,7 +2989,12 @@ fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
 /// Identity is read-only here — the quartet resolves only the
 /// caller name driving the per-file cutoff. No signing, no key
 /// requirement.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI adapter: each arg is a direct clap flag; collapsing into a struct adds ceremony without reducing complexity"
+)]
 fn cmd_activity(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     explicit_path: Option<&Path>,
@@ -2953,25 +3037,27 @@ fn cmd_activity(
     let result = activity::gather_activity(system, &resolved_path, cutoff, caller)?;
 
     if pretty {
-        emit_activity_pretty(&result);
+        emit_activity_pretty(sinks, &result)?;
     } else {
         let value = serde_json::to_value(&result).context("serializing activity result")?;
-        print_output(true, &value)?;
+        print_output(sinks, true, &value)?;
     }
     Ok(())
 }
 
-fn emit_activity_pretty(result: &activity::ActivityResult) {
+fn emit_activity_pretty(sinks: &mut IoSinks<'_>, result: &activity::ActivityResult) -> Result<()> {
     if result.files.is_empty() {
-        eprintln!("(no activity)");
-        return;
+        writeln!(sinks.stderr, "(no activity)").context("writing to stderr")?;
+        return Ok(());
     }
     for file in &result.files {
-        eprintln!("{}:", file.path.display());
-        eprintln!(
+        writeln!(sinks.stderr, "{}:", file.path.display()).context("writing to stderr")?;
+        writeln!(
+            sinks.stderr,
             "  {}",
             format_activity_cutoff_header(result.cutoff_explicit, file.cutoff_applied)
-        );
+        )
+        .context("writing to stderr")?;
         for change in &file.changes {
             match change {
                 activity::Change::Comment {
@@ -2986,10 +3072,12 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
                     let arrow = reply_to
                         .as_deref()
                         .map_or_else(String::new, |p| format!(" \u{2934} {p}"));
-                    eprintln!(
+                    writeln!(
+                        sinks.stderr,
                         "  {} \u{00b7} comment \u{00b7} {comment_id} by {author}{arrow} (lines {line_start}-{line_end})",
                         ts.format("%Y-%m-%d %H:%M")
-                    );
+                    )
+                    .context("writing to stderr")?;
                 }
                 activity::Change::Ack {
                     ts,
@@ -2997,16 +3085,20 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
                     author,
                     ..
                 } => {
-                    eprintln!(
+                    writeln!(
+                        sinks.stderr,
                         "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {author}",
                         ts.format("%Y-%m-%d %H:%M")
-                    );
+                    )
+                    .context("writing to stderr")?;
                 }
                 activity::Change::Sandbox { ts, author, .. } => {
-                    eprintln!(
+                    writeln!(
+                        sinks.stderr,
                         "  {} \u{00b7} sandbox \u{00b7} {author}",
                         ts.format("%Y-%m-%d %H:%M")
-                    );
+                    )
+                    .context("writing to stderr")?;
                 }
                 // The Change enum is `#[non_exhaustive]`; future
                 // variants surface as a generic line until the
@@ -3014,11 +3106,13 @@ fn emit_activity_pretty(result: &activity::ActivityResult) {
                 _ => {}
             }
         }
-        eprintln!();
+        writeln!(sinks.stderr).context("writing to stderr")?;
     }
     if let Some(ts) = result.newest_ts_overall {
-        eprintln!("(newest_ts_overall: {})", ts.to_rfc3339());
+        writeln!(sinks.stderr, "(newest_ts_overall: {})", ts.to_rfc3339())
+            .context("writing to stderr")?;
     }
+    Ok(())
 }
 
 /// Render the per-file cutoff header line for `activity --pretty`.
@@ -3058,16 +3152,21 @@ fn format_activity_cutoff_header(
     }
 }
 
-fn cmd_permissions(system: &dyn System, cwd: &Path, action: &PermissionsAction) -> Result<()> {
+fn cmd_permissions(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    action: &PermissionsAction,
+) -> Result<()> {
     match action {
         PermissionsAction::Show { output_args } => {
             let report = permissions_inspect::show(system, cwd)?;
             if output_args.json {
                 let value =
                     serde_json::to_value(&report).context("serializing permissions show output")?;
-                print_output(true, &value)?;
+                print_output(sinks, true, &value)?;
             } else {
-                emit_permissions_show_text(cwd, &report);
+                emit_permissions_show_text(sinks, cwd, &report)?;
             }
             Ok(())
         }
@@ -3086,9 +3185,9 @@ fn cmd_permissions(system: &dyn System, cwd: &Path, action: &PermissionsAction) 
             if output_args.json {
                 let value = serde_json::to_value(&report)
                     .context("serializing permissions check output")?;
-                print_output(true, &value)?;
+                print_output(sinks, true, &value)?;
             } else {
-                emit_permissions_check_text(&report, *why);
+                emit_permissions_check_text(sinks, &report, *why)?;
             }
             // Gitignore-style exit code: 0 when restricted, 1 otherwise.
             // We have already printed our payload, so signal "miss" with
@@ -3119,66 +3218,87 @@ fn format_string_list(items: &[String]) -> String {
     out
 }
 
-fn emit_permissions_show_text(cwd: &Path, report: &permissions_inspect::ShowOutput) {
-    eprintln!("Permissions resolved at {}:", cwd.display());
-    eprintln!();
+fn emit_permissions_show_text(
+    sinks: &mut IoSinks<'_>,
+    cwd: &Path,
+    report: &permissions_inspect::ShowOutput,
+) -> Result<()> {
+    let stderr = &mut sinks.stderr;
+    writeln!(stderr, "Permissions resolved at {}:", cwd.display()).context("writing to stderr")?;
+    writeln!(stderr).context("writing to stderr")?;
 
-    eprintln!("  trusted_roots:");
+    writeln!(stderr, "  trusted_roots:").context("writing to stderr")?;
     if report.trusted_roots.is_empty() {
-        eprintln!("    (none)");
+        writeln!(stderr, "    (none)").context("writing to stderr")?;
     } else {
         for entry in &report.trusted_roots {
-            eprintln!(
+            writeln!(
+                stderr,
                 "    {}  (source: {})",
                 entry.path_text,
                 entry.source_file.display()
-            );
+            )
+            .context("writing to stderr")?;
             if let Some(realm) = entry.realm_root.as_deref() {
-                eprintln!("      realm_root: {}", realm.display());
+                writeln!(stderr, "      realm_root: {}", realm.display())
+                    .context("writing to stderr")?;
             }
             if !entry.also_deny_bash.is_empty() {
-                eprintln!(
+                writeln!(
+                    stderr,
                     "      also_deny_bash: {}",
                     format_string_list(&entry.also_deny_bash)
-                );
+                )
+                .context("writing to stderr")?;
             }
-            eprintln!("      cli_allowed: {}", entry.cli_allowed);
+            writeln!(stderr, "      cli_allowed: {}", entry.cli_allowed)
+                .context("writing to stderr")?;
         }
     }
-    eprintln!();
+    writeln!(stderr).context("writing to stderr")?;
 
-    eprintln!("  deny_ops:");
+    writeln!(stderr, "  deny_ops:").context("writing to stderr")?;
     if report.deny_ops.is_empty() {
-        eprintln!("    (none)");
+        writeln!(stderr, "    (none)").context("writing to stderr")?;
     } else {
         for entry in &report.deny_ops {
-            eprintln!(
+            writeln!(
+                stderr,
                 "    {}  ops={}  (source: {})",
                 entry.path.display(),
                 format_string_list(&entry.ops),
                 entry.source_file.display()
-            );
+            )
+            .context("writing to stderr")?;
         }
     }
-    eprintln!();
+    writeln!(stderr).context("writing to stderr")?;
 
-    eprintln!("  allow_dot_folders:");
+    writeln!(stderr, "  allow_dot_folders:").context("writing to stderr")?;
     if report.allow_dot_folders.is_empty() {
-        eprintln!("    (none)");
+        writeln!(stderr, "    (none)").context("writing to stderr")?;
     } else {
         for entry in &report.allow_dot_folders {
-            eprintln!("    {}", format_string_list(&entry.names));
+            writeln!(stderr, "    {}", format_string_list(&entry.names))
+                .context("writing to stderr")?;
         }
     }
+    Ok(())
 }
 
-fn emit_permissions_check_text(report: &permissions_inspect::CheckOutput, why: bool) {
-    eprintln!("restricted: {}", report.restricted);
+fn emit_permissions_check_text(
+    sinks: &mut IoSinks<'_>,
+    report: &permissions_inspect::CheckOutput,
+    why: bool,
+) -> Result<()> {
+    writeln!(sinks.stderr, "restricted: {}", report.restricted).context("writing to stderr")?;
     if why && let Some(rule) = &report.matching_rule {
-        eprintln!("  matched: {}", rule.rule_text);
-        eprintln!("  kind:    {}", rule.kind);
-        eprintln!("  source:  {}", rule.source_file.display());
+        writeln!(sinks.stderr, "  matched: {}", rule.rule_text).context("writing to stderr")?;
+        writeln!(sinks.stderr, "  kind:    {}", rule.kind).context("writing to stderr")?;
+        writeln!(sinks.stderr, "  source:  {}", rule.source_file.display())
+            .context("writing to stderr")?;
     }
+    Ok(())
 }
 
 /// Wire the CLI `restrict` subcommand to the
@@ -3187,7 +3307,12 @@ fn emit_permissions_check_text(report: &permissions_inspect::CheckOutput, why: b
 /// `user_settings_explicit` lets tests pin a hermetic location for
 /// the user-scope file. When `None`, the function expands
 /// [`DEFAULT_USER_SETTINGS`] through the active `System`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI adapter: each arg is a direct clap flag; collapsing into a struct adds ceremony without reducing complexity"
+)]
 fn cmd_restrict(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     path: &str,
@@ -3223,46 +3348,67 @@ fn cmd_restrict(
             "rules_applied": outcome.rules_applied,
             "yaml_was_created": outcome.yaml_was_created,
         });
-        print_output(true, &value)?;
+        print_output(sinks, true, &value)?;
     } else {
-        emit_restrict_summary(&outcome);
+        emit_restrict_summary(sinks, &outcome)?;
     }
     Ok(())
 }
 
-fn emit_restrict_summary(outcome: &permissions_restrict::RestrictOutcome) {
-    eprintln!("Restricted: {}", outcome.absolute_path.display());
-    eprintln!("  Anchor: {}", outcome.anchor.display());
+fn emit_restrict_summary(
+    sinks: &mut IoSinks<'_>,
+    outcome: &permissions_restrict::RestrictOutcome,
+) -> Result<()> {
+    let stderr = &mut sinks.stderr;
+    writeln!(stderr, "Restricted: {}", outcome.absolute_path.display())
+        .context("writing to stderr")?;
+    writeln!(stderr, "  Anchor: {}", outcome.anchor.display()).context("writing to stderr")?;
     if outcome.yaml_was_created {
-        eprintln!(
+        writeln!(
+            stderr,
             "  .remargin.yaml created at {}",
             outcome.anchor.join(".remargin.yaml").display()
-        );
+        )
+        .context("writing to stderr")?;
     } else {
-        eprintln!(
+        writeln!(
+            stderr,
             "  .remargin.yaml updated at {}",
             outcome.anchor.join(".remargin.yaml").display()
-        );
+        )
+        .context("writing to stderr")?;
     }
-    eprintln!(
+    writeln!(
+        stderr,
         "  Settings updated: {} file(s)",
         outcome.claude_files_touched.len()
-    );
+    )
+    .context("writing to stderr")?;
     for file in &outcome.claude_files_touched {
-        eprintln!("    {}", file.display());
+        writeln!(stderr, "    {}", file.display()).context("writing to stderr")?;
     }
-    eprintln!("  Rules written: {}", outcome.rules_applied.len());
-    eprintln!(
+    writeln!(stderr, "  Rules written: {}", outcome.rules_applied.len())
+        .context("writing to stderr")?;
+    writeln!(
+        stderr,
         "  Sidecar updated: {}",
         outcome
             .anchor
             .join(".claude/.remargin-restrictions.json")
             .display()
-    );
-    eprintln!(
+    )
+    .context("writing to stderr")?;
+    writeln!(
+        stderr,
         "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
-    );
-    eprintln!("  Layer 1 (remargin's own ops) is enforcing immediately on the next call.");
+    )
+    .context("writing to stderr")?;
+    writeln!(
+        stderr,
+        "  Layer 1 (remargin's own ops) is enforcing immediately on the next call."
+    )
+    .context("writing to stderr")?;
+    Ok(())
 }
 
 /// Wire the CLI `unprotect` subcommand to the
@@ -3274,6 +3420,7 @@ fn emit_restrict_summary(outcome: &permissions_restrict::RestrictOutcome) {
 /// captured at apply time), so the reversal scrubs exactly the files
 /// the corresponding `restrict` touched.
 fn cmd_unprotect(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     path: &str,
@@ -3297,48 +3444,70 @@ fn cmd_unprotect(
             "warnings": outcome.warnings,
             "yaml_entry_removed": outcome.yaml_entry_removed,
         });
-        print_output(true, &value)?;
+        print_output(sinks, true, &value)?;
     } else {
-        emit_unprotect_summary(&outcome);
+        emit_unprotect_summary(sinks, &outcome)?;
     }
     Ok(())
 }
 
-fn emit_unprotect_summary(outcome: &permissions_unprotect::UnprotectOutcome) {
-    eprintln!("Unprotected: {}", outcome.absolute_path.display());
-    eprintln!("  Anchor: {}", outcome.anchor.display());
+fn emit_unprotect_summary(
+    sinks: &mut IoSinks<'_>,
+    outcome: &permissions_unprotect::UnprotectOutcome,
+) -> Result<()> {
+    let stderr = &mut sinks.stderr;
+    writeln!(stderr, "Unprotected: {}", outcome.absolute_path.display())
+        .context("writing to stderr")?;
+    writeln!(stderr, "  Anchor: {}", outcome.anchor.display()).context("writing to stderr")?;
     if outcome.yaml_entry_removed {
-        eprintln!(
+        writeln!(
+            stderr,
             "  .remargin.yaml updated at {}",
             outcome.anchor.join(".remargin.yaml").display()
-        );
+        )
+        .context("writing to stderr")?;
     } else {
-        eprintln!("  .remargin.yaml: no matching entry");
+        writeln!(stderr, "  .remargin.yaml: no matching entry").context("writing to stderr")?;
     }
     if outcome.claude_files_touched.is_empty() {
-        eprintln!("  Settings: none touched (no sidecar entry)");
+        writeln!(stderr, "  Settings: none touched (no sidecar entry)")
+            .context("writing to stderr")?;
     } else {
-        eprintln!(
+        writeln!(
+            stderr,
             "  Settings updated: {} file(s)",
             outcome.claude_files_touched.len()
-        );
+        )
+        .context("writing to stderr")?;
         for file in &outcome.claude_files_touched {
-            eprintln!("    {}", file.display());
+            writeln!(stderr, "    {}", file.display()).context("writing to stderr")?;
         }
     }
     if !outcome.warnings.is_empty() {
-        eprintln!("  Warnings:");
+        writeln!(stderr, "  Warnings:").context("writing to stderr")?;
         for warning in &outcome.warnings {
-            eprintln!("    - {warning}");
+            writeln!(stderr, "    - {warning}").context("writing to stderr")?;
         }
     }
-    eprintln!(
+    writeln!(
+        stderr,
         "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
-    );
-    eprintln!("  Layer 1 (remargin's own ops) stops enforcing immediately on the next call.");
+    )
+    .context("writing to stderr")?;
+    writeln!(
+        stderr,
+        "  Layer 1 (remargin's own ops) stops enforcing immediately on the next call."
+    )
+    .context("writing to stderr")?;
+    Ok(())
 }
 
-fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<()> {
+fn cmd_resolve_mode(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    json_mode: bool,
+) -> Result<()> {
     let resolved = config::resolve_mode(system, cwd)?;
     let source = resolved.source.as_ref().map(|p| p.display().to_string());
     let value = json!({
@@ -3346,18 +3515,23 @@ fn cmd_resolve_mode(system: &dyn System, cwd: &Path, json_mode: bool) -> Result<
         "source": source,
     });
     if json_mode {
-        print_output(true, &value)?;
+        print_output(sinks, true, &value)?;
     } else {
-        eprintln!("Mode:   {}", resolved.mode.as_str());
+        writeln!(sinks.stderr, "Mode:   {}", resolved.mode.as_str())
+            .context("writing to stderr")?;
         match &source {
-            Some(path) => eprintln!("Source: {path}"),
-            None => eprintln!("Source: <default>"),
+            Some(path) => {
+                writeln!(sinks.stderr, "Source: {path}").context("writing to stderr")?;
+            }
+            None => {
+                writeln!(sinks.stderr, "Source: <default>").context("writing to stderr")?;
+            }
         }
     }
     Ok(())
 }
 
-fn cmd_keygen(system: &dyn System, output: &Path) -> Result<()> {
+fn cmd_keygen(sinks: &mut IoSinks<'_>, system: &dyn System, output: &Path) -> Result<()> {
     use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
 
     let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
@@ -3381,20 +3555,26 @@ fn cmd_keygen(system: &dyn System, output: &Path) -> Result<()> {
         .write(&pub_path, public_openssh.as_bytes())
         .with_context(|| format!("writing public key to {}", pub_path.display()))?;
 
-    eprintln!("Private key: {}", output.display());
-    eprintln!("Public key:  {}", pub_path.display());
+    writeln!(sinks.stderr, "Private key: {}", output.display()).context("writing to stderr")?;
+    writeln!(sinks.stderr, "Public key:  {}", pub_path.display()).context("writing to stderr")?;
 
     Ok(())
 }
 
-fn cmd_lint(system: &dyn System, cwd: &Path, file: &str, json_mode: bool) -> Result<()> {
+fn cmd_lint(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    file: &str,
+    json_mode: bool,
+) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
     let report = linter::lint_doc(system, &path)?;
 
     if json_mode {
-        print_output(true, &report.to_json())?;
+        print_output(sinks, true, &report.to_json())?;
     } else {
-        eprint!("{}", report.format_text());
+        write!(sinks.stderr, "{}", report.format_text()).context("writing to stderr")?;
     }
 
     if !report.is_clean() {
@@ -3404,6 +3584,7 @@ fn cmd_lint(system: &dyn System, cwd: &Path, file: &str, json_mode: bool) -> Res
 }
 
 fn cmd_ls(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -3415,7 +3596,7 @@ fn cmd_ls(
     let entries = document::ls(system, cwd, target, config)?;
 
     if json_mode {
-        print_output(true, &json!({ "entries": entries }))
+        print_output(sinks, true, &json!({ "entries": entries }))
     } else {
         for entry in &entries {
             let kind = if entry.is_dir { "d" } else { "-" };
@@ -3426,17 +3607,21 @@ fn cmd_ls(
                 .remargin_pending
                 .map(|p| format!(" [{p} pending]"))
                 .unwrap_or_default();
-            out(&format!(
-                "{kind} {size_str:>8} {}{}",
-                entry.path.display(),
-                pending_str,
-            ))?;
+            out(
+                sinks,
+                &format!(
+                    "{kind} {size_str:>8} {}{}",
+                    entry.path.display(),
+                    pending_str,
+                ),
+            )?;
         }
         Ok(())
     }
 }
 
 fn cmd_metadata(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -3478,10 +3663,15 @@ fn cmd_metadata(
         map.insert("last_activity".into(), json!(last));
     }
 
-    print_output(json_mode, &result)
+    print_output(sinks, json_mode, &result)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI adapter: each arg is a direct clap flag; collapsing into a struct adds ceremony without reducing complexity"
+)]
 fn cmd_migrate(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -3498,13 +3688,18 @@ fn cmd_migrate(
             .iter()
             .map(|m| json!({ "new_id": m.new_id, "original_role": m.original_role }))
             .collect();
-        print_output(true, &json!({ "migrated": results }))
+        print_output(sinks, true, &json!({ "migrated": results }))
     } else if migrated.is_empty() {
-        eprintln!("No legacy comments found.");
+        writeln!(sinks.stderr, "No legacy comments found.").context("writing to stderr")?;
         Ok(())
     } else {
         for m in &migrated {
-            eprintln!("{} -> {} (migrated)", m.original_role, m.new_id);
+            writeln!(
+                sinks.stderr,
+                "{} -> {} (migrated)",
+                m.original_role, m.new_id
+            )
+            .context("writing to stderr")?;
         }
         Ok(())
     }
@@ -3593,6 +3788,7 @@ fn resolve_role_identity(
     reason = "single dispatch match is clearer than per-op helpers here"
 )]
 fn cmd_plan(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -3796,14 +3992,14 @@ fn cmd_plan(
     // readable. JSON mode still emits the full PlanReport payload.
     if !json_mode {
         if report.config_diff.is_some() {
-            return emit_plan_restrict_text(&report);
+            return emit_plan_restrict_text(sinks, &report);
         }
         if report.unprotect_diff.is_some() {
-            return emit_plan_unprotect_text(&report);
+            return emit_plan_unprotect_text(sinks, &report);
         }
     }
 
-    print_output(json_mode, &value)
+    print_output(sinks, json_mode, &value)
 }
 
 /// Render a `plan restrict` [`PlanReport`] as a structured text block.
@@ -3811,60 +4007,84 @@ fn cmd_plan(
 /// section per touched file, then conflicts. Emitted on stdout via
 /// the standard `out` helper so existing pipe-friendly behaviour is
 /// preserved.
-fn emit_plan_restrict_text(report: &plan_ops::PlanReport) -> Result<()> {
+fn emit_plan_restrict_text(sinks: &mut IoSinks<'_>, report: &plan_ops::PlanReport) -> Result<()> {
     let Some(diff) = report.config_diff.as_ref() else {
         return Ok(());
     };
-    out(&format!("Plan: restrict {}", diff.absolute_path.display()))?;
-    out(&format!("  Anchor: {}", diff.anchor.display()))?;
-    out(&format!(
-        "  noop: {}   would_commit: {}",
-        report.noop, report.would_commit,
-    ))?;
+    out(
+        sinks,
+        &format!("Plan: restrict {}", diff.absolute_path.display()),
+    )?;
+    out(sinks, &format!("  Anchor: {}", diff.anchor.display()))?;
+    out(
+        sinks,
+        &format!(
+            "  noop: {}   would_commit: {}",
+            report.noop, report.would_commit,
+        ),
+    )?;
     if let Some(reason) = &report.reject_reason {
-        out(&format!("  reject_reason: {reason}"))?;
+        out(sinks, &format!("  reject_reason: {reason}"))?;
     }
-    out(&format!(
-        "  .remargin.yaml: {}",
-        diff.remargin_yaml.path.display()
-    ))?;
-    out(&format!(
-        "    will be created: {}",
-        diff.remargin_yaml.will_be_created
-    ))?;
-    out(&format!(
-        "    entry: {}",
-        entry_action_label(diff.remargin_yaml.entry_action),
-    ))?;
-    out(&format!(
-        "  Settings: {} file(s)",
-        diff.settings_files.len()
-    ))?;
+    out(
+        sinks,
+        &format!("  .remargin.yaml: {}", diff.remargin_yaml.path.display()),
+    )?;
+    out(
+        sinks,
+        &format!(
+            "    will be created: {}",
+            diff.remargin_yaml.will_be_created
+        ),
+    )?;
+    out(
+        sinks,
+        &format!(
+            "    entry: {}",
+            entry_action_label(diff.remargin_yaml.entry_action),
+        ),
+    )?;
+    out(
+        sinks,
+        &format!("  Settings: {} file(s)", diff.settings_files.len()),
+    )?;
     for sf in &diff.settings_files {
-        out(&format!("    {}", sf.path.display()))?;
-        out(&format!("      will be created: {}", sf.will_be_created))?;
-        out(&format!(
-            "      deny rules: +{} to add, {} already present",
-            sf.deny_rules_to_add.len(),
-            sf.deny_rules_already_present.len(),
-        ))?;
-        out(&format!(
-            "      allow rules: +{} to add, {} already present",
-            sf.allow_rules_to_add.len(),
-            sf.allow_rules_already_present.len(),
-        ))?;
+        out(sinks, &format!("    {}", sf.path.display()))?;
+        out(
+            sinks,
+            &format!("      will be created: {}", sf.will_be_created),
+        )?;
+        out(
+            sinks,
+            &format!(
+                "      deny rules: +{} to add, {} already present",
+                sf.deny_rules_to_add.len(),
+                sf.deny_rules_already_present.len(),
+            ),
+        )?;
+        out(
+            sinks,
+            &format!(
+                "      allow rules: +{} to add, {} already present",
+                sf.allow_rules_to_add.len(),
+                sf.allow_rules_already_present.len(),
+            ),
+        )?;
     }
-    out(&format!(
-        "  Sidecar: {} ({})",
-        diff.sidecar.path.display(),
-        entry_action_label(diff.sidecar.entry_action),
-    ))?;
+    out(
+        sinks,
+        &format!(
+            "  Sidecar: {} ({})",
+            diff.sidecar.path.display(),
+            entry_action_label(diff.sidecar.entry_action),
+        ),
+    )?;
     if diff.conflicts.is_empty() {
-        out("  conflicts: 0")?;
+        out(sinks, "  conflicts: 0")?;
     } else {
-        out(&format!("  conflicts: {}", diff.conflicts.len()))?;
+        out(sinks, &format!("  conflicts: {}", diff.conflicts.len()))?;
         for conflict in &diff.conflicts {
-            emit_conflict_line(conflict)?;
+            emit_conflict_line(sinks, conflict)?;
         }
     }
     Ok(())
@@ -3881,7 +4101,7 @@ const fn entry_action_label(action: plan_ops::EntryAction) -> &'static str {
     }
 }
 
-fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
+fn emit_conflict_line(sinks: &mut IoSinks<'_>, conflict: &plan_ops::ConfigConflict) -> Result<()> {
     match conflict {
         plan_ops::ConfigConflict::AllowDenyOverlap {
             allow_rule,
@@ -3899,39 +4119,54 @@ fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
                 OverlapKind::Exact => "exact",
                 _ => "unknown overlap kind",
             };
-            out(&format!(
-                "    allow_deny_overlap in {} ({kind_label}):",
-                settings_file.display()
-            ))?;
-            out(&format!("      existing allow:  {allow_rule}"))?;
-            out(&format!("      projected deny:  {projected_deny_rule}"))?;
+            out(
+                sinks,
+                &format!(
+                    "    allow_deny_overlap in {} ({kind_label}):",
+                    settings_file.display()
+                ),
+            )?;
+            out(sinks, &format!("      existing allow:  {allow_rule}"))?;
+            out(
+                sinks,
+                &format!("      projected deny:  {projected_deny_rule}"),
+            )?;
         }
         plan_ops::ConfigConflict::AnchorIsAncestor { anchor, cwd } => {
-            out(&format!(
-                "    anchor_is_ancestor: cwd={} anchor={}",
-                cwd.display(),
-                anchor.display(),
-            ))?;
+            out(
+                sinks,
+                &format!(
+                    "    anchor_is_ancestor: cwd={} anchor={}",
+                    cwd.display(),
+                    anchor.display(),
+                ),
+            )?;
         }
         plan_ops::ConfigConflict::YamlEntryWouldChange {
             path,
             previous,
             projected,
         } => {
-            out(&format!("    yaml_entry_would_change: path={path}"))?;
-            out(&format!(
-                "      previous: also_deny_bash={:?} cli_allowed={}",
-                previous.also_deny_bash, previous.cli_allowed,
-            ))?;
-            out(&format!(
-                "      projected: also_deny_bash={:?} cli_allowed={}",
-                projected.also_deny_bash, projected.cli_allowed,
-            ))?;
+            out(sinks, &format!("    yaml_entry_would_change: path={path}"))?;
+            out(
+                sinks,
+                &format!(
+                    "      previous: also_deny_bash={:?} cli_allowed={}",
+                    previous.also_deny_bash, previous.cli_allowed,
+                ),
+            )?;
+            out(
+                sinks,
+                &format!(
+                    "      projected: also_deny_bash={:?} cli_allowed={}",
+                    projected.also_deny_bash, projected.cli_allowed,
+                ),
+            )?;
         }
         // ConfigConflict is `#[non_exhaustive]`; cover future variants
         // gracefully without breaking the build.
         _ => {
-            out("    <unknown conflict variant>")?;
+            out(sinks, "    <unknown conflict variant>")?;
         }
     }
     Ok(())
@@ -3941,50 +4176,65 @@ fn emit_conflict_line(conflict: &plan_ops::ConfigConflict) -> Result<()> {
 /// Symmetric mirror of [`emit_plan_restrict_text`] for the reverse
 /// direction: anchor + `would_commit`/`noop` header, one section per
 /// touched file, then drift conflicts.
-fn emit_plan_unprotect_text(report: &plan_ops::PlanReport) -> Result<()> {
+fn emit_plan_unprotect_text(sinks: &mut IoSinks<'_>, report: &plan_ops::PlanReport) -> Result<()> {
     let Some(diff) = report.unprotect_diff.as_ref() else {
         return Ok(());
     };
-    out(&format!("Plan: unprotect {}", diff.absolute_path.display()))?;
-    out(&format!("  Anchor: {}", diff.anchor.display()))?;
-    out(&format!(
-        "  noop: {}   would_commit: {}",
-        report.noop, report.would_commit,
-    ))?;
+    out(
+        sinks,
+        &format!("Plan: unprotect {}", diff.absolute_path.display()),
+    )?;
+    out(sinks, &format!("  Anchor: {}", diff.anchor.display()))?;
+    out(
+        sinks,
+        &format!(
+            "  noop: {}   would_commit: {}",
+            report.noop, report.would_commit,
+        ),
+    )?;
     if let Some(reason) = &report.reject_reason {
-        out(&format!("  reject_reason: {reason}"))?;
+        out(sinks, &format!("  reject_reason: {reason}"))?;
     }
-    out(&format!(
-        "  .remargin.yaml: {}",
-        diff.remargin_yaml.path.display()
-    ))?;
-    out(&format!(
-        "    entry: {}",
-        unprotect_entry_action_label(diff.remargin_yaml.entry_action),
-    ))?;
-    out(&format!(
-        "  Settings: {} file(s)",
-        diff.settings_files.len()
-    ))?;
+    out(
+        sinks,
+        &format!("  .remargin.yaml: {}", diff.remargin_yaml.path.display()),
+    )?;
+    out(
+        sinks,
+        &format!(
+            "    entry: {}",
+            unprotect_entry_action_label(diff.remargin_yaml.entry_action),
+        ),
+    )?;
+    out(
+        sinks,
+        &format!("  Settings: {} file(s)", diff.settings_files.len()),
+    )?;
     for sf in &diff.settings_files {
-        out(&format!("    {}", sf.path.display()))?;
-        out(&format!(
-            "      rules: -{} to remove, {} already absent",
-            sf.rules_to_remove.len(),
-            sf.rules_already_absent.len(),
-        ))?;
+        out(sinks, &format!("    {}", sf.path.display()))?;
+        out(
+            sinks,
+            &format!(
+                "      rules: -{} to remove, {} already absent",
+                sf.rules_to_remove.len(),
+                sf.rules_already_absent.len(),
+            ),
+        )?;
     }
-    out(&format!(
-        "  Sidecar: {} ({})",
-        diff.sidecar.path.display(),
-        unprotect_entry_action_label(diff.sidecar.entry_action),
-    ))?;
+    out(
+        sinks,
+        &format!(
+            "  Sidecar: {} ({})",
+            diff.sidecar.path.display(),
+            unprotect_entry_action_label(diff.sidecar.entry_action),
+        ),
+    )?;
     if diff.conflicts.is_empty() {
-        out("  conflicts: 0")?;
+        out(sinks, "  conflicts: 0")?;
     } else {
-        out(&format!("  conflicts: {}", diff.conflicts.len()))?;
+        out(sinks, &format!("  conflicts: {}", diff.conflicts.len()))?;
         for conflict in &diff.conflicts {
-            emit_unprotect_conflict_line(conflict)?;
+            emit_unprotect_conflict_line(sinks, conflict)?;
         }
     }
     Ok(())
@@ -4000,27 +4250,39 @@ const fn unprotect_entry_action_label(action: plan_ops::UnprotectEntryAction) ->
     }
 }
 
-fn emit_unprotect_conflict_line(conflict: &plan_ops::UnprotectConflict) -> Result<()> {
+fn emit_unprotect_conflict_line(
+    sinks: &mut IoSinks<'_>,
+    conflict: &plan_ops::UnprotectConflict,
+) -> Result<()> {
     match conflict {
         plan_ops::UnprotectConflict::RuleAlreadyAbsent {
             rule,
             settings_file,
         } => {
-            out(&format!(
-                "    rule_already_absent in {}: {rule}",
-                settings_file.display()
-            ))?;
+            out(
+                sinks,
+                &format!(
+                    "    rule_already_absent in {}: {rule}",
+                    settings_file.display()
+                ),
+            )?;
         }
         plan_ops::UnprotectConflict::SidecarEntryMissing { path } => {
-            out(&format!("    sidecar_entry_missing: {}", path.display()))?;
+            out(
+                sinks,
+                &format!("    sidecar_entry_missing: {}", path.display()),
+            )?;
         }
         plan_ops::UnprotectConflict::YamlEntryMissing { path } => {
-            out(&format!("    yaml_entry_missing: {}", path.display()))?;
+            out(
+                sinks,
+                &format!("    yaml_entry_missing: {}", path.display()),
+            )?;
         }
         // UnprotectConflict is `#[non_exhaustive]`; cover future
         // variants gracefully without breaking the build.
         _ => {
-            out("    <unknown conflict variant>")?;
+            out(sinks, "    <unknown conflict variant>")?;
         }
     }
     Ok(())
@@ -4056,6 +4318,7 @@ fn read_plan_batch_ops(
 }
 
 fn cmd_purge(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4067,7 +4330,7 @@ fn cmd_purge(
 
     if recursive {
         let result = purge::purge_dir(system, &path, config)?;
-        return print_output(json_mode, &result.to_json(cwd));
+        return print_output(sinks, json_mode, &result.to_json(cwd));
     }
 
     if system.is_dir(&path).unwrap_or(false) {
@@ -4078,6 +4341,7 @@ fn cmd_purge(
     let result = purge::purge(system, &path, config)?;
 
     print_output(
+        sinks,
         json_mode,
         &json!({
             "comments_removed": result.comments_removed,
@@ -4087,6 +4351,7 @@ fn cmd_purge(
 }
 
 fn cmd_query(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4095,7 +4360,7 @@ fn cmd_query(
     let target = cwd.join(expand_cli_path(system, params.path)?);
     let filter = build_query_filter(config, params)?;
     let results = query::query(system, &target, &filter)?;
-    render_query_output(&results, params, filter.pending_label())
+    render_query_output(sinks, &results, params, filter.pending_label())
 }
 
 fn build_query_filter(
@@ -4131,12 +4396,14 @@ fn build_query_filter(
 }
 
 fn render_query_output(
+    sinks: &mut IoSinks<'_>,
     results: &[query::QueryResult],
     params: &QueryParams<'_>,
     pending_label: Option<&str>,
 ) -> Result<()> {
     if params.json_mode {
         return print_output(
+            sinks,
             true,
             &json!({
                 "base_path": format!("{}/", params.path.trim_end_matches('/')),
@@ -4145,35 +4412,46 @@ fn render_query_output(
         );
     }
     if params.pretty {
-        return out_raw(&display::format_query_pretty(results, pending_label));
+        return out_raw(sinks, &display::format_query_pretty(results, pending_label));
     }
     for r in results {
-        out(&format!(
-            "{} ({} comments, {} pending)",
-            r.path.display(),
-            r.comment_count,
-            r.pending_count,
-        ))?;
+        out(
+            sinks,
+            &format!(
+                "{} ({} comments, {} pending)",
+                r.path.display(),
+                r.comment_count,
+                r.pending_count,
+            ),
+        )?;
         for cm in &r.comments {
             let status = if cm.ack.is_empty() {
                 "pending"
             } else {
                 "acked"
             };
-            out(&format!(
-                "  {} {} ({}) [{}] {}",
-                cm.id,
-                cm.author,
-                cm.author_type.as_str(),
-                status,
-                cm.content,
-            ))?;
+            out(
+                sinks,
+                &format!(
+                    "  {} {} ({}) [{}] {}",
+                    cm.id,
+                    cm.author,
+                    cm.author_type.as_str(),
+                    status,
+                    cm.content,
+                ),
+            )?;
         }
     }
     Ok(())
 }
 
-fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Result<()> {
+fn cmd_search(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    params: &SearchParams<'_>,
+) -> Result<()> {
     let target = cwd.join(expand_cli_path(system, params.path)?);
 
     let scope = match params.scope {
@@ -4191,7 +4469,7 @@ fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Res
     let results = search::search(system, cwd, &target, &options)?;
 
     if params.json_mode {
-        print_output(true, &json!({ "matches": results }))
+        print_output(sinks, true, &json!({ "matches": results }))
     } else {
         for m in &results {
             let loc = match m.location {
@@ -4200,17 +4478,14 @@ fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Res
                 _ => "unknown",
             };
             for line in &m.before {
-                out(&format!("  {line}"))?;
+                out(sinks, &format!("  {line}"))?;
             }
-            out(&format!(
-                "{}:{}  [{}]  {}",
-                m.path.display(),
-                m.line,
-                loc,
-                m.text
-            ))?;
+            out(
+                sinks,
+                &format!("{}:{}  [{}]  {}", m.path.display(), m.line, loc, m.text),
+            )?;
             for line in &m.after {
-                out(&format!("  {line}"))?;
+                out(sinks, &format!("  {line}"))?;
             }
         }
         Ok(())
@@ -4218,6 +4493,7 @@ fn cmd_search(system: &dyn System, cwd: &Path, params: &SearchParams<'_>) -> Res
 }
 
 fn cmd_react(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4234,6 +4510,7 @@ fn cmd_react(
     )?;
     let action = if params.remove { "removed" } else { "added" };
     print_output(
+        sinks,
         params.json_mode,
         &json!({ "action": action, "emoji": params.emoji, "comment_id": params.id }),
     )
@@ -4289,6 +4566,7 @@ fn registry_participant_pretty(
 }
 
 fn cmd_registry(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     action: &RegistryAction,
@@ -4304,10 +4582,10 @@ fn cmd_registry(
                     .iter()
                     .map(|(name, participant)| registry_participant_json(name, participant))
                     .collect();
-                print_output(true, &json!({ "participants": participants }))
+                print_output(sinks, true, &json!({ "participants": participants }))
             } else {
                 for (name, participant) in &registry.participants {
-                    out(&registry_participant_pretty(name, participant))?;
+                    out(sinks, &registry_participant_pretty(name, participant))?;
                 }
                 Ok(())
             }
@@ -4316,6 +4594,7 @@ fn cmd_registry(
 }
 
 fn cmd_sandbox(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4341,7 +4620,7 @@ fn cmd_sandbox(
                 })
                 .collect::<Result<_>>()?;
             let result = sandbox_ops::add_to_files(system, &absolute, identity, config)?;
-            emit_sandbox_bulk_result(&result, cwd, "added", json_mode)?;
+            emit_sandbox_bulk_result(sinks, &result, cwd, "added", json_mode)?;
             if result.failed.is_empty() {
                 Ok(())
             } else {
@@ -4361,7 +4640,7 @@ fn cmd_sandbox(
                 })
                 .collect::<Result<_>>()?;
             let result = sandbox_ops::remove_from_files(system, &absolute, identity, config)?;
-            emit_sandbox_bulk_result(&result, cwd, "removed", json_mode)?;
+            emit_sandbox_bulk_result(sinks, &result, cwd, "removed", json_mode)?;
             if result.failed.is_empty() {
                 Ok(())
             } else {
@@ -4394,7 +4673,7 @@ fn cmd_sandbox(
                         })
                     })
                     .collect();
-                out_json(&json!({ "files": items }))
+                out_json(sinks, &json!({ "files": items }))
             } else {
                 for l in &listings {
                     let display_path = if *absolute {
@@ -4406,7 +4685,7 @@ fn cmd_sandbox(
                             .display()
                             .to_string()
                     };
-                    out(&display_path)?;
+                    out(sinks, &display_path)?;
                 }
                 Ok(())
             }
@@ -4415,21 +4694,21 @@ fn cmd_sandbox(
 }
 
 fn emit_sandbox_bulk_result(
+    sinks: &mut IoSinks<'_>,
     result: &sandbox_ops::SandboxBulkResult,
     cwd: &Path,
     changed_key: &str,
     json_mode: bool,
 ) -> Result<()> {
     if json_mode {
-        out_json(&result.to_json(cwd, changed_key))?;
+        out_json(sinks, &result.to_json(cwd, changed_key))?;
     } else {
         for p in &result.changed {
-            out(&strip_prefix_display(p, cwd))?;
+            out(sinks, &strip_prefix_display(p, cwd))?;
         }
         for failure in &result.failed {
-            let mut stderr = io::stderr().lock();
             let _ = writeln!(
-                stderr,
+                sinks.stderr,
                 "{}: {}",
                 strip_prefix_display(&failure.path, cwd),
                 failure.reason,
@@ -4447,6 +4726,7 @@ fn strip_prefix_display(path: &Path, base: &Path) -> String {
 }
 
 fn cmd_mv(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4459,9 +4739,9 @@ fn cmd_mv(
     let outcome = mv_op::mv(system, cwd, config, &args)?;
 
     if params.json_mode {
-        out_json(&mv_outcome_json(&outcome))
+        out_json(sinks, &mv_outcome_json(&outcome))
     } else {
-        out(&mv_outcome_pretty(params.src, params.dst, &outcome))
+        out(sinks, &mv_outcome_pretty(params.src, params.dst, &outcome))
     }
 }
 
@@ -4515,6 +4795,7 @@ fn mv_outcome_pretty(src: &str, dst: &str, outcome: &mv_op::MvOutcome) -> String
 }
 
 fn cmd_rm(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4525,14 +4806,17 @@ fn cmd_rm(
     let result = document::rm(system, cwd, &target, config)?;
 
     if json_mode {
-        out_json(&json!({
-            "deleted": file,
-            "existed": result.existed,
-        }))
+        out_json(
+            sinks,
+            &json!({
+                "deleted": file,
+                "existed": result.existed,
+            }),
+        )
     } else if result.existed {
-        out(&format!("deleted: {file}"))
+        out(sinks, &format!("deleted: {file}"))
     } else {
-        out(&format!("already absent: {file}"))
+        out(sinks, &format!("already absent: {file}"))
     }
 }
 
@@ -4546,6 +4830,7 @@ fn expand_vault_path(system: &dyn System, vault_path: Option<&Path>) -> Result<O
 
 #[cfg(feature = "obsidian")]
 fn cmd_obsidian(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     action: &ObsidianAction,
@@ -4554,17 +4839,19 @@ fn cmd_obsidian(
     match action {
         ObsidianAction::Install { vault_path } => {
             if !json_mode {
-                eprintln!(
+                writeln!(
+                    sinks.stderr,
                     "Downloading remargin plugin v{} from GitHub Releases...",
                     obsidian::plugin_version()
-                );
+                )
+                .context("writing to stderr")?;
             }
             let expanded = expand_vault_path(system, vault_path.as_deref())?;
             let report = obsidian::install(system, cwd, expanded.as_deref())?;
             if json_mode {
-                print_output(true, &report.to_json())
+                print_output(sinks, true, &report.to_json())
             } else {
-                eprintln!("{}", report.to_text());
+                writeln!(sinks.stderr, "{}", report.to_text()).context("writing to stderr")?;
                 Ok(())
             }
         }
@@ -4575,26 +4862,38 @@ fn cmd_obsidian(
                 obsidian::UninstallStatus::Removed { plugin_dir } => {
                     if json_mode {
                         print_output(
+                            sinks,
                             true,
                             &json!({
                                 "uninstalled": plugin_dir.display().to_string(),
                             }),
                         )
                     } else {
-                        eprintln!("Uninstalled remargin plugin from {}", plugin_dir.display());
+                        writeln!(
+                            sinks.stderr,
+                            "Uninstalled remargin plugin from {}",
+                            plugin_dir.display()
+                        )
+                        .context("writing to stderr")?;
                         Ok(())
                     }
                 }
                 obsidian::UninstallStatus::NotInstalled { plugin_dir } => {
                     if json_mode {
                         print_output(
+                            sinks,
                             true,
                             &json!({
                                 "not_installed": plugin_dir.display().to_string(),
                             }),
                         )
                     } else {
-                        eprintln!("remargin plugin not installed at {}", plugin_dir.display());
+                        writeln!(
+                            sinks.stderr,
+                            "remargin plugin not installed at {}",
+                            plugin_dir.display()
+                        )
+                        .context("writing to stderr")?;
                         Ok(())
                     }
                 }
@@ -4604,6 +4903,7 @@ fn cmd_obsidian(
 }
 
 fn cmd_sign(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4622,9 +4922,9 @@ fn cmd_sign(
     options.repair_checksum = repair_checksum;
     let result = operations::sign::sign_comments(system, &path, config, &selection, options)?;
     if json_mode {
-        print_output(true, &sign_result_json(&result))
+        print_output(sinks, true, &sign_result_json(&result))
     } else {
-        render_sign_result_text(&result)
+        render_sign_result_text(sinks, &result)
     }
 }
 
@@ -4664,33 +4964,49 @@ fn sign_result_json(result: &operations::sign::SignResult) -> Value {
     json!({ "repaired": repaired, "signed": signed, "skipped": skipped })
 }
 
-fn render_sign_result_text(result: &operations::sign::SignResult) -> Result<()> {
+fn render_sign_result_text(
+    sinks: &mut IoSinks<'_>,
+    result: &operations::sign::SignResult,
+) -> Result<()> {
     for entry in &result.repaired {
-        out(&format!(
-            "repaired checksum: {} ({} -> {})",
-            entry.id, entry.old_checksum, entry.new_checksum
-        ))?;
+        out(
+            sinks,
+            &format!(
+                "repaired checksum: {} ({} -> {})",
+                entry.id, entry.old_checksum, entry.new_checksum
+            ),
+        )?;
     }
     for entry in &result.signed {
-        out(&format!("signed: {} (ts={})", entry.id, entry.ts))?;
+        out(sinks, &format!("signed: {} (ts={})", entry.id, entry.ts))?;
     }
     for entry in &result.skipped {
-        out(&format!("skipped: {} ({})", entry.id, entry.reason))?;
+        out(sinks, &format!("skipped: {} ({})", entry.id, entry.reason))?;
     }
     if result.signed.is_empty() && result.skipped.is_empty() && result.repaired.is_empty() {
-        out("no candidates")?;
+        out(sinks, "no candidates")?;
     }
     Ok(())
 }
 
-fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Result<()> {
+fn cmd_skill(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    action: &SkillAction,
+    json_mode: bool,
+) -> Result<()> {
     match action {
         SkillAction::Install { global } => {
             let path = skill::install(system, *global)?;
             if json_mode {
-                print_output(true, &json!({ "installed": path.display().to_string() }))
+                print_output(
+                    sinks,
+                    true,
+                    &json!({ "installed": path.display().to_string() }),
+                )
             } else {
-                eprintln!("Skill installed to {}", path.display());
+                writeln!(sinks.stderr, "Skill installed to {}", path.display())
+                    .context("writing to stderr")?;
                 Ok(())
             }
         }
@@ -4703,18 +5019,19 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
                 _ => "unknown",
             };
             if json_mode {
-                print_output(true, &json!({ "status": status_str }))
+                print_output(sinks, true, &json!({ "status": status_str }))
             } else {
-                eprintln!("Skill status: {status_str}");
+                writeln!(sinks.stderr, "Skill status: {status_str}")
+                    .context("writing to stderr")?;
                 Ok(())
             }
         }
         SkillAction::Uninstall { global } => {
             skill::uninstall(system, *global)?;
             if json_mode {
-                print_output(true, &json!({ "uninstalled": true }))
+                print_output(sinks, true, &json!({ "uninstalled": true }))
             } else {
-                eprintln!("Skill uninstalled.");
+                writeln!(sinks.stderr, "Skill uninstalled.").context("writing to stderr")?;
                 Ok(())
             }
         }
@@ -4722,6 +5039,7 @@ fn cmd_skill(system: &dyn System, action: &SkillAction, json_mode: bool) -> Resu
 }
 
 fn cmd_mcp(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     startup_flags: &IdentityFlags,
@@ -4757,6 +5075,7 @@ fn cmd_mcp(
 
             if json_mode {
                 print_output(
+                    sinks,
                     true,
                     &json!({
                         "installed": true,
@@ -4765,7 +5084,11 @@ fn cmd_mcp(
                     }),
                 )
             } else {
-                eprintln!("MCP server registered ({scope} scope): {bin_str}");
+                writeln!(
+                    sinks.stderr,
+                    "MCP server registered ({scope} scope): {bin_str}"
+                )
+                .context("writing to stderr")?;
                 Ok(())
             }
         }
@@ -4781,9 +5104,9 @@ fn cmd_mcp(
             }
 
             if json_mode {
-                print_output(true, &json!({ "uninstalled": true }))
+                print_output(sinks, true, &json!({ "uninstalled": true }))
             } else {
-                eprintln!("MCP server unregistered.");
+                writeln!(sinks.stderr, "MCP server unregistered.").context("writing to stderr")?;
                 Ok(())
             }
         }
@@ -4802,9 +5125,9 @@ fn cmd_mcp(
             };
 
             if json_mode {
-                print_output(true, &json!({ "status": status_str }))
+                print_output(sinks, true, &json!({ "status": status_str }))
             } else {
-                eprintln!("MCP status: {status_str}");
+                writeln!(sinks.stderr, "MCP status: {status_str}").context("writing to stderr")?;
                 Ok(())
             }
         }
@@ -4812,6 +5135,7 @@ fn cmd_mcp(
 }
 
 fn cmd_verify(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     file: &str,
@@ -4835,16 +5159,19 @@ fn cmd_verify(
         .collect();
 
     if json_mode {
-        print_output(true, &json!({ "results": results, "ok": report.ok }))?;
+        print_output(sinks, true, &json!({ "results": results, "ok": report.ok }))?;
     } else {
         for row in &report.results {
             let chk = if row.checksum_ok { "ok" } else { "FAIL" };
-            out(&format!(
-                "{}: checksum={} signature={}",
-                row.id,
-                chk,
-                row.signature.as_str(),
-            ))?;
+            out(
+                sinks,
+                &format!(
+                    "{}: checksum={} signature={}",
+                    row.id,
+                    chk,
+                    row.signature.as_str(),
+                ),
+            )?;
         }
     }
 
@@ -4856,6 +5183,7 @@ fn cmd_verify(
 }
 
 fn cmd_write(
+    sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
@@ -4876,10 +5204,14 @@ fn cmd_write(
     // still returns a single payload, now with `noop: true` alongside
     // the existing fields so callers can branch on it.
     if outcome.noop && !wp.json_mode {
-        return out(&format!("{}: no changes (already up to date)", wp.path));
+        return out(
+            sinks,
+            &format!("{}: no changes (already up to date)", wp.path),
+        );
     }
 
     print_output(
+        sinks,
         wp.json_mode,
         &outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw),
     )

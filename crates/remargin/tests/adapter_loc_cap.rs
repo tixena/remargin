@@ -88,19 +88,40 @@ mod tests {
         // CLI: MCP-server boot adapter — sets up stdin/stdout streams,
         // the tracing sub-subscriber, and the MCP loop. Not per-op glue;
         // configuration-heavy setup code.
-        m.insert("cmd_mcp", (95, "MCP server bootstrap + tracing setup"));
+        m.insert("cmd_mcp", (100, "MCP server bootstrap + tracing setup"));
         // CLI: Obsidian install/uninstall — opt-in via the `obsidian`
         // feature; interactive-ish download + patch flow that is itself
         // not part of the document API surface.
         m.insert(
             "cmd_obsidian",
-            (60, "feature-gated Obsidian vault plugin install"),
+            (75, "feature-gated Obsidian vault plugin install"),
         );
         // CLI: query parses a rich filter DSL out of clap args; most
         // lines are flag -> QueryOptions field assignments, no logic.
         m.insert(
             "cmd_query",
             (70, "parses rich QueryOptions from clap flags"),
+        );
+        // CLI: activity adapter resolves explicit/implicit path, parses
+        // optional --since cutoff, and resolves caller identity through
+        // ResolvedConfig before delegating to activity::gather_activity.
+        // Each step is a 4-6 line block of clap-arg unwrapping.
+        m.insert(
+            "cmd_activity",
+            (
+                55,
+                "path/since/identity resolution before delegating to gather_activity",
+            ),
+        );
+        // CLI: search adapter unwraps eight clap fields (scope enum,
+        // pattern, options) into search::SearchOptions, expands the
+        // path through the System, then formats results.
+        m.insert(
+            "cmd_search",
+            (
+                55,
+                "extracts SearchOptions from clap flags + result formatting",
+            ),
         );
         // MCP: plan dispatcher mirrors the CLI shape above; same
         // rationale. Shrinks when the adapter-layer PlanRequest builder
@@ -135,7 +156,7 @@ mod tests {
         m.insert(
             "cmd_get_binary",
             (
-                55,
+                60,
                 "binary get dispatch (--out vs --json vs raw bytes), threading trusted_roots through read_binary",
             ),
         );
