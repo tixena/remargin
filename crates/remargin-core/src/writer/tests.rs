@@ -10,6 +10,7 @@ use os_shim::System as _;
 use os_shim::mock::MockSystem;
 
 use crate::linter;
+use crate::on_disk_comment::OnDiskComment;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment};
 use crate::reactions::{Reactions, ReactionsExt as _};
 
@@ -747,4 +748,56 @@ body
         2,
         "parse preserves legacy duplicates verbatim; dedupe is a write-side concern",
     );
+}
+
+/// Pin the writer's emitted key set against `OnDiskComment`'s serde
+/// shape. Adding a field to `OnDiskComment` without teaching the
+/// writer to emit it will trip this test.
+#[test]
+fn writer_emits_every_on_disk_comment_field() {
+    let mut reactions = Reactions::new();
+    let _added = reactions.add_reaction(
+        "+1",
+        "bob",
+        DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap(),
+    );
+    let comment = Comment {
+        ack: vec![Acknowledgment {
+            author: String::from("jorge"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+        }],
+        attachments: vec![String::from("diagram.png")],
+        author: String::from("eduardo"),
+        author_type: AuthorType::Agent,
+        checksum: String::from("sha256:deadbeef"),
+        content: String::from("body"),
+        edited_at: Some(DateTime::parse_from_rfc3339("2026-04-07T10:00:00-04:00").unwrap()),
+        id: String::from("full"),
+        line: 0,
+        reactions,
+        remargin_kind: Some(vec![String::from("question")]),
+        reply_to: Some(String::from("xyz")),
+        signature: Some(String::from("ed25519:sig==")),
+        thread: Some(String::from("t01")),
+        to: vec![String::from("jorge"), String::from("claude")],
+        ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
+    };
+
+    let on_disk = OnDiskComment::from(&comment);
+    let value: serde_yaml::Value = serde_yaml::to_value(&on_disk).unwrap();
+    let expected_keys: Vec<String> = value
+        .as_mapping()
+        .unwrap()
+        .iter()
+        .map(|(k, _)| k.as_str().unwrap().to_owned())
+        .collect();
+
+    let output = serialize_comment(&comment);
+    for key in &expected_keys {
+        let appears = output.contains(&format!("\n{key}:"));
+        assert!(
+            appears,
+            "writer dropped on-disk key {key:?} (full output:\n{output})",
+        );
+    }
 }

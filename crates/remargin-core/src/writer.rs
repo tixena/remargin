@@ -15,9 +15,10 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
+use crate::on_disk_comment::OnDiskComment;
 use crate::parser::heading::resolve_heading_path;
 use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
-use crate::reactions::{ReactionsExt as _, format_reaction_entry_block, quote_emoji_key};
+use crate::reactions::quote_emoji_key;
 
 /// Filenames the writer refuses to modify under any circumstances.
 ///
@@ -131,9 +132,9 @@ pub fn ensure_not_forbidden_target(path: &Path) -> Result<()> {
 
 /// Serialize a `Comment` into a remargin fenced code block string.
 ///
-/// The YAML fields are emitted in canonical order: id, author, type, ts,
-/// to, reply-to, thread, attachments, reactions, ack, checksum, signature.
-/// Optional fields are omitted when empty or `None`.
+/// Routes through [`OnDiskComment`] so the on-disk YAML keys come from
+/// one source of truth. Field order on disk follows `OnDiskComment`'s
+/// declaration order. Optional fields are omitted when empty or `None`.
 #[must_use]
 pub fn serialize_comment(comment: &Comment) -> String {
     let fence_depth = required_fence_depth(&comment.content);
@@ -142,57 +143,9 @@ pub fn serialize_comment(comment: &Comment) -> String {
 
     let _ = writeln!(out, "{fence}remargin");
     out.push_str("---\n");
-
-    // Required fields in canonical order.
-    let _ = writeln!(out, "id: {}", comment.id);
-    let _ = writeln!(out, "author: {}", comment.author);
-    let _ = writeln!(out, "type: {}", comment.author_type.as_str());
-    let _ = writeln!(out, "ts: {}", comment.ts.to_rfc3339());
-
-    // Optional fields (only emit if non-default).
-    if !comment.to.is_empty() {
-        let _ = writeln!(out, "to: [{}]", comment.to.join(", "));
-    }
-    if let Some(reply_to) = &comment.reply_to {
-        let _ = writeln!(out, "reply-to: {reply_to}");
-    }
-    if let Some(thread) = &comment.thread {
-        let _ = writeln!(out, "thread: {thread}");
-    }
-    if !comment.attachments.is_empty() {
-        let _ = writeln!(out, "attachments: [{}]", comment.attachments.join(", "));
-    }
-    if !comment.reactions.is_empty() {
-        out.push_str("reactions:\n");
-        for (emoji, entries) in comment.reactions.entries_by_emoji() {
-            let _ = writeln!(out, "  {}:", quote_emoji_key(&emoji));
-            for entry in &entries {
-                out.push_str(&format_reaction_entry_block("    ", entry));
-            }
-        }
-    }
-    let deduped_ack = dedupe_acks(&comment.ack);
-    if !deduped_ack.is_empty() {
-        out.push_str("ack:\n");
-        for ack_entry in &deduped_ack {
-            let _ = writeln!(
-                out,
-                "  - {}@{}",
-                ack_entry.author,
-                ack_entry.ts.to_rfc3339()
-            );
-        }
-    }
-
-    // Checksum and signature come last.
-    let _ = writeln!(out, "checksum: {}", comment.checksum);
-    if let Some(sig) = &comment.signature {
-        let _ = writeln!(out, "signature: {sig}");
-    }
-
+    write_yaml_header(&mut out, comment);
     out.push_str("---\n");
 
-    // Content.
     if !comment.content.is_empty() {
         out.push_str(&comment.content);
         if !comment.content.ends_with('\n') {
@@ -202,6 +155,103 @@ pub fn serialize_comment(comment: &Comment) -> String {
 
     let _ = writeln!(out, "{fence}");
     out
+}
+
+/// Emit the YAML header (between the two `---` markers) for `comment`.
+///
+/// `OnDiskComment` is the wire shape; the writer reads its serialized
+/// `Mapping` so every emitted key is the rename'd on-disk name. The
+/// shape for `to`/`attachments`/`remargin_kind` is flow style; ack and
+/// reactions are block style with extra indentation matching the
+/// pre-serde-routing on-disk format.
+//
+// Defensive `if let` chains skip malformed values rather than panic.
+// Every shape mismatch here would mean `OnDiskComment` was changed in
+// a way the emitter does not yet understand — the
+// `every_on_disk_field_emits_a_line` test catches that at build time.
+#[expect(
+    clippy::expect_used,
+    reason = "OnDiskComment is a fixed Serialize impl; serde_yaml::to_value cannot fail for it"
+)]
+fn write_yaml_header(out: &mut String, comment: &Comment) {
+    let on_disk = OnDiskComment::from(comment);
+    let value = serde_yaml::to_value(&on_disk)
+        .expect("OnDiskComment is a derived Serialize and cannot fail");
+    let Some(mapping) = value.as_mapping() else {
+        return;
+    };
+
+    for (key, val) in mapping {
+        if let Some(key_str) = key.as_str() {
+            emit_yaml_field(out, key_str, val);
+        }
+    }
+}
+
+fn emit_yaml_field(out: &mut String, key: &str, value: &serde_yaml::Value) {
+    match key {
+        "to" | "attachments" | "remargin_kind" => emit_flow_string_seq(out, key, value),
+        "ack" => emit_ack_block(out, key, value),
+        "reactions" => emit_reactions_block(out, key, value),
+        _ => emit_scalar_field(out, key, value),
+    }
+}
+
+fn emit_flow_string_seq(out: &mut String, key: &str, value: &serde_yaml::Value) {
+    let Some(seq) = value.as_sequence() else {
+        return;
+    };
+    let items: Vec<&str> = seq.iter().filter_map(serde_yaml::Value::as_str).collect();
+    let _ = writeln!(out, "{key}: [{}]", items.join(", "));
+}
+
+fn emit_ack_block(out: &mut String, key: &str, value: &serde_yaml::Value) {
+    let Some(seq) = value.as_sequence() else {
+        return;
+    };
+    let _ = writeln!(out, "{key}:");
+    for entry in seq {
+        if let Some(s) = entry.as_str() {
+            let _ = writeln!(out, "  - {s}");
+        }
+    }
+}
+
+fn emit_reactions_block(out: &mut String, key: &str, value: &serde_yaml::Value) {
+    let Some(map) = value.as_mapping() else {
+        return;
+    };
+    let _ = writeln!(out, "{key}:");
+    for (emoji_key, entries) in map {
+        let Some(emoji) = emoji_key.as_str() else {
+            continue;
+        };
+        let _ = writeln!(out, "  {}:", quote_emoji_key(emoji));
+        let Some(entry_seq) = entries.as_sequence() else {
+            continue;
+        };
+        for entry in entry_seq {
+            let Some(entry_map) = entry.as_mapping() else {
+                continue;
+            };
+            let author = entry_map
+                .get(serde_yaml::Value::String(String::from("author")))
+                .and_then(serde_yaml::Value::as_str)
+                .unwrap_or("");
+            let ts = entry_map
+                .get(serde_yaml::Value::String(String::from("ts")))
+                .and_then(serde_yaml::Value::as_str)
+                .unwrap_or("");
+            let _ = writeln!(out, "    - author: {author}");
+            let _ = writeln!(out, "      ts: {ts}");
+        }
+    }
+}
+
+fn emit_scalar_field(out: &mut String, key: &str, value: &serde_yaml::Value) {
+    if let Some(s) = value.as_str() {
+        let _ = writeln!(out, "{key}: {s}");
+    }
 }
 
 /// Insert a new comment into the parsed document at the given position.

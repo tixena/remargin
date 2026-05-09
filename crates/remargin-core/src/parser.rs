@@ -13,14 +13,13 @@ use std::path::Path;
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, FixedOffset};
 use os_shim::System;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tixschema::model_schema;
 
 use crate::kind::validate_kinds;
-use crate::reactions::{
-    ReactionEntry, Reactions, ReactionsExt as _, format_reaction_entry_block, quote_emoji_key,
-};
-use crate::writer::dedupe_acks;
+use crate::on_disk_comment::{OnDiskComment, comment_from_on_disk};
+use crate::reactions::ReactionEntry;
+use crate::writer::serialize_comment;
 
 /// An acknowledgment of a comment by another participant.
 #[derive(Debug, Clone, Serialize)]
@@ -182,35 +181,6 @@ pub enum Segment {
     LegacyComment(LegacyComment),
 }
 
-#[derive(Deserialize)]
-struct RawYamlHeader {
-    #[serde(default)]
-    ack: Vec<String>,
-    #[serde(default)]
-    attachments: Vec<String>,
-    author: String,
-    #[serde(rename = "type")]
-    author_type: String,
-    checksum: String,
-    #[serde(default)]
-    edited_at: Option<String>,
-    id: String,
-    #[serde(
-        default,
-        deserialize_with = "crate::reactions::deserialize_with_legacy"
-    )]
-    reactions: Reactions,
-    #[serde(default, rename = "remargin_kind")]
-    remargin_kind: Vec<String>,
-    #[serde(rename = "reply-to")]
-    reply_to: Option<String>,
-    signature: Option<String>,
-    thread: Option<String>,
-    #[serde(default)]
-    to: Vec<String>,
-    ts: String,
-}
-
 #[derive(Debug)]
 struct FencedBlock {
     depth: usize,
@@ -263,7 +233,7 @@ impl ParsedDocument {
         for seg in &self.segments {
             match seg {
                 Segment::Body(text) => out.push_str(text),
-                Segment::Comment(cm) => serialize_comment(cm, &mut out),
+                Segment::Comment(cm) => out.push_str(&serialize_comment(cm)),
                 Segment::LegacyComment(lc) => serialize_legacy_comment(lc, &mut out),
             }
         }
@@ -345,88 +315,6 @@ pub(crate) fn required_fence_depth(content: &str) -> usize {
 
     let min_depth = max_backticks + 1;
     if min_depth < 3 { 3 } else { min_depth }
-}
-
-fn serialize_comment(cm: &Comment, out: &mut String) {
-    let fence_depth = required_fence_depth(&cm.content);
-    let fence: String = repeat_n('`', fence_depth).collect();
-
-    let _ = writeln!(out, "{fence}remargin");
-    out.push_str("---\n");
-
-    let _ = writeln!(out, "id: {}", cm.id);
-    let _ = writeln!(out, "author: {}", cm.author);
-    let _ = writeln!(out, "type: {}", cm.author_type.as_str());
-    let _ = writeln!(out, "ts: {}", cm.ts.to_rfc3339());
-    if let Some(edited_at) = cm.edited_at {
-        let _ = writeln!(out, "edited_at: {}", edited_at.to_rfc3339());
-    }
-    let _ = writeln!(out, "checksum: {}", cm.checksum);
-
-    if !cm.to.is_empty() {
-        let _ = writeln!(out, "to: [{}]", cm.to.join(", "));
-    }
-    if let Some(reply_to) = &cm.reply_to {
-        let _ = writeln!(out, "reply-to: {reply_to}");
-    }
-    if let Some(thread) = &cm.thread {
-        let _ = writeln!(out, "thread: {thread}");
-    }
-    if !cm.attachments.is_empty() {
-        let _ = writeln!(out, "attachments: [{}]", cm.attachments.join(", "));
-    }
-    if let Some(kinds) = cm.remargin_kind.as_deref()
-        && !kinds.is_empty()
-    {
-        // Emit as flow-style sequence for readability and to mirror
-        // `to:` / `attachments:`. Kinds never contain commas or colons
-        // (enforced by `crate::kind::validate_kinds`), so the flow form
-        // is safe without quoting.
-        let _ = writeln!(out, "remargin_kind: [{}]", kinds.join(", "));
-    }
-    if !cm.reactions.is_empty() {
-        out.push_str("reactions:\n");
-        for (emoji, entries) in cm.reactions.entries_by_emoji() {
-            let _ = writeln!(out, "  {}:", quote_emoji_key(&emoji));
-            for entry in &entries {
-                out.push_str(&format_reaction_entry_block("    ", entry));
-            }
-        }
-    }
-    // Writer-side dedupe: the on-disk ack list always carries
-    // at most one entry per identity, with the latest timestamp. The
-    // helper lives in `crate::writer` because every public write path
-    // funnels through it (`writer::write_document` and the sandbox/purge
-    // closures all call `to_markdown`); this is the single serialization
-    // boundary that pins the invariant. Reads tolerate duped legacy data:
-    // `parse` accepts whatever YAML emits, but no remargin write ever
-    // emits duplicates, so any unrelated edit self-heals the file.
-    let deduped_ack = dedupe_acks(&cm.ack);
-    if !deduped_ack.is_empty() {
-        out.push_str("ack:\n");
-        for ack_entry in &deduped_ack {
-            let _ = writeln!(
-                out,
-                "  - {}@{}",
-                ack_entry.author,
-                ack_entry.ts.to_rfc3339()
-            );
-        }
-    }
-    if let Some(sig) = &cm.signature {
-        let _ = writeln!(out, "signature: {sig}");
-    }
-
-    out.push_str("---\n");
-
-    if !cm.content.is_empty() {
-        out.push_str(&cm.content);
-        if !cm.content.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-
-    let _ = writeln!(out, "{fence}");
 }
 
 fn serialize_legacy_comment(lc: &LegacyComment, out: &mut String) {
@@ -533,22 +421,10 @@ fn scan_fences(source: &str) -> Vec<FencedBlock> {
     blocks
 }
 
-/// Parses entries like `"eduardo@2026-04-06T15:00:00-04:00"`.
-fn parse_ack_entry(entry: &str) -> Result<Acknowledgment> {
-    let at_pos = entry
-        .find('@')
-        .with_context(|| format!("ack entry missing '@': {entry}"))?;
-    let author = entry[..at_pos].to_owned();
-    let ts_str = &entry[at_pos + 1..];
-    let ts = DateTime::parse_from_rfc3339(ts_str)
-        .with_context(|| format!("invalid ack timestamp: {ts_str}"))?;
-    Ok(Acknowledgment { author, ts })
-}
-
 /// Parses entries like `"eduardo@2026-04-11T12:34:56+00:00"`.
 ///
-/// Shape-identical to [`parse_ack_entry`]: author, literal `@`, RFC3339
-/// timestamp. See [`SandboxEntry`].
+/// Shape mirrors the on-disk `ack:` entries: author, literal `@`,
+/// RFC3339 timestamp. See [`SandboxEntry`].
 ///
 /// # Errors
 ///
@@ -584,31 +460,6 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
 
     let content_str = parts.next().unwrap_or("");
 
-    let header: RawYamlHeader = serde_yaml::from_str(yaml_str)
-        .with_context(|| format!("failed to parse YAML header:\n{yaml_str}"))?;
-
-    let ts = DateTime::parse_from_rfc3339(&header.ts)
-        .with_context(|| format!("invalid timestamp: {}", header.ts))?;
-
-    let edited_at = match header.edited_at.as_deref() {
-        Some(raw) => Some(
-            DateTime::parse_from_rfc3339(raw)
-                .with_context(|| format!("invalid edited_at: {raw}"))?,
-        ),
-        None => None,
-    };
-
-    let author_type = match header.author_type.as_str() {
-        "human" => AuthorType::Human,
-        "agent" => AuthorType::Agent,
-        other => anyhow::bail!("unknown author type: {other}"),
-    };
-
-    let mut ack_list = Vec::with_capacity(header.ack.len());
-    for entry in &header.ack {
-        ack_list.push(parse_ack_entry(entry)?);
-    }
-
     // Trim a single trailing newline from content if present (the newline
     // before the closing fence is structural, not part of the content).
     let content = content_str
@@ -616,45 +467,13 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         .unwrap_or(content_str)
         .to_owned();
 
-    validate_kinds(&header.remargin_kind)
+    let on_disk: OnDiskComment = serde_yaml::from_str(yaml_str)
+        .with_context(|| format!("failed to parse YAML header:\n{yaml_str}"))?;
+
+    validate_kinds(&on_disk.remargin_kind)
         .with_context(|| format!("invalid remargin_kind in block starting near line {line}"))?;
-    // `RawYamlHeader.remargin_kind` is still `Vec<String>` via
-    // `#[serde(default)]` so validate sees an empty slice when the
-    // field is absent.
 
-    // Preserve the bare-file round-trip: a pre-`remargin_kind` comment
-    // has no `remargin_kind:` line, so the parser must not fabricate an
-    // empty-but-present list on its way out. `None` → no line; an
-    // explicit `[]` on disk parses into `None` too, which is fine — the
-    // next serialize stays absent, and the kinds-less checksum
-    // equivalence in [`crate::crypto::compute_checksum`] is maintained.
-    let remargin_kind = if header.remargin_kind.is_empty() {
-        None
-    } else {
-        Some(header.remargin_kind)
-    };
-
-    let mut reactions = header.reactions;
-    reactions.backfill_legacy_timestamps(ts, &ack_list);
-
-    Ok(Comment {
-        ack: ack_list,
-        attachments: header.attachments,
-        author: header.author,
-        author_type,
-        checksum: header.checksum,
-        content,
-        edited_at,
-        id: header.id,
-        line,
-        reactions,
-        remargin_kind,
-        reply_to: header.reply_to,
-        signature: header.signature,
-        thread: header.thread,
-        to: header.to,
-        ts,
-    })
+    comment_from_on_disk(on_disk, content, line)
 }
 
 /// Returns `None` if the tag does not match a `user comments` or `agent
