@@ -1656,7 +1656,6 @@ fn main() -> ExitCode {
 
     let output = subcommand_output(&cli.command);
     let verbose = output.is_some_and(|o| o.verbose);
-    let json_mode = output.is_some_and(|o| o.json);
 
     let system = RealSystem::new();
     if verbose {
@@ -1684,30 +1683,7 @@ fn main() -> ExitCode {
     // Non-JSON mode does not emit a timing footer on any stream:
     // stdout stays pure command output and stderr stays clean. The timing
     // value survives as `elapsed_ms` inside the JSON payload.
-    match run(&cli, &system, &cwd, &mut sinks) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            let err_msg = format!("{err:#}");
-            let is_silent_sentinel = err_msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER);
-            let exit_code = classify_error(&err);
-            if is_silent_sentinel {
-                // Sentinel for `permissions check`.
-                // Output already emitted on the success path; we only
-                // need the gitignore-style exit code, no "error: ..."
-                // render.
-            } else if json_mode {
-                let error_json = inject_elapsed_ms(&json!({ "error": err_msg }));
-                let _ = writeln!(
-                    sinks.stderr,
-                    "{}",
-                    serde_json::to_string_pretty(&error_json).unwrap_or_default()
-                );
-            } else {
-                let _ = writeln!(sinks.stderr, "error: {err_msg}");
-            }
-            ExitCode::from(exit_code)
-        }
-    }
+    run(&cli, &system, &cwd, &mut sinks)
 }
 
 fn classify_error(err: &anyhow::Error) -> u8 {
@@ -1972,11 +1948,40 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
     }
 }
 
+fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> ExitCode {
+    let json_mode = subcommand_output(&cli.command).is_some_and(|o| o.json);
+
+    match dispatch(cli, system, cwd, sinks) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            let err_msg = format!("{err:#}");
+            let is_silent_sentinel = err_msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER);
+            let exit_code = classify_error(&err);
+            if is_silent_sentinel {
+                // Sentinel for `permissions check`.
+                // Output already emitted on the success path; we only
+                // need the gitignore-style exit code, no "error: ..."
+                // render.
+            } else if json_mode {
+                let error_json = inject_elapsed_ms(&json!({ "error": err_msg }));
+                let _ = writeln!(
+                    sinks.stderr,
+                    "{}",
+                    serde_json::to_string_pretty(&error_json).unwrap_or_default()
+                );
+            } else {
+                let _ = writeln!(sinks.stderr, "error: {err_msg}");
+            }
+            ExitCode::from(exit_code)
+        }
+    }
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "config-free subcommand short-circuit list grows linearly with commands"
 )]
-fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> Result<()> {
+fn dispatch(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> Result<()> {
     let output = subcommand_output(&cli.command);
     let json_mode = output.is_some_and(|o| o.json);
 
