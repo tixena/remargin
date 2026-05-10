@@ -47,26 +47,23 @@ export function WidgetRootToolbar({
   return (
     <div className="remargin-widget-root-toolbar">
       <Badge
-        className={`px-1 py-0 rounded-full font-mono text-[9px] font-semibold leading-none ${avatarClass}`}
+        className={`px-1 py-0 rounded-full font-mono text-[10px] font-semibold leading-none ${avatarClass}`}
         aria-label={isAgent ? "AI agent thread" : "Human thread"}
       >
         {initials}
       </Badge>
       {comment.id && (
-        <Badge className="px-1 py-0 rounded-sm bg-slate-500 text-white font-mono text-[9px] font-semibold leading-none">
+        <Badge className="px-1 py-0 rounded-sm bg-slate-500 text-white font-mono text-[10px] font-semibold leading-none">
           {comment.id}
         </Badge>
       )}
       {summary.totalReplies > 0 && (
-        <Badge
-          variant="outline"
-          className="px-1.5 py-0 rounded-sm font-mono text-[9px] font-normal leading-none"
-        >
+        <span className="font-mono text-[10px] font-normal leading-none text-[var(--text-muted)]">
           {summary.totalReplies} {replyNoun}
-        </Badge>
+        </span>
       )}
       {summary.pendingForMe > 0 && (
-        <Badge className="px-1.5 py-0 rounded-sm bg-amber-500 text-white font-mono text-[9px] font-semibold leading-none">
+        <Badge className="px-1.5 py-0 rounded-sm bg-amber-500 text-white font-mono text-[10px] font-semibold leading-none">
           {summary.pendingForMe} pending
         </Badge>
       )}
