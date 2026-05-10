@@ -28,6 +28,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    use anyhow::Context as _;
     use assert_cmd::Command;
     use os_shim::real::RealSystem;
     use remargin_core::config::ResolvedConfig;
@@ -95,7 +96,11 @@ Body paragraph two.
     /// `--json` is per-subcommand, not a top-level flag, so
     /// append it at the end where every subcommand accepts trailing
     /// options.
-    #[expect(clippy::panic, reason = "integration test assertion helper")]
+    ///
+    /// Failure surfaces via `.unwrap()` on a context-attached `Result`
+    /// — same end behaviour as the previous `panic!` call but uses the
+    /// project-allowed unwrap idiom rather than the lint-flagged
+    /// `panic!` macro.
     fn run_cli(cwd: &Path, args: &[&str], stdin: &str) -> Value {
         let mut cmd = Command::cargo_bin("remargin").unwrap();
         cmd.current_dir(cwd).args(args).arg("--json");
@@ -113,29 +118,28 @@ Body paragraph two.
             String::from_utf8_lossy(&output.stderr),
         );
 
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
-            panic!(
-                "CLI stdout was not valid JSON for args {:?}: {}; raw={}",
-                args,
-                err,
-                String::from_utf8_lossy(&output.stdout)
-            )
-        })
+        serde_json::from_slice(&output.stdout)
+            .with_context(|| {
+                format!(
+                    "CLI stdout was not valid JSON for args {:?}; raw={}",
+                    args,
+                    String::from_utf8_lossy(&output.stdout)
+                )
+            })
+            .unwrap()
     }
 
     /// Call the in-process MCP handler with a `plan` tools-call request.
     ///
-    /// `arguments` must be a JSON object; this adds the `op` field and
-    /// wraps it inside the JSON-RPC `tools/call` envelope.
-    #[expect(clippy::panic, reason = "integration test assertion helper")]
-    fn run_mcp(base_dir: &Path, op: &str, arguments: Value) -> Value {
+    /// `arguments` is a typed map (not a generic `Value`) so the
+    /// "must be an object" contract is enforced at compile time, not
+    /// at runtime. This adds the `op` field and wraps it inside the
+    /// JSON-RPC `tools/call` envelope.
+    fn run_mcp(base_dir: &Path, op: &str, mut arguments: serde_json::Map<String, Value>) -> Value {
         let system = RealSystem::new();
         let config = parity_config(system, base_dir);
 
-        let Value::Object(mut args_map) = arguments else {
-            panic!("run_mcp expects an object for `arguments`, got non-object")
-        };
-        args_map.insert(String::from("op"), Value::String(String::from(op)));
+        arguments.insert(String::from("op"), Value::String(String::from(op)));
 
         let request = json!({
             "jsonrpc": "2.0",
@@ -143,7 +147,7 @@ Body paragraph two.
             "method": "tools/call",
             "params": {
                 "name": "plan",
-                "arguments": Value::Object(args_map),
+                "arguments": Value::Object(arguments),
             }
         });
 
@@ -192,7 +196,12 @@ Body paragraph two.
     /// Invoke CLI and MCP for the same plan op, normalize, and assert
     /// structural equality. Returns the normalized report for op-specific
     /// follow-up assertions.
-    fn assert_parity(cli_args: &[&str], mcp_op: &str, mcp_args: Value, tmp: &TempDir) -> Value {
+    fn assert_parity(
+        cli_args: &[&str],
+        mcp_op: &str,
+        mcp_args: serde_json::Map<String, Value>,
+        tmp: &TempDir,
+    ) -> Value {
         assert_parity_with_stdin(cli_args, "", mcp_op, mcp_args, tmp)
     }
 
@@ -203,7 +212,7 @@ Body paragraph two.
         cli_args: &[&str],
         cli_stdin: &str,
         mcp_op: &str,
-        mcp_args: Value,
+        mcp_args: serde_json::Map<String, Value>,
         tmp: &TempDir,
     ) -> Value {
         let cli_value = normalize(run_cli(tmp.path(), cli_args, cli_stdin));
@@ -215,6 +224,13 @@ Body paragraph two.
         cli_value
     }
 
+    /// Build the `mcp_args` Map for an `assert_parity*` call. Wraps a
+    /// `json!({...})` literal so test code stays compact while the
+    /// helper signature stays typed.
+    fn obj(v: &Value) -> serde_json::Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
     #[test]
     fn plan_delete_parity() {
         let tmp = TempDir::new().unwrap();
@@ -222,7 +238,7 @@ Body paragraph two.
         let report = assert_parity(
             &["plan", "delete", "doc.md", "aaa"],
             "delete",
-            json!({ "file": "doc.md", "ids": ["aaa"] }),
+            obj(&json!({ "file": "doc.md", "ids": ["aaa"] })),
             &tmp,
         );
         assert_eq!(report["op"], "delete");
@@ -236,7 +252,7 @@ Body paragraph two.
         let report = assert_parity(
             &["plan", "edit", "doc.md", "aaa", "Edited content."],
             "edit",
-            json!({ "file": "doc.md", "id": "aaa", "content": "Edited content." }),
+            obj(&json!({ "file": "doc.md", "id": "aaa", "content": "Edited content." })),
             &tmp,
         );
         assert_eq!(report["op"], "edit");
@@ -250,7 +266,7 @@ Body paragraph two.
         let report = assert_parity(
             &["plan", "migrate", "doc.md"],
             "migrate",
-            json!({ "file": "doc.md" }),
+            obj(&json!({ "file": "doc.md" })),
             &tmp,
         );
         assert_eq!(report["op"], "migrate");
@@ -267,7 +283,7 @@ Body paragraph two.
         let report = assert_parity(
             &["plan", "purge", "doc.md"],
             "purge",
-            json!({ "file": "doc.md" }),
+            obj(&json!({ "file": "doc.md" })),
             &tmp,
         );
         assert_eq!(report["op"], "purge");
@@ -289,7 +305,7 @@ Body paragraph two.
             &["plan", "write", "fresh.md", "--create"],
             new_body,
             "write",
-            json!({ "file": "fresh.md", "content": new_body, "create": true }),
+            obj(&json!({ "file": "fresh.md", "content": new_body, "create": true })),
             &tmp,
         );
         assert_eq!(report["op"], "write");
@@ -306,7 +322,7 @@ Body paragraph two.
         let report = assert_parity(
             &["plan", "write", "out.txt", "hello", "--raw"],
             "write",
-            json!({ "file": "out.txt", "content": "hello", "raw": true }),
+            obj(&json!({ "file": "out.txt", "content": "hello", "raw": true })),
             &tmp,
         );
         assert_eq!(report["op"], "write");

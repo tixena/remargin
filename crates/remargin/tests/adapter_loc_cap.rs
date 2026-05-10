@@ -200,10 +200,6 @@ mod tests {
         out
     }
 
-    #[expect(
-        clippy::panic,
-        reason = "integration-test assertion helper: panic is how test failures propagate to cargo test"
-    )]
     #[test]
     fn adapter_handlers_stay_under_loc_cap() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -212,8 +208,14 @@ mod tests {
 
         for (surface, rel_path) in ADAPTER_FILES {
             let full = Path::new(manifest_dir).join(rel_path);
-            let src = fs::read_to_string(&full)
-                .unwrap_or_else(|err| panic!("reading {}: {err}", full.display()));
+            let read = fs::read_to_string(&full);
+            assert!(
+                read.is_ok(),
+                "reading {}: {:?}",
+                full.display(),
+                read.as_ref().err()
+            );
+            let src = read.unwrap();
             let counts = collect_fn_line_counts(&src);
 
             for (name, loc) in counts {
@@ -236,11 +238,13 @@ mod tests {
             }
         }
 
-        if !violations.is_empty() {
-            for v in &violations {
-                println!("LOC CAP VIOLATION: {v}");
-            }
-            panic!("{} adapter handler(s) exceeded LOC cap", violations.len());
+        for v in &violations {
+            println!("LOC CAP VIOLATION: {v}");
         }
+        assert!(
+            violations.is_empty(),
+            "{} adapter handler(s) exceeded LOC cap",
+            violations.len()
+        );
     }
 } // mod tests

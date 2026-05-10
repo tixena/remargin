@@ -386,7 +386,6 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
     // ---------- sandbox ----------
 
     #[test]
-    #[expect(clippy::panic, reason = "integration test assertion helper")]
     fn sandbox_scoping_follows_config_identity() {
         let (_tmp, walker, flag_config) = two_realms();
         let doc = seed_doc(&walker, "doc.md", "# Hello\n\nBody.\n");
@@ -406,9 +405,11 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 
         let walker_stdout = run_ok(&walker, &["sandbox", "--json", "list"]);
         let walker_json: Value = serde_json::from_str(&walker_stdout).unwrap();
-        let Some(walker_files) = walker_json["files"].as_array() else {
-            panic!("walker files must be a JSON array, got: {walker_json}")
-        };
+        assert!(
+            walker_json["files"].is_array(),
+            "walker files must be a JSON array, got: {walker_json}"
+        );
+        let walker_files = walker_json["files"].as_array().unwrap();
         assert!(
             walker_files.is_empty(),
             "walker-agent's sandbox must stay empty, got: {walker_json}"
@@ -419,9 +420,11 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
             &["sandbox", "--config", &flag_path, "--json", "list"],
         );
         let flag_json: Value = serde_json::from_str(&flag_stdout).unwrap();
-        let Some(flag_files) = flag_json["files"].as_array() else {
-            panic!("flag files must be a JSON array, got: {flag_json}")
-        };
+        assert!(
+            flag_json["files"].is_array(),
+            "flag files must be a JSON array, got: {flag_json}"
+        );
+        let flag_files = flag_json["files"].as_array().unwrap();
         assert_eq!(
             flag_files.len(),
             1,
