@@ -198,6 +198,29 @@ impl ResolvedConfig {
     /// declared identity is not in the registry the doc's realm sees,
     /// or the strict-mode key resolution falls through.
     pub fn escalate_for_doc(&self, system: &dyn System, doc_path: &Path) -> Result<Self> {
+        let escalated = self.escalate_mode_for_doc(system, doc_path)?;
+        if escalated.mode != self.mode {
+            escalated.validate_identity().with_context(|| {
+                format!(
+                    "doc {:?} is in a realm whose mode is stricter than the \
+                     caller's mode; cannot escalate cleanly",
+                    doc_path.display(),
+                )
+            })?;
+        }
+        Ok(escalated)
+    }
+
+    /// Realm-walk + mode escalation only, no posting-authority check.
+    /// Use from read-only paths (verify, lint, comments-list) where the
+    /// caller does not need to be able to write into the realm but does
+    /// need the realm's mode to apply to integrity checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when [`resolve_mode`] fails on the doc's realm
+    /// (e.g. unreadable `.remargin.yaml`).
+    pub fn escalate_mode_for_doc(&self, system: &dyn System, doc_path: &Path) -> Result<Self> {
         let realm_anchor = doc_path.parent().unwrap_or(doc_path);
         let ResolvedMode {
             mode: realm_mode, ..
@@ -207,7 +230,7 @@ impl ResolvedConfig {
             return Ok(self.clone());
         }
 
-        let escalated = Self {
+        Ok(Self {
             assets_dir: self.assets_dir.clone(),
             author_type: self.author_type.clone(),
             identity: self.identity.clone(),
@@ -218,17 +241,7 @@ impl ResolvedConfig {
             source_path: self.source_path.clone(),
             trusted_roots: self.trusted_roots.clone(),
             unrestricted: self.unrestricted,
-        };
-
-        escalated.validate_identity().with_context(|| {
-            format!(
-                "doc {:?} is in a realm whose mode is stricter than the \
-                 caller's mode; cannot escalate cleanly",
-                doc_path.display(),
-            )
-        })?;
-
-        Ok(escalated)
+        })
     }
 
     /// Check if a comment must be signed (strict mode + registered participant).

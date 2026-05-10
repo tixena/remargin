@@ -189,7 +189,7 @@ pub fn migrate(
 
     let added_ids: HashSet<String> = results.iter().map(|r| r.new_id.clone()).collect();
     let removed: HashSet<String> = HashSet::new();
-    commit_with_verify(&doc, config, |verified_doc| {
+    commit_with_verify(&doc, config, path, |verified_doc| {
         writer::write_document(system, path, verified_doc, &added_ids, &removed)
     })?;
 

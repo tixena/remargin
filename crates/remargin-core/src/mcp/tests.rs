@@ -11,6 +11,7 @@ use os_shim::System as _;
 use os_shim::mock::MockSystem;
 use serde_json::{Value, json};
 
+use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::mcp;
 use crate::operations::{CreateCommentParams, create_comment};
@@ -841,6 +842,179 @@ fn verify_checks_checksum_integrity() {
     // the test config → status is `missing` (neutral in open mode).
     assert_eq!(results[0]["signature"], "missing");
     assert!(result["ok"].as_bool().unwrap(), "verify should pass");
+}
+
+#[test]
+fn verify_escalates_to_realm_strict_mode_when_caller_is_open() {
+    // BUG: handle_verify passes the caller's ResolvedConfig straight into
+    // verify_document without calling escalate_for_doc. So a file living
+    // inside a strict-mode realm gets verified under the caller's
+    // open-mode rules — and an unsigned comment by a registered-active
+    // participant (which strict mode would mark fatal) passes verify
+    // with ok=true. Breaks the realm-mode-floor contract documented on
+    // ResolvedConfig::escalate_for_doc.
+    //
+    // After the fix, handle_verify must escalate to the realm's strict
+    // mode before calling verify_document.
+
+    let unsigned_doc = "\
+# Realm doc
+
+```remargin
+---
+id: u01
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+---
+hello
+```
+";
+    let base = Path::new("/parent");
+    let system = MockSystem::new()
+        .with_dir(Path::new("/parent/realm"))
+        .unwrap()
+        .with_file(
+            Path::new("/parent/.remargin.yaml"),
+            b"mode: open\nidentity: caller\ntype: human\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/parent/realm/.remargin.yaml"),
+            b"mode: strict\nidentity: realm-owner\ntype: agent\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/parent/realm/file.md"), unsigned_doc.as_bytes())
+        .unwrap();
+
+    let alice_active_yaml = "\
+participants:
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtestalicekey
+";
+    let registry: Registry = serde_yaml::from_str(alice_active_yaml).unwrap();
+
+    // Caller is mounted at /parent (open mode). The registry knows alice
+    // as active so the post-fix Strict + Missing path can flip to bad.
+    let caller_cfg = ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type: Some(AuthorType::Human),
+        identity: Some(String::from("caller")),
+        ignore: Vec::new(),
+        key_path: None,
+        mode: Mode::Open,
+        registry: Some(registry),
+        source_path: None,
+        trusted_roots: Vec::new(),
+        unrestricted: false,
+    };
+
+    let response = call(
+        &system,
+        base,
+        &caller_cfg,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "verify",
+                "arguments": { "file": "realm/file.md" }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let results = result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1_usize);
+    assert!(results[0]["checksum_ok"].as_bool().unwrap());
+    assert_eq!(results[0]["signature"], "missing");
+
+    assert!(
+        !result["ok"].as_bool().unwrap(),
+        "verify must escalate to the realm's strict mode for files inside it; \
+         an unsigned comment by a registered-active participant must report ok=false"
+    );
+}
+
+#[test]
+fn verify_keeps_open_verdict_when_no_stricter_subrealm_exists() {
+    // Sanity: when the file is NOT inside a stricter sub-realm, the
+    // caller's open-mode verdict still wins. This guards against an
+    // over-correction in the fix that would always re-walk regardless
+    // of whether a stricter realm exists below the caller's mount.
+
+    let unsigned_doc = "\
+# Doc
+
+```remargin
+---
+id: u01
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+---
+hello
+```
+";
+    let base = Path::new("/parent");
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/parent/.remargin.yaml"),
+            b"mode: open\nidentity: caller\ntype: human\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/parent/file.md"), unsigned_doc.as_bytes())
+        .unwrap();
+
+    let alice_active_yaml = "\
+participants:
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtestalicekey
+";
+    let registry: Registry = serde_yaml::from_str(alice_active_yaml).unwrap();
+
+    let caller_cfg = ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type: Some(AuthorType::Human),
+        identity: Some(String::from("caller")),
+        ignore: Vec::new(),
+        key_path: None,
+        mode: Mode::Open,
+        registry: Some(registry),
+        source_path: None,
+        trusted_roots: Vec::new(),
+        unrestricted: false,
+    };
+
+    let response = call(
+        &system,
+        base,
+        &caller_cfg,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "verify",
+                "arguments": { "file": "file.md" }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert!(
+        result["ok"].as_bool().unwrap(),
+        "no stricter sub-realm exists; open-mode verdict (Missing is neutral) must stand"
+    );
 }
 
 // Note: the purge `dry_run` smoke test was removed in along
@@ -4188,4 +4362,79 @@ fn mcp_plan_mv_directory_emits_is_directory() {
     // Plan must not move anything.
     assert!(system.is_dir(&base.join("src")).unwrap());
     assert!(!system.exists(&base.join("dst")).unwrap());
+}
+
+/// Verify-gate refusal flowing out of `mcp__remargin__ack` carries a
+/// structured error JSON in the tool result's `text` field, not a free-
+/// form `verify failed (mode: …)` blob. Callers branch on `error_kind`
+/// instead of regex-matching the string.
+#[test]
+fn mcp_ack_verify_failure_returns_structured_error_json() {
+    let base = Path::new("/docs");
+    // Bad-checksum doc: open mode tolerates Missing / UnknownAuthor,
+    // but a bad checksum is always a verify-gate trip.
+    let bad_doc = "\
+---
+title: Doc
+---
+
+Body.
+
+```remargin
+---
+id: abc
+author: tester
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:0000000000000000000000000000000000000000000000000000000000000000
+---
+hello
+```
+";
+    let system = MockSystem::new()
+        .with_file(base.join("a.md"), bad_doc.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "ack",
+                "arguments": {
+                    "file": "a.md",
+                    "ids": ["abc"]
+                }
+            }
+        }),
+    );
+
+    assert!(
+        is_tool_error(&response),
+        "verify-gate trip should be a tool error"
+    );
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["error_kind"], "verify_failed");
+    assert_eq!(payload["mode"], "open");
+    let failures = payload["failures"].as_array().unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0]["id"], "abc");
+    assert_eq!(failures[0]["checksum_ok"], false);
+    assert!(
+        payload["headline"]
+            .as_str()
+            .unwrap()
+            .starts_with("verify failed:")
+    );
+    assert!(
+        payload["hint"]
+            .as_str()
+            .unwrap()
+            .contains("remargin verify")
+    );
 }

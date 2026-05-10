@@ -229,7 +229,7 @@ pub fn create_comment(
     let markdown_after = doc.to_markdown();
     linter::lint_or_fail(&markdown_after).context("document has structural issues after write")?;
 
-    commit_with_verify(&doc, cfg, |verified_doc| {
+    commit_with_verify(&doc, cfg, path, |verified_doc| {
         writer::write_document(
             system,
             path,
@@ -301,7 +301,7 @@ pub fn ack_comments(
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
     let empty: HashSet<String> = HashSet::new();
-    commit_with_verify(&doc, config, |verified_doc| {
+    commit_with_verify(&doc, config, path, |verified_doc| {
         writer::write_document(system, path, verified_doc, &empty, &empty)
     })?;
 
@@ -349,7 +349,7 @@ pub fn react(
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
     let empty: HashSet<String> = HashSet::new();
-    commit_with_verify(&doc, config, |verified_doc| {
+    commit_with_verify(&doc, config, path, |verified_doc| {
         writer::write_document(system, path, verified_doc, &empty, &empty)
     })?;
 
@@ -412,7 +412,7 @@ pub fn delete_comments(
 
     let expected_added: HashSet<String> = HashSet::new();
     let expected_removed: HashSet<String> = comment_ids.iter().map(|s| String::from(*s)).collect();
-    commit_with_verify(&doc, config, |verified_doc| {
+    commit_with_verify(&doc, config, path, |verified_doc| {
         writer::write_document(
             system,
             path,
@@ -514,7 +514,7 @@ pub fn edit_comment(
     frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
     let empty: HashSet<String> = HashSet::new();
-    commit_with_verify(&doc, cfg, |verified_doc| {
+    commit_with_verify(&doc, cfg, path, |verified_doc| {
         writer::write_document(system, path, verified_doc, &empty, &empty)
     })?;
 

@@ -882,6 +882,22 @@ fn tool_result_error(message: &str) -> Value {
     })
 }
 
+/// Build an MCP tool result (error) whose `text` field is a JSON-stringified
+/// payload. Used for typed errors (e.g. verify-gate failures) so callers
+/// can branch on `error_kind` instead of regex-matching a free-form string.
+/// The caller provides the structured value; we serialize it so the
+/// outer `tools/call` `elapsed_ms` injector can re-parse and decorate it.
+fn tool_result_error_json(payload: &Value) -> Value {
+    let text = serde_json::to_string_pretty(payload).unwrap_or_default();
+    json!({
+        "content": [{
+            "type": "text",
+            "text": text
+        }],
+        "isError": true
+    })
+}
+
 /// Extract an optional bool field from a JSON object.
 fn optional_bool(params: &Map<String, Value>, field: &str) -> bool {
     params.get(field).and_then(Value::as_bool).unwrap_or(false)
@@ -1262,7 +1278,12 @@ fn dispatch_tool(
                 tool_result_success(&value)
             }
         }
-        Err(err) => tool_result_error(&format!("{err:#}")),
+        Err(err) => err
+            .downcast_ref::<operations::verify::VerifyFailure>()
+            .map_or_else(
+                || tool_result_error(&format!("{err:#}")),
+                |vf| tool_result_error_json(&vf.to_json()),
+            ),
     }
 }
 
@@ -2356,8 +2377,9 @@ fn handle_verify(
 
     let path = base_dir.join(file);
     let doc = parser::parse_file(system, &path)?;
+    let escalated = config.escalate_mode_for_doc(system, &path)?;
 
-    let report = operations::verify::verify_document(&doc, config);
+    let report = operations::verify::verify_document(&doc, &escalated);
     let results: Vec<Value> = report
         .results
         .iter()

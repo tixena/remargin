@@ -27,13 +27,22 @@
 //! `Invalid` (crypto mismatch) and `BadChecksum` are always bad: those are
 //! forgery / corruption signals regardless of mode.
 
-use anyhow::{Result, bail};
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
 use core::fmt::Write as _;
+use serde_json::{Value, json};
+use thiserror::Error;
 
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
 use crate::parser::{Comment, ParsedDocument};
+
+const SUMMARY_LINE_LIMIT: usize = 5;
 
 /// Per-comment signature resolution status. Produced by
 /// [`verify_document`] and rendered verbatim in the `signature` column of
@@ -93,6 +102,169 @@ pub struct VerifyReport {
     pub ok: bool,
     /// Per-comment rows, one per parsed comment in document order.
     pub results: Vec<RowStatus>,
+}
+
+/// Typed verify-gate refusal.
+///
+/// Carries the failing rows, the active mode and the document path so
+/// the CLI / MCP layer can render a human headline + structured machine
+/// fields without re-parsing the stringified diagnostic.
+#[derive(Debug, Clone, Error)]
+#[error("{}", self.legacy_text())]
+#[non_exhaustive]
+pub struct VerifyFailure {
+    /// Failing rows only (rows that contributed to `ok == false` under
+    /// the active mode). Order matches document order.
+    pub failures: Vec<RowStatus>,
+    /// Active mode at refusal time.
+    pub mode: Mode,
+    /// The document the gate was protecting.
+    pub path: PathBuf,
+}
+
+impl VerifyFailure {
+    /// Build a failure from a parsed document and the active config +
+    /// path.
+    ///
+    /// The verify pass is rerun so the failing rows can be classified
+    /// against the registry (the `RowStatus` rows in [`VerifyReport`]
+    /// alone do not carry registry membership).
+    #[must_use]
+    pub fn from_document(doc: &ParsedDocument, cfg: &ResolvedConfig, path: &Path) -> Self {
+        let report = verify_document(doc, cfg);
+        let comments = doc.comments();
+        let mut failures: Vec<RowStatus> = Vec::new();
+        for (row, cm) in report.results.iter().zip(comments.iter()) {
+            let registered_active = is_registered_active(cm, cfg.registry.as_ref());
+            if row_is_bad(&cfg.mode, row.checksum_ok, row.signature, registered_active) {
+                failures.push(row.clone());
+            }
+        }
+        Self {
+            failures,
+            mode: cfg.mode.clone(),
+            path: path.to_path_buf(),
+        }
+    }
+
+    /// One-line plain-English summary suitable for the very top of an
+    /// error panel. Counts only failing rows.
+    #[must_use]
+    pub fn headline(&self) -> String {
+        let n = self.failures.len();
+        let path = self.path.display();
+        if n == 1 {
+            format!("verify failed: 1 unsigned or invalid comment in {path}")
+        } else {
+            format!("verify failed: {n} unsigned or invalid comments in {path}")
+        }
+    }
+
+    /// Actionable next-step suggestion. Plain prose; safe to append to
+    /// the headline when rendering to a single string.
+    #[must_use]
+    pub fn hint(&self) -> String {
+        format!(
+            "Try `remargin verify {} --json` for the full breakdown, or contact the document's owner to re-sign legacy entries.",
+            self.path.display()
+        )
+    }
+
+    /// Multi-line human rendering: headline, blank line, summary, blank
+    /// line, hint. Suitable for CLI stderr (non-JSON mode).
+    #[must_use]
+    pub fn human_text(&self) -> String {
+        let mut out = self.headline();
+        let summary = self.summary_lines();
+        if !summary.is_empty() {
+            out.push_str("\n\n");
+            out.push_str(&summary.join("\n"));
+        }
+        out.push_str("\n\n");
+        out.push_str(&self.hint());
+        out
+    }
+
+    /// Recreate the legacy `verify failed (mode: …): …` blob so callers
+    /// that chain on `format!("{err}")` keep matching. Used by the
+    /// `Display` impl through the `thiserror` derive.
+    fn legacy_text(&self) -> String {
+        let mut out = format!("verify failed (mode: {}):\n", self.mode.as_str());
+        for row in &self.failures {
+            let chk = if row.checksum_ok { "ok" } else { "FAIL" };
+            let _ = writeln!(
+                out,
+                "  {}: checksum={} signature={}",
+                row.id,
+                chk,
+                row.signature.as_str()
+            );
+        }
+        out
+    }
+
+    /// Per-failure summary, grouped by signature status, capped at
+    /// [`SUMMARY_LINE_LIMIT`] lines with an "and N more" tail when
+    /// truncated.
+    #[must_use]
+    pub fn summary_lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        let mut by_status: BTreeMap<&'static str, Vec<&str>> = BTreeMap::new();
+        for row in &self.failures {
+            let key = if row.checksum_ok {
+                row.signature.as_str()
+            } else {
+                "checksum_FAIL"
+            };
+            by_status.entry(key).or_default().push(&row.id);
+        }
+        for (status, ids) in &by_status {
+            if lines.len() >= SUMMARY_LINE_LIMIT {
+                break;
+            }
+            let preview = ids.iter().take(5).copied().collect::<Vec<_>>().join(", ");
+            let extra = if ids.len() > 5 {
+                format!(" (and {} more)", ids.len() - 5)
+            } else {
+                String::new()
+            };
+            lines.push(format!("- {preview}: {status}{extra}"));
+        }
+        let total_groups = by_status.len();
+        if total_groups > lines.len() {
+            lines.push(format!(
+                "- and {} more group(s)",
+                total_groups - lines.len()
+            ));
+        }
+        lines
+    }
+
+    /// Structured JSON shape: `error_kind`, `headline`, `failures`,
+    /// `hint`, `mode`, `path`. Suitable for CLI `--json` and MCP tool
+    /// errors.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let failures: Vec<Value> = self
+            .failures
+            .iter()
+            .map(|row| {
+                json!({
+                    "checksum_ok": row.checksum_ok,
+                    "id": row.id,
+                    "signature": row.signature.as_str(),
+                })
+            })
+            .collect();
+        json!({
+            "error_kind": "verify_failed",
+            "failures": failures,
+            "headline": self.headline(),
+            "hint": self.hint(),
+            "mode": self.mode.as_str(),
+            "path": self.path.display().to_string(),
+        })
+    }
 }
 
 /// Walk every comment in `doc` and produce a [`VerifyReport`] under the
@@ -169,15 +341,23 @@ pub fn format_report_diagnostic(report: &VerifyReport, mode: &Mode) -> String {
 /// # Errors
 ///
 /// Returns an error whenever the verify report for `doc` would be `ok ==
-/// false` under `cfg.mode`. In that case `write_fn` is not invoked.
+/// false` under `cfg.mode`. The error is a downcastable
+/// [`VerifyFailure`]; the CLI / MCP layer pulls the typed shape out for
+/// structured presentation while legacy `format!("{err}")` callers keep
+/// the multi-line diagnostic. In that case `write_fn` is not invoked.
 /// Otherwise the return value is whatever `write_fn` returns.
-pub fn commit_with_verify<F>(doc: &ParsedDocument, cfg: &ResolvedConfig, write_fn: F) -> Result<()>
+pub fn commit_with_verify<F>(
+    doc: &ParsedDocument,
+    cfg: &ResolvedConfig,
+    path: &Path,
+    write_fn: F,
+) -> Result<()>
 where
     F: FnOnce(&ParsedDocument) -> Result<()>,
 {
     let report = verify_document(doc, cfg);
     if !report.ok {
-        bail!("{}", format_report_diagnostic(&report, &cfg.mode));
+        return Err(VerifyFailure::from_document(doc, cfg, path).into());
     }
     write_fn(doc)
 }

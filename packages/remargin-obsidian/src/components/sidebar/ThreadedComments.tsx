@@ -6,6 +6,7 @@ import type { Comment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 import { collectKinds, matchesKindFilter } from "@/lib/kindFilter";
 import { buildThreadTree, type ThreadNode } from "@/lib/threadTree";
+import { parseVerifyFailure, type VerifyFailure } from "@/lib/verifyFailure";
 
 interface ThreadedCommentsProps {
   file: string;
@@ -245,8 +246,7 @@ export function ThreadedComments({
   if (error) {
     return (
       <div ref={rootRef} className="px-4 py-3 text-xs text-red-400 whitespace-pre-wrap break-words">
-        <div className="font-semibold mb-1">Failed to load comments</div>
-        <div className="font-mono text-[10px]">{error}</div>
+        <ErrorPanel raw={error} />
       </div>
     );
   }
@@ -284,6 +284,40 @@ export function ThreadedComments({
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+/**
+ * Render the comment-pane error state. When the raw stderr blob carries
+ * the structured `verify_failed` shape, surface a plain-English headline
+ * + actionable hint, with the per-failure breakdown tucked inside a
+ * disclosure. Falls back to the raw text otherwise.
+ */
+function ErrorPanel({ raw }: { raw: string }) {
+  const parsed: VerifyFailure | null = parseVerifyFailure(raw);
+  if (!parsed) {
+    return (
+      <>
+        <div className="font-semibold mb-1">Failed to load comments</div>
+        <div className="font-mono text-[10px]">{raw}</div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="font-semibold mb-1">{parsed.headline}</div>
+      <div className="mb-2">{parsed.hint}</div>
+      <details>
+        <summary className="cursor-pointer">Show full details</summary>
+        <ul className="font-mono text-[10px] mt-1">
+          {parsed.failures.map((row) => (
+            <li key={row.id}>
+              {row.id}: checksum={row.checksum_ok ? "ok" : "FAIL"} signature={row.signature}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </>
   );
 }
 

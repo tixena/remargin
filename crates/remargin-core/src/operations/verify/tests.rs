@@ -16,7 +16,9 @@ use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
 use crate::operations::batch::{BatchCommentOp, batch_comment};
-use crate::operations::verify::{RowStatus, SignatureStatus, commit_with_verify, verify_document};
+use crate::operations::verify::{
+    RowStatus, SignatureStatus, VerifyFailure, commit_with_verify, verify_document,
+};
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment,
 };
@@ -280,7 +282,7 @@ fn commit_with_verify_invokes_writer_when_ok() {
     let cfg = make_config(Mode::Open, None);
 
     let mut called = false;
-    let result = commit_with_verify(&doc, &cfg, |_| {
+    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| {
         called = true;
         Ok(())
     });
@@ -297,7 +299,7 @@ fn commit_with_verify_blocks_writer_on_bad_checksum() {
     let cfg = make_config(Mode::Open, None);
 
     let mut called = false;
-    let result = commit_with_verify(&doc, &cfg, |_| {
+    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| {
         called = true;
         Ok(())
     });
@@ -317,7 +319,7 @@ fn commit_with_verify_blocks_in_registered_for_unknown_author() {
     let cfg = make_config(Mode::Registered, Some(alice_active_registry()));
 
     let mut called = false;
-    let result = commit_with_verify(&doc, &cfg, |_| {
+    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| {
         called = true;
         Ok(())
     });
@@ -333,6 +335,121 @@ fn commit_with_verify_blocks_in_registered_for_unknown_author() {
         msg.contains("unknown_author"),
         "diagnostic should list the status, got: {msg}"
     );
+}
+
+// ---------- VerifyFailure: typed-error rendering ----------
+
+#[test]
+fn verify_failure_headline_singular() {
+    let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let vf = VerifyFailure::from_document(&doc, &cfg, Path::new("/d/a.md"));
+    assert_eq!(
+        vf.headline(),
+        "verify failed: 1 unsigned or invalid comment in /d/a.md"
+    );
+}
+
+#[test]
+fn verify_failure_headline_plural() {
+    let doc = doc_with(vec![
+        make_comment("a1", "charlie", "x"),
+        make_comment("a2", "dave", "y"),
+        make_comment("a3", "eve", "z"),
+    ]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let vf = VerifyFailure::from_document(&doc, &cfg, Path::new("/d/multi.md"));
+    assert_eq!(
+        vf.headline(),
+        "verify failed: 3 unsigned or invalid comments in /d/multi.md"
+    );
+}
+
+#[test]
+fn verify_failure_summary_groups_by_status() {
+    let doc = doc_with(vec![
+        make_comment("a1", "charlie", "x"),
+        make_comment("a2", "dave", "y"),
+    ]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let vf = VerifyFailure::from_document(&doc, &cfg, Path::new("/d/a.md"));
+    let lines = vf.summary_lines();
+    assert_eq!(lines.len(), 1, "single status group, got: {lines:?}");
+    assert!(
+        lines[0].contains("a1, a2") && lines[0].contains("unknown_author"),
+        "summary should list ids and status, got: {}",
+        lines[0]
+    );
+}
+
+#[test]
+fn verify_failure_summary_truncates_after_five_ids() {
+    // Strict + alice-registered-no-key path: alice with Missing
+    // signature is bad in Strict.
+    let doc = doc_with(vec![
+        make_comment("id01", "alice", "a"),
+        make_comment("id02", "alice", "b"),
+        make_comment("id03", "alice", "c"),
+        make_comment("id04", "alice", "d"),
+        make_comment("id05", "alice", "e"),
+        make_comment("id06", "alice", "f"),
+        make_comment("id07", "alice", "g"),
+    ]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let vf = VerifyFailure::from_document(&doc, &cfg, Path::new("/d/a.md"));
+    let lines = vf.summary_lines();
+    assert!(
+        lines[0].contains("(and 2 more)"),
+        "summary first line should call out the truncated tail, got: {}",
+        lines[0]
+    );
+}
+
+#[test]
+fn verify_failure_to_json_shape_is_stable() {
+    let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let vf = VerifyFailure::from_document(&doc, &cfg, Path::new("/d/a.md"));
+    let value = vf.to_json();
+    assert_eq!(value["error_kind"], "verify_failed");
+    assert_eq!(value["mode"], "strict");
+    assert_eq!(value["path"], "/d/a.md");
+    let failures = value["failures"].as_array().unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0]["id"], "abc");
+    assert_eq!(failures[0]["signature"], "unknown_author");
+    assert_eq!(failures[0]["checksum_ok"], true);
+    assert!(
+        value["headline"]
+            .as_str()
+            .unwrap()
+            .starts_with("verify failed:")
+    );
+    assert!(value["hint"].as_str().unwrap().contains("remargin verify"));
+}
+
+#[test]
+fn verify_failure_human_text_has_three_blocks() {
+    let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let vf = VerifyFailure::from_document(&doc, &cfg, Path::new("/d/a.md"));
+    let text = vf.human_text();
+    assert!(text.starts_with("verify failed:"), "headline first: {text}");
+    assert!(text.contains("\n\n- "), "summary block follows: {text}");
+    assert!(text.contains("Try `remargin verify"), "hint last: {text}");
+}
+
+#[test]
+fn commit_with_verify_returns_typed_failure() {
+    let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| Ok(()));
+    let err = result.unwrap_err();
+    let downcast = err.downcast_ref::<VerifyFailure>();
+    assert!(downcast.is_some(), "error must downcast to VerifyFailure");
+    let vf = downcast.unwrap();
+    assert_eq!(vf.path, Path::new("/d/a.md"));
+    assert_eq!(vf.failures.len(), 1);
 }
 
 // ---------- row rendering sanity ----------

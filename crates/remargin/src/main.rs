@@ -1957,18 +1957,25 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> E
             let err_msg = format!("{err:#}");
             let is_silent_sentinel = err_msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER);
             let exit_code = classify_error(&err);
+            let verify_failure = err.downcast_ref::<operations::verify::VerifyFailure>();
             if is_silent_sentinel {
                 // Sentinel for `permissions check`.
                 // Output already emitted on the success path; we only
                 // need the gitignore-style exit code, no "error: ..."
                 // render.
             } else if json_mode {
-                let error_json = inject_elapsed_ms(&json!({ "error": err_msg }));
+                let payload = verify_failure.map_or_else(
+                    || json!({ "error": err_msg }),
+                    operations::verify::VerifyFailure::to_json,
+                );
+                let error_json = inject_elapsed_ms(&payload);
                 let _ = writeln!(
                     sinks.stderr,
                     "{}",
                     serde_json::to_string_pretty(&error_json).unwrap_or_default()
                 );
+            } else if let Some(vf) = verify_failure {
+                let _ = writeln!(sinks.stderr, "error: {}", vf.human_text());
             } else {
                 let _ = writeln!(sinks.stderr, "error: {err_msg}");
             }
@@ -5149,8 +5156,9 @@ fn cmd_verify(
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
     let doc = parser::parse_file(system, &path)?;
+    let escalated = config.escalate_mode_for_doc(system, &path)?;
 
-    let report = operations::verify::verify_document(&doc, config);
+    let report = operations::verify::verify_document(&doc, &escalated);
     let results: Vec<Value> = report
         .results
         .iter()
