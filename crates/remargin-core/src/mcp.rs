@@ -17,7 +17,7 @@ use os_shim::System;
 use serde_json::{Map, Value, json};
 
 use crate::activity;
-use crate::config::identity::{IdentityFlags, resolve_identity};
+use crate::config::identity::{IdentityFlags, resolve_identity, resolve_identity_report};
 use crate::config::permissions::resolve::{ResolvedPermissions, resolve_permissions};
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
@@ -81,7 +81,12 @@ const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 /// `restrict` and `unprotect` are intentionally absent from the MCP
 /// surface: they mutate permission policy and must only be
 /// invokable by the human via the CLI.
-const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_check", "permissions_show"];
+const NO_PATH_TOOLS: &[&str] = &[
+    "identity_create",
+    "permissions_check",
+    "permissions_show",
+    "whoami",
+];
 
 /// Tools whose handler defaults the target to MCP `cwd` when the
 /// caller omits `path`. The dispatch-time boundary check synthesises
@@ -693,6 +698,31 @@ fn desc_verify() -> ToolDesc {
     }
 }
 
+/// Build the `whoami` tool descriptor.
+///
+/// Mirrors the CLI `remargin identity show` surface. With no flags,
+/// returns the server's startup-resolved identity. The standard
+/// per-call identity flags (`config_path` | `identity` + `type` (+
+/// `key` when strict)) project a what-would-I-be-under-these-flags
+/// answer without touching disk. Returns `{"found": false}` when no
+/// identity is configured (read-only diagnostic surface — never a
+/// hard error on missing config).
+fn desc_whoami() -> ToolDesc {
+    ToolDesc {
+        name: "whoami",
+        description: "Return the effective identity remargin sees for this caller. \
+             With no flags, reports the MCP server's startup-resolved identity. \
+             With the standard identity flags, projects the identity that would \
+             apply under those flags. Returns `{found: false}` when no identity \
+             is configured (soft miss; never errors on missing config).",
+        schema: with_identity_flag_schema(json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        })),
+    }
+}
+
 /// Build the `permissions_show` tool descriptor.
 fn desc_permissions_show() -> ToolDesc {
     ToolDesc {
@@ -830,6 +860,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_search(),
         desc_sign(),
         desc_verify(),
+        desc_whoami(),
         desc_write(),
     ]
 }
@@ -1281,6 +1312,7 @@ fn dispatch_tool(
         "search" => handle_search(system, base_dir, p),
         "sign" => handle_sign(system, base_dir, config, p),
         "verify" => handle_verify(system, base_dir, config, p),
+        "whoami" => handle_whoami(system, base_dir, p),
         "write" => handle_write(system, base_dir, config, p),
         _ => return tool_result_error(&format!("unknown tool: {tool_name}")),
     };
@@ -2410,6 +2442,21 @@ fn handle_verify(
         .collect();
 
     Ok(json!({ "results": results, "ok": report.ok }))
+}
+
+/// Handle the `whoami` tool. Mirrors `remargin identity show` —
+/// resolves the effective identity at `base_dir` under the per-call
+/// flags (defaults to no flags, which surfaces the startup
+/// identity). Soft-misses missing-config so the Obsidian plugin can
+/// poll on startup without seeing a hard error.
+fn handle_whoami(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let flags = identity_flags_from_params(params)?.unwrap_or_default();
+    let report = resolve_identity_report(system, base_dir, &flags)?;
+    serde_json::to_value(&report).context("serializing whoami report")
 }
 
 /// Handle the `write` tool: write document contents.

@@ -19,7 +19,7 @@ use os_shim::real::RealSystem;
 use serde_json::{Value, json};
 
 use remargin_core::activity;
-use remargin_core::config::identity::IdentityFlags;
+use remargin_core::config::identity::{IdentityFlags, IdentityReport, resolve_identity_report};
 use remargin_core::config::{self, ResolvedConfig};
 use remargin_core::display;
 use remargin_core::document;
@@ -3293,18 +3293,8 @@ fn cmd_identity_show(
     json_mode: bool,
 ) -> Result<()> {
     let (flags, _assets_dir) = build_identity_flags(system, identity_args, None)?;
-    match ResolvedConfig::resolve(system, cwd, &flags, None) {
-        Ok(cfg) => render_identity(sinks, &cfg, json_mode),
-        Err(err) if flags.is_empty() || looks_like_walk_miss(&err) => {
-            // Walk-based "no matching config" is a soft miss on a
-            // read-only diagnostic. Emit `found: false` and exit
-            // cleanly so tooling that polls identity during startup
-            // (the Obsidian plugin) does not see a hard
-            // error for the "no config yet" state.
-            render_identity_not_found(sinks, json_mode)
-        }
-        Err(err) => Err(err),
-    }
+    let report = resolve_identity_report(system, cwd, &flags)?;
+    render_identity_report(sinks, &report, json_mode)
 }
 
 /// Print a ready-to-use identity YAML block to stdout.
@@ -3346,67 +3336,43 @@ fn cmd_identity_create(
     out_raw(sinks, &out_str)
 }
 
-fn render_identity(
+fn render_identity_report(
     sinks: &mut IoSinks<'_>,
-    config: &ResolvedConfig,
+    report: &IdentityReport,
     json_mode: bool,
 ) -> Result<()> {
-    let Some(identity) = config.identity.as_deref() else {
-        return render_identity_not_found(sinks, json_mode);
-    };
-    let author_type_str = config
-        .author_type
-        .as_ref()
-        .map(|t| String::from(t.as_str()));
-    let key_display = config.key_path.as_ref().map(|p| p.display().to_string());
-    let path_display = config.source_path.as_ref().map(|p| p.display().to_string());
+    if !report.found {
+        if json_mode {
+            return print_output(sinks, true, &json!({ "found": false }));
+        }
+        writeln!(sinks.stderr, "No identity config found.").context("writing to stderr")?;
+        return Ok(());
+    }
 
     if json_mode {
         return print_output(
             sinks,
             true,
-            &json!({
-                "found": true,
-                "path": path_display,
-                "identity": identity,
-                "author_type": author_type_str,
-                "key": key_display,
-                "mode": config.mode.as_str(),
-            }),
+            &serde_json::to_value(report).context("serializing identity report")?,
         );
     }
 
-    if let Some(p) = &path_display {
+    if let Some(p) = &report.path {
         writeln!(sinks.stderr, "Found config: {p}").context("writing to stderr")?;
     }
-    writeln!(sinks.stderr, "Identity:     {identity}").context("writing to stderr")?;
-    if let Some(t) = &author_type_str {
+    if let Some(i) = &report.identity {
+        writeln!(sinks.stderr, "Identity:     {i}").context("writing to stderr")?;
+    }
+    if let Some(t) = &report.author_type {
         writeln!(sinks.stderr, "Type:         {t}").context("writing to stderr")?;
     }
-    if let Some(k) = &key_display {
+    if let Some(k) = &report.key {
         writeln!(sinks.stderr, "Key:          {k}").context("writing to stderr")?;
     }
-    writeln!(sinks.stderr, "Mode:         {}", config.mode.as_str())
-        .context("writing to stderr")?;
-    Ok(())
-}
-
-fn render_identity_not_found(sinks: &mut IoSinks<'_>, json_mode: bool) -> Result<()> {
-    if json_mode {
-        return print_output(sinks, true, &json!({ "found": false }));
+    if let Some(m) = &report.mode {
+        writeln!(sinks.stderr, "Mode:         {m}").context("writing to stderr")?;
     }
-    writeln!(sinks.stderr, "No identity config found.").context("writing to stderr")?;
     Ok(())
-}
-
-/// Cheap heuristic for the branch-3 walk-exhaust error message emitted
-/// by `resolve_identity`. Used by `cmd_identity` to distinguish "walk
-/// didn't match" (soft — map to `found: false`) from every other
-/// resolver error (hard — propagate).
-fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
-    let msg = format!("{err:#}");
-    msg.contains("no identity resolved")
-        || msg.contains("no .remargin.yaml matched the supplied filters")
 }
 
 /// Dispatch `remargin permissions <show|check>`.

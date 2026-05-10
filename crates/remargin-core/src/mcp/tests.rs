@@ -267,6 +267,7 @@ fn tools_list_returns_all_tools() {
         "search",
         "sign",
         "verify",
+        "whoami",
         "write",
     ];
     /// Tool names that are intentionally CLI-only and must NOT appear
@@ -3708,6 +3709,135 @@ fn mcp_identity_create_missing_identity_errors() {
             "params": {
                 "name": "identity_create",
                 "arguments": {
+                    "type": "human"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+// ===========================================================================
+// whoami MCP tests
+// ===========================================================================
+
+#[test]
+fn mcp_whoami_returns_resolved_identity_from_walked_config() {
+    let base = Path::new("/docs");
+    let yaml = b"identity: alice\ntype: human\nassets_dir: assets\nmode: open\n" as &[u8];
+    let system = MockSystem::new()
+        .with_file(base.join(".remargin.yaml"), yaml)
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "whoami",
+                "arguments": {}
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "got error: {response}");
+    let result = extract_tool_text(&response);
+    assert_eq!(result["found"].as_bool(), Some(true));
+    assert_eq!(result["identity"].as_str(), Some("alice"));
+    assert_eq!(result["author_type"].as_str(), Some("human"));
+    assert_eq!(result["mode"].as_str(), Some("open"));
+    assert_eq!(
+        result["path"].as_str(),
+        Some("/docs/.remargin.yaml"),
+        "expected path to point at the walked config"
+    );
+}
+
+#[test]
+fn mcp_whoami_with_no_config_returns_found_false() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "whoami",
+                "arguments": {}
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "got error: {response}");
+    let result = extract_tool_text(&response);
+    assert_eq!(result["found"].as_bool(), Some(false));
+    assert!(result.get("identity").is_none() || result["identity"].is_null());
+}
+
+#[test]
+fn mcp_whoami_with_config_path_projects_alternate_identity() {
+    let base = Path::new("/docs");
+    let yaml = b"identity: alt-bob\ntype: agent\nassets_dir: assets\nmode: open\n" as &[u8];
+    let system = MockSystem::new()
+        .with_file(Path::new("/other/.remargin.yaml"), yaml)
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "whoami",
+                "arguments": {
+                    "config_path": "/other/.remargin.yaml"
+                }
+            }
+        }),
+    );
+
+    assert!(!is_tool_error(&response), "got error: {response}");
+    let result = extract_tool_text(&response);
+    assert_eq!(result["found"].as_bool(), Some(true));
+    assert_eq!(result["identity"].as_str(), Some("alt-bob"));
+    assert_eq!(result["author_type"].as_str(), Some("agent"));
+}
+
+#[test]
+fn mcp_whoami_rejects_config_path_with_manual_flags() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "whoami",
+                "arguments": {
+                    "config_path": "/other/.remargin.yaml",
+                    "identity": "bob",
                     "type": "human"
                 }
             }

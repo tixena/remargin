@@ -21,8 +21,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
+use serde::Serialize;
+
 use crate::config::registry::{Registry, RegistryParticipantStatus};
-use crate::config::{Config, Mode, parse_author_type, resolve_key_path};
+use crate::config::{Config, Mode, ResolvedConfig, parse_author_type, resolve_key_path};
 use crate::parser::AuthorType;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
@@ -133,6 +135,62 @@ impl fmt::Display for IdentitySource {
     }
 }
 
+/// Snapshot of the effective identity at a given `cwd`.
+///
+/// The shape both `remargin identity show` (CLI) and the `whoami`
+/// MCP op serialize. `found: false` means "no identity is configured
+/// here": either the resolver returned a walk-exhaustion error with
+/// no flags supplied (read-only diagnostic surface) or the resolved
+/// [`ResolvedConfig`] has no identity field. Every other resolver
+/// error propagates as `Err` from [`resolve_identity_report`].
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct IdentityReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_type: Option<String>,
+    pub found: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+impl IdentityReport {
+    #[must_use]
+    pub fn from_resolved(config: &ResolvedConfig) -> Self {
+        let Some(identity) = config.identity.as_deref() else {
+            return Self::not_found();
+        };
+        Self {
+            author_type: config
+                .author_type
+                .as_ref()
+                .map(|t| String::from(t.as_str())),
+            found: true,
+            identity: Some(identity.to_owned()),
+            key: config.key_path.as_ref().map(|p| p.display().to_string()),
+            mode: Some(String::from(config.mode.as_str())),
+            path: config.source_path.as_ref().map(|p| p.display().to_string()),
+        }
+    }
+
+    #[must_use]
+    pub const fn not_found() -> Self {
+        Self {
+            author_type: None,
+            found: false,
+            identity: None,
+            key: None,
+            mode: None,
+            path: None,
+        }
+    }
+}
+
 /// Resolve the effective identity for `cwd` under the given [`Mode`]
 /// using the three-branch flow described in the module docs.
 ///
@@ -188,6 +246,34 @@ pub fn resolve_identity(
     }
 
     resolve_from_walk(system, cwd, mode, flags, registry)
+}
+
+/// Resolve the effective identity at `cwd` under `flags`.
+///
+/// Returns a structured snapshot for both `remargin identity show`
+/// (CLI) and the `whoami` MCP op. Soft-misses the walk-exhaustion
+/// error when `flags.is_empty()` (or when the error message matches
+/// one of the branch-3 walk-exhaust strings) so the caller can
+/// render `found: false` cleanly during startup polls. Every other
+/// resolver error propagates.
+///
+/// # Errors
+///
+/// Propagates every resolver error that is not a walk-exhaust soft
+/// miss (unparseable `--config` file, registry miss in
+/// registered/strict mode, key resolution failure, etc.).
+pub fn resolve_identity_report(
+    system: &dyn System,
+    cwd: &Path,
+    flags: &IdentityFlags,
+) -> Result<IdentityReport> {
+    match ResolvedConfig::resolve(system, cwd, flags, None) {
+        Ok(cfg) => Ok(IdentityReport::from_resolved(&cfg)),
+        Err(err) if flags.is_empty() || looks_like_walk_miss(&err) => {
+            Ok(IdentityReport::not_found())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 /// True when `flags` contains a complete manual identity declaration
@@ -406,6 +492,16 @@ fn walk_filter_matches(config: &Config, flags: &IdentityFlags) -> bool {
 
 /// In registered/strict mode, the declared identity must correspond to
 /// an `active` registry entry. Used by every branch.
+/// Cheap heuristic for the branch-3 walk-exhaust error message
+/// emitted by `resolve_identity`. Distinguishes "walk didn't match"
+/// (soft - map to `found: false`) from every other resolver error
+/// (hard - propagate).
+fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
+    let msg = format!("{err:#}");
+    msg.contains("no identity resolved")
+        || msg.contains("no .remargin.yaml matched the supplied filters")
+}
+
 fn check_registry_membership(
     identity: &str,
     mode: &Mode,
