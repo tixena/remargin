@@ -894,15 +894,16 @@ pub fn metadata(
     let comments = doc.comments();
 
     let comment_count = comments.len();
-    let pending_count = comments.iter().filter(|cm| cm.ack.is_empty()).count();
+    let pending_count = comments.iter().filter(|cm| cm.is_pending()).count();
 
     let mut pending_for: Vec<String> = Vec::new();
     for cm in &comments {
-        if cm.ack.is_empty() {
-            for recipient in &cm.to {
-                if !pending_for.contains(recipient) {
-                    pending_for.push(recipient.clone());
-                }
+        if !cm.is_pending() {
+            continue;
+        }
+        for recipient in &cm.to {
+            if cm.is_pending_for(recipient) && !pending_for.contains(recipient) {
+                pending_for.push(recipient.clone());
             }
         }
     }
@@ -963,7 +964,7 @@ fn get_remargin_metadata(system: &dyn System, path: &Path) -> (Option<u32>, Opti
         return (None, None);
     }
 
-    let pending = comments.iter().filter(|cm| cm.ack.is_empty()).count();
+    let pending = comments.iter().filter(|cm| cm.is_pending()).count();
     let last_activity = comments
         .iter()
         .map(|cm| cm.ts)

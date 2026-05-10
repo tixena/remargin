@@ -247,6 +247,152 @@ fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
 }
 
 #[test]
+fn pending_count_directed_with_partial_ack_is_pending() {
+    // `to: [alice]`, acked only by `bob`. Alice has not acked, so the
+    // conversation is still open from her perspective; the comment
+    // must count as pending.
+    let cm = make_comment(
+        "a",
+        "2026-04-06T12:00:00-04:00",
+        vec![String::from("alice")],
+        vec![Acknowledgment {
+            author: String::from("bob"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+        }],
+    );
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending = get_value(&mapping, "remargin_pending").unwrap();
+    assert_eq!(
+        pending.as_u64().unwrap(),
+        1,
+        "directed comment whose addressee has not acked must count as pending"
+    );
+}
+
+#[test]
+fn pending_for_directed_with_partial_ack_lists_unacked_recipient() {
+    // Same shape as above; the unacked recipient must surface in
+    // remargin_pending_for. The party who DID ack (bob) must NOT
+    // appear because bob is not in `to` and is no longer waiting.
+    let cm = make_comment(
+        "a",
+        "2026-04-06T12:00:00-04:00",
+        vec![String::from("alice")],
+        vec![Acknowledgment {
+            author: String::from("bob"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+        }],
+    );
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["alice"]);
+}
+
+#[test]
+fn pending_for_directed_with_one_recipient_acked_excludes_them() {
+    // `to: [alice, eduardo]`, only alice has acked. Eduardo must
+    // surface as pending; alice must not (she has acked).
+    let cm = make_comment(
+        "a",
+        "2026-04-06T12:00:00-04:00",
+        vec![String::from("alice"), String::from("eduardo")],
+        vec![Acknowledgment {
+            author: String::from("alice"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+        }],
+    );
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["eduardo"]);
+}
+
+#[test]
+fn pending_count_self_addressed_with_third_party_ack_is_pending() {
+    // The exact shape witnessed in index.md `57m`: comment authored
+    // by `eduardo`, addressed `to: [eduardo]`, acked by an unrelated
+    // agent. Eduardo himself has not acked, so the conversation is
+    // still open from his perspective.
+    let cm = make_comment(
+        "a",
+        "2026-04-06T12:00:00-04:00",
+        vec![String::from("eduardo")],
+        vec![Acknowledgment {
+            author: String::from("agent"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+        }],
+    );
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending = get_value(&mapping, "remargin_pending").unwrap();
+    assert_eq!(pending.as_u64().unwrap(), 1);
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["eduardo"]);
+}
+
+#[test]
+fn broadcast_comment_with_no_to_and_no_ack_is_pending_for_unassigned() {
+    // Broadcast comment: no `to:`, no `ack:`. Pending in the eyes
+    // of everyone — counts toward remargin_pending and surfaces
+    // under the `<unassigned>` sentinel in remargin_pending_for so
+    // the document is never silently "closed" when somebody posted
+    // a question to nobody in particular.
+    let cm = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
+    let comments: Vec<&Comment> = vec![&cm];
+    let mut mapping = Mapping::new();
+    update_remargin_fields(&mut mapping, &comments);
+
+    let pending = get_value(&mapping, "remargin_pending").unwrap();
+    assert_eq!(
+        pending.as_u64().unwrap(),
+        1,
+        "broadcast unacked comment must count toward remargin_pending"
+    );
+
+    let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
+    let names: Vec<&str> = pending_for
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["<unassigned>"],
+        "broadcast unacked comment must surface under <unassigned>"
+    );
+}
+
+#[test]
 fn last_activity() {
     let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let cm2 = make_comment(

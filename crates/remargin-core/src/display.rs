@@ -6,7 +6,7 @@ use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
 
 use crate::operations::query::{ExpandedComment, QueryResult};
-use crate::parser::Comment;
+use crate::parser::{self, Comment};
 use crate::reactions::ReactionsExt as _;
 
 const MAX_CONTENT_LINES: usize = 5;
@@ -84,13 +84,7 @@ pub(crate) fn count_pending(comments: &[&Comment]) -> usize {
 }
 
 pub(crate) fn is_pending(cm: &Comment) -> bool {
-    if cm.to.is_empty() {
-        return cm.ack.is_empty();
-    }
-    let acked_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
-    cm.to
-        .iter()
-        .any(|addr| !acked_authors.contains(&addr.as_str()))
+    cm.is_pending()
 }
 
 /// Root comments are sorted by line number (document order).
@@ -314,13 +308,7 @@ fn count_pending_expanded(comments: &[ExpandedComment]) -> usize {
 }
 
 fn is_pending_expanded(cm: &ExpandedComment) -> bool {
-    if cm.to.is_empty() {
-        return cm.ack.is_empty();
-    }
-    let acked_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
-    cm.to
-        .iter()
-        .any(|addr| !acked_authors.contains(&addr.as_str()))
+    parser::is_pending(&cm.to, &cm.ack)
 }
 
 fn format_pending_label(count: usize, filter_name: Option<&str>) -> String {

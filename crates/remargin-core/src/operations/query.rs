@@ -436,22 +436,13 @@ fn collect_pending_recipients(pending: &[&&parser::Comment]) -> Vec<String> {
 /// broad form silently excluded broadcasts; the current semantics
 /// match the documented "pending (unacked) comments" language.
 fn is_pending(cm: &parser::Comment) -> bool {
-    if cm.to.is_empty() {
-        return cm.ack.is_empty();
-    }
-    let ack_authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
-    cm.to
-        .iter()
-        .any(|recipient| !ack_authors.contains(&recipient.as_str()))
+    cm.is_pending()
 }
 
 /// A comment is pending for a specific `target` if `target` is in `to` and
 /// has not acknowledged it.
 fn is_pending_for(cm: &parser::Comment, target: &str) -> bool {
-    if !cm.to.contains(&String::from(target)) {
-        return false;
-    }
-    !cm.ack.iter().any(|a| a.author == target)
+    cm.is_pending_for(target)
 }
 
 /// A broadcast comment is pending for `me` when `to` is empty AND `me`
@@ -460,10 +451,7 @@ fn is_pending_for(cm: &parser::Comment, target: &str) -> bool {
 /// not acked (unlike the broad `is_pending`, which considers any ack
 /// enough to close the conversation).
 fn is_pending_broadcast(cm: &parser::Comment, me: &str) -> bool {
-    if !cm.to.is_empty() {
-        return false;
-    }
-    !cm.ack.iter().any(|a| a.author == me)
+    cm.is_pending_broadcast_for(me)
 }
 
 /// Convert a parsed comment reference into an owned `ExpandedComment`.

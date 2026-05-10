@@ -224,20 +224,19 @@ pub fn populate_user_fields(mapping: &mut Mapping, doc_body: &str, config: &Reso
 /// Recompute `remargin_*` fields from the current comment state.
 /// Always overwrites these fields (they are tool-managed).
 pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
-    // Count pending (comments with no ack entries).
-    let pending_count = comments.iter().filter(|cm| cm.ack.is_empty()).count();
+    let pending_count = comments.iter().filter(|cm| cm.is_pending()).count();
 
-    // Collect unique "to" recipients on unacked comments. An unacked
-    // comment with no recipients (`to: []`) surfaces under the literal
-    // sentinel `<unassigned>` so triage tooling sees the
-    // pending entry instead of an invisibly-empty bucket. The angle
-    // brackets keep the sentinel unambiguously distinguishable from
-    // any registered identity (the registry rejects identities that
-    // contain `<`).
+    // Collect unique unacked recipients across pending comments.
+    // Broadcasts (`to: []`) surface under the `<unassigned>` sentinel.
+    // Directed comments contribute only the named recipients who
+    // have not personally acked yet; recipients who already acked
+    // are excluded so partial acks shrink `remargin_pending_for`
+    // monotonically. The angle-bracket sentinel cannot collide with
+    // any registered identity (the registry rejects `<`).
     let mut pending_for: Vec<String> = Vec::new();
     let unassigned_sentinel = String::from("<unassigned>");
     for cm in comments {
-        if !cm.ack.is_empty() {
+        if !cm.is_pending() {
             continue;
         }
         if cm.to.is_empty() {
@@ -246,7 +245,7 @@ pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
             }
         } else {
             for recipient in &cm.to {
-                if !pending_for.contains(recipient) {
+                if cm.is_pending_for(recipient) && !pending_for.contains(recipient) {
                     pending_for.push(recipient.clone());
                 }
             }

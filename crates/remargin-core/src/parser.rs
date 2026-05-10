@@ -130,6 +130,30 @@ impl Comment {
         }
     }
 
+    /// True when at least one named recipient has not acknowledged
+    /// (or, for broadcasts, when nobody has). The single source of
+    /// truth used by frontmatter, metadata, search, and query so the
+    /// surfaces never disagree.
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        is_pending(&self.to, &self.ack)
+    }
+
+    /// True for broadcast (`to:` empty) comments that the caller has
+    /// not personally acked. Distinct from [`Self::is_pending_for`]:
+    /// for broadcasts, a personal ack closes the conversation from
+    /// the caller's view even when other participants have not.
+    #[must_use]
+    pub fn is_pending_broadcast_for(&self, me: &str) -> bool {
+        is_pending_broadcast_for(&self.to, &self.ack, me)
+    }
+
+    /// True when `target` is in `to:` and has not acknowledged yet.
+    #[must_use]
+    pub fn is_pending_for(&self, target: &str) -> bool {
+        is_pending_for(&self.to, &self.ack, target)
+    }
+
     /// Borrow the comment's classification tags as a slice. Returns
     /// `&[]` when the field is absent, so callers that do not care
     /// about the `Some(empty)` vs `None` distinction can iterate,
@@ -250,6 +274,38 @@ impl ParsedDocument {
 
 fn byte_offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].matches('\n').count() + 1
+}
+
+/// True when `author` appears in `ack`. Shared by `Comment` and any
+/// other carrier of `(to, ack)` (e.g. `ExpandedComment`).
+#[must_use]
+pub fn is_acked_by(ack: &[Acknowledgment], author: &str) -> bool {
+    ack.iter().any(|a| a.author == author)
+}
+
+/// Pending predicate over the `(to, ack)` shape. Directed comments
+/// are pending when at least one named recipient has not acked;
+/// broadcasts (`to:` empty) are pending when nobody has.
+#[must_use]
+pub fn is_pending(to: &[String], ack: &[Acknowledgment]) -> bool {
+    if to.is_empty() {
+        return ack.is_empty();
+    }
+    to.iter().any(|recipient| !is_acked_by(ack, recipient))
+}
+
+/// Pending-for-`target` predicate: `target` must be in `to` and not
+/// already in `ack`.
+#[must_use]
+pub fn is_pending_for(to: &[String], ack: &[Acknowledgment], target: &str) -> bool {
+    to.iter().any(|t| t == target) && !is_acked_by(ack, target)
+}
+
+/// Pending-broadcast-for-`me` predicate: `to` empty and `me` has not
+/// personally acked.
+#[must_use]
+pub fn is_pending_broadcast_for(to: &[String], ack: &[Acknowledgment], me: &str) -> bool {
+    to.is_empty() && !is_acked_by(ack, me)
 }
 
 /// Parse a markdown string into a structured document.

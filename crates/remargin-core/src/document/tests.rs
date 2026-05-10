@@ -484,6 +484,55 @@ fn metadata_pdf_is_binary() {
 }
 
 #[test]
+fn metadata_directed_with_third_party_ack_is_pending_for_addressee() {
+    // Reproduces the index.md `57m` shape: `to: [eduardo]` plus a
+    // third-party ack from `agent`. Eduardo himself has not acked,
+    // so the conversation is still open from his perspective.
+    // metadata() must report pending_count == 1 and surface eduardo
+    // in pending_for. Without the fix, the broad `ack.is_empty()`
+    // rule treats the third-party ack as enough to close the comment
+    // and silently drops eduardo from pending_for.
+    const DOC: &str = "\
+---
+title: Test
+---
+
+# Test
+
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+to: [eduardo]
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
+ack:
+  - agent@2026-04-06T13:00:00-04:00
+---
+Self-addressed note acked by an agent only.
+```
+";
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), DOC.as_bytes())
+        .unwrap();
+
+    let meta = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        false,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(meta.comment_count, Some(1));
+    assert_eq!(meta.pending_count, Some(1));
+    assert_eq!(meta.pending_for, vec![String::from("eduardo")]);
+}
+
+#[test]
 fn metadata_missing_file_errors() {
     let system = MockSystem::new().with_current_dir("/project").unwrap();
 
