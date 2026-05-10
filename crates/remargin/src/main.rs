@@ -1291,26 +1291,78 @@ struct GetParams<'cmd> {
     start: Option<usize>,
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "CLI flags are naturally boolean"
-)]
+struct EditParams<'cmd> {
+    content: &'cmd str,
+    file: &'cmd str,
+    id: &'cmd str,
+    json_mode: bool,
+    remargin_kind: Option<&'cmd [String]>,
+}
+
+struct ActivityParams<'cmd> {
+    explicit_path: Option<&'cmd Path>,
+    identity_args: &'cmd IdentityArgs,
+    json_mode: bool,
+    pretty: bool,
+    since: Option<&'cmd str>,
+}
+
+struct RestrictParams<'cmd> {
+    also_deny_bash: &'cmd [String],
+    cli_allowed: bool,
+    json_mode: bool,
+    path: &'cmd str,
+    user_settings_explicit: Option<&'cmd Path>,
+}
+
+struct MigrateParams<'cmd> {
+    backup: bool,
+    file: &'cmd str,
+    identities: &'cmd migrate::MigrateIdentities,
+    json_mode: bool,
+}
+
+/// How `query` results are rendered. Mutually-exclusive successor to the
+/// previous `json_mode` / `pretty` / `summary` bool triple.
+enum QueryOutputMode {
+    Json,
+    Plain,
+    Pretty,
+    Summary,
+}
+
+/// Pending-filter knobs for `query`. These compose as a UNION at the
+/// filter layer (e.g. `--pending-for-me` AND `--pending-broadcast` both
+/// apply, returning the union of matching comments). Grouped into one
+/// substruct so the parent [`QueryParams`] stays under clippy's
+/// bool-density threshold without changing CLI semantics.
+struct QueryPendingFilters<'cmd> {
+    /// `true` when `--pending` was passed: filter to comments without
+    /// any ack.
+    any: bool,
+    /// `true` when `--pending-broadcast` was passed: include
+    /// broadcast-pending comments.
+    broadcast: bool,
+    /// `true` when `--pending-for-me` was passed: include comments
+    /// addressed to the resolved caller identity.
+    for_me: bool,
+    /// `Some(user)` when `--pending-for <user>` was passed: include
+    /// comments whose `to:` list contains `user` and which are still
+    /// pending.
+    for_user: Option<&'cmd str>,
+}
+
 struct QueryParams<'cmd> {
     author: Option<&'cmd str>,
     comment_id: Option<&'cmd str>,
     content_regex: Option<&'cmd str>,
     expanded: bool,
     ignore_case: bool,
-    json_mode: bool,
+    output: QueryOutputMode,
     path: &'cmd str,
-    pending: bool,
-    pending_broadcast: bool,
-    pending_for: Option<&'cmd str>,
-    pending_for_me: bool,
-    pretty: bool,
+    pending: QueryPendingFilters<'cmd>,
     remargin_kind: &'cmd [String],
     since: Option<&'cmd str>,
-    summary: bool,
 }
 
 struct SearchParams<'cmd> {
@@ -2165,16 +2217,14 @@ fn handle_activity(
     else {
         bail!("internal: handle_activity called with wrong subcommand");
     };
-    cmd_activity(
-        sinks,
-        system,
-        cwd,
-        path.as_deref(),
-        since.as_deref(),
-        *pretty,
+    let p = ActivityParams {
+        explicit_path: path.as_deref(),
         identity_args,
-        output_args.json,
-    )
+        json_mode: output_args.json,
+        pretty: *pretty,
+        since: since.as_deref(),
+    };
+    cmd_activity(sinks, system, cwd, &p)
 }
 
 fn handle_restrict(
@@ -2193,16 +2243,14 @@ fn handle_restrict(
     else {
         bail!("internal: handle_restrict called with wrong subcommand");
     };
-    cmd_restrict(
-        sinks,
-        system,
-        cwd,
-        path,
+    let p = RestrictParams {
         also_deny_bash,
-        *cli_allowed,
-        user_settings.as_deref(),
-        output_args.json,
-    )
+        cli_allowed: *cli_allowed,
+        json_mode: output_args.json,
+        path,
+        user_settings_explicit: user_settings.as_deref(),
+    };
+    cmd_restrict(sinks, system, cwd, &p)
 }
 
 fn handle_unprotect(
@@ -2436,17 +2484,14 @@ fn handle_edit(
     // occurrence (even `--kind x` once) replaces the full list — consistent
     // with how `--to` works.
     let kind_replacement = (!remargin_kind.is_empty()).then_some(remargin_kind.as_slice());
-    cmd_edit(
-        sinks,
-        system,
-        cwd,
-        config,
+    let p = EditParams {
+        content,
         file,
         id,
-        content,
-        kind_replacement,
-        output_args.json,
-    )
+        json_mode: output_args.json,
+        remargin_kind: kind_replacement,
+    };
+    cmd_edit(sinks, system, cwd, config, &p)
 }
 
 fn handle_get(
@@ -2550,16 +2595,13 @@ fn handle_migrate(
         human_config.as_deref(),
         agent_config.as_deref(),
     )?;
-    cmd_migrate(
-        sinks,
-        system,
-        cwd,
-        config,
+    let p = MigrateParams {
+        backup: *backup,
         file,
-        *backup,
-        &identities,
-        output_args.json,
-    )
+        identities: &identities,
+        json_mode: output_args.json,
+    };
+    cmd_migrate(sinks, system, cwd, config, &p)
 }
 
 fn handle_mv(
@@ -2642,6 +2684,11 @@ fn handle_query(
     cwd: &Path,
     config: &ResolvedConfig,
 ) -> Result<()> {
+    let q = build_query_params(command)?;
+    cmd_query(sinks, system, cwd, config, &q)
+}
+
+fn build_query_params(command: &Commands) -> Result<QueryParams<'_>> {
     let Commands::Query {
         path,
         author,
@@ -2661,26 +2708,35 @@ fn handle_query(
         ..
     } = command
     else {
-        bail!("internal: handle_query called with wrong subcommand");
+        bail!("internal: build_query_params called with wrong subcommand");
     };
-    let q = QueryParams {
+    let output = if output_args.json {
+        QueryOutputMode::Json
+    } else if *pretty {
+        QueryOutputMode::Pretty
+    } else if *summary {
+        QueryOutputMode::Summary
+    } else {
+        QueryOutputMode::Plain
+    };
+    let pending_filter = QueryPendingFilters {
+        any: *pending,
+        broadcast: *pending_broadcast,
+        for_user: pending_for.as_deref(),
+        for_me: *pending_for_me,
+    };
+    Ok(QueryParams {
         author: author.as_deref(),
         comment_id: comment_id.as_deref(),
         content_regex: content_regex.as_deref(),
         expanded: *expanded,
         ignore_case: *ignore_case,
-        json_mode: output_args.json,
+        output,
         path: path.as_str(),
-        pending: *pending,
-        pending_broadcast: *pending_broadcast,
-        pending_for: pending_for.as_deref(),
-        pending_for_me: *pending_for_me,
-        pretty: *pretty,
+        pending: pending_filter,
         remargin_kind,
         since: since.as_deref(),
-        summary: *summary,
-    };
-    cmd_query(sinks, system, cwd, config, &q)
+    })
 }
 
 fn handle_react(
@@ -3056,25 +3112,16 @@ fn cmd_delete(
     print_output(sinks, json_mode, &json!({ "deleted": ids }))
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CLI adapter: each arg is a direct clap flag and collapsing them \
-              into a struct adds more noise than it removes"
-)]
 fn cmd_edit(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
-    file: &str,
-    id: &str,
-    content: &str,
-    remargin_kind: Option<&[String]>,
-    json_mode: bool,
+    p: &EditParams<'_>,
 ) -> Result<()> {
-    let path = resolve_doc_path(system, cwd, file)?;
-    operations::edit_comment(system, &path, config, id, content, remargin_kind)?;
-    print_output(sinks, json_mode, &json!({ "edited": id }))
+    let path = resolve_doc_path(system, cwd, p.file)?;
+    operations::edit_comment(system, &path, config, p.id, p.content, p.remargin_kind)?;
+    print_output(sinks, p.json_mode, &json!({ "edited": p.id }))
 }
 
 fn cmd_get(
@@ -3380,27 +3427,19 @@ fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
 /// Identity is read-only here — the quartet resolves only the
 /// caller name driving the per-file cutoff. No signing, no key
 /// requirement.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CLI adapter: each arg is a direct clap flag; collapsing into a struct adds ceremony without reducing complexity"
-)]
 fn cmd_activity(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
-    explicit_path: Option<&Path>,
-    since: Option<&str>,
-    pretty: bool,
-    identity_args: &IdentityArgs,
-    json_mode: bool,
+    p: &ActivityParams<'_>,
 ) -> Result<()> {
-    if pretty && json_mode {
+    if p.pretty && p.json_mode {
         bail!("--pretty and --json are mutually exclusive");
     }
 
-    let resolved_path = match explicit_path {
-        Some(p) => {
-            let expanded = expand_cli_pathbuf(system, p)?;
+    let resolved_path = match p.explicit_path {
+        Some(path) => {
+            let expanded = expand_cli_pathbuf(system, path)?;
             if expanded.is_absolute() {
                 expanded
             } else {
@@ -3410,7 +3449,7 @@ fn cmd_activity(
         None => cwd.to_path_buf(),
     };
 
-    let cutoff = match since {
+    let cutoff = match p.since {
         Some(raw) => Some(
             chrono::DateTime::parse_from_rfc3339(raw)
                 .with_context(|| format!("--since: invalid ISO 8601 timestamp {raw:?}"))?,
@@ -3418,7 +3457,7 @@ fn cmd_activity(
         None => None,
     };
 
-    let (flags, _assets_dir) = build_identity_flags(system, identity_args, None)?;
+    let (flags, _assets_dir) = build_identity_flags(system, p.identity_args, None)?;
     let resolved = ResolvedConfig::resolve(system, cwd, &flags, None)?;
     let caller = resolved
         .identity
@@ -3427,7 +3466,7 @@ fn cmd_activity(
 
     let result = activity::gather_activity(system, &resolved_path, cutoff, caller)?;
 
-    if pretty {
+    if p.pretty {
         emit_activity_pretty(sinks, &result)?;
     } else {
         let value = serde_json::to_value(&result).context("serializing activity result")?;
@@ -3698,21 +3737,13 @@ fn emit_permissions_check_text(
 /// `user_settings_explicit` lets tests pin a hermetic location for
 /// the user-scope file. When `None`, the function expands
 /// [`DEFAULT_USER_SETTINGS`] through the active `System`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CLI adapter: each arg is a direct clap flag; collapsing into a struct adds ceremony without reducing complexity"
-)]
 fn cmd_restrict(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
-    path: &str,
-    also_deny_bash: &[String],
-    cli_allowed: bool,
-    user_settings_explicit: Option<&Path>,
-    json_mode: bool,
+    p: &RestrictParams<'_>,
 ) -> Result<()> {
-    let user_scope = match user_settings_explicit {
+    let user_scope = match p.user_settings_explicit {
         Some(explicit) => expand_cli_pathbuf(system, explicit)?,
         None => expand_cli_path(system, DEFAULT_USER_SETTINGS)?,
     };
@@ -3721,20 +3752,20 @@ fn cmd_restrict(
     let settings_files = vec![project_scope, user_scope];
 
     let args = permissions_restrict::RestrictArgs::new(
-        String::from(path),
-        also_deny_bash.to_vec(),
-        cli_allowed,
+        String::from(p.path),
+        p.also_deny_bash.to_vec(),
+        p.cli_allowed,
     );
     let outcome = permissions_restrict::restrict(system, cwd, &args, &settings_files)?;
 
-    if json_mode {
+    if p.json_mode {
         let value = serde_json::json!({
             "absolute_path": outcome.absolute_path.display().to_string(),
             "anchor": outcome.anchor.display().to_string(),
             "claude_files_touched": outcome
                 .claude_files_touched
                 .iter()
-                .map(|p| p.display().to_string())
+                .map(|file| file.display().to_string())
                 .collect::<Vec<_>>(),
             "rules_applied": outcome.rules_applied,
             "yaml_was_created": outcome.yaml_was_created,
@@ -4057,24 +4088,17 @@ fn cmd_metadata(
     print_output(sinks, json_mode, &result)
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CLI adapter: each arg is a direct clap flag; collapsing into a struct adds ceremony without reducing complexity"
-)]
 fn cmd_migrate(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
     config: &ResolvedConfig,
-    file: &str,
-    backup: bool,
-    identities: &migrate::MigrateIdentities,
-    json_mode: bool,
+    p: &MigrateParams<'_>,
 ) -> Result<()> {
-    let path = resolve_doc_path(system, cwd, file)?;
-    let migrated = migrate::migrate(system, &path, config, identities, backup)?;
+    let path = resolve_doc_path(system, cwd, p.file)?;
+    let migrated = migrate::migrate(system, &path, config, p.identities, p.backup)?;
 
-    if json_mode {
+    if p.json_mode {
         let results: Vec<Value> = migrated
             .iter()
             .map(|m| json!({ "new_id": m.new_id, "original_role": m.original_role }))
@@ -4936,14 +4960,14 @@ fn build_query_filter(
     filter.author = params.author.map(String::from);
     filter.comment_id = params.comment_id.map(String::from);
     filter.expanded = params.expanded;
-    filter.pending = params.pending;
-    filter.pending_for = params.pending_for.map(String::from);
+    filter.pending = params.pending.any;
+    filter.pending_for = params.pending.for_user.map(String::from);
     filter.remargin_kind = params.remargin_kind.to_vec();
     filter.since = since_dt;
-    filter.summary = params.summary;
+    filter.summary = matches!(params.output, QueryOutputMode::Summary);
     filter = filter.with_caller_identity(
-        params.pending_for_me,
-        params.pending_broadcast,
+        params.pending.for_me,
+        params.pending.broadcast,
         config.identity.clone(),
     )?;
     if let Some(pattern) = params.content_regex {
@@ -4958,18 +4982,21 @@ fn render_query_output(
     params: &QueryParams<'_>,
     pending_label: Option<&str>,
 ) -> Result<()> {
-    if params.json_mode {
-        return print_output(
-            sinks,
-            true,
-            &json!({
-                "base_path": format!("{}/", params.path.trim_end_matches('/')),
-                "results": results,
-            }),
-        );
-    }
-    if params.pretty {
-        return out_raw(sinks, &display::format_query_pretty(results, pending_label));
+    match params.output {
+        QueryOutputMode::Json => {
+            return print_output(
+                sinks,
+                true,
+                &json!({
+                    "base_path": format!("{}/", params.path.trim_end_matches('/')),
+                    "results": results,
+                }),
+            );
+        }
+        QueryOutputMode::Pretty => {
+            return out_raw(sinks, &display::format_query_pretty(results, pending_label));
+        }
+        QueryOutputMode::Plain | QueryOutputMode::Summary => {}
     }
     for r in results {
         out(
@@ -5306,29 +5333,29 @@ fn mv_outcome_json(outcome: &mv_op::MvOutcome) -> serde_json::Value {
     json!({
         "bytes_moved": outcome.bytes_moved,
         "dst_absolute": outcome.dst_absolute.display().to_string(),
-        "fallback_copy": outcome.fallback_copy,
-        "is_directory": outcome.is_directory,
+        "fallback_copy": outcome.action.fallback_copy,
+        "is_directory": outcome.topology.is_directory,
         "nested_files_moved": outcome.nested_files_moved,
-        "noop_same_path": outcome.noop_same_path,
-        "overwritten": outcome.overwritten,
+        "noop_same_path": outcome.topology.noop_same_path,
+        "overwritten": outcome.action.overwritten,
         "src_absolute": outcome.src_absolute.display().to_string(),
     })
 }
 
 fn mv_outcome_pretty(src: &str, dst: &str, outcome: &mv_op::MvOutcome) -> String {
-    let suffix_overwrite = if outcome.overwritten {
+    let suffix_overwrite = if outcome.action.overwritten {
         ", overwrote destination"
     } else {
         ""
     };
-    let suffix_fallback = if outcome.fallback_copy {
+    let suffix_fallback = if outcome.action.fallback_copy {
         ", cross-filesystem copy"
     } else {
         ""
     };
-    if outcome.noop_same_path {
+    if outcome.topology.noop_same_path {
         format!("no-op: {src} (same canonical path)")
-    } else if outcome.is_directory {
+    } else if outcome.topology.is_directory {
         format!(
             "renamed directory: {src} -> {dst} ({} nested file{}{suffix_overwrite}{suffix_fallback})",
             outcome.nested_files_moved,

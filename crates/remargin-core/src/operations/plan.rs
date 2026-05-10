@@ -600,40 +600,61 @@ pub enum PurgeDirFileOutcome {
 /// call would be a same-path no-op or an idempotent re-run after a
 /// previous successful move, and — when the source is a directory
 /// — the count of nested files that would move with it.
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each bool is a documented JSON output field"
-)]
+/// Bool fields are split into two `#[serde(flatten)]` substructs
+/// (`MvExistence`, `MvState`) so the canonical JSON output stays a
+/// flat object — every key visible to consumers stays unchanged —
+/// while no single struct holds more than three bools.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvDiff {
     /// Canonical absolute destination path. Matches
     /// [`crate::operations::mv::MvOutcome::dst_absolute`].
     pub dst_absolute: PathBuf,
-    /// `true` when the destination currently exists. The live op
-    /// requires `--force` (or the equivalent MCP flag) to overwrite.
-    pub dst_exists: bool,
-    /// `true` when the source is missing and the destination already
-    /// exists at the requested path. The live op would settle as a
-    /// `bytes_moved = 0` success.
-    pub idempotent_already_settled: bool,
-    /// `true` when the source resolves to a directory.
-    /// The live op renames the directory + every nested file as a
-    /// unit. Mirrors [`crate::operations::mv::MvOutcome::is_directory`].
-    pub is_directory: bool,
+    /// What's on disk at src and dst, plus whether src is a directory.
+    /// Flattened in JSON.
+    #[serde(flatten)]
+    pub existence: MvExistence,
     /// Number of regular files that would move with the directory
     /// source. `0` for the file-mv case AND for the no-op /
     /// already-settled branches. Mirrors
     /// [`crate::operations::mv::MvOutcome::nested_files_moved`].
     pub nested_files_moved: usize,
-    /// `true` when src and dst resolve to the same canonical path.
-    pub noop_same_path: bool,
     /// Canonical absolute source path. When the source is missing
     /// this is the lexical join of `base_dir` + the requested path.
     pub src_absolute: PathBuf,
+    /// Terminal "no work needed" indicators. Flattened in JSON.
+    #[serde(flatten)]
+    pub state: MvState,
+}
+
+/// What `src` and `dst` resolve to on disk, plus whether the source
+/// is a directory. Flattened into [`MvDiff`]'s JSON output.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct MvExistence {
+    /// `true` when the destination currently exists. The live op
+    /// requires `--force` (or the equivalent MCP flag) to overwrite.
+    pub dst_exists: bool,
+    /// `true` when the source resolves to a directory. The live op
+    /// renames the directory + every nested file as a unit. Mirrors
+    /// [`crate::operations::mv::MvOutcome::is_directory`].
+    pub is_directory: bool,
     /// `true` when the source path resolves to an existing file or
     /// directory.
     pub src_exists: bool,
+}
+
+/// Terminal-no-work-needed indicators for the move. Flattened into
+/// [`MvDiff`]'s JSON output.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct MvState {
+    /// `true` when the source is missing and the destination already
+    /// exists at the requested path. The live op would settle as a
+    /// `bytes_moved = 0` success.
+    pub idempotent_already_settled: bool,
+    /// `true` when src and dst resolve to the same canonical path.
+    pub noop_same_path: bool,
 }
 
 /// A `plan` request for a single mutating op, normalized so CLI + MCP
@@ -1040,7 +1061,7 @@ fn dispatch_mv(
         Ok(diff) => {
             // Same-path no-op and the idempotent already-settled
             // branch both leave the filesystem untouched.
-            report.noop = diff.noop_same_path || diff.idempotent_already_settled;
+            report.noop = diff.state.noop_same_path || diff.state.idempotent_already_settled;
             report.would_commit = true;
             report.mv_diff = Some(diff);
         }
@@ -1104,17 +1125,21 @@ fn project_mv(
 
     Ok(MvDiff {
         dst_absolute: dst_resolved,
-        dst_exists,
-        idempotent_already_settled,
-        is_directory: src_is_dir && src_exists,
+        existence: MvExistence {
+            dst_exists,
+            is_directory: src_is_dir && src_exists,
+            src_exists,
+        },
         nested_files_moved,
-        noop_same_path,
         src_absolute: if src_exists {
             src_resolved
         } else {
             src_lexical
         },
-        src_exists,
+        state: MvState {
+            idempotent_already_settled,
+            noop_same_path,
+        },
     })
 }
 

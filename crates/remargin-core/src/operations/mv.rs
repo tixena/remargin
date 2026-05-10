@@ -75,13 +75,17 @@ impl MvArgs {
 }
 
 /// Outcome of a successful [`mv`] call.
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each bool is a documented JSON output field"
-)]
+///
+/// Bool fields are split into two `#[serde(flatten)]` substructs
+/// (`MvTopology`, `MvAction`) so the canonical JSON output stays a flat
+/// object — the keys remain unchanged for callers — while no single
+/// struct holds more than two bools.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvOutcome {
+    /// What the rename did at the filesystem level. Flattened in JSON.
+    #[serde(flatten)]
+    pub action: MvAction,
     /// Bytes moved (file size at the source). `0` for a same-path no-op
     /// or for an idempotent `src missing, dst already at destination`
     /// re-run. For the directory case this is the sum of
@@ -90,28 +94,46 @@ pub struct MvOutcome {
     pub bytes_moved: u64,
     /// Canonical absolute destination path the bytes now live at.
     pub dst_absolute: PathBuf,
-    /// `true` when the rename fell back to `copy + remove` because the
-    /// in-process rename returned `EXDEV` (cross-filesystem move).
-    pub fallback_copy: bool,
-    /// `true` when the source resolved to a directory: the
-    /// op renamed the directory + every nested file as a unit.
-    pub is_directory: bool,
     /// Number of regular files inside the source directory at rename
     /// time. `0` for the file-mv case AND for the no-op / already-
     /// settled branches. Reported in JSON so the caller knows how many
     /// nested files moved with the directory.
     pub nested_files_moved: usize,
-    /// `true` when [`MvArgs::src`] and [`MvArgs::dst`] resolved to the
-    /// same canonical path. The op is a no-op in this case.
-    pub noop_same_path: bool,
-    /// `true` when the destination existed before the call and was
-    /// overwritten. Only ever `true` when [`MvArgs::force`] was set.
-    pub overwritten: bool,
     /// Canonical absolute source path the bytes lived at before the
     /// op. For the idempotent `src missing, dst present` re-run case
     /// this is the lexical join of `base_dir` + `args.src` (since
     /// canonicalization fails when the source is gone).
     pub src_absolute: PathBuf,
+    /// What `src` resolved to + whether the op was a no-op. Flattened
+    /// in JSON.
+    #[serde(flatten)]
+    pub topology: MvTopology,
+}
+
+/// Topology of the move's source and how src/dst aligned. Flattened
+/// into [`MvOutcome`]'s JSON output.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct MvTopology {
+    /// `true` when the source resolved to a directory: the
+    /// op renamed the directory + every nested file as a unit.
+    pub is_directory: bool,
+    /// `true` when [`MvArgs::src`] and [`MvArgs::dst`] resolved to the
+    /// same canonical path. The op is a no-op in this case.
+    pub noop_same_path: bool,
+}
+
+/// What the rename actually did at the filesystem level. Flattened
+/// into [`MvOutcome`]'s JSON output.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct MvAction {
+    /// `true` when the rename fell back to `copy + remove` because the
+    /// in-process rename returned `EXDEV` (cross-filesystem move).
+    pub fallback_copy: bool,
+    /// `true` when the destination existed before the call and was
+    /// overwritten. Only ever `true` when [`MvArgs::force`] was set.
+    pub overwritten: bool,
 }
 
 /// Move or rename a single file from `args.src` to `args.dst`.
@@ -239,12 +261,16 @@ pub fn mv(
     Ok(MvOutcome {
         bytes_moved,
         dst_absolute: dst_resolved,
-        fallback_copy,
-        is_directory: false,
         nested_files_moved: 0,
-        noop_same_path: false,
-        overwritten: dst_pre_existed,
         src_absolute: src_resolved,
+        topology: MvTopology {
+            is_directory: false,
+            noop_same_path: false,
+        },
+        action: MvAction {
+            fallback_copy,
+            overwritten: dst_pre_existed,
+        },
     })
 }
 
@@ -311,12 +337,16 @@ fn idempotent_already_settled(
         return Ok(MvOutcome {
             bytes_moved: 0,
             dst_absolute: dst_resolved.to_path_buf(),
-            fallback_copy: false,
-            is_directory,
             nested_files_moved: 0,
-            noop_same_path: false,
-            overwritten: false,
             src_absolute: src_lexical.to_path_buf(),
+            topology: MvTopology {
+                is_directory,
+                noop_same_path: false,
+            },
+            action: MvAction {
+                fallback_copy: false,
+                overwritten: false,
+            },
         });
     }
     bail!(
@@ -344,12 +374,16 @@ fn same_path_noop(
     Ok(MvOutcome {
         bytes_moved,
         dst_absolute: dst_resolved,
-        fallback_copy: false,
-        is_directory,
         nested_files_moved: 0,
-        noop_same_path: true,
-        overwritten: false,
         src_absolute: src_resolved.to_path_buf(),
+        topology: MvTopology {
+            is_directory,
+            noop_same_path: true,
+        },
+        action: MvAction {
+            fallback_copy: false,
+            overwritten: false,
+        },
     })
 }
 
@@ -454,12 +488,16 @@ fn mv_directory(
     Ok(MvOutcome {
         bytes_moved,
         dst_absolute: dst_resolved,
-        fallback_copy,
-        is_directory: true,
         nested_files_moved,
-        noop_same_path: false,
-        overwritten: dst_pre_existed,
         src_absolute: src_resolved.to_path_buf(),
+        topology: MvTopology {
+            is_directory: true,
+            noop_same_path: false,
+        },
+        action: MvAction {
+            fallback_copy,
+            overwritten: dst_pre_existed,
+        },
     })
 }
 

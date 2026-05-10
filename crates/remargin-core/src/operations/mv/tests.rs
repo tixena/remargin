@@ -163,7 +163,7 @@ fn cross_filesystem_rename_falls_back_to_copy() {
     let args = MvArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.fallback_copy);
+    assert!(outcome.action.fallback_copy);
     assert_eq!(outcome.bytes_moved, 16);
     assert!(!inner.exists(&base().join("a.md")).unwrap());
     assert_eq!(
@@ -185,7 +185,7 @@ fn force_overwrites_destination() {
     let args = MvArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md")).with_force(true);
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.overwritten);
+    assert!(outcome.action.overwritten);
     assert!(!system.exists(&base().join("a.md")).unwrap());
     assert_eq!(system.read_to_string(&base().join("b.md")).unwrap(), "new");
 }
@@ -202,8 +202,8 @@ fn idempotent_when_source_already_at_destination() {
     let args = MvArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(!outcome.noop_same_path);
-    assert!(!outcome.overwritten);
+    assert!(!outcome.topology.noop_same_path);
+    assert!(!outcome.action.overwritten);
     // 0 distinguishes the "already settled" branch from a real move.
     assert_eq!(outcome.bytes_moved, 0);
     assert_eq!(outcome.dst_absolute, base().join("b.md"));
@@ -320,7 +320,7 @@ fn renames_empty_directory() {
     let args = MvArgs::new(PathBuf::from("a"), PathBuf::from("b"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.is_directory);
+    assert!(outcome.topology.is_directory);
     assert_eq!(outcome.nested_files_moved, 0);
     assert_eq!(outcome.bytes_moved, 0);
     assert!(!system.exists(&base().join("a")).unwrap());
@@ -334,9 +334,9 @@ fn renames_within_same_dir() {
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
     assert_eq!(outcome.bytes_moved, 11);
-    assert!(!outcome.fallback_copy);
-    assert!(!outcome.noop_same_path);
-    assert!(!outcome.overwritten);
+    assert!(!outcome.action.fallback_copy);
+    assert!(!outcome.topology.noop_same_path);
+    assert!(!outcome.action.overwritten);
     assert_eq!(outcome.dst_absolute, base().join("b.md"));
     assert!(!system.exists(&base().join("a.md")).unwrap());
     assert!(system.exists(&base().join("b.md")).unwrap());
@@ -352,8 +352,8 @@ fn same_path_is_noop() {
     let args = MvArgs::new(PathBuf::from("a.md"), PathBuf::from("a.md"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.noop_same_path);
-    assert!(!outcome.overwritten);
+    assert!(outcome.topology.noop_same_path);
+    assert!(!outcome.action.overwritten);
     assert_eq!(outcome.bytes_moved, 9);
     // File still there with same bytes.
     assert_eq!(
@@ -383,7 +383,7 @@ fn renames_directory_with_nested_md_files() {
     let args = MvArgs::new(PathBuf::from("notes"), PathBuf::from("archive"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.is_directory);
+    assert!(outcome.topology.is_directory);
     assert_eq!(outcome.nested_files_moved, 2);
     assert_eq!(outcome.bytes_moved, 5 + 14);
     assert!(!system.exists(&base().join("notes")).unwrap());
@@ -416,7 +416,7 @@ fn renames_directory_with_mixed_content_and_subdirectory() {
     let args = MvArgs::new(PathBuf::from("src"), PathBuf::from("dst"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.is_directory);
+    assert!(outcome.topology.is_directory);
     assert_eq!(outcome.nested_files_moved, 3);
     assert!(!system.exists(&base().join("src")).unwrap());
     assert_eq!(
@@ -448,8 +448,8 @@ fn directory_same_path_is_noop() {
     let args = MvArgs::new(PathBuf::from("notes"), PathBuf::from("notes"));
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.noop_same_path);
-    assert!(outcome.is_directory);
+    assert!(outcome.topology.noop_same_path);
+    assert!(outcome.topology.is_directory);
     assert!(system.exists(&base().join("notes/a.md")).unwrap());
 }
 
@@ -489,8 +489,8 @@ fn directory_force_overwrites_existing_destination() {
     let args = MvArgs::new(PathBuf::from("src"), PathBuf::from("dst")).with_force(true);
     let outcome = mv(&system, base(), &open_config(), &args).unwrap();
 
-    assert!(outcome.is_directory);
-    assert!(outcome.overwritten);
+    assert!(outcome.topology.is_directory);
+    assert!(outcome.action.overwritten);
     assert!(!system.exists(&base().join("src")).unwrap());
     assert_eq!(
         system.read_to_string(&base().join("dst/a.md")).unwrap(),

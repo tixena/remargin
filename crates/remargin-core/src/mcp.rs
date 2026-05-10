@@ -2171,11 +2171,11 @@ fn handle_mv(
     Ok(json!({
         "bytes_moved": outcome.bytes_moved,
         "dst_absolute": outcome.dst_absolute.display().to_string(),
-        "fallback_copy": outcome.fallback_copy,
-        "is_directory": outcome.is_directory,
+        "fallback_copy": outcome.action.fallback_copy,
+        "is_directory": outcome.topology.is_directory,
         "nested_files_moved": outcome.nested_files_moved,
-        "noop_same_path": outcome.noop_same_path,
-        "overwritten": outcome.overwritten,
+        "noop_same_path": outcome.topology.noop_same_path,
+        "overwritten": outcome.action.overwritten,
         "src_absolute": outcome.src_absolute.display().to_string(),
     }))
 }
