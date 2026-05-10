@@ -236,11 +236,43 @@ fn initialize_returns_capabilities() {
 }
 
 #[test]
-#[expect(
-    clippy::cognitive_complexity,
-    reason = "roll-call of every registered tool; adding one `names.contains` per tool is the clearest form"
-)]
 fn tools_list_returns_all_tools() {
+    /// Every MCP tool name the server is expected to register. Update
+    /// here when a new MCP-exposed tool lands.
+    const EXPECTED_TOOLS: &[&str] = &[
+        "ack",
+        "activity",
+        "batch",
+        "comment",
+        "comments",
+        "delete",
+        "edit",
+        "get",
+        "identity_create",
+        "lint",
+        "ls",
+        "metadata",
+        "migrate",
+        "mv",
+        "permissions_check",
+        "permissions_show",
+        "plan",
+        "purge",
+        "query",
+        "react",
+        "rm",
+        "sandbox_add",
+        "sandbox_list",
+        "sandbox_remove",
+        "search",
+        "sign",
+        "verify",
+        "write",
+    ];
+    /// Tool names that are intentionally CLI-only and must NOT appear
+    /// on the MCP surface.
+    const CLI_ONLY_TOOLS: &[&str] = &["restrict", "unprotect"];
+
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -258,42 +290,22 @@ fn tools_list_returns_all_tools() {
     );
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 28_usize);
+    assert_eq!(tools.len(), EXPECTED_TOOLS.len());
 
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
-    assert!(names.contains(&"comment"));
-    assert!(names.contains(&"batch"));
-    assert!(names.contains(&"ack"));
-    assert!(names.contains(&"activity"));
-    assert!(names.contains(&"react"));
-    assert!(names.contains(&"delete"));
-    assert!(names.contains(&"edit"));
-    assert!(names.contains(&"comments"));
-    assert!(names.contains(&"verify"));
-    assert!(names.contains(&"migrate"));
-    assert!(names.contains(&"lint"));
-    assert!(names.contains(&"ls"));
-    assert!(names.contains(&"get"));
-    assert!(names.contains(&"write"));
-    assert!(names.contains(&"metadata"));
-    assert!(names.contains(&"mv"));
-    assert!(names.contains(&"permissions_show"));
-    assert!(names.contains(&"permissions_check"));
-    assert!(names.contains(&"plan"));
-    assert!(names.contains(&"query"));
-    assert!(names.contains(&"rm"));
-    assert!(names.contains(&"search"));
-    assert!(names.contains(&"sign"));
-    assert!(names.contains(&"purge"));
-    assert!(names.contains(&"sandbox_add"));
-    assert!(names.contains(&"sandbox_remove"));
-    assert!(names.contains(&"sandbox_list"));
-    assert!(names.contains(&"identity_create"));
-
-    // restrict and unprotect are intentionally CLI-only.
-    assert!(!names.contains(&"restrict"));
-    assert!(!names.contains(&"unprotect"));
+    for expected in EXPECTED_TOOLS {
+        assert!(
+            names.contains(expected),
+            "missing MCP tool: {expected}; got: {names:?}"
+        );
+    }
+    for cli_only in CLI_ONLY_TOOLS {
+        assert!(
+            !names.contains(cli_only),
+            "{cli_only} must not appear on the MCP surface; got: {names:?}"
+        );
+    }
 }
 
 #[test]

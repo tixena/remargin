@@ -1020,10 +1020,6 @@ fn dispatch_unprotect(
 /// src is a file), and otherwise returns a populated [`MvDiff`] with
 /// `would_commit = true`. A directory source is supported — the diff
 /// carries `is_directory: true` and the nested file count.
-#[expect(
-    clippy::too_many_lines,
-    reason = "consolidated mv preflight: every branch is one of the live op's checks (forbidden / sandbox / pre_mutate / dst-exists), kept inline so plan and live mv stay byte-equivalent"
-)]
 fn dispatch_mv(
     system: &dyn System,
     base_dir: &Path,
@@ -1033,117 +1029,12 @@ fn dispatch_mv(
     dst: &Path,
     force: bool,
 ) -> Result<PlanReport> {
-    use crate::permissions::op_guard::pre_mutate_check_for_caller;
-    use crate::writer::ensure_not_forbidden_target;
-
     let empty = parser::parse("").context("parsing empty before-document for plan mv")?;
     let mut report = project_report("mv", &empty, &empty, cfg, identity);
 
     // Wrap every preflight that the live op would perform; a failing
     // check flips `would_commit` and surfaces the message verbatim.
-    let projection = (|| -> Result<MvDiff> {
-        ensure_not_forbidden_target(src)?;
-        ensure_not_forbidden_target(dst)?;
-
-        let src_lexical = if src.is_absolute() {
-            src.to_path_buf()
-        } else {
-            base_dir.join(src)
-        };
-        let src_is_dir = system.is_dir(&src_lexical).unwrap_or(false);
-
-        let dst_lexical = if dst.is_absolute() {
-            dst.to_path_buf()
-        } else {
-            base_dir.join(dst)
-        };
-        let dst_is_existing_dir = system.is_dir(&dst_lexical).unwrap_or(false);
-
-        // Same gate as the live op: file → existing-directory dst is
-        // ambiguous (caller probably meant `dst/<basename>`). Directory
-        // source → existing-directory dst is the overwrite-with-force
-        // case handled below, so do not reject here.
-        if !src_is_dir && dst_is_existing_dir {
-            anyhow::bail!(
-                "destination is a directory: {} (this op moves a single file; pass an explicit destination path)",
-                dst.display()
-            );
-        }
-
-        let src_exists = system.exists(&src_lexical).unwrap_or(false);
-
-        let src_resolved = if src_exists {
-            allowlist::resolve_sandboxed(
-                system,
-                base_dir,
-                src,
-                cfg.unrestricted,
-                &cfg.trusted_roots,
-            )?
-        } else {
-            allowlist::resolve_sandboxed_create(
-                system,
-                base_dir,
-                src,
-                cfg.unrestricted,
-                &cfg.trusted_roots,
-            )?
-        };
-
-        let dst_resolved = allowlist::resolve_sandboxed_create(
-            system,
-            base_dir,
-            dst,
-            cfg.unrestricted,
-            &cfg.trusted_roots,
-        )?;
-        ensure_not_forbidden_target(&dst_resolved)?;
-
-        let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
-        let noop_same_path = src_exists && src_resolved == dst_resolved;
-        let idempotent_already_settled = !src_exists && dst_exists;
-
-        if !src_exists && !dst_exists {
-            anyhow::bail!(
-                "source not found: {} (and destination does not exist either)",
-                src.display()
-            );
-        }
-
-        let caller = cfg.caller_info();
-        if src_exists {
-            pre_mutate_check_for_caller(system, "mv", &src_resolved, &caller)?;
-        }
-        pre_mutate_check_for_caller(system, "mv", &dst_resolved, &caller)?;
-
-        if dst_exists && !noop_same_path && !idempotent_already_settled && !force {
-            anyhow::bail!(
-                "destination exists: {} (pass --force to overwrite)",
-                dst.display()
-            );
-        }
-
-        let nested_files_moved = if src_is_dir && src_exists {
-            mv_directory_size(system, &src_resolved)
-        } else {
-            0
-        };
-
-        Ok(MvDiff {
-            dst_absolute: dst_resolved,
-            dst_exists,
-            idempotent_already_settled,
-            is_directory: src_is_dir && src_exists,
-            nested_files_moved,
-            noop_same_path,
-            src_absolute: if src_exists {
-                src_resolved
-            } else {
-                src_lexical
-            },
-            src_exists,
-        })
-    })();
+    let projection = project_mv(system, base_dir, cfg, src, dst, force);
 
     match projection {
         Ok(diff) => {
@@ -1160,6 +1051,162 @@ fn dispatch_mv(
     }
 
     Ok(report)
+}
+
+/// Run every preflight check the live `mv` op would run, in the same
+/// order, and assemble an [`MvDiff`] describing the resolved end state.
+/// Kept structurally parallel to the live op so plan and live mv stay
+/// byte-equivalent in their accept/reject behaviour.
+fn project_mv(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    src: &Path,
+    dst: &Path,
+    force: bool,
+) -> Result<MvDiff> {
+    use crate::writer::ensure_not_forbidden_target;
+
+    ensure_not_forbidden_target(src)?;
+    ensure_not_forbidden_target(dst)?;
+
+    let (src_lexical, dst_lexical) = mv_lexical_paths(base_dir, src, dst);
+    let src_is_dir = system.is_dir(&src_lexical).unwrap_or(false);
+    let dst_is_existing_dir = system.is_dir(&dst_lexical).unwrap_or(false);
+
+    check_mv_dst_directory_ambiguity(src_is_dir, dst_is_existing_dir, dst)?;
+
+    let src_exists = system.exists(&src_lexical).unwrap_or(false);
+    let (src_resolved, dst_resolved) =
+        resolve_mv_paths(system, base_dir, cfg, src, dst, src_exists)?;
+    ensure_not_forbidden_target(&dst_resolved)?;
+
+    let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
+    let noop_same_path = src_exists && src_resolved == dst_resolved;
+    let idempotent_already_settled = !src_exists && dst_exists;
+
+    if !src_exists && !dst_exists {
+        anyhow::bail!(
+            "source not found: {} (and destination does not exist either)",
+            src.display()
+        );
+    }
+
+    run_mv_pre_mutate_checks(system, cfg, &src_resolved, &dst_resolved, src_exists)?;
+    let already_settled = noop_same_path || idempotent_already_settled;
+    check_mv_dst_overwrite(dst_exists, already_settled, force, dst)?;
+
+    let nested_files_moved = if src_is_dir && src_exists {
+        mv_directory_size(system, &src_resolved)
+    } else {
+        0
+    };
+
+    Ok(MvDiff {
+        dst_absolute: dst_resolved,
+        dst_exists,
+        idempotent_already_settled,
+        is_directory: src_is_dir && src_exists,
+        nested_files_moved,
+        noop_same_path,
+        src_absolute: if src_exists {
+            src_resolved
+        } else {
+            src_lexical
+        },
+        src_exists,
+    })
+}
+
+fn mv_lexical_paths(base_dir: &Path, src: &Path, dst: &Path) -> (PathBuf, PathBuf) {
+    let src_lexical = if src.is_absolute() {
+        src.to_path_buf()
+    } else {
+        base_dir.join(src)
+    };
+    let dst_lexical = if dst.is_absolute() {
+        dst.to_path_buf()
+    } else {
+        base_dir.join(dst)
+    };
+    (src_lexical, dst_lexical)
+}
+
+/// Same gate as the live op: file → existing-directory dst is
+/// ambiguous (caller probably meant `dst/<basename>`). Directory
+/// source → existing-directory dst is the overwrite-with-force case
+/// handled by [`check_mv_dst_overwrite`], so do not reject here.
+fn check_mv_dst_directory_ambiguity(
+    src_is_dir: bool,
+    dst_is_existing_dir: bool,
+    dst: &Path,
+) -> Result<()> {
+    if !src_is_dir && dst_is_existing_dir {
+        anyhow::bail!(
+            "destination is a directory: {} (this op moves a single file; pass an explicit destination path)",
+            dst.display()
+        );
+    }
+    Ok(())
+}
+
+fn resolve_mv_paths(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    src: &Path,
+    dst: &Path,
+    src_exists: bool,
+) -> Result<(PathBuf, PathBuf)> {
+    let src_resolved = if src_exists {
+        allowlist::resolve_sandboxed(system, base_dir, src, cfg.unrestricted, &cfg.trusted_roots)?
+    } else {
+        allowlist::resolve_sandboxed_create(
+            system,
+            base_dir,
+            src,
+            cfg.unrestricted,
+            &cfg.trusted_roots,
+        )?
+    };
+    let dst_resolved = allowlist::resolve_sandboxed_create(
+        system,
+        base_dir,
+        dst,
+        cfg.unrestricted,
+        &cfg.trusted_roots,
+    )?;
+    Ok((src_resolved, dst_resolved))
+}
+
+fn run_mv_pre_mutate_checks(
+    system: &dyn System,
+    cfg: &ResolvedConfig,
+    src_resolved: &Path,
+    dst_resolved: &Path,
+    src_exists: bool,
+) -> Result<()> {
+    use crate::permissions::op_guard::pre_mutate_check_for_caller;
+    let caller = cfg.caller_info();
+    if src_exists {
+        pre_mutate_check_for_caller(system, "mv", src_resolved, &caller)?;
+    }
+    pre_mutate_check_for_caller(system, "mv", dst_resolved, &caller)
+}
+
+fn check_mv_dst_overwrite(
+    dst_exists: bool,
+    already_settled: bool,
+    force: bool,
+    dst: &Path,
+) -> Result<()> {
+    if dst_exists && !already_settled && !force {
+        anyhow::bail!(
+            "destination exists: {} (pass --force to overwrite)",
+            dst.display()
+        );
+    }
+    Ok(())
 }
 
 /// Count nested regular files under `dir` for the plan projection's

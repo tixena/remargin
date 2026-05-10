@@ -86,10 +86,6 @@ impl<'params> CreateCommentParams<'params> {
 /// - Attachment files do not exist
 /// - The file cannot be read or written
 /// - The linter detects structural issues
-#[expect(
-    clippy::too_many_lines,
-    reason = "linear comment-creation pipeline added the realm-mode floor block at the top"
-)]
 pub fn create_comment(
     system: &dyn System,
     path: &Path,
@@ -107,10 +103,6 @@ pub fn create_comment(
         .identity
         .as_deref()
         .context("identity is required to create a comment")?;
-
-    // Registry membership and strict-mode key presence are validated at
-    // `ResolvedConfig::resolve` time; the op just reads the
-    // signing key it needs.
     let signing_key = cfg.resolve_signing_key(identity);
 
     if params.auto_ack && params.reply_to.is_none() {
@@ -120,55 +112,19 @@ pub fn create_comment(
     let author_type = cfg.author_type.clone().unwrap_or(AuthorType::Human);
 
     let mut doc = parser::parse_file(system, path)?;
-
     let markdown_before = doc.to_markdown();
     linter::lint_or_fail(&markdown_before)
         .context("document has structural issues before write")?;
 
-    let existing_ids = doc.comment_ids();
-    let new_id = id::generate(&existing_ids);
-
-    // accept `remargin_kind` from params. Validate before
-    // doing any work so a malformed tag never touches the document.
-    // An empty slice becomes `None` on the comment so the YAML writer
-    // emits no `remargin_kind:` line — preserving pre-kind comments
-    // byte-for-byte.
-    validate_kinds(params.remargin_kind).context("invalid remargin_kind")?;
-    let remargin_kind: Option<Vec<String>> = if params.remargin_kind.is_empty() {
-        None
-    } else {
-        Some(params.remargin_kind.to_vec())
-    };
+    let new_id = id::generate(&doc.comment_ids());
+    let remargin_kind = validate_and_normalize_kinds(params.remargin_kind)?;
     let checksum = compute_checksum(params.content, params.remargin_kind);
-
     let thread = params
         .reply_to
         .map(|parent_id| resolve_thread(&doc, parent_id));
-
     let resolved_attachments =
         copy_attachments(system, path, cfg, params.attachments).context("copying attachments")?;
-
-    // Reply invariant: the parent's author is always first in `to:`.
-    // Additional recipients passed by the caller are appended in input
-    // order, with duplicates (including duplicates of the parent author)
-    // removed. Root comments (no `reply_to`) use `params.to` verbatim.
-    let effective_to: Vec<String> = {
-        let parent_author = params
-            .reply_to
-            .and_then(|pid| doc.find_comment(pid))
-            .map(|parent| parent.author.clone());
-
-        let mut result: Vec<String> = Vec::new();
-        if let Some(author) = parent_author {
-            result.push(author);
-        }
-        for recipient in params.to {
-            if !result.contains(recipient) {
-                result.push(recipient.clone());
-            }
-        }
-        result
-    };
+    let effective_to = build_effective_to(&doc, params.reply_to, params.to);
 
     let now = Utc::now().fixed_offset();
     let mut comment = Comment {
@@ -197,30 +153,16 @@ pub fn create_comment(
 
     writer::insert_comment(&mut doc, comment, params.position)?;
 
-    // Auto-ack the parent comment in the same write cycle.
     if params.auto_ack
         && let Some(parent_id) = params.reply_to
     {
-        let parent = find_comment_mut(&mut doc, parent_id)
-            .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
-        parent.ack.push(Acknowledgment {
-            author: String::from(identity),
-            ts: now,
-        });
+        apply_auto_ack_to_parent(&mut doc, parent_id, identity, now)?;
     }
 
     frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
-    // Atomic comment+sandbox composite write: append the caller's sandbox
-    // entry (idempotent) in the same write cycle. This runs *after*
-    // `ensure_frontmatter` so recomputed `remargin_*` fields are preserved.
     if params.sandbox {
-        let mut entries = frontmatter::read_sandbox_entries(&doc)?;
-        // The bool result is intentionally ignored: idempotent re-add
-        // preserves the existing timestamp, and the comment write still
-        // happens either way.
-        let _added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
-        frontmatter::write_sandbox_entries(&mut doc, &entries)?;
+        apply_sandbox_entry(&mut doc, identity, now)?;
     }
 
     let expected_added: HashSet<String> = HashSet::from([new_id.clone()]);
@@ -240,6 +182,75 @@ pub fn create_comment(
     })?;
 
     Ok(new_id)
+}
+
+/// Validate and normalize the caller-supplied `remargin_kind` slice.
+/// Empty input becomes `None` so the YAML writer emits no
+/// `remargin_kind:` line — preserving pre-kind comments byte-for-byte.
+fn validate_and_normalize_kinds(remargin_kind: &[String]) -> Result<Option<Vec<String>>> {
+    validate_kinds(remargin_kind).context("invalid remargin_kind")?;
+    if remargin_kind.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(remargin_kind.to_vec()))
+    }
+}
+
+/// Reply invariant: the parent's author is always first in `to:`.
+/// Additional recipients passed by the caller are appended in input
+/// order, with duplicates (including duplicates of the parent author)
+/// removed. Root comments (no `reply_to`) use `caller_to` verbatim.
+fn build_effective_to(
+    doc: &ParsedDocument,
+    reply_to: Option<&str>,
+    caller_to: &[String],
+) -> Vec<String> {
+    let parent_author = reply_to
+        .and_then(|pid| doc.find_comment(pid))
+        .map(|parent| parent.author.clone());
+
+    let mut result: Vec<String> = Vec::new();
+    if let Some(author) = parent_author {
+        result.push(author);
+    }
+    for recipient in caller_to {
+        if !result.contains(recipient) {
+            result.push(recipient.clone());
+        }
+    }
+    result
+}
+
+/// Append the current identity's ack to the parent comment in the same
+/// write cycle as the reply. Errors when the parent ID does not resolve.
+fn apply_auto_ack_to_parent(
+    doc: &mut ParsedDocument,
+    parent_id: &str,
+    identity: &str,
+    now: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<()> {
+    let parent = find_comment_mut(doc, parent_id)
+        .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
+    parent.ack.push(Acknowledgment {
+        author: String::from(identity),
+        ts: now,
+    });
+    Ok(())
+}
+
+/// Atomic composite write: append the caller's sandbox frontmatter entry
+/// in the same write cycle. Idempotent — re-adding for an identity that
+/// already has an entry preserves the existing timestamp. Runs after
+/// `ensure_frontmatter` so recomputed `remargin_*` fields are preserved.
+fn apply_sandbox_entry(
+    doc: &mut ParsedDocument,
+    identity: &str,
+    now: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<()> {
+    let mut entries = frontmatter::read_sandbox_entries(doc)?;
+    let _added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
+    frontmatter::write_sandbox_entries(doc, &entries)?;
+    Ok(())
 }
 
 /// Acknowledge (or un-acknowledge) one or more comments.

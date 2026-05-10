@@ -1984,125 +1984,12 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> E
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "config-free subcommand short-circuit list grows linearly with commands"
-)]
 fn dispatch(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> Result<()> {
     let output = subcommand_output(&cli.command);
     let json_mode = output.is_some_and(|o| o.json);
 
-    // Config-free subcommands short-circuit the config resolution path.
-    match &cli.command {
-        Commands::Version => {
-            writeln!(sinks.stderr, "remargin {}", env!("CARGO_PKG_VERSION"))
-                .context("writing to stderr")?;
-            return Ok(());
-        }
-        Commands::Identity {
-            action,
-            identity_args,
-            output_args,
-        } => {
-            return cmd_identity(
-                sinks,
-                system,
-                cwd,
-                action.as_ref(),
-                identity_args,
-                output_args.json,
-            );
-        }
-        Commands::ResolveMode {
-            cwd: cwd_arg,
-            output_args,
-        } => {
-            let cwd_expanded = cwd_arg
-                .as_deref()
-                .map(|c| expand_cli_pathbuf(system, c))
-                .transpose()?;
-            let start_dir = cwd_expanded.as_deref().unwrap_or(cwd);
-            return cmd_resolve_mode(sinks, system, start_dir, output_args.json);
-        }
-        Commands::Keygen {
-            output: keygen_output,
-            ..
-        } => {
-            let expanded_output = expand_cli_pathbuf(system, keygen_output)?;
-            return cmd_keygen(sinks, system, &expanded_output);
-        }
-        #[cfg(feature = "obsidian")]
-        Commands::Obsidian {
-            action,
-            output_args,
-        } => {
-            return cmd_obsidian(sinks, system, cwd, action, output_args.json);
-        }
-        Commands::Skill {
-            action,
-            output_args,
-        } => return cmd_skill(sinks, system, action, output_args.json),
-        Commands::Activity {
-            path,
-            since,
-            pretty,
-            identity_args,
-            output_args,
-        } => {
-            return cmd_activity(
-                sinks,
-                system,
-                cwd,
-                path.as_deref(),
-                since.as_deref(),
-                *pretty,
-                identity_args,
-                output_args.json,
-            );
-        }
-        Commands::Permissions { action } => {
-            return cmd_permissions(sinks, system, cwd, action);
-        }
-        Commands::Restrict {
-            path,
-            also_deny_bash,
-            cli_allowed,
-            user_settings,
-            output_args,
-        } => {
-            return cmd_restrict(
-                sinks,
-                system,
-                cwd,
-                path,
-                also_deny_bash,
-                *cli_allowed,
-                user_settings.as_deref(),
-                output_args.json,
-            );
-        }
-        Commands::Unprotect {
-            path,
-            strict,
-            user_settings,
-            output_args,
-        } => {
-            return cmd_unprotect(
-                sinks,
-                system,
-                cwd,
-                path,
-                *strict,
-                user_settings.as_deref(),
-                output_args.json,
-            );
-        }
-        _ => {
-            debug_assert!(
-                !subcommand_is_config_free(&cli.command),
-                "config-free subcommand fell through short-circuit"
-            );
-        }
+    if try_dispatch_config_free(cli, system, cwd, sinks)?.is_some() {
+        return Ok(());
     }
 
     let default_identity = IdentityArgs::default();
@@ -2140,10 +2027,210 @@ fn dispatch(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>)
     dispatch_with_config(sinks, cli, system, cwd, &final_config)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "dispatch function maps all CLI subcommands"
-)]
+/// Handle every config-free subcommand. Returns `Ok(Some(()))` when a
+/// matching arm ran, `Ok(None)` when the subcommand needs the
+/// config-aware dispatch path.
+fn try_dispatch_config_free(
+    cli: &Cli,
+    system: &dyn System,
+    cwd: &Path,
+    sinks: &mut IoSinks<'_>,
+) -> Result<Option<()>> {
+    match &cli.command {
+        Commands::Version => handle_version(sinks).map(Some),
+        Commands::Identity { .. } => handle_identity(&cli.command, sinks, system, cwd).map(Some),
+        Commands::ResolveMode { .. } => {
+            handle_resolve_mode(&cli.command, sinks, system, cwd).map(Some)
+        }
+        Commands::Keygen { .. } => handle_keygen(&cli.command, sinks, system).map(Some),
+        #[cfg(feature = "obsidian")]
+        Commands::Obsidian { .. } => handle_obsidian(&cli.command, sinks, system, cwd).map(Some),
+        Commands::Skill { .. } => handle_skill(&cli.command, sinks, system).map(Some),
+        Commands::Activity { .. } => handle_activity(&cli.command, sinks, system, cwd).map(Some),
+        Commands::Permissions { action } => cmd_permissions(sinks, system, cwd, action).map(Some),
+        Commands::Restrict { .. } => handle_restrict(&cli.command, sinks, system, cwd).map(Some),
+        Commands::Unprotect { .. } => handle_unprotect(&cli.command, sinks, system, cwd).map(Some),
+        _ => {
+            debug_assert!(
+                !subcommand_is_config_free(&cli.command),
+                "config-free subcommand fell through short-circuit"
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn handle_version(sinks: &mut IoSinks<'_>) -> Result<()> {
+    writeln!(sinks.stderr, "remargin {}", env!("CARGO_PKG_VERSION")).context("writing to stderr")
+}
+
+fn handle_identity(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Identity {
+        action,
+        identity_args,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_identity called with wrong subcommand");
+    };
+    cmd_identity(
+        sinks,
+        system,
+        cwd,
+        action.as_ref(),
+        identity_args,
+        output_args.json,
+    )
+}
+
+fn handle_resolve_mode(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::ResolveMode {
+        cwd: cwd_arg,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_resolve_mode called with wrong subcommand");
+    };
+    let cwd_expanded = cwd_arg
+        .as_deref()
+        .map(|c| expand_cli_pathbuf(system, c))
+        .transpose()?;
+    let start_dir = cwd_expanded.as_deref().unwrap_or(cwd);
+    cmd_resolve_mode(sinks, system, start_dir, output_args.json)
+}
+
+fn handle_keygen(command: &Commands, sinks: &mut IoSinks<'_>, system: &dyn System) -> Result<()> {
+    let Commands::Keygen {
+        output: keygen_output,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_keygen called with wrong subcommand");
+    };
+    let expanded_output = expand_cli_pathbuf(system, keygen_output)?;
+    cmd_keygen(sinks, system, &expanded_output)
+}
+
+#[cfg(feature = "obsidian")]
+fn handle_obsidian(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Obsidian {
+        action,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_obsidian called with wrong subcommand");
+    };
+    cmd_obsidian(sinks, system, cwd, action, output_args.json)
+}
+
+fn handle_skill(command: &Commands, sinks: &mut IoSinks<'_>, system: &dyn System) -> Result<()> {
+    let Commands::Skill {
+        action,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_skill called with wrong subcommand");
+    };
+    cmd_skill(sinks, system, action, output_args.json)
+}
+
+fn handle_activity(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Activity {
+        path,
+        since,
+        pretty,
+        identity_args,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_activity called with wrong subcommand");
+    };
+    cmd_activity(
+        sinks,
+        system,
+        cwd,
+        path.as_deref(),
+        since.as_deref(),
+        *pretty,
+        identity_args,
+        output_args.json,
+    )
+}
+
+fn handle_restrict(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Restrict {
+        path,
+        also_deny_bash,
+        cli_allowed,
+        user_settings,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_restrict called with wrong subcommand");
+    };
+    cmd_restrict(
+        sinks,
+        system,
+        cwd,
+        path,
+        also_deny_bash,
+        *cli_allowed,
+        user_settings.as_deref(),
+        output_args.json,
+    )
+}
+
+fn handle_unprotect(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Unprotect {
+        path,
+        strict,
+        user_settings,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_unprotect called with wrong subcommand");
+    };
+    cmd_unprotect(
+        sinks,
+        system,
+        cwd,
+        path,
+        *strict,
+        user_settings.as_deref(),
+        output_args.json,
+    )
+}
+
 fn dispatch_with_config(
     sinks: &mut IoSinks<'_>,
     cli: &Cli,
@@ -2152,334 +2239,29 @@ fn dispatch_with_config(
     config: &ResolvedConfig,
 ) -> Result<()> {
     match &cli.command {
-        Commands::Ack {
-            file,
-            ids,
-            path,
-            remove,
-            output_args,
-            ..
-        } => {
-            let ap = AckParams {
-                file: file.as_deref(),
-                ids,
-                json_mode: output_args.json,
-                remove: *remove,
-                search_path: path,
-            };
-            cmd_ack(sinks, system, cwd, config, &ap)
-        }
-        Commands::Batch {
-            file,
-            ops,
-            output_args,
-            ..
-        } => cmd_batch(sinks, system, cwd, config, file, ops, output_args.json),
-        Commands::Comment {
-            file,
-            content,
-            after_comment,
-            after_heading,
-            after_line,
-            attach,
-            auto_ack,
-            comment_file,
-            remargin_kind,
-            reply_to,
-            sandbox,
-            to,
-            output_args,
-            ..
-        } => {
-            let resolved_content =
-                resolve_comment_content(system, cwd, content.as_ref(), comment_file.as_ref())?;
-            let cp = CommentParams {
-                after_comment: after_comment.as_deref(),
-                after_heading: after_heading.as_deref(),
-                after_line: *after_line,
-                attachments: attach,
-                auto_ack: *auto_ack,
-                content: &resolved_content,
-                file,
-                json_mode: output_args.json,
-                remargin_kind,
-                reply_to: reply_to.as_deref(),
-                sandbox: *sandbox,
-                to,
-            };
-            cmd_comment(sinks, system, cwd, config, &cp)
-        }
-        Commands::Comments {
-            file,
-            pretty,
-            remargin_kind,
-            output_args,
-        } => cmd_comments(
-            sinks,
-            system,
-            cwd,
-            file,
-            remargin_kind,
-            output_args.json,
-            *pretty,
-        ),
-        Commands::Delete {
-            file,
-            ids,
-            output_args,
-            ..
-        } => cmd_delete(sinks, system, cwd, config, file, ids, output_args.json),
-        Commands::Edit {
-            file,
-            id,
-            content,
-            remargin_kind,
-            output_args,
-            ..
-        } => {
-            // When no --kind flags are provided we preserve the stored
-            // list; any occurrence (even `--kind x` once) replaces the
-            // full list — consistent with how `--to` works.
-            let kind_replacement = (!remargin_kind.is_empty()).then_some(remargin_kind.as_slice());
-            cmd_edit(
-                sinks,
-                system,
-                cwd,
-                config,
-                file,
-                id,
-                content,
-                kind_replacement,
-                output_args.json,
-            )
-        }
-        Commands::Get {
-            path,
-            binary,
-            start,
-            end,
-            line_numbers,
-            out,
-            output_args,
-            ..
-        } => {
-            let gp = GetParams {
-                binary: *binary,
-                end: *end,
-                json_mode: output_args.json,
-                line_numbers: *line_numbers,
-                out: out.as_deref(),
-                path,
-                start: *start,
-            };
-            cmd_get(sinks, system, cwd, config, &gp)
-        }
-        Commands::Lint { file, output_args } => {
-            cmd_lint(sinks, system, cwd, file, output_args.json)
-        }
-        Commands::Ls {
-            path, output_args, ..
-        } => cmd_ls(sinks, system, cwd, config, path, output_args.json),
-        Commands::Metadata {
-            path, output_args, ..
-        } => cmd_metadata(sinks, system, cwd, config, path, output_args.json),
-        Commands::Migrate {
-            file,
-            backup,
-            human_config,
-            agent_config,
-            output_args,
-            ..
-        } => {
-            let identities = resolve_migrate_identities(
-                system,
-                cwd,
-                config,
-                human_config.as_deref(),
-                agent_config.as_deref(),
-            )?;
-            cmd_migrate(
-                sinks,
-                system,
-                cwd,
-                config,
-                file,
-                *backup,
-                &identities,
-                output_args.json,
-            )
-        }
-        Commands::Mv {
-            src,
-            dst,
-            force,
-            output_args,
-            ..
-        } => {
-            let p = MvParams {
-                dst: dst.as_str(),
-                force: *force,
-                json_mode: output_args.json,
-                src: src.as_str(),
-            };
-            cmd_mv(sinks, system, cwd, config, &p)
-        }
-        Commands::Plan { action, .. } => cmd_plan(
-            sinks,
-            system,
-            cwd,
-            config,
-            action,
-            plan_action_output(action).json,
-        ),
-        Commands::Purge {
-            file,
-            output_args,
-            recursive,
-            ..
-        } => cmd_purge(
-            sinks,
-            system,
-            cwd,
-            config,
-            file,
-            *recursive,
-            output_args.json,
-        ),
-        Commands::Query {
-            path,
-            author,
-            comment_id,
-            content_regex,
-            expanded,
-            ignore_case,
-            pending,
-            pending_broadcast,
-            pending_for,
-            pending_for_me,
-            pretty,
-            remargin_kind,
-            since,
-            summary,
-            output_args,
-            ..
-        } => {
-            let q = QueryParams {
-                author: author.as_deref(),
-                comment_id: comment_id.as_deref(),
-                content_regex: content_regex.as_deref(),
-                expanded: *expanded,
-                ignore_case: *ignore_case,
-                json_mode: output_args.json,
-                path: path.as_str(),
-                pending: *pending,
-                pending_broadcast: *pending_broadcast,
-                pending_for: pending_for.as_deref(),
-                pending_for_me: *pending_for_me,
-                pretty: *pretty,
-                remargin_kind,
-                since: since.as_deref(),
-                summary: *summary,
-            };
-            cmd_query(sinks, system, cwd, config, &q)
-        }
-        Commands::React {
-            file,
-            id,
-            emoji,
-            remove,
-            output_args,
-            ..
-        } => {
-            let r = ReactParams {
-                emoji: emoji.as_str(),
-                file: file.as_str(),
-                id: id.as_str(),
-                json_mode: output_args.json,
-                remove: *remove,
-            };
-            cmd_react(sinks, system, cwd, config, &r)
-        }
-        Commands::Registry {
-            action,
-            output_args,
-        } => cmd_registry(sinks, system, cwd, action, output_args.json),
-        Commands::Rm {
-            file, output_args, ..
-        } => cmd_rm(sinks, system, cwd, config, file, output_args.json),
-        Commands::Sandbox {
-            action,
-            output_args,
-            ..
-        } => cmd_sandbox(sinks, system, cwd, config, action, output_args.json),
-        Commands::Search {
-            pattern,
-            path,
-            regex,
-            scope,
-            context,
-            ignore_case,
-            output_args,
-        } => {
-            let s = SearchParams {
-                context: *context,
-                ignore_case: *ignore_case,
-                json_mode: output_args.json,
-                path: path.as_str(),
-                pattern: pattern.as_str(),
-                regex: *regex,
-                scope: scope.as_str(),
-            };
-            cmd_search(sinks, system, cwd, &s)
-        }
-        Commands::Sign {
-            file,
-            ids,
-            all_mine,
-            repair_checksum,
-            output_args,
-            ..
-        } => {
-            let sp = SignParams {
-                all_mine: *all_mine,
-                file,
-                ids,
-                json_mode: output_args.json,
-                repair_checksum: *repair_checksum,
-            };
-            cmd_sign(sinks, system, cwd, config, &sp)
-        }
-        Commands::Verify {
-            file, output_args, ..
-        } => cmd_verify(sinks, system, cwd, file, config, output_args.json),
-        Commands::Write {
-            path,
-            content,
-            binary,
-            create,
-            lines,
-            raw,
-            output_args,
-            ..
-        } => {
-            let line_range = lines.as_deref().map(parse_line_range).transpose()?;
-            cmd_write(
-                sinks,
-                system,
-                cwd,
-                config,
-                &WriteParams {
-                    content: content.as_deref(),
-                    json_mode: output_args.json,
-                    opts: document::WriteOptions::new()
-                        .binary(*binary)
-                        .create(*create)
-                        .lines(line_range)
-                        .raw(*raw),
-                    path,
-                },
-            )
-        }
+        Commands::Ack { .. } => handle_ack(&cli.command, sinks, system, cwd, config),
+        Commands::Batch { .. } => handle_batch(&cli.command, sinks, system, cwd, config),
+        Commands::Comment { .. } => handle_comment(&cli.command, sinks, system, cwd, config),
+        Commands::Comments { .. } => handle_comments(&cli.command, sinks, system, cwd),
+        Commands::Delete { .. } => handle_delete(&cli.command, sinks, system, cwd, config),
+        Commands::Edit { .. } => handle_edit(&cli.command, sinks, system, cwd, config),
+        Commands::Get { .. } => handle_get(&cli.command, sinks, system, cwd, config),
+        Commands::Lint { .. } => handle_lint(&cli.command, sinks, system, cwd),
+        Commands::Ls { .. } => handle_ls(&cli.command, sinks, system, cwd, config),
+        Commands::Metadata { .. } => handle_metadata(&cli.command, sinks, system, cwd, config),
+        Commands::Migrate { .. } => handle_migrate(&cli.command, sinks, system, cwd, config),
+        Commands::Mv { .. } => handle_mv(&cli.command, sinks, system, cwd, config),
+        Commands::Plan { .. } => handle_plan(&cli.command, sinks, system, cwd, config),
+        Commands::Purge { .. } => handle_purge(&cli.command, sinks, system, cwd, config),
+        Commands::Query { .. } => handle_query(&cli.command, sinks, system, cwd, config),
+        Commands::React { .. } => handle_react(&cli.command, sinks, system, cwd, config),
+        Commands::Registry { .. } => handle_registry(&cli.command, sinks, system, cwd),
+        Commands::Rm { .. } => handle_rm(&cli.command, sinks, system, cwd, config),
+        Commands::Sandbox { .. } => handle_sandbox(&cli.command, sinks, system, cwd, config),
+        Commands::Search { .. } => handle_search(&cli.command, sinks, system, cwd),
+        Commands::Sign { .. } => handle_sign(&cli.command, sinks, system, cwd, config),
+        Commands::Verify { .. } => handle_verify(&cli.command, sinks, system, cwd, config),
+        Commands::Write { .. } => handle_write(&cli.command, sinks, system, cwd, config),
         Commands::Version
         | Commands::Activity { .. }
         | Commands::Identity { .. }
@@ -2493,6 +2275,603 @@ fn dispatch_with_config(
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => Ok(()),
     }
+}
+
+fn handle_ack(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Ack {
+        file,
+        ids,
+        path,
+        remove,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_ack called with wrong subcommand");
+    };
+    let ap = AckParams {
+        file: file.as_deref(),
+        ids,
+        json_mode: output_args.json,
+        remove: *remove,
+        search_path: path,
+    };
+    cmd_ack(sinks, system, cwd, config, &ap)
+}
+
+fn handle_batch(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Batch {
+        file,
+        ops,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_batch called with wrong subcommand");
+    };
+    cmd_batch(sinks, system, cwd, config, file, ops, output_args.json)
+}
+
+fn handle_comment(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Comment {
+        file,
+        content,
+        after_comment,
+        after_heading,
+        after_line,
+        attach,
+        auto_ack,
+        comment_file,
+        remargin_kind,
+        reply_to,
+        sandbox,
+        to,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_comment called with wrong subcommand");
+    };
+    let resolved_content =
+        resolve_comment_content(system, cwd, content.as_ref(), comment_file.as_ref())?;
+    let cp = CommentParams {
+        after_comment: after_comment.as_deref(),
+        after_heading: after_heading.as_deref(),
+        after_line: *after_line,
+        attachments: attach,
+        auto_ack: *auto_ack,
+        content: &resolved_content,
+        file,
+        json_mode: output_args.json,
+        remargin_kind,
+        reply_to: reply_to.as_deref(),
+        sandbox: *sandbox,
+        to,
+    };
+    cmd_comment(sinks, system, cwd, config, &cp)
+}
+
+fn handle_comments(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Comments {
+        file,
+        pretty,
+        remargin_kind,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_comments called with wrong subcommand");
+    };
+    cmd_comments(
+        sinks,
+        system,
+        cwd,
+        file,
+        remargin_kind,
+        output_args.json,
+        *pretty,
+    )
+}
+
+fn handle_delete(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Delete {
+        file,
+        ids,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_delete called with wrong subcommand");
+    };
+    cmd_delete(sinks, system, cwd, config, file, ids, output_args.json)
+}
+
+fn handle_edit(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Edit {
+        file,
+        id,
+        content,
+        remargin_kind,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_edit called with wrong subcommand");
+    };
+    // When no --kind flags are provided we preserve the stored list; any
+    // occurrence (even `--kind x` once) replaces the full list — consistent
+    // with how `--to` works.
+    let kind_replacement = (!remargin_kind.is_empty()).then_some(remargin_kind.as_slice());
+    cmd_edit(
+        sinks,
+        system,
+        cwd,
+        config,
+        file,
+        id,
+        content,
+        kind_replacement,
+        output_args.json,
+    )
+}
+
+fn handle_get(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Get {
+        path,
+        binary,
+        start,
+        end,
+        line_numbers,
+        out,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_get called with wrong subcommand");
+    };
+    let gp = GetParams {
+        binary: *binary,
+        end: *end,
+        json_mode: output_args.json,
+        line_numbers: *line_numbers,
+        out: out.as_deref(),
+        path,
+        start: *start,
+    };
+    cmd_get(sinks, system, cwd, config, &gp)
+}
+
+fn handle_lint(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Lint { file, output_args } = command else {
+        bail!("internal: handle_lint called with wrong subcommand");
+    };
+    cmd_lint(sinks, system, cwd, file, output_args.json)
+}
+
+fn handle_ls(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Ls {
+        path, output_args, ..
+    } = command
+    else {
+        bail!("internal: handle_ls called with wrong subcommand");
+    };
+    cmd_ls(sinks, system, cwd, config, path, output_args.json)
+}
+
+fn handle_metadata(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Metadata {
+        path, output_args, ..
+    } = command
+    else {
+        bail!("internal: handle_metadata called with wrong subcommand");
+    };
+    cmd_metadata(sinks, system, cwd, config, path, output_args.json)
+}
+
+fn handle_migrate(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Migrate {
+        file,
+        backup,
+        human_config,
+        agent_config,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_migrate called with wrong subcommand");
+    };
+    let identities = resolve_migrate_identities(
+        system,
+        cwd,
+        config,
+        human_config.as_deref(),
+        agent_config.as_deref(),
+    )?;
+    cmd_migrate(
+        sinks,
+        system,
+        cwd,
+        config,
+        file,
+        *backup,
+        &identities,
+        output_args.json,
+    )
+}
+
+fn handle_mv(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Mv {
+        src,
+        dst,
+        force,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_mv called with wrong subcommand");
+    };
+    let p = MvParams {
+        dst: dst.as_str(),
+        force: *force,
+        json_mode: output_args.json,
+        src: src.as_str(),
+    };
+    cmd_mv(sinks, system, cwd, config, &p)
+}
+
+fn handle_plan(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Plan { action, .. } = command else {
+        bail!("internal: handle_plan called with wrong subcommand");
+    };
+    cmd_plan(
+        sinks,
+        system,
+        cwd,
+        config,
+        action,
+        plan_action_output(action).json,
+    )
+}
+
+fn handle_purge(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Purge {
+        file,
+        output_args,
+        recursive,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_purge called with wrong subcommand");
+    };
+    cmd_purge(
+        sinks,
+        system,
+        cwd,
+        config,
+        file,
+        *recursive,
+        output_args.json,
+    )
+}
+
+fn handle_query(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Query {
+        path,
+        author,
+        comment_id,
+        content_regex,
+        expanded,
+        ignore_case,
+        pending,
+        pending_broadcast,
+        pending_for,
+        pending_for_me,
+        pretty,
+        remargin_kind,
+        since,
+        summary,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_query called with wrong subcommand");
+    };
+    let q = QueryParams {
+        author: author.as_deref(),
+        comment_id: comment_id.as_deref(),
+        content_regex: content_regex.as_deref(),
+        expanded: *expanded,
+        ignore_case: *ignore_case,
+        json_mode: output_args.json,
+        path: path.as_str(),
+        pending: *pending,
+        pending_broadcast: *pending_broadcast,
+        pending_for: pending_for.as_deref(),
+        pending_for_me: *pending_for_me,
+        pretty: *pretty,
+        remargin_kind,
+        since: since.as_deref(),
+        summary: *summary,
+    };
+    cmd_query(sinks, system, cwd, config, &q)
+}
+
+fn handle_react(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::React {
+        file,
+        id,
+        emoji,
+        remove,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_react called with wrong subcommand");
+    };
+    let r = ReactParams {
+        emoji: emoji.as_str(),
+        file: file.as_str(),
+        id: id.as_str(),
+        json_mode: output_args.json,
+        remove: *remove,
+    };
+    cmd_react(sinks, system, cwd, config, &r)
+}
+
+fn handle_registry(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Registry {
+        action,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_registry called with wrong subcommand");
+    };
+    cmd_registry(sinks, system, cwd, action, output_args.json)
+}
+
+fn handle_rm(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Rm {
+        file, output_args, ..
+    } = command
+    else {
+        bail!("internal: handle_rm called with wrong subcommand");
+    };
+    cmd_rm(sinks, system, cwd, config, file, output_args.json)
+}
+
+fn handle_sandbox(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Sandbox {
+        action,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_sandbox called with wrong subcommand");
+    };
+    cmd_sandbox(sinks, system, cwd, config, action, output_args.json)
+}
+
+fn handle_search(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Search {
+        pattern,
+        path,
+        regex,
+        scope,
+        context,
+        ignore_case,
+        output_args,
+    } = command
+    else {
+        bail!("internal: handle_search called with wrong subcommand");
+    };
+    let s = SearchParams {
+        context: *context,
+        ignore_case: *ignore_case,
+        json_mode: output_args.json,
+        path: path.as_str(),
+        pattern: pattern.as_str(),
+        regex: *regex,
+        scope: scope.as_str(),
+    };
+    cmd_search(sinks, system, cwd, &s)
+}
+
+fn handle_sign(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Sign {
+        file,
+        ids,
+        all_mine,
+        repair_checksum,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_sign called with wrong subcommand");
+    };
+    let sp = SignParams {
+        all_mine: *all_mine,
+        file,
+        ids,
+        json_mode: output_args.json,
+        repair_checksum: *repair_checksum,
+    };
+    cmd_sign(sinks, system, cwd, config, &sp)
+}
+
+fn handle_verify(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Verify {
+        file, output_args, ..
+    } = command
+    else {
+        bail!("internal: handle_verify called with wrong subcommand");
+    };
+    cmd_verify(sinks, system, cwd, file, config, output_args.json)
+}
+
+fn handle_write(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Write {
+        path,
+        content,
+        binary,
+        create,
+        lines,
+        raw,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_write called with wrong subcommand");
+    };
+    let line_range = lines.as_deref().map(parse_line_range).transpose()?;
+    cmd_write(
+        sinks,
+        system,
+        cwd,
+        config,
+        &WriteParams {
+            content: content.as_deref(),
+            json_mode: output_args.json,
+            opts: document::WriteOptions::new()
+                .binary(*binary)
+                .create(*create)
+                .lines(line_range)
+                .raw(*raw),
+            path,
+        },
+    )
 }
 
 fn cmd_ack(
@@ -3795,10 +4174,6 @@ fn resolve_role_identity(
 /// Lightweight ops that have not yet been wired surface a deliberate
 /// "not yet landed" error so callers discover the subcommand tree and
 /// failures are loud. `plan write` is fully wired.
-#[expect(
-    clippy::too_many_lines,
-    reason = "single dispatch match is clearer than per-op helpers here"
-)]
 fn cmd_plan(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
@@ -3810,198 +4185,44 @@ fn cmd_plan(
     // `Comment` / `Write` arms need owned buffers that outlive the
     // `PlanRequest` (it borrows `&str` / `ProjectCommentParams<'_>`).
     // Stage them here so the borrows survive through `plan_ops::dispatch`.
-    let comment_body;
-    let write_body;
-    let attach_refs: Vec<&str>;
-    let position;
+    // Initialized to empty defaults; the `Comment` / `Write` helpers
+    // overwrite them in place before the borrow flows out.
+    let mut comment_body = String::new();
+    let mut write_body = String::new();
+    let mut attach_refs: Vec<&str> = Vec::new();
+    let mut position = InsertPosition::Append;
 
     let request = match action {
-        PlanAction::Ack {
-            path, ids, remove, ..
-        } => plan_ops::PlanRequest::Ack {
-            path: resolve_doc_path(system, cwd, path)?,
-            ids: ids.clone(),
-            remove: *remove,
-        },
-        PlanAction::Batch { path, ops_file, .. } => plan_ops::PlanRequest::Batch {
-            path: resolve_doc_path(system, cwd, path)?,
-            ops: read_plan_batch_ops(system, ops_file)?,
-        },
-        PlanAction::Comment {
-            path,
-            content,
-            after_comment,
-            after_heading,
-            after_line,
-            attach_names,
-            auto_ack,
-            reply_to,
-            sandbox,
-            to,
-            ..
-        } => {
-            let doc_path = resolve_doc_path(system, cwd, path)?;
-            comment_body = match content {
-                Some(s) => s.clone(),
-                None => read_stdin()?,
-            };
-            position = resolve_comment_position(
-                reply_to.as_deref(),
-                after_comment.as_deref(),
-                after_heading.as_deref(),
-                *after_line,
-            );
-            attach_refs = attach_names.iter().map(String::as_str).collect();
-            let params = projections::ProjectCommentParams::new(&comment_body, &position)
-                .with_attachment_filenames(&attach_refs)
-                .with_auto_ack(*auto_ack)
-                .with_reply_to(reply_to.as_deref())
-                .with_sandbox(*sandbox)
-                .with_to(to);
-            plan_ops::PlanRequest::Comment {
-                path: doc_path,
-                params,
-            }
-        }
-        PlanAction::Delete { path, ids, .. } => plan_ops::PlanRequest::Delete {
-            path: resolve_doc_path(system, cwd, path)?,
-            ids: ids.clone(),
-        },
-        PlanAction::Edit {
-            path, id, content, ..
-        } => plan_ops::PlanRequest::Edit {
-            path: resolve_doc_path(system, cwd, path)?,
-            id,
-            content,
-        },
-        PlanAction::Migrate {
-            path,
-            human_config,
-            agent_config,
-            ..
-        } => {
-            let identities = resolve_migrate_identities(
-                system,
-                cwd,
-                config,
-                human_config.as_deref(),
-                agent_config.as_deref(),
-            )?;
-            plan_ops::PlanRequest::Migrate {
-                path: resolve_doc_path(system, cwd, path)?,
-                identities,
-            }
-        }
-        PlanAction::Mv {
-            src, dst, force, ..
-        } => plan_ops::PlanRequest::Mv {
-            src: expand_cli_path(system, src)?,
-            dst: expand_cli_path(system, dst)?,
-            force: *force,
-        },
-        PlanAction::Purge {
-            path, recursive, ..
-        } => plan_ops::PlanRequest::Purge {
-            path: resolve_purge_path(system, cwd, path, *recursive)?,
-            recursive: *recursive,
-        },
-        PlanAction::React {
-            path,
-            id,
-            emoji,
-            remove,
-            ..
-        } => plan_ops::PlanRequest::React {
-            path: resolve_doc_path(system, cwd, path)?,
-            id,
-            emoji,
-            remove: *remove,
-        },
-        PlanAction::Restrict {
-            path,
-            also_deny_bash,
-            cli_allowed,
-            user_settings,
-            ..
-        } => {
-            let user_scope = match user_settings {
-                Some(explicit) => expand_cli_pathbuf(system, explicit)?,
-                None => expand_cli_path(system, DEFAULT_USER_SETTINGS)?,
-            };
-            // Anchor-walk failure surfaces via the projection's reject
-            // path; on that path we still produce a report rather than
-            // bail here. The fallback project-scope path is unused on
-            // the reject branch.
-            let project_scope = permissions_restrict::find_claude_anchor(system, cwd).map_or_else(
-                |_err| cwd.join(".claude/settings.local.json"),
-                |anchor| anchor.join(".claude/settings.local.json"),
-            );
-            let restrict_args = permissions_restrict::RestrictArgs::new(
-                path.clone(),
-                also_deny_bash.clone(),
-                *cli_allowed,
-            );
-            plan_ops::PlanRequest::Restrict {
-                args: restrict_args,
-                cwd: cwd.to_path_buf(),
-                settings_files: vec![project_scope, user_scope],
-            }
-        }
-        PlanAction::SandboxAdd { path, .. } => plan_ops::PlanRequest::SandboxAdd {
-            path: resolve_doc_path(system, cwd, path)?,
-        },
-        PlanAction::SandboxRemove { path, .. } => plan_ops::PlanRequest::SandboxRemove {
-            path: resolve_doc_path(system, cwd, path)?,
-        },
-        PlanAction::Sign {
-            path,
-            ids,
-            all_mine,
-            ..
-        } => plan_ops::PlanRequest::Sign {
-            path: resolve_doc_path(system, cwd, path)?,
-            selection: build_sign_selection(*all_mine, ids)?,
-        },
-        PlanAction::Unprotect { path, .. } => {
-            let unprotect_args = permissions_unprotect::UnprotectArgs::new(path.clone());
-            plan_ops::PlanRequest::Unprotect {
-                args: unprotect_args,
-                cwd: cwd.to_path_buf(),
-            }
-        }
-        PlanAction::Write {
-            path,
-            content,
-            binary,
-            create,
-            lines,
-            raw,
-            ..
-        } => {
-            write_body = match content {
-                Some(s) => s.clone(),
-                None => read_stdin()?,
-            };
-            let line_range = lines.as_deref().map(parse_line_range).transpose()?;
-            let opts = document::WriteOptions::new()
-                .binary(*binary)
-                .create(*create)
-                .lines(line_range)
-                .raw(*raw);
-            plan_ops::PlanRequest::Write {
-                path: expand_cli_path(system, path)?,
-                content: &write_body,
-                opts,
-            }
-        }
+        PlanAction::Ack { .. } => build_plan_ack(action, system, cwd)?,
+        PlanAction::Batch { .. } => build_plan_batch(action, system, cwd)?,
+        PlanAction::Comment { .. } => build_plan_comment(
+            action,
+            system,
+            cwd,
+            &mut comment_body,
+            &mut position,
+            &mut attach_refs,
+        )?,
+        PlanAction::Delete { .. } => build_plan_delete(action, system, cwd)?,
+        PlanAction::Edit { .. } => build_plan_edit(action, system, cwd)?,
+        PlanAction::Migrate { .. } => build_plan_migrate(action, system, cwd, config)?,
+        PlanAction::Mv { .. } => build_plan_mv(action, system)?,
+        PlanAction::Purge { .. } => build_plan_purge(action, system, cwd)?,
+        PlanAction::React { .. } => build_plan_react(action, system, cwd)?,
+        PlanAction::Restrict { .. } => build_plan_restrict(action, system, cwd)?,
+        PlanAction::SandboxAdd { .. } => build_plan_sandbox_add(action, system, cwd)?,
+        PlanAction::SandboxRemove { .. } => build_plan_sandbox_remove(action, system, cwd)?,
+        PlanAction::Sign { .. } => build_plan_sign(action, system, cwd)?,
+        PlanAction::Unprotect { .. } => build_plan_unprotect(action, cwd)?,
+        PlanAction::Write { .. } => build_plan_write(action, system, &mut write_body)?,
     };
 
     let report = plan_ops::dispatch(system, cwd, config, &request)?;
     let value = serde_json::to_value(&report).context("serializing plan report")?;
 
-    // Config-mutation plans get a structured
-    // text block in text mode so the multi-file projection is
-    // readable. JSON mode still emits the full PlanReport payload.
+    // Config-mutation plans get a structured text block in text mode so
+    // the multi-file projection is readable. JSON mode still emits the
+    // full PlanReport payload.
     if !json_mode {
         if report.config_diff.is_some() {
             return emit_plan_restrict_text(sinks, &report);
@@ -4012,6 +4233,330 @@ fn cmd_plan(
     }
 
     print_output(sinks, json_mode, &value)
+}
+
+fn build_plan_ack(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Ack {
+        path, ids, remove, ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Ack {
+        path: resolve_doc_path(system, cwd, path)?,
+        ids: ids.clone(),
+        remove: *remove,
+    })
+}
+
+fn build_plan_batch(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Batch { path, ops_file, .. } = action else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Batch {
+        path: resolve_doc_path(system, cwd, path)?,
+        ops: read_plan_batch_ops(system, ops_file)?,
+    })
+}
+
+fn build_plan_comment<'cmd>(
+    action: &'cmd PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+    comment_body: &'cmd mut String,
+    position: &'cmd mut InsertPosition,
+    attach_refs: &'cmd mut Vec<&'cmd str>,
+) -> Result<plan_ops::PlanRequest<'cmd>> {
+    let PlanAction::Comment {
+        path,
+        content,
+        after_comment,
+        after_heading,
+        after_line,
+        attach_names,
+        auto_ack,
+        reply_to,
+        sandbox,
+        to,
+        ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    let doc_path = resolve_doc_path(system, cwd, path)?;
+    *comment_body = match content {
+        Some(s) => s.clone(),
+        None => read_stdin()?,
+    };
+    *position = resolve_comment_position(
+        reply_to.as_deref(),
+        after_comment.as_deref(),
+        after_heading.as_deref(),
+        *after_line,
+    );
+    *attach_refs = attach_names.iter().map(String::as_str).collect();
+    let params = projections::ProjectCommentParams::new(comment_body, position)
+        .with_attachment_filenames(attach_refs)
+        .with_auto_ack(*auto_ack)
+        .with_reply_to(reply_to.as_deref())
+        .with_sandbox(*sandbox)
+        .with_to(to);
+    Ok(plan_ops::PlanRequest::Comment {
+        path: doc_path,
+        params,
+    })
+}
+
+fn build_plan_delete(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Delete { path, ids, .. } = action else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Delete {
+        path: resolve_doc_path(system, cwd, path)?,
+        ids: ids.clone(),
+    })
+}
+
+fn build_plan_edit<'cmd>(
+    action: &'cmd PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'cmd>> {
+    let PlanAction::Edit {
+        path, id, content, ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Edit {
+        path: resolve_doc_path(system, cwd, path)?,
+        id,
+        content,
+    })
+}
+
+fn build_plan_migrate(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Migrate {
+        path,
+        human_config,
+        agent_config,
+        ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    let identities = resolve_migrate_identities(
+        system,
+        cwd,
+        config,
+        human_config.as_deref(),
+        agent_config.as_deref(),
+    )?;
+    Ok(plan_ops::PlanRequest::Migrate {
+        path: resolve_doc_path(system, cwd, path)?,
+        identities,
+    })
+}
+
+fn build_plan_mv(
+    action: &PlanAction,
+    system: &dyn System,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Mv {
+        src, dst, force, ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Mv {
+        src: expand_cli_path(system, src)?,
+        dst: expand_cli_path(system, dst)?,
+        force: *force,
+    })
+}
+
+fn build_plan_purge(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Purge {
+        path, recursive, ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Purge {
+        path: resolve_purge_path(system, cwd, path, *recursive)?,
+        recursive: *recursive,
+    })
+}
+
+fn build_plan_react<'cmd>(
+    action: &'cmd PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'cmd>> {
+    let PlanAction::React {
+        path,
+        id,
+        emoji,
+        remove,
+        ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::React {
+        path: resolve_doc_path(system, cwd, path)?,
+        id,
+        emoji,
+        remove: *remove,
+    })
+}
+
+/// Anchor-walk failure surfaces via the projection's reject path; on
+/// that path we still produce a report rather than bail here. The
+/// fallback project-scope path is unused on the reject branch.
+fn build_plan_restrict(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Restrict {
+        path,
+        also_deny_bash,
+        cli_allowed,
+        user_settings,
+        ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    let user_scope = match user_settings {
+        Some(explicit) => expand_cli_pathbuf(system, explicit)?,
+        None => expand_cli_path(system, DEFAULT_USER_SETTINGS)?,
+    };
+    let project_scope = permissions_restrict::find_claude_anchor(system, cwd).map_or_else(
+        |_err| cwd.join(".claude/settings.local.json"),
+        |anchor| anchor.join(".claude/settings.local.json"),
+    );
+    Ok(plan_ops::PlanRequest::Restrict {
+        args: permissions_restrict::RestrictArgs::new(
+            path.clone(),
+            also_deny_bash.clone(),
+            *cli_allowed,
+        ),
+        cwd: cwd.to_path_buf(),
+        settings_files: vec![project_scope, user_scope],
+    })
+}
+
+fn build_plan_sandbox_add(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::SandboxAdd { path, .. } = action else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::SandboxAdd {
+        path: resolve_doc_path(system, cwd, path)?,
+    })
+}
+
+fn build_plan_sandbox_remove(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::SandboxRemove { path, .. } = action else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::SandboxRemove {
+        path: resolve_doc_path(system, cwd, path)?,
+    })
+}
+
+fn build_plan_sign(
+    action: &PlanAction,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Sign {
+        path,
+        ids,
+        all_mine,
+        ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Sign {
+        path: resolve_doc_path(system, cwd, path)?,
+        selection: build_sign_selection(*all_mine, ids)?,
+    })
+}
+
+fn build_plan_unprotect(action: &PlanAction, cwd: &Path) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Unprotect { path, .. } = action else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Unprotect {
+        args: permissions_unprotect::UnprotectArgs::new(path.clone()),
+        cwd: cwd.to_path_buf(),
+    })
+}
+
+fn build_plan_write<'cmd>(
+    action: &PlanAction,
+    system: &dyn System,
+    write_body: &'cmd mut String,
+) -> Result<plan_ops::PlanRequest<'cmd>> {
+    let PlanAction::Write {
+        path,
+        content,
+        binary,
+        create,
+        lines,
+        raw,
+        ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    *write_body = match content {
+        Some(s) => s.clone(),
+        None => read_stdin()?,
+    };
+    let line_range = lines.as_deref().map(parse_line_range).transpose()?;
+    let opts = document::WriteOptions::new()
+        .binary(*binary)
+        .create(*create)
+        .lines(line_range)
+        .raw(*raw);
+    Ok(plan_ops::PlanRequest::Write {
+        path: expand_cli_path(system, path)?,
+        content: write_body,
+        opts,
+    })
 }
 
 /// Render a `plan restrict` [`PlanReport`] as a structured text block.
