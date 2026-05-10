@@ -608,4 +608,78 @@ mod tests {
     // deny-list-with-carve-out polarity. Post-eradication, the relevant
     // semantics are pinned by op_guard's allow-list scenarios in
     // `remargin-core/src/permissions/op_guard/tests.rs`.
+
+    /// MCP cwd is NOT implicitly trusted when an inherited
+    /// `.remargin.yaml` declares `trusted_roots` that exclude it. A
+    /// folder-walk tool that omits `path` (defaulting to cwd) must
+    /// reject the same way an explicit cwd path does.
+    #[test]
+    fn mcp_ls_without_path_rejects_when_cwd_outside_trusted_roots() {
+        let realm = TempDir::new().unwrap();
+        let parent = realm.path();
+        let inside = parent.join("inside");
+        let cwd = parent.join("cwd");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&cwd).unwrap();
+        fs::write(cwd.join("note.md"), b"# leak\n").unwrap();
+        fs::write(
+            parent.join(".remargin.yaml"),
+            format!(
+                "identity: alice\ntype: human\nmode: open\npermissions:\n  trusted_roots:\n    - {}\n",
+                inside.display()
+            ),
+        )
+        .unwrap();
+
+        let system = RealSystem::new();
+        let base = system.canonicalize(&cwd).unwrap();
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+
+        let result = mcp_call(&base, &config, "ls", &json!({}));
+        assert!(
+            is_tool_error(&result),
+            "ls without path should reject when cwd is not trusted: {result:#?}"
+        );
+        let text = extract_tool_text(&result);
+        assert!(
+            text.contains("trusted_roots"),
+            "expected trusted_roots refusal, got: {text}"
+        );
+
+        let explicit = mcp_call(&base, &config, "get", &json!({ "path": "note.md" }));
+        assert!(
+            is_tool_error(&explicit),
+            "get of cwd file should reject too: {explicit:#?}"
+        );
+    }
+
+    /// When cwd IS in `trusted_roots`, the same omitted-path call
+    /// succeeds — the gate is "is cwd trusted" not "is path missing".
+    #[test]
+    fn mcp_ls_without_path_succeeds_when_cwd_inside_trusted_roots() {
+        let realm = TempDir::new().unwrap();
+        let cwd = realm.path();
+        fs::write(cwd.join("note.md"), b"# hi\n").unwrap();
+        let canonical_cwd = RealSystem::new().canonicalize(cwd).unwrap();
+        fs::write(
+            cwd.join(".remargin.yaml"),
+            format!(
+                "identity: alice\ntype: human\nmode: open\npermissions:\n  trusted_roots:\n    - {}\n",
+                canonical_cwd.display()
+            ),
+        )
+        .unwrap();
+
+        let system = RealSystem::new();
+        let base = canonical_cwd;
+        let config =
+            ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
+
+        let result = mcp_call(&base, &config, "ls", &json!({}));
+        assert!(
+            !is_tool_error(&result),
+            "ls without path should succeed when cwd is in trusted_roots: {result:#?}"
+        );
+    }
 }

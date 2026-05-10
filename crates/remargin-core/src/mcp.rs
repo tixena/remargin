@@ -83,6 +83,14 @@ const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 /// invokable by the human via the CLI.
 const NO_PATH_TOOLS: &[&str] = &["identity_create", "permissions_check", "permissions_show"];
 
+/// Tools whose handler defaults the target to MCP `cwd` when the
+/// caller omits `path`. The dispatch-time boundary check synthesises
+/// `"."` for these so an unconstrained `ls` (or `query`, `search`, …)
+/// cannot read cwd when cwd is not in `trusted_roots`. `ack`'s
+/// folder-walk fallback only fires when both `file` and `path` are
+/// absent, so it is handled inline rather than via this list.
+const PATH_DEFAULTS_TO_CWD_TOOLS: &[&str] = &["activity", "ls", "query", "sandbox_list", "search"];
+
 /// Description of a single MCP tool.
 struct ToolDesc {
     /// Human-readable description.
@@ -1113,6 +1121,15 @@ fn ensure_path_in_scope(
                 }
             }
         }
+    }
+
+    // Folder-walk tools that omit `path` fall back to cwd at handler
+    // time; mirror that fallback at the boundary so cwd cannot be read
+    // when it is not in `trusted_roots`.
+    let needs_cwd_fallback = PATH_DEFAULTS_TO_CWD_TOOLS.contains(&tool_name)
+        || (tool_name == "ack" && !params.contains_key("file"));
+    if needs_cwd_fallback && !params.contains_key("path") {
+        check_one_path(system, base_dir, permissions, tool_name, ".")?;
     }
 
     Ok(())
