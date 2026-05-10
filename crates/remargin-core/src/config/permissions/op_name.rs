@@ -57,8 +57,6 @@ pub enum OpName {
     Ls,
     /// Read: doc / block metadata.
     Metadata,
-    /// Write: schema migration over a doc.
-    Migrate,
     /// Write: rename / move a file or directory.
     Mv,
     /// Write: purge tombstoned content.
@@ -95,7 +93,6 @@ impl OpName {
         Self::Lint,
         Self::Ls,
         Self::Metadata,
-        Self::Migrate,
         Self::Mv,
         Self::Purge,
         Self::Query,
@@ -129,7 +126,6 @@ impl OpName {
         Self::Comment,
         Self::Delete,
         Self::Edit,
-        Self::Migrate,
         Self::Mv,
         Self::Purge,
         Self::React,
@@ -153,7 +149,6 @@ impl OpName {
             Self::Lint => "lint",
             Self::Ls => "ls",
             Self::Metadata => "metadata",
-            Self::Migrate => "migrate",
             Self::Mv => "mv",
             Self::Purge => "purge",
             Self::Query => "query",

@@ -2270,7 +2270,7 @@ fn project_edit_cascades_ack_clear_to_descendants() {
 }
 
 // --------------------------------------------------------------------
-// project_batch / project_purge / project_migrate / project_sandbox_*
+// project_batch / project_purge / project_sandbox_*
 //: composite + destructive ops that sit on top of the
 // lightweight projections.
 // --------------------------------------------------------------------
@@ -2386,68 +2386,6 @@ fn project_purge_strips_every_comment_without_writing_disk() {
 
     let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
-}
-
-#[test]
-fn project_migrate_no_op_when_no_legacy_comments() {
-    use crate::operations::migrate::MigrateIdentities;
-    let (system, config, _first) = seed_with_comment();
-
-    let (before, after) = projections::project_migrate(
-        &system,
-        Path::new("/docs/test.md"),
-        &config,
-        &MigrateIdentities::default(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        before.to_markdown().unwrap(),
-        after.to_markdown().unwrap(),
-        "migrate with no legacy comments must be a noop"
-    );
-}
-
-#[test]
-fn project_migrate_converts_legacy_markers_to_comments() {
-    use crate::operations::migrate::MigrateIdentities;
-    let content = "\
-# Test
-
-```agent comments [done:2026-04-05]
-Agent response from the before-times.
-```
-";
-    let system = system_with_doc(content);
-    let config = open_config();
-
-    let (before, after) = projections::project_migrate(
-        &system,
-        Path::new("/docs/test.md"),
-        &config,
-        &MigrateIdentities::default(),
-    )
-    .unwrap();
-
-    assert!(
-        !before.legacy_comments().is_empty(),
-        "fixture must parse as at least one legacy comment"
-    );
-    assert!(
-        after.legacy_comments().is_empty(),
-        "every legacy marker must be converted"
-    );
-    assert_eq!(
-        after.comments().len(),
-        1,
-        "one legacy marker must produce one comment"
-    );
-    let new_cm = &after.comments()[0];
-    assert_eq!(new_cm.author, "legacy-agent");
-    assert!(
-        !new_cm.ack.is_empty(),
-        "`[done:DATE]` must produce an ack entry"
-    );
 }
 
 #[test]
@@ -2616,9 +2554,7 @@ fn project_sign_all_mine_signs_only_own_comments() {
         .iter()
         .find_map(|s| match s {
             parser::Segment::Comment(c) if c.id == "ed1" => Some(c),
-            parser::Segment::Body(_)
-            | parser::Segment::Comment(_)
-            | parser::Segment::LegacyComment(_) => None,
+            parser::Segment::Body(_) | parser::Segment::Comment(_) => None,
         })
         .unwrap();
     assert!(before_ed.signature.is_none());
@@ -2629,9 +2565,7 @@ fn project_sign_all_mine_signs_only_own_comments() {
         .iter()
         .find_map(|s| match s {
             parser::Segment::Comment(c) if c.id == "ed1" => Some(c),
-            parser::Segment::Body(_)
-            | parser::Segment::Comment(_)
-            | parser::Segment::LegacyComment(_) => None,
+            parser::Segment::Body(_) | parser::Segment::Comment(_) => None,
         })
         .unwrap();
     let after_al = after
@@ -2639,9 +2573,7 @@ fn project_sign_all_mine_signs_only_own_comments() {
         .iter()
         .find_map(|s| match s {
             parser::Segment::Comment(c) if c.id == "al1" => Some(c),
-            parser::Segment::Body(_)
-            | parser::Segment::Comment(_)
-            | parser::Segment::LegacyComment(_) => None,
+            parser::Segment::Body(_) | parser::Segment::Comment(_) => None,
         })
         .unwrap();
     assert!(
@@ -2672,9 +2604,7 @@ fn project_sign_ids_signs_only_listed() {
         .iter()
         .find_map(|s| match s {
             parser::Segment::Comment(c) if c.id == "ed1" => Some(c),
-            parser::Segment::Body(_)
-            | parser::Segment::Comment(_)
-            | parser::Segment::LegacyComment(_) => None,
+            parser::Segment::Body(_) | parser::Segment::Comment(_) => None,
         })
         .unwrap();
     assert!(after_ed.signature.is_some());
@@ -2772,9 +2702,7 @@ fn project_sign_already_signed_stays_preserved() {
         .iter()
         .find_map(|s| match s {
             parser::Segment::Comment(c) if c.id == "ed1" => c.signature.clone(),
-            parser::Segment::Body(_)
-            | parser::Segment::Comment(_)
-            | parser::Segment::LegacyComment(_) => None,
+            parser::Segment::Body(_) | parser::Segment::Comment(_) => None,
         })
         .unwrap();
     let second_sig = after
@@ -2782,9 +2710,7 @@ fn project_sign_already_signed_stays_preserved() {
         .iter()
         .find_map(|s| match s {
             parser::Segment::Comment(c) if c.id == "ed1" => c.signature.clone(),
-            parser::Segment::Body(_)
-            | parser::Segment::Comment(_)
-            | parser::Segment::LegacyComment(_) => None,
+            parser::Segment::Body(_) | parser::Segment::Comment(_) => None,
         })
         .unwrap();
     assert_eq!(
@@ -2952,28 +2878,6 @@ fn purge_refuses_forbidden_targets() {
         let config = open_config();
 
         let err = purge(&system, &path, &config).unwrap_err();
-
-        assert_forbidden_ops_error(&err, basename);
-        assert_eq!(before, read_file(&system, &path));
-    }
-}
-
-#[test]
-fn migrate_refuses_forbidden_targets() {
-    use crate::operations::migrate::{MigrateIdentities, migrate};
-    for basename in FORBIDDEN_TARGETS {
-        let (system, path) = system_with_forbidden(basename, b"anything: true\n");
-        let before = read_file(&system, &path);
-        let config = open_config();
-
-        let err = migrate(
-            &system,
-            &path,
-            &config,
-            &MigrateIdentities::default(),
-            false,
-        )
-        .unwrap_err();
 
         assert_forbidden_ops_error(&err, basename);
         assert_eq!(before, read_file(&system, &path));
@@ -3350,40 +3254,6 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
         before, after,
         "batch must not partially write outside trusted_roots"
     );
-}
-
-#[test]
-fn migrate_refused_when_target_under_restrict() {
-    use crate::operations::migrate::{MigrateIdentities, migrate};
-    let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
-    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
-    let config = open_config();
-    let err = migrate(
-        &system,
-        Path::new("/docs/test.md"),
-        &config,
-        &MigrateIdentities::default(),
-        false,
-    )
-    .unwrap_err();
-    assert_restrict_refusal(&err);
-}
-
-#[test]
-fn migrate_refused_when_deny_ops_lists_migrate() {
-    use crate::operations::migrate::{MigrateIdentities, migrate};
-    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [migrate]\n";
-    let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
-    let config = open_config();
-    let err = migrate(
-        &system,
-        Path::new("/docs/test.md"),
-        &config,
-        &MigrateIdentities::default(),
-        false,
-    )
-    .unwrap_err();
-    assert_deny_ops_refusal(&err);
 }
 
 #[test]

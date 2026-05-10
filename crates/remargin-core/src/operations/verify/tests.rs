@@ -17,7 +17,8 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
 use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::operations::verify::{
-    RowStatus, SignatureStatus, VerifyFailure, commit_with_verify, verify_document,
+    RowStatus, SignatureStatus, VerifyFailure, commit_with_verify, verify_and_refresh,
+    verify_document,
 };
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment,
@@ -25,6 +26,34 @@ use crate::operations::{
 use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
 use crate::reactions::Reactions;
 use crate::writer::InsertPosition;
+
+/// Document carrying a directed comment with a partial ack and
+/// frontmatter that would be wrong under the (correct, post-fix)
+/// `is_pending` rule. Models a doc written by a buggy older version of
+/// remargin that thought any ack closed a directed comment.
+const STALE_FRONTMATTER_DOC: &str = "\
+---
+title: Test
+remargin_pending: 0
+remargin_pending_for: []
+---
+
+# Hello
+
+```remargin
+---
+id: abc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+to: [eduardo]
+checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+ack:
+  - agent@2026-04-06T13:00:00-04:00
+---
+hello
+```
+";
 
 const SIMPLE_DOC: &str = "\
 ---
@@ -901,5 +930,48 @@ surviving corrupt row
     assert_eq!(
         after, corrupted,
         "file must be byte-identical after blocked delete"
+    );
+}
+
+// ===========================================================================
+// verify_and_refresh: self-healing frontmatter on a stale file, no-op on a
+// fresh file.
+// ===========================================================================
+
+#[test]
+fn verify_and_refresh_rewrites_stale_frontmatter() {
+    let system = mock_with_doc(STALE_FRONTMATTER_DOC);
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
+    assert!(report.ok, "open mode + good checksum must report ok");
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert!(
+        after.contains("remargin_pending: 1"),
+        "stale frontmatter must self-heal under verify; got:\n{after}"
+    );
+    assert!(
+        after.contains("eduardo"),
+        "remargin_pending_for must list the unacked addressee; got:\n{after}"
+    );
+}
+
+#[test]
+fn verify_and_refresh_is_a_no_op_when_frontmatter_is_already_current() {
+    let system = mock_with_doc(STALE_FRONTMATTER_DOC);
+    let cfg = open_cfg_as("alice");
+
+    // First call refreshes.
+    verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
+    let after_first = system.read_to_string(Path::new("/d/a.md")).unwrap();
+
+    // Second call must not mutate any byte: frontmatter is already current.
+    verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
+    let after_second = system.read_to_string(Path::new("/d/a.md")).unwrap();
+
+    assert_eq!(
+        after_first, after_second,
+        "verify on a fresh file must not write; bytes diverged"
     );
 }

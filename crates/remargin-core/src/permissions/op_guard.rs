@@ -33,7 +33,6 @@ pub const MUTATING_OPS: &[&str] = &[
     "comment",
     "delete",
     "edit",
-    "migrate",
     "mv",
     "purge",
     "react",

@@ -5,8 +5,6 @@ pub mod heading;
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
-use core::fmt::Write as _;
-use core::iter::repeat_n;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -167,26 +165,6 @@ impl Comment {
 }
 
 /// A legacy inline comment block (`user comments` / `agent comments`).
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct LegacyComment {
-    pub content: String,
-    pub done_date: Option<String>,
-    pub fence_depth: usize,
-    pub line: usize,
-    /// The raw language tag exactly as it appeared (for faithful round-trip).
-    pub raw_tag: String,
-    pub role: LegacyRole,
-}
-
-/// Role of a legacy comment author.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum LegacyRole {
-    Agent,
-    User,
-}
-
 /// Sequence of body segments and comment blocks in document order. Preserves
 /// the exact structure for round-tripping.
 #[derive(Debug)]
@@ -202,12 +180,10 @@ pub enum Segment {
     Body(String),
     /// A parsed Remargin comment block (boxed to reduce enum size).
     Comment(Box<Comment>),
-    LegacyComment(LegacyComment),
 }
 
 #[derive(Debug)]
 struct FencedBlock {
-    depth: usize,
     /// Byte offset one past the last character of the closing fence line.
     end: usize,
     inner: String,
@@ -229,7 +205,7 @@ impl ParsedDocument {
             .iter()
             .filter_map(|seg| match seg {
                 Segment::Comment(cm) => Some(cm.as_ref()),
-                Segment::Body(_) | Segment::LegacyComment(_) => None,
+                Segment::Body(_) => None,
             })
             .collect()
     }
@@ -237,17 +213,6 @@ impl ParsedDocument {
     #[must_use]
     pub fn find_comment(&self, id: &str) -> Option<&Comment> {
         self.comments().into_iter().find(|cm| cm.id == id)
-    }
-
-    #[must_use]
-    pub fn legacy_comments(&self) -> Vec<&LegacyComment> {
-        self.segments
-            .iter()
-            .filter_map(|seg| match seg {
-                Segment::LegacyComment(lc) => Some(lc),
-                Segment::Body(_) | Segment::Comment(_) => None,
-            })
-            .collect()
     }
 
     /// Round-trip: parse -> modify -> serialize back to a markdown string.
@@ -265,7 +230,6 @@ impl ParsedDocument {
             match seg {
                 Segment::Body(text) => out.push_str(text),
                 Segment::Comment(cm) => out.push_str(&serialize_comment(cm)?),
-                Segment::LegacyComment(lc) => serialize_legacy_comment(lc, &mut out),
             }
         }
         Ok(out)
@@ -330,8 +294,6 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
             let comment = parse_remargin_block(&block.inner, line)
                 .with_context(|| format!("in remargin block starting at byte {}", block.start))?;
             segments.push(Segment::Comment(Box::new(comment)));
-        } else if let Some(legacy) = try_parse_legacy(block, line) {
-            segments.push(Segment::LegacyComment(legacy));
         } else {
             segments.push(Segment::Body(content[block.start..block.end].to_owned()));
         }
@@ -378,16 +340,6 @@ pub(crate) fn required_fence_depth(content: &str) -> usize {
 
     let min_depth = max_backticks + 1;
     if min_depth < 3 { 3 } else { min_depth }
-}
-
-fn serialize_legacy_comment(lc: &LegacyComment, out: &mut String) {
-    let fence: String = repeat_n('`', lc.fence_depth).collect();
-    let _ = writeln!(out, "{fence}{}", lc.raw_tag);
-    out.push_str(&lc.content);
-    if !lc.content.is_empty() && !lc.content.ends_with('\n') {
-        out.push('\n');
-    }
-    let _ = writeln!(out, "{fence}");
 }
 
 fn scan_fences(source: &str) -> Vec<FencedBlock> {
@@ -440,7 +392,6 @@ fn scan_fences(source: &str) -> Vec<FencedBlock> {
                             idx += 1;
                         }
                         blocks.push(FencedBlock {
-                            depth: tick_count,
                             end: idx,
                             inner: source[content_start..close_line_start].to_owned(),
                             start: line_start,
@@ -537,41 +488,6 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
         .with_context(|| format!("invalid remargin_kind in block starting near line {line}"))?;
 
     comment_from_on_disk(on_disk, content, line)
-}
-
-/// Returns `None` if the tag does not match a `user comments` or `agent
-/// comments` block.
-fn try_parse_legacy(block: &FencedBlock, line: usize) -> Option<LegacyComment> {
-    let tag = block.tag.trim();
-
-    let (role, rest) = if let Some(rest) = tag.strip_prefix("user comment") {
-        (LegacyRole::User, rest)
-    } else if let Some(rest) = tag.strip_prefix("agent comment") {
-        (LegacyRole::Agent, rest)
-    } else {
-        return None;
-    };
-
-    let without_plural = rest.strip_prefix('s').unwrap_or(rest);
-    let trimmed_rest = without_plural.trim();
-
-    let done_date = if trimmed_rest.starts_with("[done:") {
-        let date_start = "[done:".len();
-        trimmed_rest
-            .find(']')
-            .map(|end_bracket| trimmed_rest[date_start..end_bracket].to_owned())
-    } else {
-        None
-    };
-
-    Some(LegacyComment {
-        content: block.inner.clone(),
-        done_date,
-        fence_depth: block.depth,
-        line,
-        raw_tag: block.tag.clone(),
-        role,
-    })
 }
 
 #[cfg(test)]

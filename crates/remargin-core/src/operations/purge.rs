@@ -170,7 +170,6 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
         .flat_map(|cm| cm.attachments.clone())
         .collect();
 
-    // Remove all Comment and LegacyComment segments.
     doc.segments.retain(|seg| matches!(seg, Segment::Body(_)));
 
     // Collapse consecutive empty Body segments and normalize double blank lines.
@@ -277,7 +276,7 @@ fn collapse_body_segments(segments: &mut Vec<Segment>) {
     for seg in segments.drain(..) {
         match seg {
             Segment::Body(text) => current_body.push_str(&text),
-            other @ (Segment::Comment(_) | Segment::LegacyComment(_)) => {
+            other @ Segment::Comment(_) => {
                 if !current_body.is_empty() {
                     merged.push(Segment::Body(mem::take(&mut current_body)));
                 }

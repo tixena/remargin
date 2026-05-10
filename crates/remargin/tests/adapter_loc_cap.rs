@@ -70,7 +70,7 @@ mod tests {
             "cmd_plan",
             (
                 215_usize,
-                "consolidated PlanAction -> PlanRequest match (plan migrate resolves two per-role configs inline; plan restrict resolves anchor + user/project settings inline; plan unprotect builds UnprotectArgs inline; plan mv adds a 5-line src/dst/force unwrap)",
+                "consolidated PlanAction -> PlanRequest match (plan restrict resolves anchor + user/project settings inline; plan unprotect builds UnprotectArgs inline; plan mv adds a 5-line src/dst/force unwrap)",
             ),
         );
         // CLI: sandbox top-level command dispatches across four
@@ -125,7 +125,7 @@ mod tests {
             "handle_plan",
             (
                 115,
-                "mirrors cmd_plan PlanAction dispatch (plan migrate resolves two per-role configs inline; plan mv adds a 4-line src/dst/force unwrap)",
+                "mirrors cmd_plan PlanAction dispatch (plan mv adds a 4-line src/dst/force unwrap)",
             ),
         );
         // MCP: search handler extracts eight optional filter fields.

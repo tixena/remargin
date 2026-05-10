@@ -28,7 +28,6 @@ use remargin_core::linter;
 use remargin_core::mcp;
 use remargin_core::operations;
 use remargin_core::operations::batch::BatchCommentOp;
-use remargin_core::operations::migrate;
 use remargin_core::operations::mv as mv_op;
 use remargin_core::operations::plan as plan_ops;
 use remargin_core::operations::projections;
@@ -89,7 +88,7 @@ struct Cli {
 ///
 /// Flattened only into subcommands that resolve an author identity
 /// (comment, edit, ack, react, sign, write, delete, batch, purge,
-/// migrate, plan, verify, sandbox, mcp). Read-only / utility
+/// plan, verify, sandbox, mcp). Read-only / utility
 /// subcommands do not flatten this group so clap rejects any attempt
 /// to pass `--config` / `--identity` / `--type` / `--key` to them.
 #[derive(clap::Args, Default)]
@@ -442,34 +441,6 @@ enum Commands {
         output_args: OutputArgs,
         #[command(flatten)]
         unrestricted_args: UnrestrictedArgs,
-    },
-    /// Convert old-format comments to remargin format.
-    ///
-    /// Two optional per-role identity flags let strict-mode docs migrate
-    /// successfully: each `--*-config` points at a `.remargin.yaml`
-    /// declaring a complete identity (author + signing key) used to
-    /// attribute and sign migrated comments of the matching legacy
-    /// role. Without them, migrated comments fall back to the historical
-    /// `legacy-user` / `legacy-agent` placeholder with no signature —
-    /// fine in open mode, rejected by the verify gate in strict mode.
-    Migrate {
-        /// Path to the document.
-        file: String,
-        /// Create a .bak backup before modifying.
-        #[arg(long)]
-        backup: bool,
-        /// Path to a `.remargin.yaml` whose identity is used for
-        /// migrated `user comments` blocks (author + signing key).
-        #[arg(long)]
-        human_config: Option<PathBuf>,
-        /// Path to a `.remargin.yaml` whose identity is used for
-        /// migrated `agent comments` blocks (author + signing key).
-        #[arg(long)]
-        agent_config: Option<PathBuf>,
-        #[command(flatten)]
-        identity_args: IdentityArgs,
-        #[command(flatten)]
-        output_args: OutputArgs,
     },
     /// Move or rename a single tracked file.
     ///
@@ -944,21 +915,6 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `migrate` op.
-    Migrate {
-        /// Path to the document.
-        path: String,
-        /// Path to a `.remargin.yaml` whose identity is used for
-        /// migrated `user comments` blocks (author + signing key).
-        #[arg(long)]
-        human_config: Option<PathBuf>,
-        /// Path to a `.remargin.yaml` whose identity is used for
-        /// migrated `agent comments` blocks (author + signing key).
-        #[arg(long)]
-        agent_config: Option<PathBuf>,
-        #[command(flatten)]
-        output_args: OutputArgs,
-    },
     /// Project an `mv` op.
     ///
     /// Surfaces the canonical src/dst, whether the destination exists
@@ -1315,13 +1271,6 @@ struct RestrictParams<'cmd> {
     user_settings_explicit: Option<&'cmd Path>,
 }
 
-struct MigrateParams<'cmd> {
-    backup: bool,
-    file: &'cmd str,
-    identities: &'cmd migrate::MigrateIdentities,
-    json_mode: bool,
-}
-
 /// How `query` results are rendered. Mutually-exclusive successor to the
 /// previous `json_mode` / `pretty` / `summary` bool triple.
 enum QueryOutputMode {
@@ -1643,7 +1592,6 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Ls { output_args, .. }
         | Commands::Mcp { output_args, .. }
         | Commands::Metadata { output_args, .. }
-        | Commands::Migrate { output_args, .. }
         | Commands::Mv { output_args, .. }
         | Commands::Purge { output_args, .. }
         | Commands::Query { output_args, .. }
@@ -1686,7 +1634,6 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
         | PlanAction::Comment { output_args, .. }
         | PlanAction::Delete { output_args, .. }
         | PlanAction::Edit { output_args, .. }
-        | PlanAction::Migrate { output_args, .. }
         | PlanAction::Mv { output_args, .. }
         | PlanAction::Purge { output_args, .. }
         | PlanAction::React { output_args, .. }
@@ -1844,7 +1791,6 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Ls { .. }
         | Commands::Mcp { .. }
         | Commands::Metadata { .. }
-        | Commands::Migrate { .. }
         | Commands::Mv { .. }
         | Commands::Plan { .. }
         | Commands::Purge { .. }
@@ -1876,7 +1822,6 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Edit { identity_args, .. }
         | Commands::Identity { identity_args, .. }
         | Commands::Mcp { identity_args, .. }
-        | Commands::Migrate { identity_args, .. }
         | Commands::Mv { identity_args, .. }
         | Commands::Plan { identity_args, .. }
         | Commands::Purge { identity_args, .. }
@@ -1924,7 +1869,6 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Ls { .. }
         | Commands::Mcp { .. }
         | Commands::Metadata { .. }
-        | Commands::Migrate { .. }
         | Commands::Mv { .. }
         | Commands::Permissions { .. }
         | Commands::Plan { .. }
@@ -1978,7 +1922,6 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Keygen { .. }
         | Commands::Lint { .. }
         | Commands::Mcp { .. }
-        | Commands::Migrate { .. }
         | Commands::Mv { .. }
         | Commands::Permissions { .. }
         | Commands::Plan { .. }
@@ -2297,7 +2240,6 @@ fn dispatch_with_config(
         Commands::Lint { .. } => handle_lint(&cli.command, sinks, system, cwd),
         Commands::Ls { .. } => handle_ls(&cli.command, sinks, system, cwd, config),
         Commands::Metadata { .. } => handle_metadata(&cli.command, sinks, system, cwd, config),
-        Commands::Migrate { .. } => handle_migrate(&cli.command, sinks, system, cwd, config),
         Commands::Mv { .. } => handle_mv(&cli.command, sinks, system, cwd, config),
         Commands::Plan { .. } => handle_plan(&cli.command, sinks, system, cwd, config),
         Commands::Purge { .. } => handle_purge(&cli.command, sinks, system, cwd, config),
@@ -2568,40 +2510,6 @@ fn handle_metadata(
         bail!("internal: handle_metadata called with wrong subcommand");
     };
     cmd_metadata(sinks, system, cwd, config, path, output_args.json)
-}
-
-fn handle_migrate(
-    command: &Commands,
-    sinks: &mut IoSinks<'_>,
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-) -> Result<()> {
-    let Commands::Migrate {
-        file,
-        backup,
-        human_config,
-        agent_config,
-        output_args,
-        ..
-    } = command
-    else {
-        bail!("internal: handle_migrate called with wrong subcommand");
-    };
-    let identities = resolve_migrate_identities(
-        system,
-        cwd,
-        config,
-        human_config.as_deref(),
-        agent_config.as_deref(),
-    )?;
-    let p = MigrateParams {
-        backup: *backup,
-        file,
-        identities: &identities,
-        json_mode: output_args.json,
-    };
-    cmd_migrate(sinks, system, cwd, config, &p)
 }
 
 fn handle_mv(
@@ -4054,111 +3962,6 @@ fn cmd_metadata(
     print_output(sinks, json_mode, &result)
 }
 
-fn cmd_migrate(
-    sinks: &mut IoSinks<'_>,
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-    p: &MigrateParams<'_>,
-) -> Result<()> {
-    let path = resolve_doc_path(system, cwd, p.file)?;
-    let migrated = migrate::migrate(system, &path, config, p.identities, p.backup)?;
-
-    if p.json_mode {
-        let results: Vec<Value> = migrated
-            .iter()
-            .map(|m| json!({ "new_id": m.new_id, "original_role": m.original_role }))
-            .collect();
-        print_output(sinks, true, &json!({ "migrated": results }))
-    } else if migrated.is_empty() {
-        writeln!(sinks.stderr, "No legacy comments found.").context("writing to stderr")?;
-        Ok(())
-    } else {
-        for m in &migrated {
-            writeln!(
-                sinks.stderr,
-                "{} -> {} (migrated)",
-                m.original_role, m.new_id
-            )
-            .context("writing to stderr")?;
-        }
-        Ok(())
-    }
-}
-
-/// Build the `MigrateIdentities` for a `migrate` (or `plan migrate`)
-/// invocation.
-///
-/// Each `--*-config <path>` is interpreted as a complete identity
-/// declaration via branch 1 of [`config::identity::resolve_identity`] —
-/// the same path the operator's own identity takes when they pass
-/// `--config`. The resolved `author_type` must match the role the flag
-/// is wired to (a human config for `--human-config`, an agent config
-/// for `--agent-config`); a mismatch is an error before any byte hits
-/// disk.
-fn resolve_migrate_identities(
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-    human_config: Option<&Path>,
-    agent_config: Option<&Path>,
-) -> Result<migrate::MigrateIdentities> {
-    let human = match human_config {
-        None => None,
-        Some(path) => Some(resolve_role_identity(
-            system,
-            cwd,
-            config,
-            path,
-            &parser::AuthorType::Human,
-            "--human-config",
-        )?),
-    };
-    let agent = match agent_config {
-        None => None,
-        Some(path) => Some(resolve_role_identity(
-            system,
-            cwd,
-            config,
-            path,
-            &parser::AuthorType::Agent,
-            "--agent-config",
-        )?),
-    };
-    Ok(migrate::MigrateIdentities::new(human, agent))
-}
-
-fn resolve_role_identity(
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-    config_path: &Path,
-    expected_type: &parser::AuthorType,
-    flag_name: &str,
-) -> Result<migrate::MigrateRoleIdentity> {
-    let flags = config::identity::IdentityFlags::for_config_path(config_path.to_path_buf());
-    let resolved = config::identity::resolve_identity(
-        system,
-        cwd,
-        &config.mode,
-        &flags,
-        config.registry.as_ref(),
-    )
-    .with_context(|| format!("resolving {flag_name} {}", config_path.display()))?;
-    if &resolved.author_type != expected_type {
-        bail!(
-            "{flag_name} resolved {:?} as type {:?}, but the flag requires type {:?}",
-            resolved.identity,
-            resolved.author_type,
-            expected_type,
-        );
-    }
-    Ok(migrate::MigrateRoleIdentity::new(
-        resolved.identity,
-        resolved.key_path,
-    ))
-}
-
 /// Route a `plan` subcommand to the correct per-op projection.
 ///
 /// Lightweight ops that have not yet been wired surface a deliberate
@@ -4195,7 +3998,6 @@ fn cmd_plan(
         )?,
         PlanAction::Delete { .. } => build_plan_delete(action, system, cwd)?,
         PlanAction::Edit { .. } => build_plan_edit(action, system, cwd)?,
-        PlanAction::Migrate { .. } => build_plan_migrate(action, system, cwd, config)?,
         PlanAction::Mv { .. } => build_plan_mv(action, system)?,
         PlanAction::Purge { .. } => build_plan_purge(action, system, cwd)?,
         PlanAction::React { .. } => build_plan_react(action, system, cwd)?,
@@ -4334,34 +4136,6 @@ fn build_plan_edit<'cmd>(
         path: resolve_doc_path(system, cwd, path)?,
         id,
         content,
-    })
-}
-
-fn build_plan_migrate(
-    action: &PlanAction,
-    system: &dyn System,
-    cwd: &Path,
-    config: &ResolvedConfig,
-) -> Result<plan_ops::PlanRequest<'static>> {
-    let PlanAction::Migrate {
-        path,
-        human_config,
-        agent_config,
-        ..
-    } = action
-    else {
-        bail!("internal: helper called with wrong PlanAction variant");
-    };
-    let identities = resolve_migrate_identities(
-        system,
-        cwd,
-        config,
-        human_config.as_deref(),
-        agent_config.as_deref(),
-    )?;
-    Ok(plan_ops::PlanRequest::Migrate {
-        path: resolve_doc_path(system, cwd, path)?,
-        identities,
     })
 }
 
@@ -5693,10 +5467,7 @@ fn cmd_verify(
     json_mode: bool,
 ) -> Result<()> {
     let path = resolve_doc_path(system, cwd, file)?;
-    let doc = parser::parse_file(system, &path)?;
-    let escalated = config.escalate_mode_for_doc(system, &path)?;
-
-    let report = operations::verify::verify_document(&doc, &escalated);
+    let report = operations::verify::verify_and_refresh(system, &path, config)?;
     let results: Vec<Value> = report
         .results
         .iter()

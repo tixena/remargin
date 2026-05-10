@@ -56,7 +56,7 @@ pub const VALID_KIND_REGEX: &str = r"^[A-Za-z0-9_ \-]{1,15}$";
 /// Validate a slice of proposed `remargin_kind` values.
 ///
 /// Called from the parser for every block on read, and from every
-/// mutating operation (create, edit, migrate, batch) before the
+/// mutating operation (create, edit, batch) before the
 /// checksum is computed. Keeping validation centralised means a
 /// malformed tag cannot sneak in through a parser edge-case and break
 /// signature verification downstream.

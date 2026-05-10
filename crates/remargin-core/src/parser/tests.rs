@@ -4,7 +4,7 @@ use std::path::Path;
 
 use os_shim::mock::MockSystem;
 
-use super::{AuthorType, LegacyRole, Segment, parse, parse_file};
+use super::{AuthorType, Segment, parse, parse_file};
 
 /// Build a minimal valid remargin block.
 fn minimal_block(id: &str) -> String {
@@ -147,60 +147,6 @@ fn test_empty_content() {
 }
 
 #[test]
-fn test_legacy_user_comment() {
-    let doc = "\
-```user comments
-This is legacy feedback.
-```
-";
-    let parsed = parse(doc).unwrap();
-    let legacy = parsed.legacy_comments();
-    assert_eq!(legacy.len(), 1);
-    assert_eq!(legacy[0].role, LegacyRole::User);
-    assert!(legacy[0].done_date.is_none());
-    assert_eq!(legacy[0].content, "This is legacy feedback.\n");
-}
-
-#[test]
-fn test_legacy_done_marker() {
-    let doc = "\
-```user comments [done:2026-04-05]
-Addressed in previous revision.
-```
-";
-    let parsed = parse(doc).unwrap();
-    let legacy = parsed.legacy_comments();
-    assert_eq!(legacy.len(), 1);
-    assert_eq!(legacy[0].role, LegacyRole::User);
-    assert_eq!(legacy[0].done_date.as_deref(), Some("2026-04-05"));
-}
-
-#[test]
-fn test_legacy_agent_comment() {
-    let doc = "\
-```agent comments
-This is an agent response.
-```
-";
-    let parsed = parse(doc).unwrap();
-    let legacy = parsed.legacy_comments();
-    assert_eq!(legacy.len(), 1);
-    assert_eq!(legacy[0].role, LegacyRole::Agent);
-    assert!(legacy[0].done_date.is_none());
-}
-
-#[test]
-fn test_mixed_old_and_new() {
-    let doc = format!(
-        "# Document\n\n{}\nSome text.\n\n```user comments\nOld feedback.\n```\n",
-        minimal_block("new1"),
-    );
-    let parsed = parse(&doc).unwrap();
-    assert_eq!(parsed.comments().len(), 1);
-    assert_eq!(parsed.legacy_comments().len(), 1);
-}
-
-#[test]
 fn test_round_trip_simple() {
     let doc = format!(
         "# Hello\n\nIntro text.\n\n{}\nMore text.\n",
@@ -330,7 +276,6 @@ fn test_no_comments() {
     let doc = "# Just a Title\n\nSome text.\n\n```python\nprint('hello')\n```\n";
     let parsed = parse(doc).unwrap();
     assert!(parsed.comments().is_empty());
-    assert!(parsed.legacy_comments().is_empty());
 }
 
 #[test]
@@ -361,19 +306,6 @@ fn test_find_comment() {
     assert!(parsed.find_comment("fc1").is_some());
     assert!(parsed.find_comment("fc2").is_some());
     assert!(parsed.find_comment("nonexistent").is_none());
-}
-
-#[test]
-fn test_legacy_singular_form() {
-    let doc = "\
-```user comment
-Singular form feedback.
-```
-";
-    let parsed = parse(doc).unwrap();
-    let legacy = parsed.legacy_comments();
-    assert_eq!(legacy.len(), 1);
-    assert_eq!(legacy[0].role, LegacyRole::User);
 }
 
 #[test]
@@ -435,16 +367,6 @@ fn test_line_numbers_multiple_comments() {
     assert_eq!(comments[0].line, 1);
     // block1 is 9 lines (ends with \n) + 1 blank separator line = line 11
     assert_eq!(comments[1].line, 11);
-}
-
-#[test]
-fn test_legacy_comment_line_number() {
-    let doc = "# Title\n\nSome text.\n\n```user comments\nOld feedback.\n```\n";
-    let parsed = parse(doc).unwrap();
-    let legacy = parsed.legacy_comments();
-    assert_eq!(legacy.len(), 1);
-    // "# Title\n\nSome text.\n\n" = 4 lines, legacy starts at line 5
-    assert_eq!(legacy[0].line, 5);
 }
 
 #[test]

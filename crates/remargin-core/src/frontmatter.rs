@@ -334,7 +334,7 @@ fn max_ts(
 
 /// Parse existing frontmatter from the document's first body segment.
 /// Returns a `Mapping` (possibly empty if no frontmatter exists).
-fn parse_existing_frontmatter(doc: &ParsedDocument) -> Result<Mapping> {
+pub(crate) fn parse_existing_frontmatter(doc: &ParsedDocument) -> Result<Mapping> {
     let first_body = match doc.segments.first() {
         Some(Segment::Body(text)) => text.as_str(),
         _ => return Ok(Mapping::new()),

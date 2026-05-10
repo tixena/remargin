@@ -1,7 +1,6 @@
 //! Comment operations: create, ack, react, delete, edit.
 
 pub mod batch;
-pub mod migrate;
 pub mod mv;
 pub mod plan;
 pub mod projections;
@@ -584,16 +583,8 @@ pub(crate) fn collapse_body_segments(segments: &mut Vec<Segment>) {
             continue;
         }
 
-        let preceded_by_comment = pos > 0
-            && matches!(
-                segments[pos - 1],
-                Segment::Comment(_) | Segment::LegacyComment(_)
-            );
-        let followed_by_comment = pos + 1 < len
-            && matches!(
-                segments[pos + 1],
-                Segment::Comment(_) | Segment::LegacyComment(_)
-            );
+        let preceded_by_comment = pos > 0 && matches!(segments[pos - 1], Segment::Comment(_));
+        let followed_by_comment = pos + 1 < len && matches!(segments[pos + 1], Segment::Comment(_));
 
         if (preceded_by_comment || followed_by_comment)
             && let Segment::Body(text) = &mut segments[pos]
@@ -668,7 +659,7 @@ pub(crate) fn find_comment_mut<'doc>(
 ) -> Option<&'doc mut Comment> {
     doc.segments.iter_mut().find_map(|seg| match seg {
         Segment::Comment(cm) if cm.id == id => Some(cm.as_mut()),
-        Segment::Body(_) | Segment::Comment(_) | Segment::LegacyComment(_) => None,
+        Segment::Body(_) | Segment::Comment(_) => None,
     })
 }
 

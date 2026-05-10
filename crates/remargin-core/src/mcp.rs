@@ -26,7 +26,6 @@ use crate::kind::matches_kind_filter;
 use crate::linter;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
-use crate::operations::migrate;
 use crate::operations::mv as mv_op;
 use crate::operations::plan as plan_ops;
 use crate::operations::projections;
@@ -419,24 +418,6 @@ fn desc_metadata() -> ToolDesc {
     }
 }
 
-/// Build the migrate tool descriptor.
-fn desc_migrate() -> ToolDesc {
-    ToolDesc {
-        name: "migrate",
-        description: "Convert old-format comments to remargin format. Optional `human_config` / `agent_config` point at .remargin.yaml files used to attribute and sign migrated comments per legacy role (required for strict mode). To preview without writing, use `plan` with op=\"migrate\" (same fields).",
-        schema: with_identity_flag_schema(json!({
-            "type": "object",
-            "properties": {
-                "file": { "type": "string", "description": "Path to the document" },
-                "backup": { "type": "boolean", "description": "Create .bak backup", "default": false },
-                "human_config": { "type": "string", "description": "Path to .remargin.yaml whose identity attributes/signs migrated user comments" },
-                "agent_config": { "type": "string", "description": "Path to .remargin.yaml whose identity attributes/signs migrated agent comments" }
-            },
-            "required": ["file"]
-        })),
-    }
-}
-
 /// Build the `mv` tool descriptor.
 fn desc_mv() -> ToolDesc {
     ToolDesc {
@@ -458,11 +439,11 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, migrate, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (restrict / unprotect) are CLI-only - use `remargin plan restrict` / `remargin plan unprotect`.",
+        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (restrict / unprotect) are CLI-only - use `remargin plan restrict` / `remargin plan unprotect`.",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | migrate | mv | purge | sandbox-add | sandbox-remove | sign | write" },
+                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | mv | purge | sandbox-add | sandbox-remove | sign | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
                 "src": { "type": "string", "description": "For mv: source path." },
                 "dst": { "type": "string", "description": "For mv: destination path." },
@@ -845,7 +826,6 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_lint(),
         desc_ls(),
         desc_metadata(),
-        desc_migrate(),
         desc_mv(),
         desc_permissions_check(),
         desc_permissions_show(),
@@ -1291,7 +1271,6 @@ fn dispatch_tool(
         "lint" => handle_lint(system, base_dir, p),
         "ls" => handle_ls(system, base_dir, config, p),
         "metadata" => handle_metadata(system, base_dir, config, p),
-        "migrate" => handle_migrate(system, base_dir, config, p),
         "mv" => handle_mv(system, base_dir, config, p),
         "permissions_check" => handle_permissions_check(system, base_dir, p),
         "permissions_show" => handle_permissions_show(system, base_dir),
@@ -1756,103 +1735,6 @@ fn handle_metadata(
     Ok(result)
 }
 
-/// Handle the `migrate` tool: convert old-format comments.
-fn handle_migrate(
-    system: &dyn System,
-    base_dir: &Path,
-    config: &ResolvedConfig,
-    params: &Map<String, Value>,
-) -> Result<Value> {
-    let file = required_str(params, "file")?;
-    let backup = optional_bool(params, "backup");
-    let declared = resolve_identity_from_params(system, base_dir, config, params)?;
-    let cfg = effective_config(config, declared.as_ref());
-
-    let identities = migrate_identities_from_params(system, base_dir, cfg, params)?;
-    let path = base_dir.join(file);
-    let migrated = migrate::migrate(system, &path, cfg, &identities, backup)?;
-
-    let results: Vec<Value> = migrated
-        .iter()
-        .map(|m| {
-            json!({
-                "new_id": m.new_id,
-                "original_role": m.original_role
-            })
-        })
-        .collect();
-
-    Ok(json!({ "migrated": results }))
-}
-
-/// Resolve the per-role identity flags out of an MCP params map.
-///
-/// Mirrors the CLI's `resolve_migrate_identities` helper but reads
-/// JSON: `human_config` / `agent_config` are optional string paths,
-/// each interpreted as branch 1 of `config::identity::resolve_identity`.
-/// The resolved `author_type` must match the role; a mismatch is a hard
-/// error.
-fn migrate_identities_from_params(
-    system: &dyn System,
-    base_dir: &Path,
-    cfg: &ResolvedConfig,
-    params: &Map<String, Value>,
-) -> Result<migrate::MigrateIdentities> {
-    let human = match optional_str(params, "human_config") {
-        None => None,
-        Some(s) => Some(resolve_role_identity_for_mcp(
-            system,
-            base_dir,
-            cfg,
-            Path::new(s),
-            &parser::AuthorType::Human,
-            "human_config",
-        )?),
-    };
-    let agent = match optional_str(params, "agent_config") {
-        None => None,
-        Some(s) => Some(resolve_role_identity_for_mcp(
-            system,
-            base_dir,
-            cfg,
-            Path::new(s),
-            &parser::AuthorType::Agent,
-            "agent_config",
-        )?),
-    };
-    Ok(migrate::MigrateIdentities::new(human, agent))
-}
-
-fn resolve_role_identity_for_mcp(
-    system: &dyn System,
-    base_dir: &Path,
-    cfg: &ResolvedConfig,
-    config_path: &Path,
-    expected_type: &parser::AuthorType,
-    field_name: &str,
-) -> Result<migrate::MigrateRoleIdentity> {
-    let resolved_path = if config_path.is_absolute() {
-        config_path.to_path_buf()
-    } else {
-        base_dir.join(config_path)
-    };
-    let flags = IdentityFlags::for_config_path(resolved_path.clone());
-    let resolved = resolve_identity(system, base_dir, &cfg.mode, &flags, cfg.registry.as_ref())
-        .with_context(|| format!("resolving {field_name} {}", resolved_path.display()))?;
-    if &resolved.author_type != expected_type {
-        bail!(
-            "{field_name} resolved {:?} as type {:?}, but the field requires type {:?}",
-            resolved.identity,
-            resolved.author_type,
-            expected_type,
-        );
-    }
-    Ok(migrate::MigrateRoleIdentity::new(
-        resolved.identity,
-        resolved.key_path,
-    ))
-}
-
 /// Build the canonical "this plan op is CLI-only" error returned when
 /// `mcp__remargin__plan` is called with `op="restrict"` or
 /// `op="unprotect"`. Pulled out so [`handle_plan`] stays
@@ -1928,13 +1810,6 @@ fn handle_plan(
             path: base_dir.join(required_str(params, "file")?),
             ops: parse_plan_batch_ops(params)?,
         },
-        "migrate" => {
-            let identities = migrate_identities_from_params(system, base_dir, cfg, params)?;
-            plan_ops::PlanRequest::Migrate {
-                path: base_dir.join(required_str(params, "file")?),
-                identities,
-            }
-        }
         "mv" => plan_ops::PlanRequest::Mv {
             src: PathBuf::from(required_str(params, "src")?),
             dst: PathBuf::from(required_str(params, "dst")?),
@@ -2425,10 +2300,7 @@ fn handle_verify(
     let file = required_str(params, "file")?;
 
     let path = base_dir.join(file);
-    let doc = parser::parse_file(system, &path)?;
-    let escalated = config.escalate_mode_for_doc(system, &path)?;
-
-    let report = operations::verify::verify_document(&doc, &escalated);
+    let report = operations::verify::verify_and_refresh(system, &path, config)?;
     let results: Vec<Value> = report
         .results
         .iter()

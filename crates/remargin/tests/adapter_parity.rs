@@ -13,8 +13,8 @@
 //! adapter drift and is the regression this harness is designed to
 //! catch.
 //!
-//! Covers the deterministic ops `delete`, `edit`, `migrate` (no legacy
-//! input), `purge`, and `write` (markdown + raw). `ack`, `react`,
+//! Covers the deterministic ops `delete`, `edit`, `purge`, and
+//! `write` (markdown + raw). `ack`, `react`,
 //! `sandbox-add`, `sandbox-remove`, `comment`, and `batch` are excluded
 //! because their projections stamp `Utc::now()` into the `after`
 //! document; byte-level parity would require freezing the clock, which
@@ -257,23 +257,6 @@ Body paragraph two.
         );
         assert_eq!(report["op"], "edit");
         assert_eq!(report["comments"]["modified"].as_array().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn plan_migrate_parity_on_clean_doc() {
-        let tmp = TempDir::new().unwrap();
-        seed(&tmp, "doc.md");
-        let report = assert_parity(
-            &["plan", "migrate", "doc.md"],
-            "migrate",
-            obj(&json!({ "file": "doc.md" })),
-            &tmp,
-        );
-        assert_eq!(report["op"], "migrate");
-        // No legacy comments in the fixture; the projection is a pure
-        // frontmatter touch-up. Both adapters agree on whether that's a
-        // noop, whatever the verdict turns out to be — parity is what
-        // we're asserting here, not the specific verdict.
     }
 
     #[test]

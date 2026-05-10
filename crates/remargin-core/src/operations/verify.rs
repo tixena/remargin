@@ -30,17 +30,21 @@
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use core::fmt::Write as _;
+use os_shim::System;
 use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
-use crate::parser::{Comment, ParsedDocument};
+use crate::frontmatter;
+use crate::parser::{self, Comment, ParsedDocument};
+use crate::writer;
 
 const SUMMARY_LINE_LIMIT: usize = 5;
 
@@ -307,6 +311,45 @@ pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyRepo
     }
 
     VerifyReport { ok, results }
+}
+
+/// Run [`verify_document`] from disk and refresh the on-disk frontmatter
+/// only when [`frontmatter::ensure_frontmatter`] would change it.
+///
+/// The refresh is a side effect: the verify report still describes
+/// integrity exactly as [`verify_document`] would. Comment IDs never
+/// move (the refresh only touches `remargin_*` frontmatter fields), so
+/// the writer's preservation invariant passes by construction. A
+/// frontmatter that is already current returns from this function with
+/// no disk write — `mtime` and bytes are untouched.
+///
+/// # Errors
+///
+/// Propagates parse, mode-escalation, frontmatter, and write errors.
+/// The verify report itself never causes an error: a bad report is
+/// surfaced in the `ok` flag, not as an `Err`.
+pub fn verify_and_refresh(
+    system: &dyn System,
+    path: &Path,
+    config: &ResolvedConfig,
+) -> Result<VerifyReport> {
+    let mut doc = parser::parse_file(system, path)?;
+    let escalated = config.escalate_mode_for_doc(system, path)?;
+
+    let report = verify_document(&doc, &escalated);
+
+    let before_fm = frontmatter::parse_existing_frontmatter(&doc)
+        .context("snapshotting current frontmatter")?;
+    frontmatter::ensure_frontmatter(&mut doc, &escalated)?;
+    let after_fm = frontmatter::parse_existing_frontmatter(&doc)
+        .context("snapshotting recomputed frontmatter")?;
+
+    if before_fm != after_fm {
+        let empty: HashSet<String> = HashSet::new();
+        writer::write_document(system, path, &doc, &empty, &empty)?;
+    }
+
+    Ok(report)
 }
 
 /// Format a [`VerifyReport`] as a human-readable diagnostic.

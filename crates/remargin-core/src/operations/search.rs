@@ -252,19 +252,6 @@ fn build_line_attribution(content: &str, doc: &parser::ParsedDocument) -> Vec<Li
                 }
                 byte_pos += comment_text.len();
             }
-            Segment::LegacyComment(lc) => {
-                let start_line = content[..byte_pos].matches('\n').count();
-                let mut lc_text = String::new();
-                serialize_legacy_block(lc, &mut lc_text);
-                let lc_lines = lc_text.matches('\n').count();
-                for i in 0..lc_lines {
-                    let idx = start_line + i;
-                    if idx < attribution.len() {
-                        attribution[idx] = LineAttribution::Comment(String::new());
-                    }
-                }
-                byte_pos += lc_text.len();
-            }
         }
     }
 
@@ -393,17 +380,6 @@ fn serialize_comment_block(cm: &parser::Comment, out: &mut String) {
         if !cm.content.ends_with('\n') {
             out.push('\n');
         }
-    }
-    let _ = writeln!(out, "{fence}");
-}
-
-/// Reconstruct a legacy comment block's text representation for line counting.
-fn serialize_legacy_block(lc: &parser::LegacyComment, out: &mut String) {
-    let fence: String = repeat_n('`', lc.fence_depth).collect();
-    let _ = writeln!(out, "{fence}{}", lc.raw_tag);
-    out.push_str(&lc.content);
-    if !lc.content.is_empty() && !lc.content.ends_with('\n') {
-        out.push('\n');
     }
     let _ = writeln!(out, "{fence}");
 }

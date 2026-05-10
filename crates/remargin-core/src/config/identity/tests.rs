@@ -538,7 +538,7 @@ fn config_flag_plus_manual_flags_bails() {
 
 // ---------- Relative `key:` anchoring (config-dir, not CWD) ----------
 //
-// Pre-existing bug surfaced by the per-role-config migrate flags: a
+// Pre-existing bug surfaced by absolute-path `--config` resolution: a
 // relative `key:` value in a `.remargin.yaml` was passed straight to
 // the OS, which resolves it against the process's CWD. That happens to
 // work when the config is found by walking up from CWD (config dir ==

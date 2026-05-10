@@ -252,7 +252,6 @@ fn tools_list_returns_all_tools() {
         "lint",
         "ls",
         "metadata",
-        "migrate",
         "mv",
         "permissions_check",
         "permissions_show",
@@ -2958,39 +2957,6 @@ fn mcp_plan_purge_recursive_emits_purge_dir_diff() {
 }
 
 #[test]
-fn mcp_plan_migrate_no_op_without_legacy_comments() {
-    let base = Path::new("/docs");
-    let (system, config, _id) = seed_real_comment(base, "doc.md");
-
-    let response = call(
-        &system,
-        base,
-        &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1_i32,
-            "method": "tools/call",
-            "params": {
-                "name": "plan",
-                "arguments": { "op": "migrate", "file": "doc.md" }
-            }
-        }),
-    );
-
-    assert!(
-        !is_tool_error(&response),
-        "plan migrate should succeed: {response}"
-    );
-    let report_text = response["result"]["content"][0]["text"].as_str().unwrap();
-    let report: serde_json::Value = serde_json::from_str(report_text).unwrap();
-    assert_eq!(report["op"], "migrate");
-    assert!(
-        report["noop"].as_bool().unwrap(),
-        "migrate on a doc with no legacy markers must be a noop"
-    );
-}
-
-#[test]
 fn mcp_plan_sandbox_add_rewrites_frontmatter() {
     let base = Path::new("/docs");
     let (system, config, _id) = seed_real_comment(base, "doc.md");
@@ -3123,7 +3089,6 @@ fn identity_declaration_schema_present_on_mutating_tools() {
         "comment",
         "delete",
         "edit",
-        "migrate",
         "plan",
         "purge",
         "react",

@@ -113,7 +113,7 @@ pub fn dedupe_acks(acks: &[Acknowledgment]) -> Vec<Acknowledgment> {
 /// Return an error if `path`'s basename matches [`FORBIDDEN_TARGETS`].
 ///
 /// Every mutating op (write, comment, edit, delete, ack, react, batch,
-/// sign, purge, migrate, rm, sandbox) funnels through this guard before
+/// sign, purge, rm, sandbox) funnels through this guard before
 /// any bytes reach disk.
 ///
 /// # Errors
@@ -368,7 +368,7 @@ pub fn insert_comment(
 fn serialize_comment_from_segment(segment: &Segment) -> Result<String, serde_yaml::Error> {
     match segment {
         Segment::Comment(cm) => serialize_comment(cm),
-        Segment::Body(_) | Segment::LegacyComment(_) => Ok(String::new()),
+        Segment::Body(_) => Ok(String::new()),
     }
 }
 

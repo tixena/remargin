@@ -30,7 +30,6 @@ use sha2::{Digest as _, Sha256};
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::document::{self, WriteOptions, WriteProjection};
-use crate::operations::migrate::MigrateIdentities;
 use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
 use crate::operations::sign::SignSelection;
 use crate::operations::verify::{VerifyReport, verify_document};
@@ -694,15 +693,6 @@ pub enum PlanRequest<'req> {
         id: &'req str,
         content: &'req str,
     },
-    /// `plan migrate` — projects conversion of legacy comments.
-    Migrate {
-        path: PathBuf,
-        /// Per-role identities (and signing keys) used by both the
-        /// projection and the real op. Pass
-        /// `MigrateIdentities::default()` to keep the historical
-        /// `legacy-user` / `legacy-agent` placeholder behaviour.
-        identities: MigrateIdentities,
-    },
     /// `plan mv` — projects a file relocation.
     /// Produces an [`MvDiff`] in [`PlanReport::mv_diff`] describing
     /// the resolved src/dst paths, whether the destination already
@@ -801,7 +791,6 @@ impl PlanRequest<'_> {
             Self::Comment { .. } => "comment",
             Self::Delete { .. } => "delete",
             Self::Edit { .. } => "edit",
-            Self::Migrate { .. } => "migrate",
             Self::Mv { .. } => "mv",
             Self::Purge { .. } => "purge",
             Self::React { .. } => "react",
@@ -919,10 +908,6 @@ pub fn dispatch(
         }
         PlanRequest::Edit { path, id, content } => {
             let (before, after) = projections::project_edit(system, path, cfg, id, content)?;
-            project_report(label, &before, &after, cfg, identity)
-        }
-        PlanRequest::Migrate { path, identities } => {
-            let (before, after) = projections::project_migrate(system, path, cfg, identities)?;
             project_report(label, &before, &after, cfg, identity)
         }
         PlanRequest::Mv { src, dst, force } => {

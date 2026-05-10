@@ -10,9 +10,9 @@
 //! to `walker-agent` and fail the `flag-agent` assertion.
 //!
 //! Tests that inspect author attribution prove `--config` end-to-end.
-//! Tests that merely exercise a subcommand (write / rm / purge /
-//! migrate) prove `--config` at least reaches the resolver without
-//! being silently dropped.
+//! Tests that merely exercise a subcommand (write / rm / purge)
+//! prove `--config` at least reaches the resolver without being
+//! silently dropped.
 
 #[cfg(test)]
 mod tests {
@@ -509,29 +509,6 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
             &["rm", &doc.to_string_lossy(), "--config", &flag_path],
         );
         assert!(!doc.exists(), "rm should remove the file");
-    }
-
-    // ---------- migrate ----------
-
-    #[test]
-    fn migrate_accepts_config_declaration() {
-        let (_tmp, walker, flag_config) = two_realms();
-        let doc = seed_doc(
-            &walker,
-            "doc.md",
-            "# Hello\n\n<!-- user comments -->\n- alice (2024-01-01): hi\n",
-        );
-        let flag_path = String::from(flag_config.to_string_lossy());
-
-        let output = run(
-            &walker,
-            &["migrate", &doc.to_string_lossy(), "--config", &flag_path],
-        );
-        let stderr = str::from_utf8(&output.stderr).unwrap();
-        assert!(
-            output.status.success(),
-            "migrate --config should succeed; stderr={stderr}"
-        );
     }
 
     // ---------- sign (strict mode with real key) ----------

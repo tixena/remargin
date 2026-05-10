@@ -33,7 +33,6 @@ use crate::frontmatter;
 use crate::id;
 use crate::kind::validate_kinds;
 use crate::linter;
-use crate::operations::migrate::{self, MigrateIdentities};
 use crate::operations::sign;
 use crate::operations::{
     collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
@@ -653,49 +652,9 @@ pub fn project_edit(
     Ok((before, after))
 }
 
-/// Projection sibling of [`crate::operations::migrate::migrate`].
-///
-/// Delegates the per-segment building to
-/// [`crate::operations::migrate::build_migrated_segments`] so the
-/// projection and the real op produce byte-identical comments
-/// (threading, identities, signatures, ack timestamps). The real op
-/// additionally writes a `.md.bak` when `backup` is set; the projection
-/// never copies bytes.
-///
-/// `after` is byte-identical to `before` when there are no legacy
-/// comments, giving a clean `noop` verdict.
-///
-/// # Errors
-///
-/// Surfaces the same diagnostics `migrate` would on its pre-commit path:
-/// frontmatter issues, or signing failures when `identities` carries a
-/// key path that cannot be read.
-pub fn project_migrate(
-    system: &dyn System,
-    path: &Path,
-    config: &ResolvedConfig,
-    identities: &MigrateIdentities,
-) -> Result<(ParsedDocument, ParsedDocument)> {
-    let (before, mut after) = parse_file_twice(system, path)?;
-
-    if after.legacy_comments().is_empty() {
-        frontmatter::ensure_frontmatter(&mut after, config)?;
-        return Ok((before, after));
-    }
-
-    let now = Utc::now().fixed_offset();
-    let (new_segments, _results) =
-        migrate::build_migrated_segments(system, &after.segments, identities, now)?;
-    after.segments = new_segments;
-
-    frontmatter::ensure_frontmatter(&mut after, config)?;
-
-    Ok((before, after))
-}
-
 /// Projection sibling of [`crate::operations::purge::purge`].
 ///
-/// Strips every `Comment` and `LegacyComment` segment from the document,
+/// Strips every `Comment` segment from the document,
 /// collapses the remaining body text, and removes every `remargin_*`
 /// frontmatter key. Does *not* delete attachment files from disk — plan
 /// stays side-effect-free, and a caller acting on the report is expected

@@ -33,7 +33,6 @@ mod tests {
         ("edit", &["a.md", "foo", "content"]),
         ("identity", &[]),
         ("mcp", &[]),
-        ("migrate", &["a.md"]),
         ("plan", &["comment", "a.md", "hi"]),
         ("purge", &["a.md"]),
         ("react", &["a.md", "foo", "thumbsup"]),
