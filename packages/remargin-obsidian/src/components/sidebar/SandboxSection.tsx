@@ -420,7 +420,7 @@ function toggleSelectAll(
   });
 }
 
-interface PromptGroupSectionProps {
+export interface PromptGroupSectionProps {
   group: PromptGroup;
   viewMode: ViewMode;
   selected: Set<string>;
@@ -451,8 +451,11 @@ interface PromptGroupSectionProps {
  * One prompt-scoped outer container. Renders a header with the
  * resolved prompt's name + scope, then the existing Staged / Unstaged
  * sub-sections, scoped to this group's files.
+ *
+ * Exported for component-test isolation (rem-jl3h). Internal to the
+ * Sandbox section in production use.
  */
-function PromptGroupSection({
+export function PromptGroupSection({
   group,
   viewMode,
   selected,
