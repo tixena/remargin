@@ -102,7 +102,12 @@ fn query_pending_for_alice() {
 
     let results = query(&system, Path::new("/project"), &filter).unwrap();
     assert_eq!(results.len(), 1);
-    assert!(results[0].pending_for.contains(&String::from("alice")));
+    assert!(
+        results[0]
+            .pending_for
+            .as_ref()
+            .is_some_and(|v| v.contains(&String::from("alice")))
+    );
 }
 
 #[test]
@@ -366,12 +371,15 @@ fn query_expanded_returns_comments() {
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
-    assert_eq!(review.comments.len(), 3);
-    assert_eq!(review.comments[0].id, "c1");
-    assert_eq!(review.comments[0].author, "alice");
-    assert_eq!(review.comments[0].content, "First comment from alice.");
-    assert_eq!(review.comments[1].id, "c2");
-    assert_eq!(review.comments[2].id, "c3");
+    assert_eq!(review.comments.as_ref().unwrap().len(), 3);
+    assert_eq!(review.comments.as_ref().unwrap()[0].id, "c1");
+    assert_eq!(review.comments.as_ref().unwrap()[0].author, "alice");
+    assert_eq!(
+        review.comments.as_ref().unwrap()[0].content,
+        "First comment from alice."
+    );
+    assert_eq!(review.comments.as_ref().unwrap()[1].id, "c2");
+    assert_eq!(review.comments.as_ref().unwrap()[2].id, "c3");
 }
 
 #[test]
@@ -389,9 +397,22 @@ fn query_expanded_pending_filters_comments() {
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
     // c1 and c2 are pending, c3 is acked.
-    assert_eq!(review.comments.len(), 2);
-    assert!(review.comments.iter().all(|cm| cm.ack.is_empty()));
-    let ids: Vec<&str> = review.comments.iter().map(|cm| cm.id.as_str()).collect();
+    assert_eq!(review.comments.as_ref().unwrap().len(), 2);
+    assert!(
+        review
+            .comments
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|cm| cm.ack.is_empty())
+    );
+    let ids: Vec<&str> = review
+        .comments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|cm| cm.id.as_str())
+        .collect();
     assert!(ids.contains(&"c1"));
     assert!(ids.contains(&"c2"));
 }
@@ -411,9 +432,13 @@ fn query_expanded_pending_for_filters_comments() {
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
     // Only c2 is pending and addressed to alice.
-    assert_eq!(review.comments.len(), 1);
-    assert_eq!(review.comments[0].id, "c2");
-    assert!(review.comments[0].to.contains(&String::from("alice")));
+    assert_eq!(review.comments.as_ref().unwrap().len(), 1);
+    assert_eq!(review.comments.as_ref().unwrap()[0].id, "c2");
+    assert!(
+        review.comments.as_ref().unwrap()[0]
+            .to
+            .contains(&String::from("alice"))
+    );
 }
 
 #[test]
@@ -429,9 +454,9 @@ fn query_expanded_author_filters_comments() {
     assert_eq!(results.len(), 1);
     let review = &results[0];
     // Only c2 is by bob.
-    assert_eq!(review.comments.len(), 1);
-    assert_eq!(review.comments[0].id, "c2");
-    assert_eq!(review.comments[0].author, "bob");
+    assert_eq!(review.comments.as_ref().unwrap().len(), 1);
+    assert_eq!(review.comments.as_ref().unwrap()[0].id, "c2");
+    assert_eq!(review.comments.as_ref().unwrap()[0].author, "bob");
 }
 
 #[test]
@@ -450,8 +475,8 @@ fn query_expanded_since_filters_comments() {
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
     // Only c3 (14:00) is after 13:00. c1 (10:00) and c2 (12:00) are before.
-    assert_eq!(review.comments.len(), 1);
-    assert_eq!(review.comments[0].id, "c3");
+    assert_eq!(review.comments.as_ref().unwrap().len(), 1);
+    assert_eq!(review.comments.as_ref().unwrap()[0].id, "c3");
 }
 
 #[test]
@@ -470,8 +495,8 @@ fn query_expanded_combined_filters() {
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
     // Only c1 is pending AND by alice (c3 is by alice but acked, c2 is pending but by bob).
-    assert_eq!(review.comments.len(), 1);
-    assert_eq!(review.comments[0].id, "c1");
+    assert_eq!(review.comments.as_ref().unwrap().len(), 1);
+    assert_eq!(review.comments.as_ref().unwrap()[0].id, "c1");
 }
 
 #[test]
@@ -487,15 +512,15 @@ fn query_expanded_multiple_files() {
     // Both files have pending comments.
     assert_eq!(results.len(), 2);
     for r in &results {
-        assert!(!r.comments.is_empty());
+        assert!(r.comments.as_ref().is_some_and(|v| !v.is_empty()));
     }
     // other.md has 1 pending comment from carol.
     let other = results
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("other.md"))
         .unwrap();
-    assert_eq!(other.comments.len(), 1);
-    assert_eq!(other.comments[0].author, "carol");
+    assert_eq!(other.comments.as_ref().unwrap().len(), 1);
+    assert_eq!(other.comments.as_ref().unwrap()[0].author, "carol");
 }
 
 #[test]
@@ -509,7 +534,7 @@ fn query_summary_has_empty_comments() {
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     // summary=true suppresses comment data.
     for r in &results {
-        assert!(r.comments.is_empty());
+        assert!(r.comments.as_ref().is_none_or(Vec::is_empty));
     }
 }
 
@@ -540,9 +565,9 @@ fn query_expanded_comment_fields_complete() {
 
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].comments.len(), 1);
+    assert_eq!(results[0].comments.as_ref().unwrap().len(), 1);
 
-    let cm = &results[0].comments[0];
+    let cm = &results[0].comments.as_ref().unwrap()[0];
     assert_eq!(cm.id, "c3");
     assert_eq!(cm.author, "alice");
     assert!(matches!(cm.author_type, AuthorType::Human));
@@ -701,7 +726,12 @@ fn to_with_no_ack_is_pending() {
     // from eduardo) → 2 pending. pending_for only lists directed
     // recipients; the broadcast has no named recipients.
     assert_eq!(mixed.pending_count, 2);
-    assert!(mixed.pending_for.contains(&String::from("eduardo")));
+    assert!(
+        mixed
+            .pending_for
+            .as_ref()
+            .is_some_and(|v| v.contains(&String::from("eduardo")))
+    );
 }
 
 #[test]
@@ -752,7 +782,7 @@ fn pending_count_matches_expanded() {
     for r in &results {
         assert_eq!(
             r.pending_count,
-            u32::try_from(r.comments.len()).unwrap(),
+            u32::try_from(r.comments.as_ref().map_or(0, Vec::len)).unwrap(),
             "pending_count should equal expanded comments length for {}",
             r.path.display()
         );
@@ -772,11 +802,17 @@ fn pending_for_excludes_fully_acked() {
 
     // bob acked, carol did not. pending_for should contain carol but not bob.
     assert!(
-        partial.pending_for.contains(&String::from("carol")),
+        partial
+            .pending_for
+            .as_ref()
+            .is_some_and(|v| v.contains(&String::from("carol"))),
         "carol should be in pending_for"
     );
     assert!(
-        !partial.pending_for.contains(&String::from("bob")),
+        partial
+            .pending_for
+            .as_ref()
+            .is_none_or(|v| !v.contains(&String::from("bob"))),
         "bob should NOT be in pending_for (already acked)"
     );
 }
@@ -814,7 +850,7 @@ No to field at all.
     // pending_count reflects broadcast-is-pending semantics; pending_for
     // is still empty because broadcasts have no named recipients.
     assert_eq!(results[0].pending_count, 1);
-    assert!(results[0].pending_for.is_empty());
+    assert!(results[0].pending_for.as_ref().is_none_or(Vec::is_empty));
 
     // With --pending filter, the document now surfaces.
     let pending_filter = QueryFilter {
@@ -914,8 +950,8 @@ fn expanded_pending_for_partial_ack() {
         .find(|r| r.path.to_str().unwrap().contains("partial.md"))
         .unwrap();
 
-    assert_eq!(partial.comments.len(), 1);
-    assert_eq!(partial.comments[0].id, "pa1");
+    assert_eq!(partial.comments.as_ref().unwrap().len(), 1);
+    assert_eq!(partial.comments.as_ref().unwrap()[0].id, "pa1");
 }
 
 // ===========================================================================
@@ -932,7 +968,7 @@ fn query_default_includes_comments() {
     // Comments should be included by default (not empty).
     for r in &results {
         assert!(
-            !r.comments.is_empty(),
+            r.comments.as_ref().is_some_and(|v| !v.is_empty()),
             "default query should include comments for {}",
             r.path.display()
         );
@@ -949,7 +985,7 @@ fn expanded_comments_have_file_path() {
 
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     for r in &results {
-        for cm in &r.comments {
+        for cm in r.comments.iter().flatten() {
             assert_eq!(
                 cm.file, r.path,
                 "comment {}'s file field should match parent result path",
@@ -972,7 +1008,7 @@ fn query_summary_only() {
     assert!(!results.is_empty());
     for r in &results {
         assert!(
-            r.comments.is_empty(),
+            r.comments.as_ref().is_none_or(Vec::is_empty),
             "summary mode should suppress comments for {}",
             r.path.display()
         );
@@ -991,7 +1027,7 @@ fn backward_compat_expanded_flag() {
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     for r in &results {
         assert!(
-            !r.comments.is_empty(),
+            r.comments.as_ref().is_some_and(|v| !v.is_empty()),
             "--expanded should include comments for {}",
             r.path.display()
         );
@@ -1009,7 +1045,7 @@ fn file_path_on_default_comments() {
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
 
-    for cm in &review.comments {
+    for cm in review.comments.iter().flatten() {
         assert!(
             cm.file.to_str().unwrap().contains("review.md"),
             "comment {} file should be review.md, got {}",
@@ -1030,7 +1066,10 @@ fn summary_with_pending_filter() {
 
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     for r in &results {
-        assert!(r.comments.is_empty(), "summary suppresses comments");
+        assert!(
+            r.comments.as_ref().is_none_or(Vec::is_empty),
+            "summary suppresses comments"
+        );
         assert!(r.pending_count > 0, "pending filter still applies");
     }
 }
@@ -1047,7 +1086,7 @@ fn expanded_overrides_summary() {
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     for r in &results {
         assert!(
-            !r.comments.is_empty(),
+            r.comments.as_ref().is_some_and(|v| !v.is_empty()),
             "expanded=true should override summary for {}",
             r.path.display()
         );
@@ -1197,7 +1236,7 @@ fn content_regex_filters_comments() {
     // bob." — no alice.
     let all_comments: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     assert_eq!(all_comments, vec!["c1"]);
 }
@@ -1218,7 +1257,7 @@ fn content_regex_composes_with_pending() {
     let results = query(&system, Path::new("/exp"), &filter).unwrap();
     let ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     // c1, c2 (pending + contain "comment"), d1 (pending + contains "Comment"
     // capitalised — case-sensitive so excluded). Only c1, c2.
@@ -1281,7 +1320,7 @@ Nothing match-worthy here.
     let results = query(&system, Path::new("/d"), &filter).unwrap();
     let ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     assert_eq!(ids, vec!["m1"]);
 }
@@ -1407,6 +1446,7 @@ fn pending_for_me_surfaces_only_directed_unacked_by_caller() {
     let ids: Vec<&str> = results[0]
         .comments
         .iter()
+        .flatten()
         .map(|cm| cm.id.as_str())
         .collect();
     // Only `dir_alice` is directed to alice and still unacked by her.
@@ -1436,11 +1476,11 @@ fn pending_for_me_matches_pending_for() {
 
     let me_ids: Vec<&str> = me_results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     let for_ids: Vec<&str> = for_results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
 
     assert_eq!(me_ids, for_ids);
@@ -1460,6 +1500,7 @@ fn pending_broadcast_only_surfaces_unacked_broadcasts() {
     let ids: Vec<&str> = results[0]
         .comments
         .iter()
+        .flatten()
         .map(|cm| cm.id.as_str())
         .collect();
     // brd_open has zero acks (pending for alice).
@@ -1480,7 +1521,7 @@ fn pending_broadcast_excludes_directed_even_unacked() {
     let results = query(&system, Path::new("/four"), &filter).unwrap();
     let ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     assert!(
         !ids.contains(&"dir_alice"),
@@ -1505,7 +1546,7 @@ fn pending_for_me_and_pending_broadcast_union() {
     let results = query(&system, Path::new("/four"), &filter).unwrap();
     let mut ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     ids.sort_unstable();
     assert_eq!(ids, vec!["brd_open", "dir_alice"]);
@@ -1525,7 +1566,7 @@ fn pending_broadcast_respects_callers_ack() {
     let results = query(&system, Path::new("/four"), &filter).unwrap();
     let mut ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     ids.sort_unstable();
     // Both broadcasts count: brd_open has no acks; brd_mine was only
@@ -1548,7 +1589,7 @@ fn pending_union_composes_with_author_filter() {
     let results = query(&system, Path::new("/four"), &filter).unwrap();
     let ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     assert_eq!(ids, vec!["dir_alice"]);
 }
@@ -1620,7 +1661,7 @@ fn query_kind_filter_single_value() {
     let results = query(&system, Path::new("/kinds"), &filter).unwrap();
     let ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     assert_eq!(ids, vec!["q1"]);
 }
@@ -1636,7 +1677,7 @@ fn query_kind_filter_uses_or_semantics() {
     let results = query(&system, Path::new("/kinds"), &filter).unwrap();
     let mut ids: Vec<&str> = results
         .iter()
-        .flat_map(|r| r.comments.iter().map(|cm| cm.id.as_str()))
+        .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     ids.sort_unstable();
     assert_eq!(ids, vec!["q1", "t1"]);
@@ -1651,7 +1692,10 @@ fn query_kind_filter_empty_returns_everything() {
         ..QueryFilter::default()
     };
     let results = query(&system, Path::new("/kinds"), &filter).unwrap();
-    let count = results.iter().flat_map(|r| r.comments.iter()).count();
+    let count = results
+        .iter()
+        .flat_map(|r| r.comments.iter().flatten())
+        .count();
     assert_eq!(count, 3, "empty filter should return every comment");
 }
 

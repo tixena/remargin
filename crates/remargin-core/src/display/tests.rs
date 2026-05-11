@@ -603,11 +603,11 @@ fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult 
     .unwrap_or(u32::MAX);
     QueryResult {
         comment_count,
-        comments,
+        comments: Some(comments),
         last_activity,
         path: PathBuf::from(path),
         pending_count,
-        pending_for: Vec::new(),
+        pending_for: None,
     }
 }
 

@@ -135,7 +135,7 @@ export function InboxSection({
       const results = await backend.query(".", opts);
       const flat: InboxItem[] = [];
       for (const result of results) {
-        for (const comment of result.comments) {
+        for (const comment of result.comments ?? []) {
           flat.push({ file: result.path, comment });
         }
       }

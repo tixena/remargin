@@ -4711,7 +4711,7 @@ fn render_query_output(
                 r.pending_count,
             ),
         )?;
-        for cm in &r.comments {
+        for cm in r.comments.as_deref().unwrap_or(&[]) {
             let status = if cm.ack.is_empty() {
                 "pending"
             } else {

@@ -213,8 +213,9 @@ pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -
         first_file = false;
 
         let path_str = result.path.display().to_string();
-        let comment_count = result.comments.len();
-        let pending_count = count_pending_expanded(&result.comments);
+        let comments_slice = result.comments.as_deref().unwrap_or(&[]);
+        let comment_count = comments_slice.len();
+        let pending_count = count_pending_expanded(comments_slice);
         total_pending += pending_count;
 
         let pending_label = format_pending_label(pending_count, filter_name);
@@ -223,7 +224,7 @@ pub fn format_query_pretty(results: &[QueryResult], filter_name: Option<&str>) -
             "{path_str} ({comment_count} comments, {pending_label})"
         );
 
-        let mut comments: Vec<&ExpandedComment> = result.comments.iter().collect();
+        let mut comments: Vec<&ExpandedComment> = comments_slice.iter().collect();
         comments.sort_by_key(|cm| cm.line);
 
         for cm in &comments {

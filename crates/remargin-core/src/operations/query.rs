@@ -238,9 +238,10 @@ pub struct ExpandedComment {
 pub struct QueryResult {
     /// Total number of comments in the document.
     pub comment_count: u32,
-    /// Individual matching comments (populated by default; empty in summary mode).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub comments: Vec<ExpandedComment>,
+    /// `None` in summary mode; otherwise the (always non-empty)
+    /// list of matching comments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<Vec<ExpandedComment>>,
     /// Most recent activity timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_activity: Option<DateTime<FixedOffset>>,
@@ -248,9 +249,9 @@ pub struct QueryResult {
     pub path: PathBuf,
     /// Number of pending (unacked) comments.
     pub pending_count: u32,
-    /// Unique recipients on unacked comments.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub pending_for: Vec<String>,
+    /// `None` when no recipients have outstanding acks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_for: Option<Vec<String>>,
 }
 
 /// Query across documents in a directory tree.
@@ -348,20 +349,17 @@ pub fn query(
         // Collect expanded comments unless summary-only mode is requested.
         // When `expanded` is true OR `summary` is false, include comment data.
         let include_comments = !filter.summary || filter.expanded;
-        let expanded_comments = if include_comments {
-            let matched: Vec<ExpandedComment> = comments
+        let expanded_comments = include_comments.then(|| {
+            comments
                 .iter()
                 .filter(|cm| comment_matches_filters(cm, filter))
                 .map(|cm| expanded_from_comment(cm, &relative))
-                .collect();
-            // If no individual comments match, skip this file entirely.
-            if matched.is_empty() {
-                continue;
-            }
-            matched
-        } else {
-            Vec::new()
-        };
+                .collect::<Vec<ExpandedComment>>()
+        });
+        // Empty match list means no matches — skip the file entirely.
+        if matches!(&expanded_comments, Some(v) if v.is_empty()) {
+            continue;
+        }
 
         results.push(QueryResult {
             comment_count,
@@ -369,7 +367,7 @@ pub fn query(
             last_activity,
             path: relative,
             pending_count,
-            pending_for,
+            pending_for: (!pending_for.is_empty()).then_some(pending_for),
         });
     }
 
