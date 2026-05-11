@@ -27,7 +27,6 @@ import {
 import { SandboxGroupHeader } from "@/components/sidebar/SandboxGroupHeader";
 import { SandboxRow } from "@/components/sidebar/SandboxRow";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useBackend } from "@/hooks/useBackend";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
 import type { ViewMode } from "@/types";
@@ -326,7 +325,7 @@ export function SandboxSection({
         </div>
       )}
 
-      <ScrollArea className="max-h-64">
+      <div className="flex flex-col min-w-0">
         {groups.map((group) => {
           const key = group.source ?? DEFAULT_GROUP_KEY;
           return (
@@ -361,7 +360,7 @@ export function SandboxSection({
           disabled={totalStaged === 0 || submitting}
           submitting={submitting}
         />
-      </ScrollArea>
+      </div>
     </div>
   );
 }
