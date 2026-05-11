@@ -61,10 +61,31 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [kindFilter, setKindFilter] = useState<string[]>([]);
   const [inboxKinds, setInboxKinds] = useState<string[]>([]);
   const [threadKinds, setThreadKinds] = useState<string[]>([]);
+  const [availableFolders, setAvailableFolders] = useState<string[]>([]);
 
   const bumpRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
+
+  // Keep the create-mode folder picker fed with current vault folders.
+  // Sort lexicographically; vault root (path "") sorts to the top and
+  // renders as "(vault root)" inside the picker.
+  useEffect(() => {
+    const refreshFolders = () => {
+      const folders = plugin.app.vault.getAllFolders(true).map((f) => f.path);
+      folders.sort((a, b) => a.localeCompare(b));
+      setAvailableFolders(folders);
+    };
+    refreshFolders();
+    const createRef = plugin.app.vault.on("create", refreshFolders);
+    const deleteRef = plugin.app.vault.on("delete", refreshFolders);
+    const renameRef = plugin.app.vault.on("rename", refreshFolders);
+    return () => {
+      plugin.app.vault.offref(createRef);
+      plugin.app.vault.offref(deleteRef);
+      plugin.app.vault.offref(renameRef);
+    };
+  }, [plugin]);
 
   const handleSandboxView = useCallback(
     (next: ViewMode) => {
@@ -307,6 +328,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
           onSubmit={handleSandboxSubmit}
           onSavePrompt={handleSavePrompt}
           onDeletePrompt={handleDeletePrompt}
+          availableFolders={availableFolders}
         />
       }
       inboxActions={<ViewToggle value={inboxView} onChange={handleInboxView} />}

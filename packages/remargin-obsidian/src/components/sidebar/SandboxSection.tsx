@@ -79,6 +79,11 @@ interface SandboxSectionProps {
    * without a key). When set, the button is disabled.
    */
   savePromptDisabledReason?: string;
+  /**
+   * Vault folders the create-mode picker can offer. Forwarded to
+   * `<InlinePromptEditor>` via `<PromptGroupSection>`.
+   */
+  availableFolders?: string[];
 }
 
 function errorMessage(err: unknown): string {
@@ -106,6 +111,7 @@ export function SandboxSection({
   onSavePrompt,
   onDeletePrompt,
   savePromptDisabledReason,
+  availableFolders,
 }: SandboxSectionProps) {
   const backend = useBackend();
   const [files, setFiles] = useState<string[]>([]);
@@ -333,6 +339,7 @@ export function SandboxSection({
               onSavePrompt={onSavePrompt}
               onDeletePrompt={onDeletePrompt}
               savePromptDisabledReason={savePromptDisabledReason}
+              availableFolders={availableFolders}
               onSubmitGroup={handleSubmitGroup}
               submitting={submitting}
             />
@@ -422,6 +429,8 @@ export interface PromptGroupSectionProps {
   onSavePrompt?: (args: InlinePromptEditorSaveArgs) => Promise<void>;
   onDeletePrompt?: (source: string) => Promise<void>;
   savePromptDisabledReason?: string;
+  /** Forwarded to the create-mode folder picker in `<InlinePromptEditor>`. */
+  availableFolders?: string[];
   /** Per-group Submit. Renders inside the Staged sub-section. */
   onSubmitGroup?: (group: PromptGroup) => void | Promise<void>;
   /** True while any group's Submit is in flight; disables every group's Submit. */
@@ -448,6 +457,7 @@ export function PromptGroupSection({
   onSavePrompt,
   onDeletePrompt,
   savePromptDisabledReason,
+  availableFolders,
   onSubmitGroup,
   submitting,
 }: PromptGroupSectionProps) {
@@ -568,6 +578,7 @@ export function PromptGroupSection({
           onDelete={!group.isDefault && onDeletePrompt ? handleDelete : undefined}
           onCancel={() => setEditing(false)}
           saveDisabledReason={savePromptDisabledReason}
+          availableFolders={availableFolders}
         />
       )}
 

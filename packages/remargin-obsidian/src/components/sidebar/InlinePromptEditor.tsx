@@ -1,7 +1,8 @@
 import type { EditorView } from "@codemirror/view";
-import { Check, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import { createCommentEditor } from "@/editor/commentEditor";
 
 function noop(): void {
@@ -38,6 +39,12 @@ export interface InlinePromptEditorProps {
    * editable so the user can still copy the buffer.
    */
   saveDisabledReason?: string;
+  /**
+   * Vault folders the create-mode picker can offer. Ignored in edit
+   * mode (the folder is locked to the existing `source`'s dirname).
+   * Vault root is represented as an empty string in this list.
+   */
+  availableFolders?: string[];
 }
 
 /**
@@ -58,12 +65,17 @@ export function InlinePromptEditor({
   onDelete,
   onCancel,
   saveDisabledReason,
+  availableFolders,
 }: InlinePromptEditorProps) {
   const isCreate = source === null;
   const [name, setName] = useState(initialName);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chosenFolder, setChosenFolder] = useState(folder);
+  const [folderQuery, setFolderQuery] = useState("");
+  const [showFolderDropdown, setShowFolderDropdown] = useState(false);
+  const folderPickerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const submitRef = useRef<() => void>(noop);
@@ -83,14 +95,15 @@ export function InlinePromptEditor({
     setSubmitting(true);
     setError(null);
     try {
-      const target = source ?? `${folder.replace(/\/$/u, "")}/.remargin.yaml`;
+      const dir = (source === null ? chosenFolder : folder).replace(/\/$/u, "");
+      const target = source ?? (dir === "" ? ".remargin.yaml" : `${dir}/.remargin.yaml`);
       await onSave({ source: target, name, prompt });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, saveDisabledReason, source, folder, name, onSave, getBody]);
+  }, [submitting, saveDisabledReason, source, folder, chosenFolder, name, onSave, getBody]);
 
   const handleDelete = useCallback(async () => {
     if (deleting || !onDelete || !source) return;
@@ -139,7 +152,33 @@ export function InlinePromptEditor({
     };
   }, []);
 
-  const targetLabel = source ?? `${folder.replace(/\/$/u, "")}/.remargin.yaml`;
+  const filteredFolders = useMemo(() => {
+    const q = folderQuery.trim().toLowerCase();
+    const list = availableFolders ?? [];
+    if (!q) return list;
+    return list.filter((f) => f.toLowerCase().includes(q));
+  }, [availableFolders, folderQuery]);
+
+  // Close the folder dropdown when the user clicks outside the picker.
+  // mousedown (not click) so the close happens before any inner button's
+  // onClick — otherwise picking from the list races with the outside-close.
+  useEffect(() => {
+    if (!showFolderDropdown) return undefined;
+    const onDocumentMouseDown = (e: MouseEvent) => {
+      if (!folderPickerRef.current) return;
+      if (!folderPickerRef.current.contains(e.target as Node)) {
+        setShowFolderDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    return () => document.removeEventListener("mousedown", onDocumentMouseDown);
+  }, [showFolderDropdown]);
+
+  const editTargetLabel = source ?? `${folder.replace(/\/$/u, "")}/.remargin.yaml`;
+  const createTargetLabel = (() => {
+    const dir = chosenFolder.replace(/\/$/u, "");
+    return dir === "" ? ".remargin.yaml" : `${dir}/.remargin.yaml`;
+  })();
   const saveLabel = isCreate ? "Create" : "Save";
 
   return (
@@ -157,7 +196,7 @@ export function InlinePromptEditor({
           title="Cancel"
           onClick={onCancel}
         >
-          <X className="w-3 h-3" />
+          <ObsidianIcon icon="x" size={12} />
         </button>
       </div>
 
@@ -180,9 +219,46 @@ export function InlinePromptEditor({
         />
       </label>
 
-      <div className="flex items-center gap-1 text-[10px] text-text-faint font-mono">
-        <span>{targetLabel}</span>
-      </div>
+      {isCreate ? (
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wide text-text-faint">Folder</span>
+          <div ref={folderPickerRef} className="relative">
+            <input
+              type="text"
+              value={folderQuery}
+              onChange={(e) => setFolderQuery(e.target.value)}
+              onFocus={() => setShowFolderDropdown(true)}
+              placeholder={chosenFolder === "" ? "(vault root)" : chosenFolder}
+              className="w-full p-1.5 text-xs font-mono bg-bg-primary border border-bg-border rounded-sm text-text-normal placeholder:text-text-faint focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            {showFolderDropdown && filteredFolders.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full max-h-40 overflow-y-auto bg-bg-secondary border border-bg-border rounded-sm shadow">
+                {filteredFolders.map((f) => (
+                  <button
+                    key={f || "__root__"}
+                    type="button"
+                    className="w-full text-left px-2 py-1 text-xs font-mono text-text-normal hover:bg-bg-hover"
+                    onClick={() => {
+                      setChosenFolder(f);
+                      setFolderQuery("");
+                      setShowFolderDropdown(false);
+                    }}
+                  >
+                    {f === "" ? "(vault root)" : f}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <span className="text-[9px] text-text-faint font-mono">
+            Will write to: {createTargetLabel}
+          </span>
+        </label>
+      ) : (
+        <div className="flex items-center gap-1 text-[10px] text-text-faint font-mono">
+          <span>{editTargetLabel}</span>
+        </div>
+      )}
 
       {error && (
         <div className="text-[10px] text-red-400 font-mono whitespace-pre-wrap break-words">
