@@ -206,7 +206,9 @@ describe("PromptGroupSection — edit / configure affordances", () => {
       html.includes('title="Edit prompt"'),
       `expected Edit prompt gear title, got: ${html}`
     );
-    assert.ok(html.includes("lucide-settings"), `expected gear icon, got: ${html}`);
+    // The gear glyph is painted by Obsidian's setIcon (via ObsidianIcon) at
+    // runtime — in jsdom the placeholder span is empty. The title attribute
+    // is the testable contract.
   });
 
   it("renders the '+ Configure' affordance ONLY on the Default group", () => {

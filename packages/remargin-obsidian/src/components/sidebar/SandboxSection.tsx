@@ -6,7 +6,6 @@ import {
   Folder,
   Loader2,
   Send,
-  Settings,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
@@ -27,6 +26,7 @@ import {
 import { SandboxGroupHeader } from "@/components/sidebar/SandboxGroupHeader";
 import { SandboxRow } from "@/components/sidebar/SandboxRow";
 import { Button } from "@/components/ui/button";
+import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import { useBackend } from "@/hooks/useBackend";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
 import type { ViewMode } from "@/types";
@@ -190,11 +190,6 @@ export function SandboxSection({
     [files, prompts, resolveErrors, staged]
   );
 
-  const totalStaged = useMemo(
-    () => groups.reduce((sum, g) => (g.hasError ? sum : sum + g.staged.length), 0),
-    [groups]
-  );
-
   const toggleSelected = useCallback((path: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -233,72 +228,59 @@ export function SandboxSection({
     [backend, refresh]
   );
 
-  const buildSubmitPayload = useCallback((): StagedGroup[] => {
-    const payload: StagedGroup[] = [];
-    for (const g of groups) {
-      if (g.hasError) continue;
-      const stagedFiles = g.files.filter((f) => staged.has(f));
-      if (stagedFiles.length > 0) {
-        payload.push({ prompt: g.prompt, files: stagedFiles });
-      }
-    }
-    return payload;
-  }, [groups, staged]);
-
   // Per-group submit status. Keys are the group's source ?? DEFAULT_GROUP_KEY.
-  // Cleared when a new Submit run starts.
+  // Each group's status is cleared when its own Submit is fired again.
   const [groupStatus, setGroupStatus] = useState<Map<string, "pending" | "ok" | "failed">>(
     new Map()
   );
   const [groupErrors, setGroupErrors] = useState<Map<string, string>>(new Map());
 
-  const handleSubmit = useCallback(async () => {
-    if (submitting) return;
-    const payload = buildSubmitPayload();
-    if (payload.length === 0) return;
-    setSubmitting(true);
-    setError(null);
-    setGroupStatus(new Map());
-    setGroupErrors(new Map());
+  const handleSubmitGroup = useCallback(
+    async (group: PromptGroup) => {
+      if (submitting) return;
+      if (group.hasError) return;
+      const stagedFiles = group.files.filter((f) => staged.has(f));
+      if (stagedFiles.length === 0) return;
+      const key = group.source ?? DEFAULT_GROUP_KEY;
+      const payload: StagedGroup[] = [{ prompt: group.prompt, files: stagedFiles }];
+      setSubmitting(true);
+      setError(null);
+      setGroupStatus((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+      setGroupErrors((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
 
-    const progress: SubmitProgress = {
-      onGroupStart: (group) => {
-        const key = group.prompt.source ?? DEFAULT_GROUP_KEY;
-        setGroupStatus((prev) => {
-          const next = new Map(prev);
-          next.set(key, "pending");
-          return next;
-        });
-      },
-      onGroupComplete: (group, result) => {
-        const key = group.prompt.source ?? DEFAULT_GROUP_KEY;
-        setGroupStatus((prev) => {
-          const next = new Map(prev);
-          next.set(key, result.ok ? "ok" : "failed");
-          return next;
-        });
-        if (result.error) {
-          setGroupErrors((prev) => {
-            const next = new Map(prev);
-            next.set(key, result.error ?? "submit failed");
-            return next;
-          });
-        }
-      },
-    };
+      const progress: SubmitProgress = {
+        onGroupStart: (g) => {
+          const k = g.prompt.source ?? DEFAULT_GROUP_KEY;
+          setGroupStatus((prev) => new Map(prev).set(k, "pending"));
+        },
+        onGroupComplete: (g, result) => {
+          const k = g.prompt.source ?? DEFAULT_GROUP_KEY;
+          setGroupStatus((prev) => new Map(prev).set(k, result.ok ? "ok" : "failed"));
+          if (result.error) {
+            setGroupErrors((prev) => new Map(prev).set(k, result.error ?? "submit failed"));
+          }
+        },
+      };
 
-    try {
-      // Parent owns the per-group invocation + cleanup; we only render
-      // status. A void return is tolerated for parents that don't
-      // implement the new contract yet.
-      await onSubmit?.(payload, progress);
-    } catch (err) {
-      console.error("SandboxSection.onSubmit failed:", err);
-      setError(errorMessage(err));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [buildSubmitPayload, onSubmit, submitting]);
+      try {
+        await onSubmit?.(payload, progress);
+      } catch (err) {
+        console.error("SandboxSection.onSubmit failed:", err);
+        setError(errorMessage(err));
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [submitting, staged, onSubmit]
+  );
 
   if (loading && files.length === 0) {
     return <div className="px-4 py-3 text-xs text-text-faint">Loading sandbox...</div>;
@@ -351,15 +333,11 @@ export function SandboxSection({
               onSavePrompt={onSavePrompt}
               onDeletePrompt={onDeletePrompt}
               savePromptDisabledReason={savePromptDisabledReason}
+              onSubmitGroup={handleSubmitGroup}
+              submitting={submitting}
             />
           );
         })}
-        <SubmitAllRow
-          totalStaged={totalStaged}
-          onClick={handleSubmit}
-          disabled={totalStaged === 0 || submitting}
-          submitting={submitting}
-        />
       </div>
     </div>
   );
@@ -444,6 +422,10 @@ export interface PromptGroupSectionProps {
   onSavePrompt?: (args: InlinePromptEditorSaveArgs) => Promise<void>;
   onDeletePrompt?: (source: string) => Promise<void>;
   savePromptDisabledReason?: string;
+  /** Per-group Submit. Renders inside the Staged sub-section. */
+  onSubmitGroup?: (group: PromptGroup) => void | Promise<void>;
+  /** True while any group's Submit is in flight; disables every group's Submit. */
+  submitting?: boolean;
 }
 
 // Exported for component-test isolation; internal in production use.
@@ -466,6 +448,8 @@ export function PromptGroupSection({
   onSavePrompt,
   onDeletePrompt,
   savePromptDisabledReason,
+  onSubmitGroup,
+  submitting,
 }: PromptGroupSectionProps) {
   const [headerOpen, setHeaderOpen] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -568,7 +552,7 @@ export function PromptGroupSection({
                 setHeaderOpen(true);
               }}
             >
-              <Settings className="w-3 h-3" />
+              <ObsidianIcon icon="settings" size={12} />
             </button>
           )}
         </div>
@@ -622,6 +606,19 @@ export function PromptGroupSection({
                   onOpenFile={onOpenFile}
                 />
               )}
+          {stagedOpen && onSubmitGroup && (
+            <div className="flex items-center justify-end px-4 py-2">
+              <Button
+                size="sm"
+                className="h-7 px-3 text-xs bg-accent text-white hover:bg-accent-hover"
+                disabled={group.staged.length === 0 || group.hasError || !!submitting}
+                onClick={() => void onSubmitGroup(group)}
+              >
+                <Send className="w-3 h-3 mr-1" />
+                {submitting ? "Submitting..." : `Submit (${group.staged.length})`}
+              </Button>
+            </div>
+          )}
 
           <SandboxGroupHeader
             label="Unstaged"
@@ -660,30 +657,6 @@ export function PromptGroupSection({
               )}
         </>
       )}
-    </div>
-  );
-}
-
-interface SubmitAllRowProps {
-  totalStaged: number;
-  onClick: () => void;
-  disabled: boolean;
-  submitting: boolean;
-}
-
-/** Single Submit-all button rendered at the bottom of the Sandbox. */
-function SubmitAllRow({ totalStaged, onClick, disabled, submitting }: SubmitAllRowProps) {
-  return (
-    <div className="flex items-center justify-end px-4 py-3 border-t border-border">
-      <Button
-        size="sm"
-        className="h-7 px-3 text-xs bg-accent text-white hover:bg-accent-hover"
-        disabled={disabled}
-        onClick={onClick}
-      >
-        <Send className="w-3 h-3 mr-1" />
-        {submitting ? "Submitting..." : `Submit all (${totalStaged})`}
-      </Button>
     </div>
   );
 }

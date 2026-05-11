@@ -44,6 +44,11 @@ export function SandboxRow({
         className="group flex items-center gap-1.5 py-1 pr-4 hover:bg-bg-hover"
         style={{ paddingLeft }}
       >
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelected(path)}
+          className="w-3 h-3"
+        />
         <FileText className="w-3 h-3 text-text-faint shrink-0" />
         <button
           type="button"
