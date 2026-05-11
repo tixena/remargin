@@ -470,7 +470,11 @@ enum Commands {
         #[command(flatten)]
         unrestricted_args: UnrestrictedArgs,
     },
-    /// Install or uninstall the embedded Obsidian plugin in a vault.
+    /// Install or uninstall the Obsidian plugin in a vault.
+    ///
+    /// Fetches `main.js` / `manifest.json` from the matching GitHub
+    /// release (`obsidian-v{CARGO_PKG_VERSION}`) at runtime; preserves
+    /// any existing `data.json` across reinstalls.
     #[cfg(feature = "obsidian")]
     Obsidian {
         #[command(subcommand)]
