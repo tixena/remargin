@@ -256,6 +256,7 @@ fn tools_list_returns_all_tools() {
         "permissions_check",
         "permissions_show",
         "plan",
+        "prompt_resolve",
         "purge",
         "query",
         "react",
@@ -4544,4 +4545,129 @@ hello
             .unwrap()
             .contains("remargin verify")
     );
+}
+
+#[test]
+fn prompt_resolve_returns_nearest_block() {
+    let base = Path::new("/vault");
+    let system = MockSystem::new()
+        .with_dir(base.join("a/b"))
+        .unwrap()
+        .with_file(
+            base.join(".remargin.yaml"),
+            b"system_prompt:\n  name: outer\n  prompt: outer body\n",
+        )
+        .unwrap()
+        .with_file(
+            base.join("a/.remargin.yaml"),
+            b"system_prompt:\n  name: inner\n  prompt: inner body\n",
+        )
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "prompt_resolve",
+                "arguments": {
+                    "file": "a/b/file.md"
+                }
+            }
+        }),
+    );
+
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["name"], "inner");
+    assert_eq!(payload["prompt"], "inner body");
+    assert_eq!(payload["is_default"], false);
+    assert!(payload["source"].is_string());
+}
+
+#[test]
+fn prompt_resolve_falls_through_to_default() {
+    let base = Path::new("/vault");
+    let system = MockSystem::new().with_dir(base.join("a/b")).unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "prompt_resolve",
+                "arguments": {
+                    "file": "a/b/file.md"
+                }
+            }
+        }),
+    );
+
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["name"], "default");
+    assert_eq!(payload["is_default"], true);
+    assert!(payload["source"].is_null());
+    assert!(
+        payload["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("remargin skill")
+    );
+}
+
+#[test]
+fn prompt_resolve_absolute_and_relative_paths_match() {
+    let base = Path::new("/vault");
+    let system = MockSystem::new()
+        .with_dir(base.join("a"))
+        .unwrap()
+        .with_file(
+            base.join("a/.remargin.yaml"),
+            b"system_prompt:\n  name: a\n  prompt: body\n",
+        )
+        .unwrap();
+    let config = test_config();
+
+    let response_rel = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "prompt_resolve",
+                "arguments": { "file": "a/file.md" }
+            }
+        }),
+    );
+    let response_abs = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "prompt_resolve",
+                "arguments": { "file": "/vault/a/file.md" }
+            }
+        }),
+    );
+
+    let rel = extract_tool_text(&response_rel);
+    let abs = extract_tool_text(&response_abs);
+    assert_eq!(rel["name"], abs["name"]);
+    assert_eq!(rel["prompt"], abs["prompt"]);
 }

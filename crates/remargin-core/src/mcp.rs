@@ -19,6 +19,7 @@ use serde_json::{Map, Value, json};
 use crate::activity;
 use crate::config::identity::{IdentityFlags, resolve_identity, resolve_identity_report};
 use crate::config::permissions::resolve::{ResolvedPermissions, resolve_permissions};
+use crate::config::system_prompt::resolve_system_prompt;
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
 use crate::document;
@@ -85,6 +86,7 @@ const NO_PATH_TOOLS: &[&str] = &[
     "identity_create",
     "permissions_check",
     "permissions_show",
+    "prompt_resolve",
     "whoami",
 ];
 
@@ -519,6 +521,29 @@ fn desc_purge() -> ToolDesc {
     }
 }
 
+/// Build the `prompt_resolve` tool descriptor.
+///
+/// Read-only walk-up: surfaces the nearest `system_prompt:` block
+/// declared on a `.remargin.yaml` for the supplied file or directory,
+/// falling through to the locked Default body when the walk exhausts.
+/// Identity flags are accepted for surface symmetry but never gate the
+/// resolution.
+fn desc_prompt_resolve() -> ToolDesc {
+    ToolDesc {
+        name: "prompt_resolve",
+        description: "Resolve the nearest folder-scoped system prompt for a file or directory. \
+             Walks `.remargin.yaml` files upward; first one declaring a `system_prompt:` block \
+             wins. Falls through to a locked Default body when the walk exhausts. Read-only.",
+        schema: with_identity_flag_schema(json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "Path to the file (or directory) to resolve a prompt for." }
+            },
+            "required": ["file"]
+        })),
+    }
+}
+
 /// Build the `identity_create` tool descriptor.
 ///
 /// Mirrors the CLI `remargin identity create` surface: prints a
@@ -831,6 +856,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_permissions_check(),
         desc_permissions_show(),
         desc_plan(),
+        desc_prompt_resolve(),
         desc_purge(),
         desc_query(),
         desc_react(),
@@ -1276,6 +1302,7 @@ fn dispatch_tool(
         "permissions_check" => handle_permissions_check(system, base_dir, p),
         "permissions_show" => handle_permissions_show(system, base_dir),
         "plan" => handle_plan(system, base_dir, config, p),
+        "prompt_resolve" => handle_prompt_resolve(system, base_dir, p),
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
@@ -1855,6 +1882,25 @@ fn parse_plan_line_range(raw: &str) -> Result<(usize, usize)> {
 
 /// Handle the `purge` tool: strip all comments from a document, or
 /// every visible `.md` file in a directory when `recursive` is true.
+/// Handle the `prompt_resolve` tool: walk-up the `.remargin.yaml`
+/// chain looking for a `system_prompt:` block. Read-only; identity
+/// flags are accepted (for surface symmetry) but never gate the walk.
+fn handle_prompt_resolve(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let file = required_str(params, "file")?;
+    let candidate = Path::new(file);
+    let absolute = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        base_dir.join(candidate)
+    };
+    let resolved = resolve_system_prompt(system, &absolute)?;
+    serde_json::to_value(&resolved).context("serializing prompt_resolve output")
+}
+
 fn handle_purge(
     system: &dyn System,
     base_dir: &Path,

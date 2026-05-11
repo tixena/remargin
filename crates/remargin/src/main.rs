@@ -508,6 +508,22 @@ enum Commands {
         #[command(flatten)]
         identity_args: IdentityArgs,
     },
+    /// Folder-scoped system-prompt resolver.
+    ///
+    /// Read-only walk-up that mirrors the identity resolver but anchors
+    /// on the `system_prompt:` block of a `.remargin.yaml`. Identity
+    /// flags are accepted for surface symmetry and never gate the
+    /// resolution. Falls through to the locked Default body when the
+    /// walk exhausts.
+    Prompt {
+        /// Subcommand: resolve.
+        #[command(subcommand)]
+        action: PromptAction,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
     /// Strip all comments from a document.
     ///
     /// With `--recursive`, treat `file` as a directory and purge every
@@ -1139,6 +1155,24 @@ enum IdentityAction {
     },
 }
 
+/// `remargin prompt` subcommands. Room for `set` / `unset` / `list`
+/// later — only `resolve` ships in v1 (the inline editor lives in the
+/// Obsidian plugin).
+#[derive(clap::Subcommand)]
+enum PromptAction {
+    /// Resolve the nearest folder-scoped system prompt for a file or
+    /// directory. Falls through to the locked Default body when the
+    /// walk exhausts.
+    Resolve {
+        /// File or directory to resolve a prompt for. Directories are
+        /// treated as the starting directory; files have their parent
+        /// walked.
+        file: String,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+}
+
 /// Sandbox subcommands.
 #[derive(clap::Subcommand)]
 enum SandboxAction {
@@ -1594,6 +1628,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Mcp { output_args, .. }
         | Commands::Metadata { output_args, .. }
         | Commands::Mv { output_args, .. }
+        | Commands::Prompt { output_args, .. }
         | Commands::Purge { output_args, .. }
         | Commands::Query { output_args, .. }
         | Commands::React { output_args, .. }
@@ -1774,6 +1809,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Activity { .. }
         | Commands::Identity { .. }
         | Commands::Permissions { .. }
+        | Commands::Prompt { .. }
         | Commands::ResolveMode { .. }
         | Commands::Restrict { .. }
         | Commands::Keygen { .. }
@@ -1825,6 +1861,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Mcp { identity_args, .. }
         | Commands::Mv { identity_args, .. }
         | Commands::Plan { identity_args, .. }
+        | Commands::Prompt { identity_args, .. }
         | Commands::Purge { identity_args, .. }
         | Commands::Query { identity_args, .. }
         | Commands::React { identity_args, .. }
@@ -1873,6 +1910,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Mv { .. }
         | Commands::Permissions { .. }
         | Commands::Plan { .. }
+        | Commands::Prompt { .. }
         | Commands::Purge { .. }
         | Commands::Query { .. }
         | Commands::React { .. }
@@ -1926,6 +1964,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Mv { .. }
         | Commands::Permissions { .. }
         | Commands::Plan { .. }
+        | Commands::Prompt { .. }
         | Commands::Purge { .. }
         | Commands::Query { .. }
         | Commands::React { .. }
@@ -2035,6 +2074,7 @@ fn try_dispatch_config_free(
     match &cli.command {
         Commands::Version => handle_version(sinks).map(Some),
         Commands::Identity { .. } => handle_identity(&cli.command, sinks, system, cwd).map(Some),
+        Commands::Prompt { .. } => handle_prompt(&cli.command, sinks, system, cwd).map(Some),
         Commands::ResolveMode { .. } => {
             handle_resolve_mode(&cli.command, sinks, system, cwd).map(Some)
         }
@@ -2082,6 +2122,33 @@ fn handle_identity(
         identity_args,
         output_args.json,
     )
+}
+
+fn handle_prompt(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    let Commands::Prompt {
+        action,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_prompt called with wrong subcommand");
+    };
+    match action {
+        PromptAction::Resolve {
+            file,
+            output_args: action_output,
+        } => {
+            // Honour --json on either side so callers can place it
+            // wherever clap accepts it without surprise.
+            let json_mode = output_args.json || action_output.json;
+            cmd_prompt_resolve(sinks, system, cwd, file, json_mode)
+        }
+    }
 }
 
 fn handle_resolve_mode(
@@ -2259,6 +2326,7 @@ fn dispatch_with_config(
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
         | Commands::Permissions { .. }
+        | Commands::Prompt { .. }
         | Commands::ResolveMode { .. }
         | Commands::Restrict { .. }
         | Commands::Skill { .. }
@@ -3791,6 +3859,62 @@ fn emit_unprotect_summary(
         "  Layer 1 (remargin's own ops) stops enforcing immediately on the next call."
     )
     .context("writing to stderr")?;
+    Ok(())
+}
+
+fn cmd_prompt_resolve(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    file: &str,
+    json_mode: bool,
+) -> Result<()> {
+    let target_buf = expand_cli_path(system, file)?;
+    let absolute = if target_buf.is_absolute() {
+        target_buf
+    } else {
+        cwd.join(&target_buf)
+    };
+    let resolved = config::system_prompt::resolve_system_prompt(system, &absolute)?;
+    if json_mode {
+        let value = serde_json::to_value(&resolved).context("serializing prompt_resolve output")?;
+        return print_output(sinks, true, &value);
+    }
+    write_prompt_resolve_text(sinks, &absolute, &resolved)
+}
+
+fn write_prompt_resolve_text(
+    sinks: &mut IoSinks<'_>,
+    target: &Path,
+    resolved: &config::system_prompt::ResolvedSystemPrompt,
+) -> Result<()> {
+    writeln!(sinks.stderr, "Resolved prompt for: {}", target.display())
+        .context("writing to stderr")?;
+    writeln!(sinks.stderr, "  Name:    {}", resolved.name).context("writing to stderr")?;
+    match &resolved.source {
+        Some(path) => writeln!(sinks.stderr, "  Source:  {}", path.display()),
+        None => writeln!(sinks.stderr, "  Source:  (walk exhausted)"),
+    }
+    .context("writing to stderr")?;
+    writeln!(
+        sinks.stderr,
+        "  Default: {}",
+        if resolved.is_default { "yes" } else { "no" },
+    )
+    .context("writing to stderr")?;
+    writeln!(
+        sinks.stderr,
+        "  Body ({} chars):",
+        resolved.prompt.chars().count(),
+    )
+    .context("writing to stderr")?;
+    if resolved.prompt.is_empty() {
+        writeln!(sinks.stderr, "    (empty)").context("writing to stderr")?;
+    } else {
+        for line in resolved.prompt.lines() {
+            writeln!(sinks.stderr, "    {line}").context("writing to stderr")?;
+        }
+    }
     Ok(())
 }
 

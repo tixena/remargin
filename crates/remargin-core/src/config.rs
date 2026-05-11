@@ -3,6 +3,7 @@
 pub mod identity;
 pub mod permissions;
 pub mod registry;
+pub mod system_prompt;
 
 #[cfg(test)]
 mod tests;
@@ -44,6 +45,28 @@ pub struct Config {
     /// only.
     #[serde(default)]
     pub permissions: Permissions,
+    /// Optional folder-scoped system prompt for AI runs over docs in
+    /// this realm. Resolved by walking parents via
+    /// [`system_prompt::resolve_system_prompt`]; identity-free.
+    #[serde(default)]
+    pub system_prompt: Option<SystemPrompt>,
+}
+
+/// Folder-scoped system prompt declared on a `.remargin.yaml`.
+///
+/// Picked up by [`system_prompt::resolve_system_prompt`], which walks
+/// the parent chain from a file and returns the nearest match. Identity
+/// is not consulted: the prompt is a property of the directory tree,
+/// not of the caller.
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct SystemPrompt {
+    /// Human-readable label. When absent, callers derive a name from
+    /// the basename of the owning folder.
+    pub name: Option<String>,
+    /// The literal prompt body. Written verbatim into the AI payload
+    /// by the caller — this loader does no templating.
+    pub prompt: String,
 }
 
 /// Enforcement mode for the participant registry.
