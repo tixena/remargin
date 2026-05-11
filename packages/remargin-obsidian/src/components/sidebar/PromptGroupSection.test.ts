@@ -7,21 +7,8 @@ import type { PromptGroup } from "./buildPromptGroups.ts";
 import type { InlinePromptEditorSaveArgs } from "./InlinePromptEditor.tsx";
 import { PromptGroupSection, type PromptGroupSectionProps } from "./SandboxSection.tsx";
 
-/**
- * Component tests for the per-prompt outer container inside the
- * by-prompt sandbox (rem-jl3h). These pin:
- *   - header chrome (chevron, name + scope, count badge)
- *   - Submit-status badge variants (pending spinner, ok check, failed
- *     triangle + tooltip)
- *   - editing toggle (gear button label) and the "+ Configure" entry
- *     point on the Default group
- *   - error group disables the gear / edit affordances
- *
- * `renderToStaticMarkup` doesn't fire effects or run handlers, so this
- * locks the SSR output. Behavioural state (editing toggling, header
- * collapse) is asserted via the initial render only — first-render
- * defaults are `headerOpen=true`, `editing=false`.
- */
+// SSR-only render — first-render defaults are headerOpen=true, editing=false;
+// behavioural state changes are not reachable without a client renderer.
 
 function explicit(overrides: Partial<PromptGroup> = {}): PromptGroup {
   const prompt: ResolvedSystemPrompt = {

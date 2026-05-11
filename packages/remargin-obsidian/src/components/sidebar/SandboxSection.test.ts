@@ -11,17 +11,8 @@ import type RemarginPlugin from "../../main.ts";
 import { DEFAULT_SETTINGS } from "../../types.ts";
 import { SandboxSection } from "./SandboxSection.tsx";
 
-/**
- * Component tests for the post-grouping SandboxSection (rem-jl3h).
- *
- * `renderToStaticMarkup` does NOT fire `useEffect`, so the initial
- * render path is the loading state (no fetch has happened yet). That
- * loading-state contract is exactly what these tests pin — the
- * subsequent fetch + grouping path is covered exhaustively by the
- * pure buildPromptGroups suite (and by PromptGroupSection.test.ts for
- * the per-group rendering). Combined, the matrix locks all three
- * layers without requiring JSDOM.
- */
+// SSR skips useEffect, so only the pre-fetch loading state is reachable here.
+// Post-fetch grouping is exercised by buildPromptGroups + PromptGroupSection.
 
 const pluginStub = { settings: DEFAULT_SETTINGS } as unknown as RemarginPlugin;
 

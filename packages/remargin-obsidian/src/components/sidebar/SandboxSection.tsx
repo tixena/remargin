@@ -447,14 +447,7 @@ export interface PromptGroupSectionProps {
   savePromptDisabledReason?: string;
 }
 
-/**
- * One prompt-scoped outer container. Renders a header with the
- * resolved prompt's name + scope, then the existing Staged / Unstaged
- * sub-sections, scoped to this group's files.
- *
- * Exported for component-test isolation (rem-jl3h). Internal to the
- * Sandbox section in production use.
- */
+// Exported for component-test isolation; internal in production use.
 export function PromptGroupSection({
   group,
   viewMode,

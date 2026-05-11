@@ -8,15 +8,8 @@ import {
   type InlinePromptEditorSaveArgs,
 } from "./InlinePromptEditor.tsx";
 
-/**
- * Component tests for the inline system-prompt editor (rem-jl3h).
- *
- * `renderToStaticMarkup` does not fire effects, so the CM6 mount in
- * useEffect never runs at test time. That is exactly what we want:
- * these tests pin the static markup contract (create vs edit chrome,
- * Save button label, Delete affordance, strict-mode disabled state)
- * without dragging in @codemirror.
- */
+// renderToStaticMarkup skips useEffect, so the CM6 mount never runs in
+// these tests — the @codemirror import stays cold.
 
 const noopSave = async (_args: InlinePromptEditorSaveArgs): Promise<void> => {
   /* test-only no-op */
