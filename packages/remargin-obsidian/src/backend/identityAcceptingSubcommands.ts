@@ -23,6 +23,7 @@ export const IDENTITY_ACCEPTING_SUBCOMMANDS = new Set([
   "identity",
   "migrate",
   "plan",
+  "prompt",
   "purge",
   "react",
   "rm",

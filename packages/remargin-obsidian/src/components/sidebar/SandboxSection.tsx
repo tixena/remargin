@@ -1,5 +1,20 @@
-import { ChevronDown, ChevronRight, Folder, Send } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  CircleDashed,
+  Folder,
+  Send,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ResolvedSystemPrompt } from "@/backend/types";
+import {
+  buildPromptGroups,
+  DEFAULT_GROUP_KEY,
+  type PromptGroup,
+  type StagedGroup,
+} from "@/components/sidebar/buildPromptGroups";
 import { SandboxGroupHeader } from "@/components/sidebar/SandboxGroupHeader";
 import { SandboxRow } from "@/components/sidebar/SandboxRow";
 import { Button } from "@/components/ui/button";
@@ -7,6 +22,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useBackend } from "@/hooks/useBackend";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
 import type { ViewMode } from "@/types";
+
+export type { PromptGroup, StagedGroup };
 
 interface SandboxSectionProps {
   /**
@@ -24,12 +41,22 @@ interface SandboxSectionProps {
    */
   onOpenFile?: (path: string) => void;
   /**
-   * Forwarded Submit handler. The parent is responsible for the actual
-   * Claude work; this component only tracks which files are staged and
-   * clears them from the sandbox via `remargin sandbox remove` after the
-   * handler resolves.
+   * Forwarded Submit handler. Receives the staged files grouped by
+   * resolved system prompt so the parent's Claude pipeline can spawn
+   * one `claude -p` invocation per group.
    */
-  onSubmit?: (stagedFiles: string[]) => Promise<void> | void;
+  onSubmit?: (groups: StagedGroup[]) => Promise<void> | void;
+  /**
+   * Inline editor entry-point for the prompt that controls a group.
+   * Wired by task 47; this task surfaces the gear icon but treats the
+   * handler as optional.
+   */
+  onEditPrompt?: (group: PromptGroup) => void;
+  /**
+   * "+ Configure prompt" affordance on the Default group header.
+   * Wired by task 47.
+   */
+  onConfigurePrompt?: (group: PromptGroup) => void;
 }
 
 function errorMessage(err: unknown): string {
@@ -44,29 +71,28 @@ function errorMessage(err: unknown): string {
 
 /**
  * Sidebar section that lists files the current identity has touched in its
- * remargin sandbox. Renders a VSCode-style two-group layout: **Staged**
- * (files checked for submit, with Submit inside the group) and **Unstaged**
- * (touched files not yet staged, with per-row trash + bulk stage actions).
- *
- * The authoritative list of touched files comes from `remargin sandbox list
- * --json`. Which of those are "staged" (vs "unstaged") is local state:
- * unchecking a file excludes it from the next Submit but does not mutate
- * the persistent sandbox. Only a successful Submit clears the submitted
- * rows (via `remargin sandbox remove`), and the per-row trash on unstaged
- * rows does an explicit `sandbox remove` to forget the file entirely.
+ * remargin sandbox. Renders a by-prompt outer grouping (one section per
+ * resolved system prompt; Default group last) wrapping the original
+ * Staged/Unstaged structure from task 24. Single Submit-all button at the
+ * bottom; the per-group submit was retired by `r8w`/`uhs`.
  */
 export function SandboxSection({
   refreshKey,
   viewMode = "flat",
   onOpenFile,
   onSubmit,
+  onEditPrompt,
+  onConfigurePrompt,
 }: SandboxSectionProps) {
   const backend = useBackend();
   const [files, setFiles] = useState<string[]>([]);
+  const [prompts, setPrompts] = useState<Map<string, ResolvedSystemPrompt>>(new Map());
+  const [resolveErrors, setResolveErrors] = useState<Map<string, string>>(new Map());
   const [staged, setStaged] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [stagedOpen, setStagedOpen] = useState(true);
-  const [unstagedOpen, setUnstagedOpen] = useState(true);
+  // Per-group open state. Keys are PromptGroup.source ?? DEFAULT_GROUP_KEY.
+  const [stagedOpenByGroup, setStagedOpenByGroup] = useState<Map<string, boolean>>(new Map());
+  const [unstagedOpenByGroup, setUnstagedOpenByGroup] = useState<Map<string, boolean>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -82,10 +108,6 @@ export function SandboxSection({
         const entries = await backend.sandboxList();
         const paths = entries.map((e) => e.path);
         setFiles(paths);
-        // Reset the "staged" selection to mirror the new authoritative list.
-        // Keep any previously-staged files that are still present; newly-
-        // added files default to staged so the user does not have to re-
-        // stage them after adding with `+`.
         setStaged((prev) => {
           const next = new Set<string>();
           for (const path of paths) {
@@ -93,14 +115,11 @@ export function SandboxSection({
               next.add(path);
             }
           }
-          // If nothing carried over (e.g. all previous entries were cleared),
-          // default to all-staged.
           if (next.size === 0) {
             for (const path of paths) next.add(path);
           }
           return next;
         });
-        // Drop any selection entries that no longer correspond to real files.
         setSelected((prev) => {
           const next = new Set<string>();
           for (const path of paths) {
@@ -108,10 +127,29 @@ export function SandboxSection({
           }
           return next;
         });
+
+        // Resolve prompts in parallel; capture per-file errors so a
+        // single bad walk doesn't black-hole the whole sidebar.
+        const nextPrompts = new Map<string, ResolvedSystemPrompt>();
+        const nextErrors = new Map<string, string>();
+        await Promise.all(
+          paths.map(async (p) => {
+            try {
+              const resolved = await backend.resolvePrompt(p);
+              nextPrompts.set(p, resolved);
+            } catch (err) {
+              nextErrors.set(p, errorMessage(err));
+            }
+          })
+        );
+        setPrompts(nextPrompts);
+        setResolveErrors(nextErrors);
         setError(null);
       } catch (err) {
         console.error("SandboxSection.refresh failed:", err);
         setFiles([]);
+        setPrompts(new Map());
+        setResolveErrors(new Map());
         setError(errorMessage(err));
       } finally {
         setLoading(false);
@@ -121,11 +159,18 @@ export function SandboxSection({
   );
 
   useEffect(() => {
-    refresh(refreshKey);
+    void refresh(refreshKey);
   }, [refresh, refreshKey]);
 
-  const stagedFiles = useMemo(() => files.filter((f) => staged.has(f)), [files, staged]);
-  const unstagedFiles = useMemo(() => files.filter((f) => !staged.has(f)), [files, staged]);
+  const groups = useMemo<PromptGroup[]>(
+    () => buildPromptGroups(files, prompts, resolveErrors, staged),
+    [files, prompts, resolveErrors, staged]
+  );
+
+  const totalStaged = useMemo(
+    () => groups.reduce((sum, g) => (g.hasError ? sum : sum + g.staged.length), 0),
+    [groups]
+  );
 
   const toggleSelected = useCallback((path: string) => {
     setSelected((prev) => {
@@ -136,76 +181,21 @@ export function SandboxSection({
     });
   }, []);
 
-  /** Staged bulk `check-check`: toggle select-all across staged rows. */
-  const toggleSelectAllStaged = useCallback(() => {
-    setSelected((prev) => {
-      // If every staged row is already selected, clear the staged selection.
-      // Otherwise, add every staged row to the selection.
-      const allSelected = stagedFiles.length > 0 && stagedFiles.every((f) => prev.has(f));
-      const next = new Set(prev);
-      if (allSelected) {
-        for (const f of stagedFiles) next.delete(f);
-      } else {
-        for (const f of stagedFiles) next.add(f);
-      }
+  const setStagedOpen = useCallback((key: string, open: boolean) => {
+    setStagedOpenByGroup((prev) => {
+      const next = new Map(prev);
+      next.set(key, open);
       return next;
     });
-  }, [stagedFiles]);
+  }, []);
 
-  /**
-   * Staged bulk `minus`: unstage the selected staged files, or all staged
-   * files when the staged selection is empty.
-   */
-  const unstageBulk = useCallback(() => {
-    if (stagedFiles.length === 0) return;
-    const selectedStaged = stagedFiles.filter((f) => selected.has(f));
-    const targets = selectedStaged.length > 0 ? selectedStaged : stagedFiles;
-    setStaged((prev) => {
-      const next = new Set(prev);
-      for (const t of targets) next.delete(t);
+  const setUnstagedOpen = useCallback((key: string, open: boolean) => {
+    setUnstagedOpenByGroup((prev) => {
+      const next = new Map(prev);
+      next.set(key, open);
       return next;
     });
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const t of targets) next.delete(t);
-      return next;
-    });
-  }, [stagedFiles, selected]);
-
-  /**
-   * Unstaged bulk `plus`: stage selected unstaged files, or every unstaged
-   * file when the unstaged selection is empty.
-   */
-  const stageBulk = useCallback(() => {
-    if (unstagedFiles.length === 0) return;
-    const selectedUnstaged = unstagedFiles.filter((f) => selected.has(f));
-    const targets = selectedUnstaged.length > 0 ? selectedUnstaged : unstagedFiles;
-    setStaged((prev) => {
-      const next = new Set(prev);
-      for (const t of targets) next.add(t);
-      return next;
-    });
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const t of targets) next.delete(t);
-      return next;
-    });
-  }, [unstagedFiles, selected]);
-
-  /** Unstaged bulk `check-check`: stage every unstaged file unconditionally. */
-  const stageAllUnstaged = useCallback(() => {
-    if (unstagedFiles.length === 0) return;
-    setStaged((prev) => {
-      const next = new Set(prev);
-      for (const f of unstagedFiles) next.add(f);
-      return next;
-    });
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const f of unstagedFiles) next.delete(f);
-      return next;
-    });
-  }, [unstagedFiles]);
+  }, []);
 
   const handleRemove = useCallback(
     async (path: string) => {
@@ -220,26 +210,41 @@ export function SandboxSection({
     [backend, refresh]
   );
 
+  const buildSubmitPayload = useCallback((): StagedGroup[] => {
+    const payload: StagedGroup[] = [];
+    for (const g of groups) {
+      if (g.hasError) continue;
+      const stagedFiles = g.files.filter((f) => staged.has(f));
+      if (stagedFiles.length > 0) {
+        payload.push({ prompt: g.prompt, files: stagedFiles });
+      }
+    }
+    return payload;
+  }, [groups, staged]);
+
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
-    const toSubmit = stagedFiles;
-    if (toSubmit.length === 0) return;
+    const payload = buildSubmitPayload();
+    if (payload.length === 0) return;
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit?.(toSubmit);
-      // Submit succeeded — clear the submitted files from the persistent
-      // sandbox and refetch. We only call `sandbox remove` for files the
-      // user actually submitted; anything they unstaged stays as a touched
-      // (unstaged) file.
-      try {
-        await backend.sandboxRemove(toSubmit);
-      } catch (err) {
-        // Do NOT roll back: the parent's Submit already happened (Claude has
-        // done the work). Surface the specific unstage failure so the user
-        // can clean up manually.
-        console.error("SandboxSection.sandboxRemove failed:", err);
-        setError(`Submit succeeded but failed to unstage: ${errorMessage(err)}`);
+      await onSubmit?.(payload);
+      // Per-group cleanup: one sandboxRemove per group's files. Failure
+      // of a single cleanup must not abort the remaining ones (task 48
+      // formalises the partial-failure path; here we just iterate so
+      // the loop shape is in place).
+      let cleanupError: string | null = null;
+      for (const g of payload) {
+        try {
+          await backend.sandboxRemove(g.files);
+        } catch (err) {
+          console.error("SandboxSection.sandboxRemove failed:", err);
+          cleanupError = cleanupError ?? errorMessage(err);
+        }
+      }
+      if (cleanupError) {
+        setError(`Submit succeeded but failed to unstage: ${cleanupError}`);
       }
       await refresh();
     } catch (err) {
@@ -248,7 +253,7 @@ export function SandboxSection({
     } finally {
       setSubmitting(false);
     }
-  }, [backend, stagedFiles, onSubmit, refresh, submitting]);
+  }, [backend, buildSubmitPayload, onSubmit, refresh, submitting]);
 
   if (loading && files.length === 0) {
     return <div className="px-4 py-3 text-xs text-text-faint">Loading sandbox...</div>;
@@ -276,89 +281,293 @@ export function SandboxSection({
       )}
 
       <ScrollArea className="max-h-64">
-        <SandboxGroupHeader
-          label="Staged"
-          count={stagedFiles.length}
-          open={stagedOpen}
-          onToggleOpen={() => setStagedOpen((v) => !v)}
-          leftBulkIcon="check-check"
-          leftBulkTitle="Toggle select all staged"
-          onLeftBulk={toggleSelectAllStaged}
-          rightBulkIcon="minus"
-          rightBulkTitle="Unstage selected (or all)"
-          onRightBulk={unstageBulk}
-          disabled={stagedFiles.length === 0}
+        {groups.map((group) => {
+          const key = group.source ?? DEFAULT_GROUP_KEY;
+          return (
+            <PromptGroupSection
+              key={key}
+              group={group}
+              viewMode={viewMode}
+              selected={selected}
+              stagedOpen={stagedOpenByGroup.get(key) ?? true}
+              unstagedOpen={unstagedOpenByGroup.get(key) ?? true}
+              onToggleStagedOpen={() => setStagedOpen(key, !(stagedOpenByGroup.get(key) ?? true))}
+              onToggleUnstagedOpen={() =>
+                setUnstagedOpen(key, !(unstagedOpenByGroup.get(key) ?? true))
+              }
+              onToggleSelected={toggleSelected}
+              onStageBulk={(files) => stageFiles(files, setStaged, setSelected)}
+              onUnstageBulk={(files) => unstageFiles(files, setStaged, setSelected)}
+              onSelectAll={(files) => toggleSelectAll(files, selected, setSelected)}
+              onRemoveFile={handleRemove}
+              onOpenFile={(p) => onOpenFile?.(p)}
+              onConfigurePrompt={onConfigurePrompt}
+              onEditPrompt={onEditPrompt}
+            />
+          );
+        })}
+        <SubmitAllRow
+          totalStaged={totalStaged}
+          onClick={handleSubmit}
+          disabled={totalStaged === 0 || submitting}
+          submitting={submitting}
         />
-        {stagedOpen && viewMode === "flat"
-          ? stagedFiles.map((file) => (
-              <SandboxRow
-                key={`s:${file}`}
-                path={file}
-                variant="staged"
-                selected={selected.has(file)}
-                onToggleSelected={toggleSelected}
-                onOpenFile={(p) => onOpenFile?.(p)}
-              />
-            ))
-          : stagedOpen && (
-              <SandboxTreeGroup
-                files={stagedFiles}
-                variant="staged"
-                selected={selected}
-                onToggleSelected={toggleSelected}
-                onOpenFile={(p) => onOpenFile?.(p)}
-              />
-            )}
-        {stagedOpen && (
-          <div className="flex items-center justify-end px-4 py-2">
-            <Button
-              size="sm"
-              className="h-7 px-3 text-xs bg-accent text-white hover:bg-accent-hover"
-              disabled={stagedFiles.length === 0 || submitting}
-              onClick={handleSubmit}
-            >
-              <Send className="w-3 h-3 mr-1" />
-              {submitting ? "Submitting..." : "Submit"}
-            </Button>
-          </div>
-        )}
-
-        <SandboxGroupHeader
-          label="Unstaged"
-          count={unstagedFiles.length}
-          open={unstagedOpen}
-          onToggleOpen={() => setUnstagedOpen((v) => !v)}
-          leftBulkIcon="plus"
-          leftBulkTitle="Stage selected (or all)"
-          onLeftBulk={stageBulk}
-          rightBulkIcon="check-check"
-          rightBulkTitle="Stage everything unstaged"
-          onRightBulk={stageAllUnstaged}
-          disabled={unstagedFiles.length === 0}
-        />
-        {unstagedOpen && viewMode === "flat"
-          ? unstagedFiles.map((file) => (
-              <SandboxRow
-                key={`u:${file}`}
-                path={file}
-                variant="unstaged"
-                selected={selected.has(file)}
-                onToggleSelected={toggleSelected}
-                onOpenFile={(p) => onOpenFile?.(p)}
-                onRemoveFile={handleRemove}
-              />
-            ))
-          : unstagedOpen && (
-              <SandboxTreeGroup
-                files={unstagedFiles}
-                variant="unstaged"
-                selected={selected}
-                onToggleSelected={toggleSelected}
-                onOpenFile={(p) => onOpenFile?.(p)}
-                onRemoveFile={handleRemove}
-              />
-            )}
       </ScrollArea>
+    </div>
+  );
+}
+
+function stageFiles(
+  files: string[],
+  setStaged: React.Dispatch<React.SetStateAction<Set<string>>>,
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>
+) {
+  if (files.length === 0) return;
+  setStaged((prev) => {
+    const next = new Set(prev);
+    for (const f of files) next.add(f);
+    return next;
+  });
+  setSelected((prev) => {
+    const next = new Set(prev);
+    for (const f of files) next.delete(f);
+    return next;
+  });
+}
+
+function unstageFiles(
+  files: string[],
+  setStaged: React.Dispatch<React.SetStateAction<Set<string>>>,
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>
+) {
+  if (files.length === 0) return;
+  setStaged((prev) => {
+    const next = new Set(prev);
+    for (const f of files) next.delete(f);
+    return next;
+  });
+  setSelected((prev) => {
+    const next = new Set(prev);
+    for (const f of files) next.delete(f);
+    return next;
+  });
+}
+
+function toggleSelectAll(
+  files: string[],
+  selected: Set<string>,
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>
+) {
+  if (files.length === 0) return;
+  const allSelected = files.every((f) => selected.has(f));
+  setSelected((prev) => {
+    const next = new Set(prev);
+    if (allSelected) {
+      for (const f of files) next.delete(f);
+    } else {
+      for (const f of files) next.add(f);
+    }
+    return next;
+  });
+}
+
+interface PromptGroupSectionProps {
+  group: PromptGroup;
+  viewMode: ViewMode;
+  selected: Set<string>;
+  stagedOpen: boolean;
+  unstagedOpen: boolean;
+  onToggleStagedOpen: () => void;
+  onToggleUnstagedOpen: () => void;
+  onToggleSelected: (path: string) => void;
+  onStageBulk: (files: string[]) => void;
+  onUnstageBulk: (files: string[]) => void;
+  onSelectAll: (files: string[]) => void;
+  onRemoveFile: (path: string) => void;
+  onOpenFile: (path: string) => void;
+  onConfigurePrompt?: (group: PromptGroup) => void;
+  onEditPrompt?: (group: PromptGroup) => void;
+}
+
+/**
+ * One prompt-scoped outer container. Renders a header with the
+ * resolved prompt's name + scope, then the existing Staged / Unstaged
+ * sub-sections, scoped to this group's files.
+ */
+function PromptGroupSection({
+  group,
+  viewMode,
+  selected,
+  stagedOpen,
+  unstagedOpen,
+  onToggleStagedOpen,
+  onToggleUnstagedOpen,
+  onToggleSelected,
+  onStageBulk,
+  onUnstageBulk,
+  onSelectAll,
+  onRemoveFile,
+  onOpenFile,
+  onConfigurePrompt,
+  onEditPrompt,
+}: PromptGroupSectionProps) {
+  const [headerOpen, setHeaderOpen] = useState(true);
+  const HeaderChevron = headerOpen ? ChevronDown : ChevronRight;
+  const PromptIcon = group.isDefault ? CircleDashed : Sparkles;
+
+  const unstageSelectedOrAll = useCallback(() => {
+    const targets = group.staged.filter((f) => selected.has(f));
+    onUnstageBulk(targets.length > 0 ? targets : group.staged);
+  }, [group.staged, selected, onUnstageBulk]);
+
+  const stageSelectedOrAll = useCallback(() => {
+    const targets = group.unstaged.filter((f) => selected.has(f));
+    onStageBulk(targets.length > 0 ? targets : group.unstaged);
+  }, [group.unstaged, selected, onStageBulk]);
+
+  return (
+    <div className="flex flex-col">
+      <div
+        className="flex items-center justify-between px-3 py-2 cursor-pointer select-none hover:bg-bg-hover"
+        onClick={() => setHeaderOpen((v) => !v)}
+        title={group.hasError ? group.errorMessage : undefined}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <HeaderChevron className="w-3 h-3 text-text-faint shrink-0" />
+          <PromptIcon className="w-3 h-3 text-text-faint shrink-0" />
+          <span className="text-xs font-semibold text-text-normal truncate">{group.name}</span>
+          <span className="text-[10px] text-text-faint truncate">{group.scope}</span>
+          <span className="inline-flex items-center justify-center min-w-4 h-4 px-1.5 text-[9px] text-text-muted bg-bg-border rounded-full">
+            {group.files.length}
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5">
+          {group.isDefault && !group.hasError && (
+            <button
+              type="button"
+              className="text-[10px] text-text-faint hover:text-text-normal px-1 py-0.5"
+              title="Configure prompt"
+              onClick={(e) => {
+                e.stopPropagation();
+                onConfigurePrompt?.(group);
+              }}
+            >
+              + Configure
+            </button>
+          )}
+          {!group.hasError && (
+            <button
+              type="button"
+              className="flex items-center justify-center w-5 h-5 rounded-sm text-text-faint hover:text-text-normal hover:bg-bg-border"
+              title="Edit prompt"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditPrompt?.(group);
+              }}
+            >
+              <Settings className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {headerOpen && (
+        <>
+          <SandboxGroupHeader
+            label="Staged"
+            count={group.staged.length}
+            open={stagedOpen}
+            onToggleOpen={onToggleStagedOpen}
+            leftBulkIcon="check-check"
+            leftBulkTitle="Toggle select all staged"
+            onLeftBulk={() => onSelectAll(group.staged)}
+            rightBulkIcon="minus"
+            rightBulkTitle="Unstage selected (or all)"
+            onRightBulk={unstageSelectedOrAll}
+            disabled={group.staged.length === 0 || group.hasError}
+          />
+          {stagedOpen && viewMode === "flat"
+            ? group.staged.map((file) => (
+                <SandboxRow
+                  key={`s:${file}`}
+                  path={file}
+                  variant="staged"
+                  selected={selected.has(file)}
+                  onToggleSelected={onToggleSelected}
+                  onOpenFile={onOpenFile}
+                />
+              ))
+            : stagedOpen && (
+                <SandboxTreeGroup
+                  files={group.staged}
+                  variant="staged"
+                  selected={selected}
+                  onToggleSelected={onToggleSelected}
+                  onOpenFile={onOpenFile}
+                />
+              )}
+
+          <SandboxGroupHeader
+            label="Unstaged"
+            count={group.unstaged.length}
+            open={unstagedOpen}
+            onToggleOpen={onToggleUnstagedOpen}
+            leftBulkIcon="plus"
+            leftBulkTitle="Stage selected (or all)"
+            onLeftBulk={stageSelectedOrAll}
+            rightBulkIcon="check-check"
+            rightBulkTitle="Stage everything unstaged"
+            onRightBulk={() => onStageBulk(group.unstaged)}
+            disabled={group.unstaged.length === 0 || group.hasError}
+          />
+          {unstagedOpen && viewMode === "flat"
+            ? group.unstaged.map((file) => (
+                <SandboxRow
+                  key={`u:${file}`}
+                  path={file}
+                  variant="unstaged"
+                  selected={selected.has(file)}
+                  onToggleSelected={onToggleSelected}
+                  onOpenFile={onOpenFile}
+                  onRemoveFile={onRemoveFile}
+                />
+              ))
+            : unstagedOpen && (
+                <SandboxTreeGroup
+                  files={group.unstaged}
+                  variant="unstaged"
+                  selected={selected}
+                  onToggleSelected={onToggleSelected}
+                  onOpenFile={onOpenFile}
+                  onRemoveFile={onRemoveFile}
+                />
+              )}
+        </>
+      )}
+    </div>
+  );
+}
+
+interface SubmitAllRowProps {
+  totalStaged: number;
+  onClick: () => void;
+  disabled: boolean;
+  submitting: boolean;
+}
+
+/** Single Submit-all button rendered at the bottom of the Sandbox. */
+function SubmitAllRow({ totalStaged, onClick, disabled, submitting }: SubmitAllRowProps) {
+  return (
+    <div className="flex items-center justify-end px-4 py-3 border-t border-border">
+      <Button
+        size="sm"
+        className="h-7 px-3 text-xs bg-accent text-white hover:bg-accent-hover"
+        disabled={disabled}
+        onClick={onClick}
+      >
+        <Send className="w-3 h-3 mr-1" />
+        {submitting ? "Submitting..." : `Submit all (${totalStaged})`}
+      </Button>
     </div>
   );
 }

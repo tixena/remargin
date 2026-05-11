@@ -28,6 +28,7 @@ import type {
   Participant,
   QueryOpts,
   ResolvedMode,
+  ResolvedSystemPrompt,
   SandboxListEntry,
   SearchOpts,
   WriteOpts,
@@ -390,6 +391,32 @@ export class RemarginBackend {
     const raw = await this.exec(args, { skipIdentity: true });
     const parsed = JSON.parse(raw) as ResolvedMode;
     return parsed;
+  }
+
+  /**
+   * Resolve the folder-scoped system prompt for `file` via
+   * `remargin prompt resolve <file> --json`. Identity-free walk: the
+   * prompt is a property of the directory tree, not the caller, so
+   * different identities resolving from the same path get the same
+   * answer.
+   */
+  async resolvePrompt(file: string): Promise<ResolvedSystemPrompt> {
+    const raw = await this.exec(["prompt", "resolve", file]);
+    return JSON.parse(raw) as ResolvedSystemPrompt;
+  }
+
+  /**
+   * Resolve prompts for a batch of files in parallel. Naive but correct:
+   * the CLI invocation cost is dominated by process spawn, not the walk
+   * itself. If sandboxes ever grow large enough that this becomes a
+   * bottleneck a `--batch` CLI mode can be added without changing the
+   * public surface here.
+   */
+  async resolvePrompts(files: string[]): Promise<Map<string, ResolvedSystemPrompt>> {
+    const entries = await Promise.all(
+      files.map(async (f) => [f, await this.resolvePrompt(f)] as const)
+    );
+    return new Map(entries);
   }
 
   /**

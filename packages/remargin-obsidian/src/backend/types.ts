@@ -120,3 +120,28 @@ export interface ResolvedMode {
    */
   source: string | null;
 }
+
+/**
+ * Response from `remargin prompt resolve <file> --json`. The prompt walk
+ * is identity-free: a folder's prompt is a property of the directory
+ * tree, not the caller. When no `.remargin.yaml` in the parent chain
+ * declared a `system_prompt:` block, the CLI returns the y76 Default
+ * body with `is_default = true` and `source = null`.
+ */
+export interface ResolvedSystemPrompt {
+  /** True when the walk exhausted and the resolver returned the Default body. */
+  is_default: boolean;
+  /**
+   * Human-readable label. Resolved from the YAML `name:` field when
+   * present, otherwise from the owning folder basename. `"default"`
+   * for the Default fallback.
+   */
+  name: string;
+  /** Body to forward to Claude. */
+  prompt: string;
+  /**
+   * Absolute path of the `.remargin.yaml` that declared the prompt, or
+   * `null` for the Default fallback.
+   */
+  source: string | null;
+}

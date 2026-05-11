@@ -5,7 +5,7 @@ import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
 import { InlineReplyEditor } from "@/components/sidebar/InlineReplyEditor";
 import { KindFilterBar } from "@/components/sidebar/KindFilterBar";
 import { PromptSection } from "@/components/sidebar/PromptSection";
-import { SandboxSection } from "@/components/sidebar/SandboxSection";
+import { SandboxSection, type StagedGroup } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
 import { ViewToggle } from "@/components/sidebar/ViewToggle";
@@ -189,7 +189,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     [compose, plugin, bumpRefresh]
   );
 
-  const handleSandboxSubmit = useCallback((_stagedFiles: string[]) => {
+  const handleSandboxSubmit = useCallback((_groups: StagedGroup[]) => {
     // Placeholder for the actual Submit-to-Claude pipeline. Returning a
     // resolved promise is enough for SandboxSection to proceed with the
     // post-submit `sandbox remove` + refetch flow. Once the Claude handoff
