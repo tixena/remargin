@@ -1,16 +1,18 @@
+import { existsSync, readFileSync } from "node:fs";
 import { Notice, type TFile } from "obsidian";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
+import type { InlinePromptEditorSaveArgs } from "@/components/sidebar/InlinePromptEditor";
 import { InlineReplyEditor } from "@/components/sidebar/InlineReplyEditor";
 import { KindFilterBar } from "@/components/sidebar/KindFilterBar";
-import { PromptSection } from "@/components/sidebar/PromptSection";
 import { SandboxSection, type StagedGroup } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
 import { ViewToggle } from "@/components/sidebar/ViewToggle";
 import { pruneKindFilter } from "@/lib/kindFilter";
 import { openFileAtLine } from "@/lib/openFile";
+import { removeSystemPrompt, spliceSystemPrompt } from "@/lib/yamlSystemPrompt";
 import type RemarginPlugin from "@/main";
 import type { ViewMode } from "@/types";
 
@@ -197,6 +199,35 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     return Promise.resolve();
   }, []);
 
+  const handleSavePrompt = useCallback(
+    async ({ source, name, prompt }: InlinePromptEditorSaveArgs) => {
+      const existing = existsSync(source) ? readFileSync(source, "utf-8") : "";
+      const spliced = spliceSystemPrompt(existing, { name, prompt });
+      if (!spliced.noop) {
+        const opts = existsSync(source) ? { raw: true } : { create: true, raw: true };
+        await plugin.backend.write(source, spliced.content, opts);
+      }
+      bumpRefresh();
+    },
+    [plugin, bumpRefresh]
+  );
+
+  const handleDeletePrompt = useCallback(
+    async (source: string) => {
+      if (!existsSync(source)) {
+        bumpRefresh();
+        return;
+      }
+      const existing = readFileSync(source, "utf-8");
+      const stripped = removeSystemPrompt(existing);
+      if (!stripped.noop) {
+        await plugin.backend.write(source, stripped.content, { raw: true });
+      }
+      bumpRefresh();
+    },
+    [plugin, bumpRefresh]
+  );
+
   const handleReplyClose = useCallback(() => {
     setReplyTarget(null);
   }, []);
@@ -253,7 +284,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       onInitialized={bumpRefresh}
       onPlusClick={handlePlusClick}
       onRefreshClick={bumpRefresh}
-      promptContent={<PromptSection file={activeFile} />}
       sandboxActions={<ViewToggle value={sandboxView} onChange={handleSandboxView} />}
       sandboxContent={
         <SandboxSection
@@ -261,6 +291,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
           viewMode={sandboxView}
           onOpenFile={(path) => handleOpenAtLine(path)}
           onSubmit={handleSandboxSubmit}
+          onSavePrompt={handleSavePrompt}
+          onDeletePrompt={handleDeletePrompt}
         />
       }
       inboxActions={<ViewToggle value={inboxView} onChange={handleInboxView} />}

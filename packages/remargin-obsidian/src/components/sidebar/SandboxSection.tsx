@@ -15,6 +15,10 @@ import {
   type PromptGroup,
   type StagedGroup,
 } from "@/components/sidebar/buildPromptGroups";
+import {
+  InlinePromptEditor,
+  type InlinePromptEditorSaveArgs,
+} from "@/components/sidebar/InlinePromptEditor";
 import { SandboxGroupHeader } from "@/components/sidebar/SandboxGroupHeader";
 import { SandboxRow } from "@/components/sidebar/SandboxRow";
 import { Button } from "@/components/ui/button";
@@ -47,16 +51,23 @@ interface SandboxSectionProps {
    */
   onSubmit?: (groups: StagedGroup[]) => Promise<void> | void;
   /**
-   * Inline editor entry-point for the prompt that controls a group.
-   * Wired by task 47; this task surfaces the gear icon but treats the
-   * handler as optional.
+   * Persist a `system_prompt:` block to the owning `.remargin.yaml`.
+   * Receives the target path, name, and body. Returning resolves the
+   * inline editor; rejecting surfaces the error in the editor footer
+   * and keeps the buffer.
    */
-  onEditPrompt?: (group: PromptGroup) => void;
+  onSavePrompt?: (args: InlinePromptEditorSaveArgs) => Promise<void>;
   /**
-   * "+ Configure prompt" affordance on the Default group header.
-   * Wired by task 47.
+   * Strip the `system_prompt:` block from the owning `.remargin.yaml`.
+   * Resolves when the write succeeds; rejecting surfaces the error
+   * inline.
    */
-  onConfigurePrompt?: (group: PromptGroup) => void;
+  onDeletePrompt?: (source: string) => Promise<void>;
+  /**
+   * Tooltip / disabled-reason for the Save button (e.g. strict mode
+   * without a key). When set, the button is disabled.
+   */
+  savePromptDisabledReason?: string;
 }
 
 function errorMessage(err: unknown): string {
@@ -81,8 +92,9 @@ export function SandboxSection({
   viewMode = "flat",
   onOpenFile,
   onSubmit,
-  onEditPrompt,
-  onConfigurePrompt,
+  onSavePrompt,
+  onDeletePrompt,
+  savePromptDisabledReason,
 }: SandboxSectionProps) {
   const backend = useBackend();
   const [files, setFiles] = useState<string[]>([]);
@@ -301,8 +313,9 @@ export function SandboxSection({
               onSelectAll={(files) => toggleSelectAll(files, selected, setSelected)}
               onRemoveFile={handleRemove}
               onOpenFile={(p) => onOpenFile?.(p)}
-              onConfigurePrompt={onConfigurePrompt}
-              onEditPrompt={onEditPrompt}
+              onSavePrompt={onSavePrompt}
+              onDeletePrompt={onDeletePrompt}
+              savePromptDisabledReason={savePromptDisabledReason}
             />
           );
         })}
@@ -385,8 +398,9 @@ interface PromptGroupSectionProps {
   onSelectAll: (files: string[]) => void;
   onRemoveFile: (path: string) => void;
   onOpenFile: (path: string) => void;
-  onConfigurePrompt?: (group: PromptGroup) => void;
-  onEditPrompt?: (group: PromptGroup) => void;
+  onSavePrompt?: (args: InlinePromptEditorSaveArgs) => Promise<void>;
+  onDeletePrompt?: (source: string) => Promise<void>;
+  savePromptDisabledReason?: string;
 }
 
 /**
@@ -408,10 +422,12 @@ function PromptGroupSection({
   onSelectAll,
   onRemoveFile,
   onOpenFile,
-  onConfigurePrompt,
-  onEditPrompt,
+  onSavePrompt,
+  onDeletePrompt,
+  savePromptDisabledReason,
 }: PromptGroupSectionProps) {
   const [headerOpen, setHeaderOpen] = useState(true);
+  const [editing, setEditing] = useState(false);
   const HeaderChevron = headerOpen ? ChevronDown : ChevronRight;
   const PromptIcon = group.isDefault ? CircleDashed : Sparkles;
 
@@ -424,6 +440,36 @@ function PromptGroupSection({
     const targets = group.unstaged.filter((f) => selected.has(f));
     onStageBulk(targets.length > 0 ? targets : group.unstaged);
   }, [group.unstaged, selected, onStageBulk]);
+
+  // Derive a folder hint for the create flow on the Default group.
+  // Falls back to the vault root when no Staged file is around to
+  // anchor a target folder.
+  const folderHint = useCallback((): string => {
+    const sample = group.staged[0] ?? group.files[0];
+    if (sample) {
+      const idx = Math.max(sample.lastIndexOf("/"), sample.lastIndexOf("\\"));
+      if (idx > 0) return sample.slice(0, idx);
+    }
+    return ".";
+  }, [group.staged, group.files]);
+
+  const handleSave = useCallback(
+    async (args: InlinePromptEditorSaveArgs) => {
+      if (!onSavePrompt) return;
+      await onSavePrompt(args);
+      setEditing(false);
+    },
+    [onSavePrompt]
+  );
+
+  const handleDelete = useCallback(
+    async (source: string) => {
+      if (!onDeletePrompt) return;
+      await onDeletePrompt(source);
+      setEditing(false);
+    },
+    [onDeletePrompt]
+  );
 
   return (
     <div className="flex flex-col">
@@ -442,14 +488,15 @@ function PromptGroupSection({
           </span>
         </div>
         <div className="flex items-center gap-0.5">
-          {group.isDefault && !group.hasError && (
+          {group.isDefault && !group.hasError && !editing && (
             <button
               type="button"
               className="text-[10px] text-text-faint hover:text-text-normal px-1 py-0.5"
               title="Configure prompt"
               onClick={(e) => {
                 e.stopPropagation();
-                onConfigurePrompt?.(group);
+                setEditing(true);
+                setHeaderOpen(true);
               }}
             >
               + Configure
@@ -459,10 +506,11 @@ function PromptGroupSection({
             <button
               type="button"
               className="flex items-center justify-center w-5 h-5 rounded-sm text-text-faint hover:text-text-normal hover:bg-bg-border"
-              title="Edit prompt"
+              title={editing ? "Close editor" : "Edit prompt"}
               onClick={(e) => {
                 e.stopPropagation();
-                onEditPrompt?.(group);
+                setEditing((v) => !v);
+                setHeaderOpen(true);
               }}
             >
               <Settings className="w-3 h-3" />
@@ -470,6 +518,19 @@ function PromptGroupSection({
           )}
         </div>
       </div>
+
+      {headerOpen && editing && onSavePrompt && (
+        <InlinePromptEditor
+          source={group.isDefault ? null : group.source}
+          folder={group.isDefault ? folderHint() : group.source ? group.scope : folderHint()}
+          initialName={group.isDefault ? "" : group.name}
+          initialBody={group.isDefault ? "" : group.prompt.prompt}
+          onSave={handleSave}
+          onDelete={!group.isDefault && onDeletePrompt ? handleDelete : undefined}
+          onCancel={() => setEditing(false)}
+          saveDisabledReason={savePromptDisabledReason}
+        />
+      )}
 
       {headerOpen && (
         <>

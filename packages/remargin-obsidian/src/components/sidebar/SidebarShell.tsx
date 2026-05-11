@@ -1,4 +1,4 @@
-import { Inbox, Mail, Terminal } from "lucide-react";
+import { Inbox, Mail } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ReMarginLogo } from "@/components/icons/ReMarginLogo";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
@@ -40,7 +40,6 @@ interface SidebarShellProps {
    * sidebar section to refetch its data.
    */
   onRefreshClick?: () => void;
-  promptContent?: React.ReactNode;
   /**
    * Optional filter/toolbar row rendered directly below the top header
    * and above the scrollable section list. Stays visible while the
@@ -75,7 +74,6 @@ export function SidebarShell({
   onInitialized,
   onPlusClick,
   onRefreshClick,
-  promptContent,
   filterBar,
   sandboxContent,
   sandboxActions,
@@ -85,7 +83,6 @@ export function SidebarShell({
   threadInlineEditor,
   footerContent,
 }: SidebarShellProps) {
-  const [promptOpen, setPromptOpen] = useState(false);
   const [sandboxOpen, setSandboxOpen] = useState(true);
   const [inboxOpen, setInboxOpen] = useState(true);
   const [threadOpen, setThreadOpen] = useState(true);
@@ -198,15 +195,6 @@ export function SidebarShell({
 
       <ScrollArea className="flex-1 min-w-0">
         <div className="flex flex-col min-w-0">
-          <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
-            <SectionHeader icon={Terminal} title="Prompt" open={promptOpen} />
-            <CollapsibleContent>
-              {promptContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">No prompt configured.</div>
-              )}
-            </CollapsibleContent>
-          </Collapsible>
-
           <Collapsible open={sandboxOpen} onOpenChange={setSandboxOpen}>
             <SectionHeader
               icon={Inbox}
