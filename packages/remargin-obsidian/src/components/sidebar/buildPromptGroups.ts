@@ -12,6 +12,25 @@ export interface StagedGroup {
   files: string[];
 }
 
+/** Outcome of one group's invocation in the Submit-all pipeline. */
+export interface SubmitGroupResult {
+  group: StagedGroup;
+  ok: boolean;
+  error?: string;
+  durationMs: number;
+}
+
+/**
+ * Per-group progress hooks for the Submit-all orchestration. The
+ * pipeline calls `onGroupStart` just before spawning `claude -p` for a
+ * group and `onGroupComplete` once the invocation (and its cleanup)
+ * resolves. The sandbox UI uses them to render spinners and badges.
+ */
+export interface SubmitProgress {
+  onGroupStart?: (group: StagedGroup) => void;
+  onGroupComplete?: (group: StagedGroup, result: { ok: boolean; error?: string }) => void;
+}
+
 export interface PromptGroup {
   /** Stable key for React reconciliation. `null` for the Default group. */
   source: string | null;

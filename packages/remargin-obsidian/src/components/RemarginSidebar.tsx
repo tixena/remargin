@@ -1,17 +1,23 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Notice, type TFile } from "obsidian";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type {
+  StagedGroup,
+  SubmitGroupResult,
+  SubmitProgress,
+} from "@/components/sidebar/buildPromptGroups";
 import { InboxSection } from "@/components/sidebar/InboxSection";
 import { InlineCommentEditor } from "@/components/sidebar/InlineCommentEditor";
 import type { InlinePromptEditorSaveArgs } from "@/components/sidebar/InlinePromptEditor";
 import { InlineReplyEditor } from "@/components/sidebar/InlineReplyEditor";
 import { KindFilterBar } from "@/components/sidebar/KindFilterBar";
-import { SandboxSection, type StagedGroup } from "@/components/sidebar/SandboxSection";
+import { SandboxSection } from "@/components/sidebar/SandboxSection";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { ThreadedComments } from "@/components/sidebar/ThreadedComments";
 import { ViewToggle } from "@/components/sidebar/ViewToggle";
 import { pruneKindFilter } from "@/lib/kindFilter";
 import { openFileAtLine } from "@/lib/openFile";
+import { runSubmitAll } from "@/lib/submitAllPipeline";
 import { removeSystemPrompt, spliceSystemPrompt } from "@/lib/yamlSystemPrompt";
 import type RemarginPlugin from "@/main";
 import type { ViewMode } from "@/types";
@@ -191,13 +197,21 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     [compose, plugin, bumpRefresh]
   );
 
-  const handleSandboxSubmit = useCallback((_groups: StagedGroup[]) => {
-    // Placeholder for the actual Submit-to-Claude pipeline. Returning a
-    // resolved promise is enough for SandboxSection to proceed with the
-    // post-submit `sandbox remove` + refetch flow. Once the Claude handoff
-    // lands it can be swapped in here without touching SandboxSection.
-    return Promise.resolve();
-  }, []);
+  const handleSandboxSubmit = useCallback(
+    async (groups: StagedGroup[], progress?: SubmitProgress): Promise<SubmitGroupResult[]> => {
+      const results = await runSubmitAll({
+        groups,
+        runGroup: (group) => plugin.backend.invokeClaude(group.prompt.prompt, group.files),
+        cleanupGroup: (group) => plugin.backend.sandboxRemove(group.files),
+        bumpRefresh,
+        progress,
+      });
+      // Final rescan so the list reflects every successful clear.
+      bumpRefresh();
+      return results;
+    },
+    [plugin, bumpRefresh]
+  );
 
   const handleSavePrompt = useCallback(
     async ({ source, name, prompt }: InlinePromptEditorSaveArgs) => {

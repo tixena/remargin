@@ -556,4 +556,92 @@ export class RemarginBackend {
     // Fallback: try the bare name on PATH.
     return "remargin";
   }
+
+  /**
+   * Spawn `claude -p <prompt>` and wait for completion. Used by the
+   * Submit-all pipeline (task 48): one invocation per prompt group,
+   * sequential, continue-on-failure handled by the caller.
+   *
+   * The prompt body is passed as a single argv element via `spawn`'s
+   * args array, so shell-special characters in the body are inert
+   * (no `sh -c`).
+   */
+  async invokeClaude(prompt: string, files: string[], opts?: InvokeClaudeOpts): Promise<void> {
+    const binary = this.resolveClaudeBinary();
+    const cwd = opts?.cwd ?? (expandPath(this.settings.workingDirectory) || this.vaultPath);
+    const timeout = opts?.timeout ?? 300_000;
+    const fullPrompt = files.length > 0 ? `${prompt}\n\nFiles:\n${files.join("\n")}` : prompt;
+
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn(binary, ["-p", fullPrompt], { cwd });
+      const stderrChunks: Buffer[] = [];
+      let settled = false;
+
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
+
+      child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+      // Drain stdout so the child doesn't deadlock on a full pipe; we
+      // intentionally do not capture it (Claude's own writes land on
+      // disk via the remargin skill).
+      child.stdout.on("data", () => {
+        /* discard */
+      });
+
+      const timer = setTimeout(() => {
+        child.kill();
+        settle(() => reject(new Error(`claude timed out after ${timeout}ms`)));
+      }, timeout);
+
+      child.on("error", (err: NodeJS.ErrnoException) => {
+        settle(() => {
+          if (err.code === "ENOENT") {
+            reject(new Error(`claude binary not found at "${binary}". Check plugin settings.`));
+          } else {
+            reject(new Error(`failed to spawn claude: ${err.message}`));
+          }
+        });
+      });
+
+      child.on("close", (code) => {
+        settle(() => {
+          if (code !== 0) {
+            const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+            const detail = stderr.trim() || `exit code ${code ?? "unknown"}`;
+            reject(new Error(detail));
+            return;
+          }
+          resolve();
+        });
+      });
+    });
+  }
+
+  /**
+   * Resolve the `claude` binary path. Mirrors [`resolveBinary`] but
+   * keyed off `settings.claudePath`. Empty / bare-name values fall
+   * back to PATH lookup.
+   */
+  private resolveClaudeBinary(): string {
+    const configured = expandPath(this.settings.claudePath);
+    if (!configured) return "claude";
+    const looksLikePath = configured.includes("/") || configured.includes("\\");
+    if (!looksLikePath) return configured;
+    if (existsSync(configured)) return configured;
+    return "claude";
+  }
+}
+
+export interface InvokeClaudeOpts {
+  /** Timeout in ms. Default: 300_000 (5 min). Per-group, not total. */
+  timeout?: number;
+  /**
+   * Working directory for the spawn. Default: the plugin's working
+   * directory (or vault root when blank).
+   */
+  cwd?: string;
 }

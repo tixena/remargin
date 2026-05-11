@@ -1,11 +1,14 @@
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   CircleDashed,
   Folder,
+  Loader2,
   Send,
   Settings,
   Sparkles,
+  TriangleAlert,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ResolvedSystemPrompt } from "@/backend/types";
@@ -14,6 +17,8 @@ import {
   DEFAULT_GROUP_KEY,
   type PromptGroup,
   type StagedGroup,
+  type SubmitGroupResult,
+  type SubmitProgress,
 } from "@/components/sidebar/buildPromptGroups";
 import {
   InlinePromptEditor,
@@ -46,10 +51,17 @@ interface SandboxSectionProps {
   onOpenFile?: (path: string) => void;
   /**
    * Forwarded Submit handler. Receives the staged files grouped by
-   * resolved system prompt so the parent's Claude pipeline can spawn
-   * one `claude -p` invocation per group.
+   * resolved system prompt + a progress hook the parent can call as
+   * each group starts and completes. Returns per-group results so this
+   * section can render success/failure badges.
+   *
+   * The handler now owns the per-group cleanup (`sandboxRemove`) so the
+   * sandbox section stays purely structural.
    */
-  onSubmit?: (groups: StagedGroup[]) => Promise<void> | void;
+  onSubmit?: (
+    groups: StagedGroup[],
+    progress?: SubmitProgress
+  ) => Promise<SubmitGroupResult[] | void> | void;
   /**
    * Persist a `system_prompt:` block to the owning `.remargin.yaml`.
    * Receives the target path, name, and body. Returning resolves the
@@ -234,38 +246,60 @@ export function SandboxSection({
     return payload;
   }, [groups, staged]);
 
+  // Per-group submit status. Keys are the group's source ?? DEFAULT_GROUP_KEY.
+  // Cleared when a new Submit run starts.
+  const [groupStatus, setGroupStatus] = useState<Map<string, "pending" | "ok" | "failed">>(
+    new Map()
+  );
+  const [groupErrors, setGroupErrors] = useState<Map<string, string>>(new Map());
+
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
     const payload = buildSubmitPayload();
     if (payload.length === 0) return;
     setSubmitting(true);
     setError(null);
-    try {
-      await onSubmit?.(payload);
-      // Per-group cleanup: one sandboxRemove per group's files. Failure
-      // of a single cleanup must not abort the remaining ones (task 48
-      // formalises the partial-failure path; here we just iterate so
-      // the loop shape is in place).
-      let cleanupError: string | null = null;
-      for (const g of payload) {
-        try {
-          await backend.sandboxRemove(g.files);
-        } catch (err) {
-          console.error("SandboxSection.sandboxRemove failed:", err);
-          cleanupError = cleanupError ?? errorMessage(err);
+    setGroupStatus(new Map());
+    setGroupErrors(new Map());
+
+    const progress: SubmitProgress = {
+      onGroupStart: (group) => {
+        const key = group.prompt.source ?? DEFAULT_GROUP_KEY;
+        setGroupStatus((prev) => {
+          const next = new Map(prev);
+          next.set(key, "pending");
+          return next;
+        });
+      },
+      onGroupComplete: (group, result) => {
+        const key = group.prompt.source ?? DEFAULT_GROUP_KEY;
+        setGroupStatus((prev) => {
+          const next = new Map(prev);
+          next.set(key, result.ok ? "ok" : "failed");
+          return next;
+        });
+        if (result.error) {
+          setGroupErrors((prev) => {
+            const next = new Map(prev);
+            next.set(key, result.error ?? "submit failed");
+            return next;
+          });
         }
-      }
-      if (cleanupError) {
-        setError(`Submit succeeded but failed to unstage: ${cleanupError}`);
-      }
-      await refresh();
+      },
+    };
+
+    try {
+      // Parent owns the per-group invocation + cleanup; we only render
+      // status. A void return is tolerated for parents that don't
+      // implement the new contract yet.
+      await onSubmit?.(payload, progress);
     } catch (err) {
       console.error("SandboxSection.onSubmit failed:", err);
       setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }
-  }, [backend, buildSubmitPayload, onSubmit, refresh, submitting]);
+  }, [buildSubmitPayload, onSubmit, submitting]);
 
   if (loading && files.length === 0) {
     return <div className="px-4 py-3 text-xs text-text-faint">Loading sandbox...</div>;
@@ -303,6 +337,8 @@ export function SandboxSection({
               selected={selected}
               stagedOpen={stagedOpenByGroup.get(key) ?? true}
               unstagedOpen={unstagedOpenByGroup.get(key) ?? true}
+              status={groupStatus.get(key)}
+              statusError={groupErrors.get(key)}
               onToggleStagedOpen={() => setStagedOpen(key, !(stagedOpenByGroup.get(key) ?? true))}
               onToggleUnstagedOpen={() =>
                 setUnstagedOpen(key, !(unstagedOpenByGroup.get(key) ?? true))
@@ -390,6 +426,14 @@ interface PromptGroupSectionProps {
   selected: Set<string>;
   stagedOpen: boolean;
   unstagedOpen: boolean;
+  /**
+   * Submit-all status for this group. `pending` while `claude -p` is
+   * in flight, `ok` after a successful invocation + cleanup, `failed`
+   * when the run rejected. `undefined` between runs.
+   */
+  status?: "pending" | "ok" | "failed";
+  /** Error message for the failed status, surfaced as a tooltip. */
+  statusError?: string;
   onToggleStagedOpen: () => void;
   onToggleUnstagedOpen: () => void;
   onToggleSelected: (path: string) => void;
@@ -414,6 +458,8 @@ function PromptGroupSection({
   selected,
   stagedOpen,
   unstagedOpen,
+  status,
+  statusError,
   onToggleStagedOpen,
   onToggleUnstagedOpen,
   onToggleSelected,
@@ -486,6 +532,20 @@ function PromptGroupSection({
           <span className="inline-flex items-center justify-center min-w-4 h-4 px-1.5 text-[9px] text-text-muted bg-bg-border rounded-full">
             {group.files.length}
           </span>
+          {status === "pending" && (
+            <Loader2
+              className="w-3 h-3 text-text-faint shrink-0 animate-spin"
+              aria-label="Submitting"
+            />
+          )}
+          {status === "ok" && (
+            <Check className="w-3 h-3 text-green-500 shrink-0" aria-label="Submitted" />
+          )}
+          {status === "failed" && (
+            <span title={statusError} className="inline-flex shrink-0">
+              <TriangleAlert className="w-3 h-3 text-red-400 shrink-0" aria-label="Submit failed" />
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-0.5">
           {group.isDefault && !group.hasError && !editing && (
