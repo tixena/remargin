@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use os_shim::mock::MockSystem;
 
 use crate::config::Mode;
-use crate::config::identity::{IdentityFlags, IdentitySource, resolve_identity};
+use crate::config::ResolvedConfig;
+use crate::config::identity::{IdentityFlags, IdentityReport, IdentitySource, resolve_identity};
 use crate::config::registry::{Registry, RegistryParticipant, RegistryParticipantStatus};
 use crate::parser::AuthorType;
 
@@ -729,5 +730,92 @@ fn branch3_walk_relative_key_anchors_to_walked_config_dir() {
         resolved.key_path.as_deref(),
         Some(Path::new("/notes/.remargin/agent_key")),
         "walked config's relative key must anchor to the config's dir",
+    );
+}
+
+// ===========================================================================
+// IdentitySource Display impl, IdentityReport variants, exclusivity guard
+// ===========================================================================
+
+#[test]
+fn identity_source_display_renders_each_variant() {
+    assert_eq!(
+        IdentitySource::ConfigFlag(PathBuf::from("/etc/cfg.yaml")).to_string(),
+        "--config /etc/cfg.yaml"
+    );
+    assert_eq!(IdentitySource::Manual.to_string(), "manual CLI flags");
+    assert_eq!(
+        IdentitySource::Walk(PathBuf::from("/p/.remargin.yaml")).to_string(),
+        "walk match at /p/.remargin.yaml"
+    );
+}
+
+fn config_with(identity: Option<&str>, author_type: Option<AuthorType>) -> ResolvedConfig {
+    ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type,
+        identity: identity.map(String::from),
+        ignore: Vec::new(),
+        key_path: None,
+        mode: Mode::Open,
+        registry: None,
+        source_path: None,
+        trusted_roots: Vec::new(),
+        unrestricted: false,
+    }
+}
+
+#[test]
+fn identity_report_from_resolved_with_no_identity_is_not_found() {
+    let cfg = config_with(None, None);
+    let report = IdentityReport::from_resolved(&cfg);
+    assert!(!report.found);
+    assert!(report.identity.is_none());
+}
+
+#[test]
+fn identity_report_from_resolved_populates_every_field_when_present() {
+    let mut cfg = config_with(Some("alice"), Some(AuthorType::Human));
+    cfg.key_path = Some(PathBuf::from("/keys/alice.pub"));
+    cfg.source_path = Some(PathBuf::from("/proj/.remargin.yaml"));
+
+    let report = IdentityReport::from_resolved(&cfg);
+    assert!(report.found);
+    assert_eq!(report.identity.as_deref(), Some("alice"));
+    assert_eq!(report.author_type.as_deref(), Some("human"));
+    assert_eq!(report.key.as_deref(), Some("/keys/alice.pub"));
+    assert_eq!(report.mode.as_deref(), Some("open"));
+    assert_eq!(report.path.as_deref(), Some("/proj/.remargin.yaml"));
+}
+
+#[test]
+fn identity_report_not_found_has_all_fields_empty() {
+    let report = IdentityReport::not_found();
+    assert!(!report.found);
+    assert!(report.identity.is_none());
+    assert!(report.author_type.is_none());
+    assert!(report.key.is_none());
+    assert!(report.mode.is_none());
+    assert!(report.path.is_none());
+}
+
+/// Belt-and-braces guard at the resolver entry: clap rejects this
+/// combination at the CLI layer, but non-clap callers (the MCP
+/// adapter) might construct it. The resolver bails before touching
+/// any disk.
+#[test]
+fn resolve_identity_rejects_config_path_mixed_with_manual_flags() {
+    let system = MockSystem::new();
+    let flags = IdentityFlags {
+        author_type: Some(AuthorType::Human),
+        config_path: Some(PathBuf::from("/cfg.yaml")),
+        identity: Some(String::from("alice")),
+        key: None,
+    };
+    let err = resolve_identity(&system, Path::new("/"), &Mode::Open, &flags, None).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("--config conflicts with"),
+        "expected exclusivity diagnostic, got: {msg}"
     );
 }

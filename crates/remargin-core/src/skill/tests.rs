@@ -114,3 +114,43 @@ fn test_up_to_date() {
     let status = skill::test_status(&system, false).unwrap();
     assert_eq!(status, SkillStatus::UpToDate);
 }
+
+#[test]
+fn uninstall_when_not_installed_errors() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let err = skill::uninstall(&system, false).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("not installed"),
+        "expected 'not installed' diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn install_global_without_home_errors() {
+    let system = MockSystem::new();
+    let err = skill::install(&system, true).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("HOME"), "expected HOME diagnostic, got: {msg}");
+}
+
+#[test]
+fn uninstall_global_without_home_errors() {
+    let system = MockSystem::new();
+    let err = skill::uninstall(&system, true).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("HOME"), "expected HOME diagnostic, got: {msg}");
+}
+
+#[test]
+fn test_status_global_without_home_errors() {
+    let system = MockSystem::new();
+    let err = skill::test_status(&system, true).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("HOME"), "expected HOME diagnostic, got: {msg}");
+}

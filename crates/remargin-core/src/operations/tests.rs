@@ -2354,6 +2354,57 @@ fn project_batch_auto_ack_without_reply_rejects_with_index() {
 }
 
 #[test]
+fn project_batch_op_from_json_happy_path_picks_up_every_field() {
+    let raw = serde_json::json!({
+        "content": "body",
+        "reply_to": "parent",
+        "after_line": 7_u32,
+        "auto_ack": true,
+        "to": ["alice", "bob"],
+        "attach_names": ["img.png"],
+    });
+    let obj = raw.as_object().unwrap();
+
+    let op = projections::ProjectBatchOp::from_json_object(obj, 0).unwrap();
+    assert_eq!(op.content, "body");
+    assert_eq!(op.reply_to.as_deref(), Some("parent"));
+    assert_eq!(op.after_line, Some(7_usize));
+    assert!(op.auto_ack);
+    assert_eq!(op.to, vec![String::from("alice"), String::from("bob")]);
+    assert_eq!(op.attachment_filenames, vec![String::from("img.png")]);
+}
+
+#[test]
+fn project_batch_op_from_json_missing_content_names_index() {
+    let raw = serde_json::json!({ "reply_to": "x" });
+    let obj = raw.as_object().unwrap();
+
+    let err = projections::ProjectBatchOp::from_json_object(obj, 3).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("plan batch op[3]") && msg.contains("missing required field `content`"),
+        "expected indexed missing-content diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn project_batch_op_from_json_rejects_double_anchor() {
+    let raw = serde_json::json!({
+        "content": "body",
+        "after_comment": "abc",
+        "after_heading": "Intro",
+    });
+    let obj = raw.as_object().unwrap();
+
+    let err = projections::ProjectBatchOp::from_json_object(obj, 1).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("plan batch op[1]") && msg.contains("at most one of"),
+        "expected indexed anchor-conflict diagnostic, got: {msg}"
+    );
+}
+
+#[test]
 fn project_batch_reply_auto_acks_parent() {
     let (system, config, first) = seed_with_comment();
 

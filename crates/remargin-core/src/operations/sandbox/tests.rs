@@ -10,7 +10,9 @@ use os_shim::mock::MockSystem;
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::frontmatter;
-use crate::operations::sandbox::{add_to_files, list_for_identity, remove_from_files};
+use crate::operations::sandbox::{
+    SandboxBulkResult, SandboxFailure, add_to_files, list_for_identity, remove_from_files,
+};
 use crate::parser::{self, AuthorType};
 
 /// Open-mode config used by every sandbox test that doesn't care about
@@ -418,4 +420,39 @@ fn frontmatter_sandbox_round_trip() {
 
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].author, "jorge");
+}
+
+// ---------------------------------------------------------------------------
+// SandboxBulkResult::to_json canonical shape — CLI and MCP both emit this.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bulk_result_to_json_strips_base_dir_and_uses_changed_key() {
+    let result = SandboxBulkResult {
+        changed: vec![PathBuf::from("/docs/a.md")],
+        failed: vec![SandboxFailure {
+            path: PathBuf::from("/docs/c.md"),
+            reason: String::from("denied"),
+        }],
+        skipped: vec![PathBuf::from("/docs/b.md")],
+    };
+
+    let value = result.to_json(Path::new("/docs"), "added");
+    assert_eq!(value["added"], serde_json::json!(["a.md"]));
+    assert_eq!(value["skipped"], serde_json::json!(["b.md"]));
+    assert_eq!(
+        value["failed"],
+        serde_json::json!([{ "path": "c.md", "reason": "denied" }]),
+    );
+}
+
+#[test]
+fn bulk_result_to_json_renders_paths_outside_base_dir_verbatim() {
+    let result = SandboxBulkResult {
+        changed: vec![PathBuf::from("/elsewhere/out.md")],
+        failed: Vec::new(),
+        skipped: Vec::new(),
+    };
+    let value = result.to_json(Path::new("/docs"), "removed");
+    assert_eq!(value["removed"], serde_json::json!(["/elsewhere/out.md"]));
 }
