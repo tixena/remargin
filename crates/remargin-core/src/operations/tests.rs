@@ -219,7 +219,6 @@ fn create_simple_comment() {
     )
     .unwrap();
 
-    // Verify the comment was created.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
     let comments = doc.comments();
@@ -1103,7 +1102,6 @@ fn ack_remove_clears_identity_ack() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
-    // First, ack so there is something to remove.
     ack_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1112,7 +1110,6 @@ fn ack_remove_clears_identity_ack() {
         false,
     )
     .unwrap();
-    // Then remove the identity's ack.
     ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
@@ -1187,7 +1184,6 @@ fn ack_twice_is_idempotent() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
-    // First ack — records a timestamp.
     ack_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1294,7 +1290,6 @@ fn ack_noop_rewrites_file() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
-    // First ack — populates alice... er, eduardo — into the list.
     ack_comments(
         &system,
         Path::new("/docs/test.md"),

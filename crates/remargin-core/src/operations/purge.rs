@@ -39,7 +39,6 @@ pub struct PurgeResult {
 }
 
 impl PurgeResult {
-    /// Canonical JSON shape for the non-recursive purge.
     #[must_use]
     pub fn to_json(&self) -> JsonValue {
         json!({

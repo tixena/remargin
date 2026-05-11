@@ -364,7 +364,6 @@ pub fn insert_comment(
     Ok(())
 }
 
-/// Helper to serialize a `Segment::Comment` using the writer's serializer.
 fn serialize_comment_from_segment(segment: &Segment) -> Result<String, serde_yaml::Error> {
     match segment {
         Segment::Comment(cm) => serialize_comment(cm),

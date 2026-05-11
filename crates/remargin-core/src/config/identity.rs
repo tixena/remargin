@@ -137,12 +137,9 @@ impl fmt::Display for IdentitySource {
 
 /// Snapshot of the effective identity at a given `cwd`.
 ///
-/// The shape both `remargin identity show` (CLI) and the `whoami`
-/// MCP op serialize. `found: false` means "no identity is configured
-/// here": either the resolver returned a walk-exhaustion error with
-/// no flags supplied (read-only diagnostic surface) or the resolved
-/// [`ResolvedConfig`] has no identity field. Every other resolver
-/// error propagates as `Err` from [`resolve_identity_report`].
+/// `found: false` is a soft miss (no config + empty flags, or walk
+/// exhausted) — every other resolver error propagates as `Err` from
+/// [`resolve_identity_report`].
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct IdentityReport {
@@ -248,20 +245,13 @@ pub fn resolve_identity(
     resolve_from_walk(system, cwd, mode, flags, registry)
 }
 
-/// Resolve the effective identity at `cwd` under `flags`.
-///
-/// Returns a structured snapshot for both `remargin identity show`
-/// (CLI) and the `whoami` MCP op. Soft-misses the walk-exhaustion
-/// error when `flags.is_empty()` (or when the error message matches
-/// one of the branch-3 walk-exhaust strings) so the caller can
-/// render `found: false` cleanly during startup polls. Every other
-/// resolver error propagates.
+/// Resolve the effective identity at `cwd` under `flags`. Walk
+/// exhaustion with empty flags is a soft miss (startup-poll
+/// friendly); every other resolver error propagates.
 ///
 /// # Errors
 ///
-/// Propagates every resolver error that is not a walk-exhaust soft
-/// miss (unparseable `--config` file, registry miss in
-/// registered/strict mode, key resolution failure, etc.).
+/// Resolver errors other than the walk-exhaust soft miss.
 pub fn resolve_identity_report(
     system: &dyn System,
     cwd: &Path,

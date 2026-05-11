@@ -543,7 +543,6 @@ fn query_expanded_comment_fields_complete() {
     assert_eq!(results[0].comments.len(), 1);
 
     let cm = &results[0].comments[0];
-    // Verify all fields are populated correctly.
     assert_eq!(cm.id, "c3");
     assert_eq!(cm.author, "alice");
     assert!(matches!(cm.author_type, AuthorType::Human));

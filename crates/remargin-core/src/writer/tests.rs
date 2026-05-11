@@ -266,7 +266,6 @@ fn write_with_mock_system() {
 
     write_document(&system, Path::new("/docs/test.md"), &doc, &added, &removed).unwrap();
 
-    // Verify the file was written.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert!(content.contains("id: wrt1"));
 }

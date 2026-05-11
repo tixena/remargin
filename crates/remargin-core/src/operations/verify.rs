@@ -109,8 +109,6 @@ pub struct VerifyReport {
 }
 
 impl VerifyReport {
-    /// Canonical JSON shape consumed by both `cmd_verify` (CLI) and
-    /// `handle_verify` (MCP).
     #[must_use]
     pub fn to_json(&self) -> Value {
         let results: Vec<Value> = self
@@ -333,21 +331,13 @@ pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyRepo
     VerifyReport { ok, results }
 }
 
-/// Run [`verify_document`] from disk and refresh the on-disk frontmatter
-/// only when [`frontmatter::ensure_frontmatter`] would change it.
-///
-/// The refresh is a side effect: the verify report still describes
-/// integrity exactly as [`verify_document`] would. Comment IDs never
-/// move (the refresh only touches `remargin_*` frontmatter fields), so
-/// the writer's preservation invariant passes by construction. A
-/// frontmatter that is already current returns from this function with
-/// no disk write — `mtime` and bytes are untouched.
+/// Run [`verify_document`] and refresh `remargin_*` frontmatter on
+/// disk only when [`frontmatter::ensure_frontmatter`] would change it.
+/// Integrity status surfaces in `report.ok`, never as `Err`.
 ///
 /// # Errors
 ///
-/// Propagates parse, mode-escalation, frontmatter, and write errors.
-/// The verify report itself never causes an error: a bad report is
-/// surfaced in the `ok` flag, not as an `Err`.
+/// Parse, mode-escalation, frontmatter, or write errors.
 pub fn verify_and_refresh(
     system: &dyn System,
     path: &Path,

@@ -47,7 +47,6 @@ mod tests {
     fn skill_test_when_not_installed_reports_status() {
         let tmp = TempDir::new().unwrap();
         let output = run(&tmp, &["skill", "test"]);
-        // `skill test` may exit non-zero when the skill is not installed.
         let stderr = str::from_utf8(&output.stderr).unwrap();
         let stdout = str::from_utf8(&output.stdout).unwrap();
         let combined = format!("{stdout}{stderr}");

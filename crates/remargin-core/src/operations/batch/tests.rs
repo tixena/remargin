@@ -102,7 +102,6 @@ fn simple_batch() {
     let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
     assert_eq!(ids.len(), 3);
 
-    // Verify all 3 comments exist in the document.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 3);
@@ -113,26 +112,20 @@ fn batch_with_reply() {
     let system = system_with_doc(MINIMAL_DOC);
     let config = open_config();
 
-    let ops = vec![
-        BatchCommentOp {
-            after_comment: None,
-            after_heading: None,
-            after_line: None,
-            attachments: Vec::new(),
-            auto_ack: false,
-            content: String::from("Root comment."),
-            reply_to: None,
-            to: Vec::new(),
-        },
-        // We will set reply_to after creating the first one.
-        // Since batch processes in order, we cannot reference
-        // future IDs. But we can test the basic flow.
-    ];
+    let ops = vec![BatchCommentOp {
+        after_comment: None,
+        after_heading: None,
+        after_line: None,
+        attachments: Vec::new(),
+        auto_ack: false,
+        content: String::from("Root comment."),
+        reply_to: None,
+        to: Vec::new(),
+    }];
 
     let ids = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
     assert_eq!(ids.len(), 1);
 
-    // Now create a reply batch.
     let reply_ops = vec![BatchCommentOp {
         after_comment: None,
         after_heading: None,
@@ -287,7 +280,6 @@ fn batch_two_after_line_comments_both_placed_correctly() {
         cm_b.line
     );
 
-    // Verify the body text is still intact — "Line one." and "Line three." still exist.
     assert!(
         content.contains("Line one."),
         "body text 'Line one.' missing"
@@ -756,11 +748,7 @@ fn batch_auto_ack_forward_reference() {
     let system = system_with_doc(MINIMAL_DOC);
     let config = open_config();
 
-    // op0: create a new comment, op1: reply to op0 with auto_ack.
-    // op1 cannot reference op0's ID directly (it's generated at runtime),
-    // so we create op0 first, then use the returned ID.
-
-    // First, create the parent.
+    // Two-batch flow because op1 cannot reference op0's runtime-generated ID.
     let parent_ops = vec![BatchCommentOp {
         after_comment: None,
         after_heading: None,
@@ -775,7 +763,6 @@ fn batch_auto_ack_forward_reference() {
     let parent_ids =
         batch_comment(&system, Path::new("/docs/test.md"), &config, &parent_ops).unwrap();
 
-    // Now reply with auto_ack.
     let reply_ops = vec![BatchCommentOp {
         after_comment: None,
         after_heading: None,

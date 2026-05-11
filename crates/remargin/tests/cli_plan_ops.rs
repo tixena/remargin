@@ -1,8 +1,4 @@
-//! CLI smoke tests for plan subcommands that the existing harness
-//! does not exercise: ack, batch, comment, react, sign, sandbox-add.
-//! Each test runs `remargin plan <op>` and asserts the report carries
-//! the right `op` label so the `build_plan_*` adapter helpers are
-//! exercised at least once.
+//! `remargin plan {ack,batch,comment,react,sign,sandbox-add,sandbox-remove}` smoke tests.
 
 #[cfg(test)]
 mod tests {
@@ -42,7 +38,6 @@ Seed comment.
     }
 
     fn plan(tmp: &TempDir, args: &[&str]) -> serde_json::Value {
-        // `--json` belongs on the leaf subcommand, not on the parent.
         let mut full: Vec<&str> = args.to_vec();
         full.push("--json");
         let output = Command::cargo_bin("remargin")
@@ -69,9 +64,6 @@ Seed comment.
         assert_eq!(report["op"], "ack");
     }
 
-    /// `plan sign` exits non-zero in open mode without a key — the
-    /// failure surface still funnels through `build_plan_sign`, so this
-    /// covers that adapter even though the projection itself rejects.
     #[test]
     fn plan_sign_without_key_reports_no_signing_key() {
         let tmp = seed_tmp();

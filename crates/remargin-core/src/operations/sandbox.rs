@@ -53,13 +53,8 @@ pub struct SandboxBulkResult {
 }
 
 impl SandboxBulkResult {
-    /// Serialize this bulk result to the canonical JSON shape shared by
-    /// both CLI and MCP adapters.
-    ///
-    /// `base_dir` is stripped from each path so relative paths surface to
-    /// the caller. `changed_key` is the JSON key used for the `changed`
-    /// array — `"added"` for `sandbox add`, `"removed"` for
-    /// `sandbox remove`.
+    /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for
+    /// `sandbox remove`. Paths are rendered relative to `base_dir`.
     #[must_use]
     pub fn to_json(&self, base_dir: &Path, changed_key: &str) -> Value {
         let changed: Vec<String> = self

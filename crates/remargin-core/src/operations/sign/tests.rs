@@ -344,7 +344,6 @@ fn sign_all_mine_is_idempotent() {
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    // First run: signs alice's one comment.
     let r1 = sign_comments(
         &system,
         Path::new("/d/a.md"),

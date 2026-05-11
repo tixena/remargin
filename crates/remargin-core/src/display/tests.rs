@@ -886,8 +886,6 @@ fn query_pretty_reply_marker() {
 
 #[test]
 fn query_no_pretty_unchanged() {
-    // Verify that the non-pretty format_query_pretty function signature exists
-    // and the pretty output format is distinct from what non-pretty would produce.
     let cm = make_expanded(
         "abc",
         "eduardo",

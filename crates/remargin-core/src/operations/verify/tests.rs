@@ -962,11 +962,9 @@ fn verify_and_refresh_is_a_no_op_when_frontmatter_is_already_current() {
     let system = mock_with_doc(STALE_FRONTMATTER_DOC);
     let cfg = open_cfg_as("alice");
 
-    // First call refreshes.
     verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
     let after_first = system.read_to_string(Path::new("/d/a.md")).unwrap();
 
-    // Second call must not mutate any byte: frontmatter is already current.
     verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
     let after_second = system.read_to_string(Path::new("/d/a.md")).unwrap();
 

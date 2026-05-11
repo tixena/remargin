@@ -117,8 +117,6 @@ pub struct SignResult {
 }
 
 impl SignResult {
-    /// Canonical JSON shape consumed by both `cmd_sign` (CLI) and
-    /// `handle_sign` (MCP).
     #[must_use]
     pub fn to_json(&self) -> Value {
         let signed: Vec<Value> = self

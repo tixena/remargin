@@ -111,8 +111,6 @@ pub struct MvOutcome {
 }
 
 impl MvOutcome {
-    /// Canonical JSON shape consumed by both `cmd_mv` (CLI) and
-    /// `handle_mv` (MCP). Pinned by `adapter_parity` tests.
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({

@@ -18,7 +18,6 @@ fn install_project() {
     let path = skill::install(&system, false).unwrap();
     assert_eq!(path.to_str().unwrap(), "/project/.claude/skills/remargin");
 
-    // Verify the SKILL.md file was written.
     let content = system
         .read_to_string(Path::new("/project/.claude/skills/remargin/SKILL.md"))
         .unwrap();
@@ -53,13 +52,9 @@ fn uninstall_removes_dir() {
         .with_dir(Path::new("/project"))
         .unwrap();
 
-    // Install first.
     skill::install(&system, false).unwrap();
-
-    // Then uninstall.
     skill::uninstall(&system, false).unwrap();
 
-    // Verify directory is gone.
     let exists = system
         .exists(Path::new("/project/.claude/skills/remargin"))
         .unwrap();
@@ -86,10 +81,7 @@ fn test_outdated() {
         .with_dir(Path::new("/project"))
         .unwrap();
 
-    // Install first.
     skill::install(&system, false).unwrap();
-
-    // Overwrite with different content.
     system
         .write(
             Path::new("/project/.claude/skills/remargin/SKILL.md"),

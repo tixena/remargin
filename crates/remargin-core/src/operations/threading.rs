@@ -35,7 +35,6 @@ pub struct ThreadNode {
 pub fn build_thread_tree(comments: &[&Comment]) -> ThreadTree {
     let mut roots: Vec<ThreadNode> = Vec::new();
 
-    // First, identify root comments (no reply_to).
     for cm in comments {
         if cm.reply_to.is_none() {
             let node = build_node(cm, comments);

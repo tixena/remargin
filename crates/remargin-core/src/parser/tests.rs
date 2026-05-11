@@ -355,9 +355,6 @@ fn test_line_number_after_body() {
 
 #[test]
 fn test_line_numbers_multiple_comments() {
-    // First comment at line 1.
-    // minimal_block produces 9 lines (opening fence, ---, 5 YAML fields, ---, closing fence).
-    // So second comment starts at line 10 (after a blank line separator at line 10? let's compute)
     let block1 = minimal_block("m1");
     let block2 = minimal_block("m2");
     let doc = format!("{block1}\n{block2}");

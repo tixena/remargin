@@ -73,9 +73,8 @@ pub struct RmResult {
 }
 
 impl RmResult {
-    /// Canonical JSON shape. `deleted` carries the caller-supplied path
-    /// (not the canonical absolute path) so the response can be
-    /// round-tripped back into the same surface.
+    /// `deleted` echoes the caller-supplied path verbatim so the
+    /// response round-trips through the same surface.
     #[must_use]
     pub fn to_json(&self, requested_path: &str) -> Value {
         json!({
@@ -98,14 +97,8 @@ pub struct WriteOutcome {
 }
 
 impl WriteOutcome {
-    /// Serialize this outcome into the canonical JSON shape shared by
-    /// both CLI and MCP adapters: `{written, binary, raw, noop}`.
-    ///
-    /// The `raw` field surfaced to callers is `raw_opt || binary_opt`
-    /// because binary writes are raw by definition (they skip the
-    /// frontmatter / comment-preservation pass). Both adapters already
-    /// applied that OR inline; centralizing it here keeps the rule in
-    /// one place.
+    /// `raw` is forced true for binary writes (they skip the frontmatter
+    /// / comment-preservation pass), so callers don't need to OR it in.
     #[must_use]
     pub fn to_json(self, written: &str, binary: bool, raw: bool) -> Value {
         json!({
@@ -145,10 +138,8 @@ pub struct DocumentMetadata {
 }
 
 impl DocumentMetadata {
-    /// Canonical JSON shape consumed by both `cmd_metadata` (CLI) and
-    /// `handle_metadata` (MCP). `include_frontmatter=true` surfaces the
-    /// parsed YAML frontmatter; CLI omits it (CLI users round-trip via
-    /// `get`/`write`), MCP includes it (agents want one round trip).
+    /// CLI passes `include_frontmatter=false` (round-tripping via
+    /// `get`/`write`); MCP passes `true` so agents get one round trip.
     #[must_use]
     pub fn to_json(&self, include_frontmatter: bool) -> Value {
         let mut map = serde_json::Map::new();
