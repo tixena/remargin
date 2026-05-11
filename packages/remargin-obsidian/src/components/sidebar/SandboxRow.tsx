@@ -47,7 +47,7 @@ export function SandboxRow({
         <FileText className="w-3 h-3 text-text-faint shrink-0" />
         <button
           type="button"
-          className="flex-1 appearance-none bg-transparent border-0 px-0 py-0 rounded-none shadow-none text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
+          className="flex-1 !appearance-none !bg-transparent !border-0 !px-0 !py-0 !rounded-none !shadow-none text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
           onClick={() => onOpenFile(path)}
           title={path}
         >
@@ -70,7 +70,7 @@ export function SandboxRow({
       <FileText className="w-3 h-3 text-text-faint shrink-0" />
       <button
         type="button"
-        className="flex-1 appearance-none bg-transparent border-0 px-0 py-0 rounded-none shadow-none text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
+        className="flex-1 !appearance-none !bg-transparent !border-0 !px-0 !py-0 !rounded-none !shadow-none text-xs font-mono text-text-muted truncate text-left hover:text-text-normal"
         onClick={() => onOpenFile(path)}
         title={path}
       >
@@ -79,7 +79,7 @@ export function SandboxRow({
       {onRemoveFile && (
         <button
           type="button"
-          className="hidden group-hover:flex items-center justify-center appearance-none bg-transparent border-0 px-0 py-0 rounded-none shadow-none w-4 h-4 shrink-0 text-text-faint hover:text-red-400"
+          className="hidden group-hover:flex items-center justify-center !appearance-none !bg-transparent !border-0 !px-0 !py-0 !rounded-none !shadow-none w-4 h-4 shrink-0 text-text-faint hover:text-red-400"
           onClick={() => onRemoveFile(path)}
           title="Remove from sandbox"
         >
