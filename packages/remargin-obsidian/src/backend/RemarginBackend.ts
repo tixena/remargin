@@ -608,7 +608,17 @@ export class RemarginBackend {
     const timeout = opts?.timeout ?? 300_000;
     const fullPrompt = files.length > 0 ? `${prompt}\n\nFiles:\n${files.join("\n")}` : prompt;
 
-    const logStream = opts?.logPath ? openLogStream(opts.logPath, binary, fullPrompt, cwd) : null;
+    const identity = await this.identity().catch(() => null);
+    const logStream = opts?.logPath
+      ? openLogStream(opts.logPath, {
+          binary,
+          prompt,
+          files,
+          cwd,
+          promptName: opts?.promptName,
+          identity: identity?.identity,
+        })
+      : null;
 
     // WHY: headless claude denies any tool requiring runtime approval
     // because there's no interactive prompt. Pre-approving the remargin
@@ -618,7 +628,10 @@ export class RemarginBackend {
     const args = ["-p", fullPrompt, "--allowedTools", "mcp__remargin__*"];
 
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(binary, args, { cwd });
+      // WHY: claude -p waits ~3s on stdin before printing
+      // "no stdin data received". We never pipe to stdin, so close it
+      // immediately via stdio[0]='ignore' (equivalent to < /dev/null).
+      const child = spawn(binary, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
       const stderrChunks: Buffer[] = [];
       let settled = false;
 
@@ -641,7 +654,7 @@ export class RemarginBackend {
       const timer = setTimeout(() => {
         child.kill();
         settle(() => {
-          logStream?.end(`\n[remargin] killed: timeout after ${timeout}ms\n`);
+          logStream?.end(`\n${"`".repeat(4)}\n\n_[remargin] killed: timeout after ${timeout}ms_\n`);
           reject(new Error(`claude timed out after ${timeout}ms`));
         });
       }, timeout);
@@ -652,14 +665,14 @@ export class RemarginBackend {
             err.code === "ENOENT"
               ? `claude binary not found at "${binary}". Check plugin settings.`
               : `failed to spawn claude: ${err.message}`;
-          logStream?.end(`\n[remargin] spawn error: ${msg}\n`);
+          logStream?.end(`\n${"`".repeat(4)}\n\n_[remargin] spawn error: ${msg}_\n`);
           reject(new Error(msg));
         });
       });
 
       child.on("close", (code) => {
         settle(() => {
-          logStream?.end(`\n[remargin] exit ${code ?? "unknown"}\n`);
+          logStream?.end(`\n${"`".repeat(4)}\n\n_[remargin] exit ${code ?? "unknown"}_\n`);
           if (code !== 0) {
             const stderr = Buffer.concat(stderrChunks).toString("utf-8");
             const detail = stderr.trim() || `exit code ${code ?? "unknown"}`;
@@ -700,15 +713,43 @@ export interface InvokeClaudeOpts {
    * appended in real time. Parent directories are created if missing.
    */
   logPath?: string;
+  /** Resolved system-prompt name; used as the log file's H1. */
+  promptName?: string;
 }
 
-function openLogStream(logPath: string, binary: string, fullPrompt: string, cwd: string) {
+interface OpenLogStreamArgs {
+  binary: string;
+  prompt: string;
+  files: string[];
+  cwd: string;
+  promptName?: string;
+  identity?: string;
+}
+
+function openLogStream(logPath: string, args: OpenLogStreamArgs) {
   mkdirSync(dirnamePath(logPath), { recursive: true });
   const stream = createWriteStream(logPath, { flags: "a" });
+  const ts = new Date().toISOString();
+  const title = args.promptName?.trim() || "Submit run";
+  const fileList = args.files.length ? args.files.map((f) => `- \`${f}\``).join("\n") : "_(none)_";
+  // WHY: 4-backtick fence so a 3-backtick block inside the spawn output
+  // doesn't close it early. The footer (written on stream end) closes
+  // this fence and adds the exit-status line.
+  const fence = "`".repeat(4);
   const header =
-    `=== ${new Date().toISOString()} ===\n` +
-    `cwd: ${cwd}\n` +
-    `$ ${binary} -p <prompt of ${fullPrompt.length} chars>\n\n`;
+    "---\n" +
+    `ts: ${ts}\n` +
+    (args.identity ? `identity: ${args.identity}\n` : "") +
+    `cwd: ${args.cwd}\n` +
+    `command: ${args.binary} -p\n` +
+    "---\n\n" +
+    `# ${title}\n\n` +
+    "## Prompt\n\n" +
+    `${args.prompt.trim()}\n\n` +
+    "## Files\n\n" +
+    `${fileList}\n\n` +
+    "## Output\n\n" +
+    `${fence}\n`;
   stream.write(header);
   return stream;
 }

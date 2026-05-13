@@ -224,6 +224,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
         runGroup: (group) =>
           plugin.backend.invokeClaude(group.prompt.prompt, group.files, {
             logPath: group.logPath,
+            promptName: group.prompt.name,
           }),
         cleanupGroup: (group) => plugin.backend.sandboxRemove(group.files),
         bumpRefresh,
