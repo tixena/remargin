@@ -610,8 +610,15 @@ export class RemarginBackend {
 
     const logStream = opts?.logPath ? openLogStream(opts.logPath, binary, fullPrompt, cwd) : null;
 
+    // WHY: headless claude denies any tool requiring runtime approval
+    // because there's no interactive prompt. Pre-approving the remargin
+    // MCP namespace lets the launched agent read pending comments,
+    // write replies, etc. without the user having to click through
+    // permission dialogs the plugin can't surface.
+    const args = ["-p", fullPrompt, "--allowedTools", "mcp__remargin__*"];
+
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(binary, ["-p", fullPrompt], { cwd });
+      const child = spawn(binary, args, { cwd });
       const stderrChunks: Buffer[] = [];
       let settled = false;
 
