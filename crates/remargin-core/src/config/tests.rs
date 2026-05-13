@@ -1,12 +1,12 @@
 //! Tests for the config and registry loader.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use os_shim::mock::MockSystem;
 
 use crate::parser::AuthorType;
 
-use super::identity::IdentityFlags;
+use super::identity::{IdentityFlags, resolve_identity_report};
 use super::registry::RegistryParticipantStatus;
 use super::{
     Mode, ResolvedConfig, load_config, load_config_filtered, load_registry, resolve_key_path,
@@ -866,5 +866,120 @@ fn resolve_bails_when_revoked_identity_in_strict_mode() {
     assert!(
         msg.contains("revoked"),
         "error must surface the revocation, got: {msg}"
+    );
+}
+
+// WHY: regression coverage for rem-bokh — when a caller passes
+// `--config <strict-yaml>` from a cwd with no config (or an open one),
+// the resolver currently keeps the cwd-derived mode and silently runs
+// in Open. That bypasses the strict-mode signing/registry gates the
+// vault declared.
+#[test]
+fn config_path_to_strict_yaml_resolves_strict_mode_even_when_cwd_has_no_config() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/elsewhere"))
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin.yaml"),
+            b"identity: alice\ntype: agent\nmode: strict\nkey: id_ed25519\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin-registry.yaml"),
+            b"participants:\n  alice:\n    type: agent\n    status: active\n    pubkeys: []\n",
+        )
+        .unwrap()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(Path::new("/home/user/.ssh/id_ed25519"), b"")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/vault/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+
+    let resolved = ResolvedConfig::resolve(&system, Path::new("/elsewhere"), &flags, None).unwrap();
+
+    assert_eq!(
+        resolved.mode,
+        Mode::Strict,
+        "config_path target declares mode: strict; resolver must adopt it, \
+         not fall back to the cwd walk's open default"
+    );
+}
+
+#[test]
+fn whoami_with_config_path_to_strict_yaml_reports_strict_mode() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/elsewhere"))
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin.yaml"),
+            b"identity: alice\ntype: agent\nmode: strict\nkey: id_ed25519\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin-registry.yaml"),
+            b"participants:\n  alice:\n    type: agent\n    status: active\n    pubkeys: []\n",
+        )
+        .unwrap()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(Path::new("/home/user/.ssh/id_ed25519"), b"")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/vault/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+
+    let report = resolve_identity_report(&system, Path::new("/elsewhere"), &flags).unwrap();
+
+    assert!(report.found, "identity should resolve from config_path");
+    assert_eq!(
+        report.mode.as_deref(),
+        Some("strict"),
+        "whoami must report the mode of the config_path target, \
+         not the cwd-derived default"
+    );
+}
+
+#[test]
+fn config_path_strict_floors_an_open_cwd_mode() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/cwd/.remargin.yaml"),
+            b"mode: open\ntype: human\nidentity: bob\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin.yaml"),
+            b"identity: alice\ntype: agent\nmode: strict\nkey: id_ed25519\n",
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/vault/.remargin-registry.yaml"),
+            b"participants:\n  alice:\n    type: agent\n    status: active\n    pubkeys: []\n",
+        )
+        .unwrap()
+        .with_env("HOME", "/home/user")
+        .unwrap()
+        .with_file(Path::new("/home/user/.ssh/id_ed25519"), b"")
+        .unwrap();
+
+    let flags = IdentityFlags {
+        config_path: Some(PathBuf::from("/vault/.remargin.yaml")),
+        ..IdentityFlags::default()
+    };
+
+    let resolved = ResolvedConfig::resolve(&system, Path::new("/cwd"), &flags, None).unwrap();
+
+    assert_eq!(
+        resolved.mode,
+        Mode::Strict,
+        "realm-mode floor: when the cwd config says open and the config_path \
+         target says strict, the stricter mode must win so a caller cannot \
+         silently dodge the target vault's signing gate"
     );
 }

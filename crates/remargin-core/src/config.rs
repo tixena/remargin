@@ -315,7 +315,7 @@ impl ResolvedConfig {
         flags: &identity::IdentityFlags,
         assets_dir_flag: Option<&str>,
     ) -> Result<Self> {
-        let ResolvedMode { mode, .. } = resolve_mode(system, cwd)?;
+        let ResolvedMode { mode: cwd_mode, .. } = resolve_mode(system, cwd)?;
 
         let registry_anchor = flags
             .config_path
@@ -328,7 +328,7 @@ impl ResolvedConfig {
             resolve_fields_from_walk(system, cwd)?
         } else {
             let resolved =
-                identity::resolve_identity(system, cwd, &mode, flags, registry.as_ref())?;
+                identity::resolve_identity(system, cwd, &cwd_mode, flags, registry.as_ref())?;
             let source_path = match &resolved.source {
                 identity::IdentitySource::ConfigFlag(p) | identity::IdentitySource::Walk(p) => {
                     Some(p.clone())
@@ -342,6 +342,17 @@ impl ResolvedConfig {
                 source_config: resolved.source_config,
                 source_path,
             }
+        };
+
+        // WHY: when --config points at a stricter realm than the cwd walk
+        // (or vice versa), the stricter mode must win so callers can't
+        // silently dodge a vault's signing/registry gate by running from
+        // an open directory.
+        let mode = match fields.source_config.as_ref() {
+            Some(cfg) if cfg.mode.strictness_rank() > cwd_mode.strictness_rank() => {
+                cfg.mode.clone()
+            }
+            _ => cwd_mode,
         };
 
         let assets_dir = assets_dir_flag
