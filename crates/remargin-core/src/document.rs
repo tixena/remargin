@@ -644,7 +644,7 @@ pub fn write(
         return Ok(WriteOutcome { noop: true });
     }
 
-    commit_with_verify(&final_doc, config, &resolved, |verified_doc| {
+    commit_with_verify(system, &final_doc, config, &resolved, |verified_doc| {
         let serialized = verified_doc.to_markdown()?;
         system
             .write(&resolved, serialized.as_bytes())

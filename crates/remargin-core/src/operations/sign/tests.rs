@@ -180,8 +180,30 @@ signature: {sig}
 }
 
 fn mock_with(content: &str) -> MockSystem {
+    let registry_yaml = format!(
+        "\
+participants:
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - {TEST_PUBLIC_KEY}
+  bob:
+    type: human
+    status: active
+    pubkeys:
+      - {TEST_PUBLIC_KEY}
+"
+    );
     MockSystem::new()
         .with_file(Path::new("/keys/ed25519"), TEST_PRIVATE_KEY.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/d/.remargin.yaml"), b"mode: registered\n")
+        .unwrap()
+        .with_file(
+            Path::new("/d/.remargin-registry.yaml"),
+            registry_yaml.as_bytes(),
+        )
         .unwrap()
         .with_file(Path::new("/d/a.md"), content.as_bytes())
         .unwrap()

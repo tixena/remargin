@@ -400,6 +400,7 @@ pub fn format_report_diagnostic(report: &VerifyReport, mode: &Mode) -> String {
 /// the multi-line diagnostic. In that case `write_fn` is not invoked.
 /// Otherwise the return value is whatever `write_fn` returns.
 pub fn commit_with_verify<F>(
+    system: &dyn System,
     doc: &ParsedDocument,
     cfg: &ResolvedConfig,
     path: &Path,
@@ -408,9 +409,10 @@ pub fn commit_with_verify<F>(
 where
     F: FnOnce(&ParsedDocument) -> Result<()>,
 {
-    let report = verify_document(doc, cfg);
+    let realm_cfg = cfg.escalate_mode_for_doc(system, path)?;
+    let report = verify_document(doc, &realm_cfg);
     if !report.ok {
-        return Err(VerifyFailure::from_document(doc, cfg, path).into());
+        return Err(VerifyFailure::from_document(doc, &realm_cfg, path).into());
     }
     write_fn(doc)
 }

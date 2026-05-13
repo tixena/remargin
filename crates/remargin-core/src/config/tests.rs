@@ -868,3 +868,45 @@ fn resolve_bails_when_revoked_identity_in_strict_mode() {
         "error must surface the revocation, got: {msg}"
     );
 }
+
+// WHY: a file's realm is the source of truth for mode. The caller's
+// own context — cwd walk, --config target, anything else — does not
+// participate in the decision. Today escalate_mode_for_doc only
+// upgrades when the realm is stricter than the caller, so a file
+// living in an open realm still gets verified/written under a
+// stricter caller mode. That breaks the invariant.
+#[test]
+fn doc_realm_open_replaces_caller_strict_mode() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/realm/.remargin.yaml"),
+            b"mode: open\nidentity: alice\ntype: human\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/realm/file.md"), b"# doc\n")
+        .unwrap();
+
+    let caller = ResolvedConfig {
+        assets_dir: String::from("assets"),
+        author_type: Some(AuthorType::Human),
+        identity: Some(String::from("alice")),
+        ignore: Vec::new(),
+        key_path: None,
+        mode: Mode::Strict,
+        registry: None,
+        source_path: None,
+        trusted_roots: Vec::new(),
+        unrestricted: false,
+    };
+
+    let resolved = caller
+        .escalate_mode_for_doc(&system, Path::new("/realm/file.md"))
+        .unwrap();
+
+    assert_eq!(
+        resolved.mode,
+        Mode::Open,
+        "the file's realm declares open; the caller's stricter context \
+         must not replace the realm's mode - realm is the source of truth"
+    );
+}

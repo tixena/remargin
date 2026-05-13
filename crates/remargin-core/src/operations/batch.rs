@@ -341,7 +341,7 @@ fn write_batch_result(
 ) -> Result<()> {
     let expected_added: HashSet<String> = created_ids.iter().cloned().collect();
     let expected_removed: HashSet<String> = HashSet::new();
-    commit_with_verify(doc, config, path, |verified_doc| {
+    commit_with_verify(system, doc, config, path, |verified_doc| {
         writer::write_document(
             system,
             path,

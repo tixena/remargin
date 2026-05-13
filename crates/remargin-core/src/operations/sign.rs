@@ -295,7 +295,7 @@ pub fn sign_comments(
     // checksum on an unsigned comment we did NOT sign), the gate
     // trips before any byte reaches disk and the caller can recover.
     let empty: HashSet<String> = HashSet::new();
-    commit_with_verify(&doc, config, path, |verified_doc| {
+    commit_with_verify(system, &doc, config, path, |verified_doc| {
         writer::write_document(system, path, verified_doc, &empty, &empty)
     })?;
 

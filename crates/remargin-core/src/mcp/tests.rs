@@ -887,6 +887,14 @@ checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b982
 hello
 ```
 ";
+    let alice_active_yaml = "\
+participants:
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtestalicekey
+";
     let base = Path::new("/parent");
     let system = MockSystem::new()
         .with_dir(Path::new("/parent/realm"))
@@ -901,17 +909,14 @@ hello
             b"mode: strict\nidentity: realm-owner\ntype: agent\n",
         )
         .unwrap()
+        .with_file(
+            Path::new("/parent/realm/.remargin-registry.yaml"),
+            alice_active_yaml.as_bytes(),
+        )
+        .unwrap()
         .with_file(Path::new("/parent/realm/file.md"), unsigned_doc.as_bytes())
         .unwrap();
 
-    let alice_active_yaml = "\
-participants:
-  alice:
-    type: human
-    status: active
-    pubkeys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtestalicekey
-";
     let registry: Registry = serde_yaml::from_str(alice_active_yaml).unwrap();
 
     // Caller is mounted at /parent (open mode). The registry knows alice

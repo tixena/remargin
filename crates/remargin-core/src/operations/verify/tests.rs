@@ -21,7 +21,7 @@ use crate::operations::verify::{
     verify_document,
 };
 use crate::operations::{
-    CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment,
+    CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, react,
 };
 use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
 use crate::reactions::Reactions;
@@ -72,6 +72,19 @@ checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b982
 ---
 hello
 ```
+";
+
+const ALICE_ACTIVE_REGISTRY_YAML: &str = "\
+participants:
+  alice:
+    type: human
+    status: active
+    pubkeys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtestalicekey
+  bob:
+    type: human
+    status: active
+    pubkeys: []
 ";
 
 fn make_comment(id: &str, author: &str, content: &str) -> Comment {
@@ -129,20 +142,23 @@ fn registry_with(yaml: &str) -> Registry {
 /// Registry where `alice` is active with a made-up pubkey and `bob` is
 /// active with no pubkeys (so any signature from bob cannot match).
 fn alice_active_registry() -> Registry {
-    registry_with(
-        "\
-participants:
-  alice:
-    type: human
-    status: active
-    pubkeys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAtestalicekey
-  bob:
-    type: human
-    status: active
-    pubkeys: []
-",
-    )
+    registry_with(ALICE_ACTIVE_REGISTRY_YAML)
+}
+
+// WHY: commit_with_verify now derives mode and registry from the doc's
+// realm. Tests that hand it a (mode, registry) pair must also stage a
+// matching realm at /d/ so the realm walk doesn't replace either.
+fn realm_at_d(mode: &Mode, registry_yaml: Option<&str>) -> MockSystem {
+    let yaml = format!("mode: {}\n", mode.as_str());
+    let mut sys = MockSystem::new()
+        .with_file(Path::new("/d/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+    if let Some(reg) = registry_yaml {
+        sys = sys
+            .with_file(Path::new("/d/.remargin-registry.yaml"), reg.as_bytes())
+            .unwrap();
+    }
+    sys
 }
 
 // ---------- status.as_str rendering ----------
@@ -309,9 +325,10 @@ fn one_bad_row_marks_whole_report_bad() {
 fn commit_with_verify_invokes_writer_when_ok() {
     let doc = doc_with(vec![make_comment("a", "alice", "hello")]);
     let cfg = make_config(Mode::Open, None);
+    let system = MockSystem::new();
 
     let mut called = false;
-    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| {
+    let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| {
         called = true;
         Ok(())
     });
@@ -326,9 +343,10 @@ fn commit_with_verify_blocks_writer_on_bad_checksum() {
     bad.checksum = String::from("sha256:deadbeef");
     let doc = doc_with(vec![bad]);
     let cfg = make_config(Mode::Open, None);
+    let system = MockSystem::new();
 
     let mut called = false;
-    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| {
+    let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| {
         called = true;
         Ok(())
     });
@@ -346,9 +364,10 @@ fn commit_with_verify_blocks_writer_on_bad_checksum() {
 fn commit_with_verify_blocks_in_registered_for_unknown_author() {
     let doc = doc_with(vec![make_comment("a", "charlie", "hello")]);
     let cfg = make_config(Mode::Registered, Some(alice_active_registry()));
+    let system = realm_at_d(&Mode::Registered, Some(ALICE_ACTIVE_REGISTRY_YAML));
 
     let mut called = false;
-    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| {
+    let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| {
         called = true;
         Ok(())
     });
@@ -472,7 +491,8 @@ fn verify_failure_human_text_has_three_blocks() {
 fn commit_with_verify_returns_typed_failure() {
     let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
     let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
-    let result = commit_with_verify(&doc, &cfg, Path::new("/d/a.md"), |_| Ok(()));
+    let system = realm_at_d(&Mode::Strict, Some(ALICE_ACTIVE_REGISTRY_YAML));
+    let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| Ok(()));
     let err = result.unwrap_err();
     let downcast = err.downcast_ref::<VerifyFailure>();
     assert!(downcast.is_some(), "error must downcast to VerifyFailure");
@@ -562,6 +582,35 @@ fn mock_with_doc(content: &str) -> MockSystem {
         .unwrap()
 }
 
+// WHY: file's realm is the source of truth for mode AND registry. Tests
+// that rely on strict-mode op gating need /d/ to declare strict
+// explicitly AND carry the registry the realm's gate consults.
+fn mock_with_doc_in_strict_realm(content: &str) -> MockSystem {
+    MockSystem::new()
+        .with_file(Path::new("/d/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
+        .with_file(
+            Path::new("/d/.remargin-registry.yaml"),
+            ALICE_ACTIVE_REGISTRY_YAML.as_bytes(),
+        )
+        .unwrap()
+        .with_file(Path::new("/d/a.md"), content.as_bytes())
+        .unwrap()
+}
+
+fn mock_with_doc_in_registered_realm(content: &str) -> MockSystem {
+    MockSystem::new()
+        .with_file(Path::new("/d/.remargin.yaml"), b"mode: registered\n")
+        .unwrap()
+        .with_file(
+            Path::new("/d/.remargin-registry.yaml"),
+            ALICE_ACTIVE_REGISTRY_YAML.as_bytes(),
+        )
+        .unwrap()
+        .with_file(Path::new("/d/a.md"), content.as_bytes())
+        .unwrap()
+}
+
 #[test]
 fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
     // Open mode + fresh unregistered identity should be accepted by the
@@ -605,7 +654,7 @@ fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
     // verify gate still catches the bad artifact and the file stays
     // byte-identical.
     let before = alice_doc_content();
-    let system = mock_with_doc(&before);
+    let system = mock_with_doc_in_registered_realm(&before);
     let mut bad_cfg = registered_cfg_with_alice();
     // Force-swap identity to a non-registered author.
     bad_cfg.identity = Some(String::from("charlie"));
@@ -728,7 +777,7 @@ fn create_comment_strict_registered_active_no_key_file_byte_identical() {
     // `create_comment`, the post-write verify gate catches the unsigned
     // artifact, and the file stays byte-identical.
     let before = alice_doc_content();
-    let system = mock_with_doc(&before);
+    let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
 
     let pos = InsertPosition::Append;
@@ -769,7 +818,7 @@ fn create_comment_strict_unregistered_author_file_byte_identical() {
     // this test confirms that even if an invalid config reaches the op,
     // the verify gate still refuses to write a bad artifact.
     let before = alice_doc_content();
-    let system = mock_with_doc(&before);
+    let system = mock_with_doc_in_strict_realm(&before);
     let mut cfg = strict_cfg_with_alice_no_key();
     cfg.identity = Some(String::from("charlie"));
 
@@ -834,7 +883,7 @@ fn edit_comment_strict_registered_active_no_key_fails_fast() {
     // edit_comment is a signed-artifact-producing op: it re-signs on edit
     // when the identity requires signing. Same fail-fast rule applies.
     let before = alice_doc_content();
-    let system = mock_with_doc(&before);
+    let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
 
     let result = edit_comment(
@@ -866,7 +915,7 @@ fn batch_comment_strict_registered_active_no_key_file_byte_identical() {
     // sneaks past, the post-write verify gate catches the unsigned
     // batch before any byte reaches disk.
     let before = alice_doc_content();
-    let system = mock_with_doc(&before);
+    let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
 
     let ops = vec![
@@ -971,5 +1020,179 @@ fn verify_and_refresh_is_a_no_op_when_frontmatter_is_already_current() {
     assert_eq!(
         after_first, after_second,
         "verify on a fresh file must not write; bytes diverged"
+    );
+}
+
+// ---------- realm-mode-bypass exploits ----------
+//
+// Each test below mutates a file whose realm declares mode: strict, using
+// a hand-built caller config that says mode: Open. The realm's mode is
+// the source of truth; the caller's mode is irrelevant. The op must
+// refuse to write under the realm's strict gate.
+//
+// Regression coverage: until commit_with_verify did the realm walk,
+// these ops silently ran under the caller's mode and the gate did not
+// fire on the realm's rules.
+
+#[test]
+fn ack_bypasses_realm_strict_mode_today() {
+    let before = alice_doc_content();
+    let system = mock_with_doc_in_strict_realm(&before);
+    // Caller says Open + has a registry where alice is active. The doc
+    // already carries an unsigned alice comment. Under the realm's
+    // strict mode, alice as registered-active with a Missing signature
+    // is fatal; under the caller's Open mode, Missing is neutral and
+    // the ack lands.
+    let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
+    cfg.identity = Some(String::from("alice"));
+
+    let result = ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false);
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert!(
+        result.is_err(),
+        "realm declares strict; the ack must be blocked by the realm's gate"
+    );
+    assert_eq!(
+        after, before,
+        "file must be byte-identical when the realm-strict gate trips"
+    );
+}
+
+#[test]
+fn react_bypasses_realm_strict_mode_today() {
+    let before = alice_doc_content();
+    let system = mock_with_doc_in_strict_realm(&before);
+    let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
+    cfg.identity = Some(String::from("alice"));
+
+    let result = react(&system, Path::new("/d/a.md"), &cfg, "alc", "+1", false);
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert!(
+        result.is_err(),
+        "realm declares strict; the reaction must be blocked by the realm's gate"
+    );
+    assert_eq!(
+        after, before,
+        "file must be byte-identical when the realm-strict gate trips"
+    );
+}
+
+#[test]
+fn delete_bypasses_realm_strict_mode_today() {
+    // Doc carries two unsigned alice comments. Deleting one leaves the
+    // other on disk — under the realm's strict mode, that surviving
+    // unsigned comment must trip the post-write gate.
+    let content1 = "alice's first note";
+    let content2 = "alice's second note";
+    let cksum1 = crypto::compute_checksum(content1, &[]);
+    let cksum2 = crypto::compute_checksum(content2, &[]);
+    let before = format!(
+        "\
+---
+title: Test
+---
+
+# Hello
+
+```remargin
+---
+id: alc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: {cksum1}
+---
+{content1}
+```
+
+```remargin
+---
+id: alc2
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: {cksum2}
+---
+{content2}
+```
+",
+    );
+    let system = mock_with_doc_in_strict_realm(&before);
+    let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
+    cfg.identity = Some(String::from("alice"));
+
+    let result = delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]);
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert!(
+        result.is_err(),
+        "realm declares strict; the surviving unsigned comment must \
+         trip the realm's gate even though the delete only removed one"
+    );
+    assert_eq!(
+        after, before,
+        "file must be byte-identical when the realm-strict gate trips"
+    );
+}
+
+#[test]
+fn commit_with_verify_does_not_consult_realm_today() {
+    // Architectural pin: commit_with_verify takes (doc, cfg, path) and
+    // could derive the realm from `path`, but it uses cfg.mode directly.
+    // A doc that lives in a strict realm + carries an unsigned
+    // registered-active comment must trip the gate even when the cfg
+    // handed in says Open.
+    let doc_content = alice_doc_content();
+    let system = mock_with_doc_in_strict_realm(&doc_content);
+    let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
+    cfg.identity = Some(String::from("alice"));
+
+    let doc = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
+
+    let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_d| Ok(()));
+
+    assert!(
+        result.is_err(),
+        "commit_with_verify must escalate to the realm's mode before \
+         verifying; today it trusts the caller's cfg.mode and the gate \
+         silently passes"
+    );
+}
+
+#[test]
+fn escalate_mode_for_doc_keeps_caller_registry_today() {
+    // The caller's registry knows alice and treats her as active.
+    // The realm registry is a different one — say, empty.
+    // After escalation, the resulting config's mode IS the realm's, but
+    // the registry is still the caller's. So `requires_signature(alice)`
+    // returns true based on the caller's registry, not the realm's.
+    //
+    // Per the rule (file's realm is the source of truth), the registry
+    // should also come from the realm's anchor.
+    let system = MockSystem::new()
+        .with_file(Path::new("/realm/.remargin.yaml"), b"mode: strict\n")
+        .unwrap()
+        .with_file(
+            Path::new("/realm/.remargin-registry.yaml"),
+            b"participants: {}\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/realm/file.md"), b"# doc\n")
+        .unwrap();
+
+    let mut caller = make_config(Mode::Open, Some(alice_active_registry()));
+    caller.identity = Some(String::from("alice"));
+
+    let resolved = caller
+        .escalate_mode_for_doc(&system, Path::new("/realm/file.md"))
+        .unwrap();
+
+    assert!(
+        !resolved.requires_signature("alice"),
+        "the realm's registry is empty, so alice cannot be \
+         registered-active for THIS realm; but the helper kept the \
+         caller's registry, which has her as active"
     );
 }

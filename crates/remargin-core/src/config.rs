@@ -92,23 +92,6 @@ impl Mode {
             Self::Strict => "strict",
         }
     }
-
-    /// Strictness rank for cross-mode comparison: `Open < Registered <
-    /// Strict`. Higher rank means stricter enforcement.
-    ///
-    /// Used by [`ResolvedConfig::escalate_for_doc`] to implement the
-    /// realm-mode floor: when a caller's CWD-resolved mode is weaker
-    /// than the doc's realm-resolved mode, the doc's mode wins so a
-    /// caller standing in an open-mode dir cannot silently write
-    /// unsigned comments into a strict-mode realm.
-    #[must_use]
-    const fn strictness_rank(&self) -> u8 {
-        match self {
-            Self::Open => 0,
-            Self::Registered => 1,
-            Self::Strict => 2,
-        }
-    }
 }
 
 /// Final resolved configuration.
@@ -190,54 +173,40 @@ impl ResolvedConfig {
         }
     }
 
-    /// Return a config whose mode is the stricter of `self.mode` and
-    /// the mode declared by the realm containing `doc_path`.
-    ///
-    /// This implements the realm-mode floor: a caller
-    /// standing in an open-mode directory who writes into a doc whose
-    /// realm declares `mode: strict` must not silently write unsigned
-    /// comments. The doc's realm wins, the resulting [`ResolvedConfig`]
-    /// is re-validated against the escalated mode (so missing keys or
-    /// unregistered identities surface as a hard error here, before any
-    /// write), and op handlers consume the doc-aware config.
-    ///
-    /// The fix is applied at op-entry time rather than inside
-    /// [`Self::resolve`] because mode escalation depends on the target
-    /// document — which `resolve` does not know about. Every mutating
-    /// op handler calls this just after entry; read-only paths use the
-    /// non-escalated config because reads don't pollute realm
-    /// invariants.
-    ///
-    /// Walks up from the doc's parent directory (or `doc_path` itself
-    /// when it is a directory). When the doc-realm mode is the same or
-    /// weaker than the caller's mode, returns a clone unchanged so this
-    /// is cheap on the common all-same-mode case.
+    /// Return a config whose mode is the mode declared by the realm
+    /// containing `doc_path`. The file's realm is the sole source of
+    /// truth; caller context never participates. Re-validates the
+    /// resulting config against the realm's mode so missing keys or
+    /// unregistered identities surface here, before any write.
     ///
     /// # Errors
     ///
     /// Returns an error when `resolve_mode` fails on the doc's realm
-    /// (e.g. unreadable `.remargin.yaml`), or when the escalated mode
+    /// (e.g. unreadable `.remargin.yaml`), or when the realm's mode
     /// fails [`Self::validate_identity`] — for example, the caller's
     /// declared identity is not in the registry the doc's realm sees,
     /// or the strict-mode key resolution falls through.
     pub fn escalate_for_doc(&self, system: &dyn System, doc_path: &Path) -> Result<Self> {
-        let escalated = self.escalate_mode_for_doc(system, doc_path)?;
-        if escalated.mode != self.mode {
-            escalated.validate_identity().with_context(|| {
+        let realm_cfg = self.escalate_mode_for_doc(system, doc_path)?;
+        if realm_cfg.mode != self.mode {
+            realm_cfg.validate_identity().with_context(|| {
                 format!(
-                    "doc {:?} is in a realm whose mode is stricter than the \
-                     caller's mode; cannot escalate cleanly",
+                    "doc {:?} is in a realm whose mode differs from the \
+                     caller's mode; identity does not satisfy the realm's gate",
                     doc_path.display(),
                 )
             })?;
         }
-        Ok(escalated)
+        Ok(realm_cfg)
     }
 
-    /// Realm-walk + mode escalation only, no posting-authority check.
-    /// Use from read-only paths (verify, lint, comments-list) where the
-    /// caller does not need to be able to write into the realm but does
-    /// need the realm's mode to apply to integrity checks.
+    /// Replace `self.mode` with the mode declared by the realm
+    /// containing `doc_path`. The file's realm is the sole source of
+    /// truth — caller context (cwd walk, --config target) does not
+    /// participate. Use from read-only paths (verify, lint,
+    /// comments-list) where the caller does not need to be able to
+    /// write into the realm but does need the realm's mode to drive
+    /// integrity checks.
     ///
     /// # Errors
     ///
@@ -248,10 +217,7 @@ impl ResolvedConfig {
         let ResolvedMode {
             mode: realm_mode, ..
         } = resolve_mode(system, realm_anchor)?;
-
-        if realm_mode.strictness_rank() <= self.mode.strictness_rank() {
-            return Ok(self.clone());
-        }
+        let realm_registry = load_registry(system, realm_anchor)?;
 
         Ok(Self {
             assets_dir: self.assets_dir.clone(),
@@ -260,7 +226,7 @@ impl ResolvedConfig {
             ignore: self.ignore.clone(),
             key_path: self.key_path.clone(),
             mode: realm_mode,
-            registry: self.registry.clone(),
+            registry: realm_registry,
             source_path: self.source_path.clone(),
             trusted_roots: self.trusted_roots.clone(),
             unrestricted: self.unrestricted,
