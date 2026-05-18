@@ -1278,11 +1278,23 @@ enum SandboxAction {
 #[derive(clap::Subcommand)]
 enum PluginAction {
     /// Register the marketplace and install the remargin plugin.
-    Install,
+    Install {
+        /// Install at project scope instead of the default user scope.
+        #[arg(long)]
+        local: bool,
+    },
     /// Check plugin installation status.
-    Test,
+    Test {
+        /// Check at project scope instead of the default user scope.
+        #[arg(long)]
+        local: bool,
+    },
     /// Uninstall the remargin plugin.
-    Uninstall,
+    Uninstall {
+        /// Uninstall from project scope instead of the default user scope.
+        #[arg(long)]
+        local: bool,
+    },
 }
 
 /// MCP subcommands.
@@ -5626,8 +5638,11 @@ fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -
     const MARKETPLACE: &str = "github:tixena/remargin";
     const PLUGIN_REF: &str = "remargin@remargin";
 
+    let scope_for = |local: bool| if local { "project" } else { "user" };
+
     match action {
-        PluginAction::Install => {
+        PluginAction::Install { local } => {
+            let scope = scope_for(*local);
             // marketplace add is idempotent on the claude side; tolerate the
             // already-registered case by inspecting stderr only on failure.
             let market = Command::new("claude")
@@ -5644,7 +5659,7 @@ fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -
             }
 
             let install = Command::new("claude")
-                .args(["plugins", "install", PLUGIN_REF])
+                .args(["plugins", "install", PLUGIN_REF, "--scope", scope])
                 .output()
                 .context("running 'claude plugins install' -- is Claude Code CLI installed?")?;
             if !install.status.success() {
@@ -5660,20 +5675,22 @@ fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -
                         "installed": true,
                         "marketplace": MARKETPLACE,
                         "plugin": PLUGIN_REF,
+                        "scope": scope,
                     }),
                 )
             } else {
                 writeln!(
                     sinks.stderr,
-                    "Plugin {PLUGIN_REF} installed from {MARKETPLACE}.",
+                    "Plugin {PLUGIN_REF} installed from {MARKETPLACE} at {scope} scope.",
                 )
                 .context("writing to stderr")?;
                 Ok(())
             }
         }
-        PluginAction::Uninstall => {
+        PluginAction::Uninstall { local } => {
+            let scope = scope_for(*local);
             let output = Command::new("claude")
-                .args(["plugins", "uninstall", PLUGIN_REF])
+                .args(["plugins", "uninstall", PLUGIN_REF, "--scope", scope])
                 .output()
                 .context("running 'claude plugins uninstall' -- is Claude Code CLI installed?")?;
             if !output.status.success() {
@@ -5682,14 +5699,21 @@ fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -
             }
 
             if json_mode {
-                print_output(sinks, true, &json!({ "uninstalled": true }))
+                print_output(sinks, true, &json!({ "uninstalled": true, "scope": scope }))
             } else {
-                writeln!(sinks.stderr, "Plugin {PLUGIN_REF} uninstalled.")
-                    .context("writing to stderr")?;
+                writeln!(
+                    sinks.stderr,
+                    "Plugin {PLUGIN_REF} uninstalled from {scope} scope.",
+                )
+                .context("writing to stderr")?;
                 Ok(())
             }
         }
-        PluginAction::Test => {
+        PluginAction::Test { local } => {
+            let scope = scope_for(*local);
+            // `claude plugins list` itself has no --scope filter; it lists
+            // installed plugins across scopes. We surface the scope label so
+            // JSON consumers know which scope the caller cares about.
             let output = Command::new("claude")
                 .args(["plugins", "list"])
                 .output()
@@ -5703,9 +5727,13 @@ fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -
             };
 
             if json_mode {
-                print_output(sinks, true, &json!({ "status": status_str }))
+                print_output(
+                    sinks,
+                    true,
+                    &json!({ "status": status_str, "scope": scope }),
+                )
             } else {
-                writeln!(sinks.stderr, "Plugin status: {status_str}")
+                writeln!(sinks.stderr, "Plugin status ({scope}): {status_str}")
                     .context("writing to stderr")?;
                 Ok(())
             }

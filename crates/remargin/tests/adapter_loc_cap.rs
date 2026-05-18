@@ -90,7 +90,7 @@ mod tests {
         m.insert(
             "cmd_plugin",
             (
-                100,
+                120,
                 "shells out to claude plugins marketplace add / install / uninstall / list",
             ),
         );
