@@ -55,8 +55,5 @@ regex.workspace = true
 # Logging
 tracing.workspace = true
 
-# Skill embedding
-include_dir.workspace = true
-
 [dev-dependencies]
 tempfile.workspace = true

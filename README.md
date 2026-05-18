@@ -467,9 +467,9 @@ remargin [OPTIONS] <COMMAND>
 | `mcp uninstall` | Remove MCP server registration |
 | `mcp test` | Check MCP registration status |
 | `mcp run` | Start the MCP server (stdio transport) |
-| `skill install [--global]` | Install the Claude Code skill |
-| `skill uninstall` | Remove the skill |
-| `skill test` | Check skill installation status |
+| `plugin install` | Register the marketplace and install the Claude Code plugin |
+| `plugin uninstall` | Uninstall the Claude Code plugin |
+| `plugin test` | Check plugin installation status |
 | `registry show` | Display the participant registry |
 
 ### Global Options
@@ -508,19 +508,16 @@ remargin mcp test
 
 Once installed, Claude Code will have access to these tools: `ls`, `get`, `write`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `lint`, `verify`, `migrate`, `purge`.
 
-### Skill
+### Plugin
 
-The skill teaches Claude Code *when* and *how* to use the MCP tools -- trigger phrases, display format for comments, critical rules (like never using `Read`/`Edit`/`Write` for remargin-managed documents), and common workflows.
+The Claude Code plugin ships the remargin skill plus the `/remargin:process-file` and `/remargin:process-sandbox-group` slash commands. The skill teaches Claude Code *when* and *how* to use the MCP tools -- trigger phrases, display format for comments, critical rules (like never using `Read`/`Edit`/`Write` for remargin-managed documents), and common workflows.
 
 ```bash
-# Install at project scope
-remargin skill install
-
-# Or install globally
-remargin skill install --global
+# Register the marketplace and install the plugin
+remargin plugin install
 
 # Verify installation
-remargin skill test
+remargin plugin test
 ```
 
 ### Permissions
@@ -542,9 +539,9 @@ To avoid per-tool confirmation prompts, add this to your Claude Code `settings.l
 For a project using remargin with Claude Code:
 
 ```bash
-# Install both MCP server and skill
+# Install both MCP server and plugin
 remargin mcp install
-remargin skill install
+remargin plugin install
 
 # Add permissions (optional, avoids confirmation prompts)
 # Edit .claude/settings.local.json and add mcp__remargin__* to allow list

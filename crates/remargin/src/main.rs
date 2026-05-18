@@ -43,7 +43,6 @@ use remargin_core::permissions::pretool::{PretoolOutcome, pretool};
 use remargin_core::permissions::restrict as permissions_restrict;
 use remargin_core::permissions::unprotect as permissions_unprotect;
 use remargin_core::responses;
-use remargin_core::skill;
 use remargin_core::writer::InsertPosition;
 
 const EXIT_ERROR: u8 = 1;
@@ -741,14 +740,6 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Manage the Claude Code skill.
-    Skill {
-        /// Subcommand: install, uninstall, test.
-        #[command(subcommand)]
-        action: SkillAction,
-        #[command(flatten)]
-        output_args: OutputArgs,
-    },
     /// Verify comment integrity (checksums and signatures) against the
     /// participant registry.
     ///
@@ -1294,29 +1285,6 @@ enum PluginAction {
     Uninstall,
 }
 
-/// Skill subcommands.
-#[derive(clap::Subcommand)]
-enum SkillAction {
-    /// Install the Claude Code skill.
-    Install {
-        /// Install globally to ~/.claude/skills/remargin/.
-        #[arg(long)]
-        global: bool,
-    },
-    /// Check skill installation status.
-    Test {
-        /// Check global installation.
-        #[arg(long)]
-        global: bool,
-    },
-    /// Uninstall the skill.
-    Uninstall {
-        /// Uninstall from global location.
-        #[arg(long)]
-        global: bool,
-    },
-}
-
 /// MCP subcommands.
 #[derive(clap::Subcommand)]
 enum McpAction {
@@ -1743,7 +1711,6 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Sandbox { output_args, .. }
         | Commands::Search { output_args, .. }
         | Commands::Sign { output_args, .. }
-        | Commands::Skill { output_args, .. }
         | Commands::Verify { output_args, .. }
         | Commands::Write { output_args, .. } => Some(output_args),
         #[cfg(feature = "obsidian")]
@@ -1934,8 +1901,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Permissions { .. }
         | Commands::Plugin { .. }
         | Commands::ResolveMode { .. }
-        | Commands::Keygen { .. }
-        | Commands::Skill { .. } => true,
+        | Commands::Keygen { .. } => true,
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => true,
         Commands::Ack { .. }
@@ -2004,7 +1970,6 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
         | Commands::Search { .. }
-        | Commands::Skill { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => None,
@@ -2044,7 +2009,6 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
-        | Commands::Skill { .. }
         | Commands::Verify { .. }
         | Commands::Version
         | Commands::Write { .. } => None,
@@ -2097,7 +2061,6 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
-        | Commands::Skill { .. }
         | Commands::Verify { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
@@ -2210,7 +2173,6 @@ fn try_dispatch_config_free(
         Commands::Keygen { .. } => handle_keygen(&cli.command, sinks, system).map(Some),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => handle_obsidian(&cli.command, sinks, system, cwd).map(Some),
-        Commands::Skill { .. } => handle_skill(&cli.command, sinks, system).map(Some),
         Commands::Plugin { .. } => handle_plugin(&cli.command, sinks).map(Some),
         Commands::Activity { .. } => handle_activity(&cli.command, sinks, system, cwd).map(Some),
         Commands::Permissions { action } => cmd_permissions(sinks, system, cwd, action).map(Some),
@@ -2350,17 +2312,6 @@ fn handle_obsidian(
         bail!("internal: handle_obsidian called with wrong subcommand");
     };
     cmd_obsidian(sinks, system, cwd, action, output_args.json)
-}
-
-fn handle_skill(command: &Commands, sinks: &mut IoSinks<'_>, system: &dyn System) -> Result<()> {
-    let Commands::Skill {
-        action,
-        output_args,
-    } = command
-    else {
-        bail!("internal: handle_skill called with wrong subcommand");
-    };
-    cmd_skill(sinks, system, action, output_args.json)
 }
 
 fn handle_plugin(command: &Commands, sinks: &mut IoSinks<'_>) -> Result<()> {
@@ -2503,8 +2454,7 @@ fn dispatch_with_config(
         | Commands::Keygen { .. }
         | Commands::Permissions { .. }
         | Commands::Plugin { .. }
-        | Commands::ResolveMode { .. }
-        | Commands::Skill { .. } => Ok(()),
+        | Commands::ResolveMode { .. } => Ok(()),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => Ok(()),
     }
@@ -5674,55 +5624,6 @@ fn render_sign_result_text(
         out(sinks, "no candidates")?;
     }
     Ok(())
-}
-
-fn cmd_skill(
-    sinks: &mut IoSinks<'_>,
-    system: &dyn System,
-    action: &SkillAction,
-    json_mode: bool,
-) -> Result<()> {
-    match action {
-        SkillAction::Install { global } => {
-            let path = skill::install(system, *global)?;
-            if json_mode {
-                print_output(
-                    sinks,
-                    true,
-                    &json!({ "installed": path.display().to_string() }),
-                )
-            } else {
-                writeln!(sinks.stderr, "Skill installed to {}", path.display())
-                    .context("writing to stderr")?;
-                Ok(())
-            }
-        }
-        SkillAction::Test { global } => {
-            let status = skill::test_status(system, *global)?;
-            let status_str = match status {
-                skill::SkillStatus::NotInstalled => "not_installed",
-                skill::SkillStatus::Outdated => "outdated",
-                skill::SkillStatus::UpToDate => "up_to_date",
-                _ => "unknown",
-            };
-            if json_mode {
-                print_output(sinks, true, &json!({ "status": status_str }))
-            } else {
-                writeln!(sinks.stderr, "Skill status: {status_str}")
-                    .context("writing to stderr")?;
-                Ok(())
-            }
-        }
-        SkillAction::Uninstall { global } => {
-            skill::uninstall(system, *global)?;
-            if json_mode {
-                print_output(sinks, true, &json!({ "uninstalled": true }))
-            } else {
-                writeln!(sinks.stderr, "Skill uninstalled.").context("writing to stderr")?;
-                Ok(())
-            }
-        }
-    }
 }
 
 fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -> Result<()> {
