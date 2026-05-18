@@ -114,10 +114,50 @@ struct ToolDesc {
     schema: Value,
 }
 
+/// Structured MCP identity-flag rejection.
+///
+/// Hosts branch on `error_kind == "mcp_identity_flag_rejected"` (via
+/// [`McpIdentityFlagRejected::to_json`]) to detect this class without
+/// regex-matching the free-form message.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct McpIdentityFlagRejected {
+    /// Offending parameter the caller sent.
+    pub flag: String,
+    /// MCP tool the caller invoked (short name, no prefix).
+    pub tool: String,
+}
+
+impl McpIdentityFlagRejected {
+    /// One-line plain-English summary.
+    #[must_use]
+    pub fn headline(&self) -> String {
+        format!(
+            "identity flag '{}' is not supported on MCP tool '{}'; use the CLI for per-call \
+             identity projection",
+            self.flag, self.tool,
+        )
+    }
+
+    /// JSON shape used by [`tool_result_error_json`].
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        json!({
+            "error_kind": "mcp_identity_flag_rejected",
+            "flag": self.flag,
+            "headline": self.headline(),
+            "tool": self.tool,
+        })
+    }
+}
+
 /// Reject any identity-declaration flag in `params`. Returns the
-/// error message on the first hit. Defense against clients that
-/// ignore the schema (which no longer advertises these flags).
-fn reject_identity_flags(tool: &str, params: &Map<String, Value>) -> Option<String> {
+/// structured rejection on the first hit. Defense against clients
+/// that ignore the schema (which no longer advertises these flags).
+fn reject_identity_flags(
+    tool: &str,
+    params: &Map<String, Value>,
+) -> Option<McpIdentityFlagRejected> {
     // `identity_create` is exempt: its `identity` / `type` / `key`
     // params name the NEW identity being rendered, not a per-call
     // re-declaration of the caller's identity.
@@ -126,10 +166,10 @@ fn reject_identity_flags(tool: &str, params: &Map<String, Value>) -> Option<Stri
     }
     for &flag in REJECTED_IDENTITY_FLAGS {
         if params.contains_key(flag) {
-            return Some(format!(
-                "identity flag '{flag}' is not supported on MCP tool '{tool}'; use the CLI for \
-                 per-call identity projection"
-            ));
+            return Some(McpIdentityFlagRejected {
+                tool: String::from(tool),
+                flag: String::from(flag),
+            });
         }
     }
     None
@@ -1195,8 +1235,8 @@ fn dispatch_tool(
     // Reject identity-declaration flags. The schema no longer
     // advertises them, but a schema-ignoring client can still send
     // them — this is the last defensible checkpoint.
-    if let Some(msg) = reject_identity_flags(tool_name, p) {
-        return tool_result_error(&msg);
+    if let Some(rejection) = reject_identity_flags(tool_name, p) {
+        return tool_result_error_json(&rejection.to_json());
     }
 
     // Dispatch-time boundary check. UNCONSTRAINED sessions get the

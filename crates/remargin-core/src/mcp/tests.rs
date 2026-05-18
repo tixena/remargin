@@ -3234,6 +3234,42 @@ fn every_mcp_tool_rejects_identity_flags() {
     }
 }
 
+/// The rejection envelope is JSON-stringified and carries
+/// `error_kind: "mcp_identity_flag_rejected"` so hosts can branch on
+/// the structured field instead of regex-matching the message.
+#[test]
+fn identity_flag_rejection_is_structured() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "x",
+                    "identity": "alice"
+                }
+            }
+        }),
+    );
+    assert!(is_tool_error(&response));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let payload: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(payload["error_kind"], "mcp_identity_flag_rejected");
+    assert_eq!(payload["tool"], "comment");
+    assert_eq!(payload["flag"], "identity");
+    assert!(payload["headline"].as_str().unwrap().contains("identity"));
+}
+
 /// `identity_create` keeps `identity`/`type`/`key` in its schema —
 /// those name the NEW identity being created, not a per-call caller
 /// principal.
