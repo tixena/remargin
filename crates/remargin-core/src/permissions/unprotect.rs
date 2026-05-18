@@ -1,4 +1,4 @@
-//! `remargin unprotect` core.
+//! `remargin claude unrestrict` core.
 //!
 //! [`unprotect`] is the public entry point: anchor discovery (walk
 //! up to the nearest `.claude/` ancestor), sidecar lookup, removal

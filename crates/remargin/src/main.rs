@@ -65,7 +65,7 @@ const EXIT_NOT_RESTRICTED: u8 = 1;
 /// stderr.
 const PERMISSIONS_NOT_RESTRICTED_MARKER: &str = "__remargin_permissions_check_not_restricted__";
 
-/// Default user-scope settings file used by `remargin restrict`.
+/// Default user-scope settings file used by `remargin claude restrict`.
 /// Resolved through [`expand_path`] so `$HOME` follows the active
 /// [`System`] (the `obsidian` feature already exercises this pattern;
 /// we follow the same approach so tests stay hermetic via the
@@ -241,6 +241,13 @@ enum Commands {
         output_args: OutputArgs,
         #[command(flatten)]
         assets_args: AssetsArgs,
+    },
+    /// Claude Code integration: manage which paths Claude is allowed to
+    /// edit + project the deny rules into both Claude settings files.
+    Claude {
+        /// Subcommand: `restrict`, `unrestrict`.
+        #[command(subcommand)]
+        action: ClaudeAction,
     },
     /// Create a comment in a document.
     Comment {
@@ -639,44 +646,6 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Restrict an agent-edit subpath.
-    ///
-    /// Adds a `permissions.trusted_roots` entry to the nearest
-    /// `.claude/`-bearing ancestor's `.remargin.yaml` and projects
-    /// the equivalent rules into both Claude settings files
-    /// (`<anchor>/.claude/settings.local.json` and
-    /// `~/.claude/settings.json`). Idempotent.
-    ///
-    /// No identity flags — `restrict` is a sanctioned config write
-    /// that the user is presumed to have authority over.
-    Restrict {
-        /// Subpath relative to the anchor, OR the literal `*` for
-        /// realm-wide.
-        path: String,
-        /// Extra Bash commands to deny on the restricted path. The
-        /// default deny list already covers every common
-        /// file-modifying command surface (`rm`, `chmod`, editors,
-        /// scriptable interpreters, archivers, shells, VCS, etc. —
-        /// see `BASH_MUTATORS` in `claude_sync.rs`); this flag is for
-        /// project-specific extras the defaults do not catch.
-        /// Comma-separated or repeat the flag:
-        /// `--also-deny-bash curl,wget` or
-        /// `--also-deny-bash curl --also-deny-bash wget`.
-        /// Both forms are equivalent.
-        #[arg(long = "also-deny-bash", value_delimiter = ',')]
-        also_deny_bash: Vec<String>,
-        /// When set, allow `Bash(remargin *)` on the path so the CLI
-        /// stays usable. The MCP / agent surfaces are still blocked.
-        #[arg(long)]
-        cli_allowed: bool,
-        /// User-scope settings file. Defaults to
-        /// `~/.claude/settings.json`. Pass an explicit path to keep
-        /// hermetic test runs out of the user's real home.
-        #[arg(long)]
-        user_settings: Option<PathBuf>,
-        #[command(flatten)]
-        output_args: OutputArgs,
-    },
     /// Remove a file from the managed document tree.
     Rm {
         /// Path to the file.
@@ -763,34 +732,6 @@ enum Commands {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Reverse a previous `restrict`.
-    ///
-    /// Removes the matching `permissions.trusted_roots` entry from the
-    /// nearest `.claude/`-bearing ancestor's `.remargin.yaml` AND
-    /// scrubs the sidecar-tracked rules from both Claude settings
-    /// files. Idempotent. Surfaces manual-edit divergences as
-    /// warnings (never errors).
-    ///
-    /// No identity flags — symmetric with `restrict`.
-    Unprotect {
-        /// Subpath to unprotect (matches the on-disk `path` field of
-        /// the original restrict entry), OR the literal `*` for the
-        /// realm-wide wildcard restrict.
-        path: String,
-        /// Exit non-zero when `<path>` is not currently restricted
-        /// instead of the default warn-and-no-op. For scripts that
-        /// want hard-fail-on-miss semantics.
-        #[arg(long)]
-        strict: bool,
-        /// User-scope settings file. Defaults to
-        /// `~/.claude/settings.json`. Symmetric with `restrict`'s
-        /// flag so hermetic test runs can stay out of the user's
-        /// real home.
-        #[arg(long)]
-        user_settings: Option<PathBuf>,
-        #[command(flatten)]
-        output_args: OutputArgs,
-    },
     /// Verify comment integrity (checksums and signatures) against the
     /// participant registry.
     ///
@@ -841,6 +782,80 @@ enum Commands {
     },
 }
 
+/// `remargin claude` subcommands. Cohesion bucket for ops whose
+/// effects are scoped entirely to Claude Code's permission surface
+/// (`.claude/settings.local.json`, `~/.claude/settings.json`, and the
+/// `.remargin-restrictions.json` sidecar).
+#[derive(clap::Subcommand)]
+enum ClaudeAction {
+    /// Restrict an agent-edit subpath.
+    ///
+    /// Adds a `permissions.trusted_roots` entry to the nearest
+    /// `.claude/`-bearing ancestor's `.remargin.yaml` and projects
+    /// the equivalent rules into both Claude settings files
+    /// (`<anchor>/.claude/settings.local.json` and
+    /// `~/.claude/settings.json`). Idempotent.
+    ///
+    /// No identity flags — `restrict` is a sanctioned config write
+    /// that the user is presumed to have authority over.
+    Restrict {
+        /// Subpath relative to the anchor, OR the literal `*` for
+        /// realm-wide.
+        path: String,
+        /// Extra Bash commands to deny on the restricted path. The
+        /// default deny list already covers every common
+        /// file-modifying command surface (`rm`, `chmod`, editors,
+        /// scriptable interpreters, archivers, shells, VCS, etc. —
+        /// see `BASH_MUTATORS` in `claude_sync.rs`); this flag is for
+        /// project-specific extras the defaults do not catch.
+        /// Comma-separated or repeat the flag:
+        /// `--also-deny-bash curl,wget` or
+        /// `--also-deny-bash curl --also-deny-bash wget`.
+        /// Both forms are equivalent.
+        #[arg(long = "also-deny-bash", value_delimiter = ',')]
+        also_deny_bash: Vec<String>,
+        /// When set, allow `Bash(remargin *)` on the path so the CLI
+        /// stays usable. The MCP / agent surfaces are still blocked.
+        #[arg(long)]
+        cli_allowed: bool,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Pass an explicit path to keep
+        /// hermetic test runs out of the user's real home.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Reverse a previous `claude restrict`.
+    ///
+    /// Removes the matching `permissions.trusted_roots` entry from the
+    /// nearest `.claude/`-bearing ancestor's `.remargin.yaml` AND
+    /// scrubs the sidecar-tracked rules from both Claude settings
+    /// files. Idempotent. Surfaces manual-edit divergences as
+    /// warnings (never errors).
+    ///
+    /// No identity flags — symmetric with `restrict`.
+    Unrestrict {
+        /// Subpath to unrestrict (matches the on-disk `path` field of
+        /// the original restrict entry), OR the literal `*` for the
+        /// realm-wide wildcard restrict.
+        path: String,
+        /// Exit non-zero when `<path>` is not currently restricted
+        /// instead of the default warn-and-no-op. For scripts that
+        /// want hard-fail-on-miss semantics.
+        #[arg(long)]
+        strict: bool,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Symmetric with `restrict`'s
+        /// flag so hermetic test runs can stay out of the user's
+        /// real home.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+}
+
 /// Registry subcommands.
 /// Plan subcommands. One variant per mutating op; per-op
 /// wiring is tracked /.
@@ -872,6 +887,17 @@ enum PlanAction {
         ops_file: String,
         #[command(flatten)]
         output_args: OutputArgs,
+    },
+    /// Project a `claude restrict` / `claude unrestrict` op.
+    ///
+    /// Mirrors `remargin claude <op>` arg-for-arg; routes through the
+    /// canonical plan dispatcher. Surfaces the multi-file config diff
+    /// (`.remargin.yaml`, project + user settings, sidecar) and any
+    /// detectable conflicts. No flags are consumed or written.
+    Claude {
+        /// Subcommand: `restrict` or `unrestrict`.
+        #[command(subcommand)]
+        action: PlanClaudeAction,
     },
     /// Project a `comment` creation op.
     Comment {
@@ -977,35 +1003,6 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project a `restrict` op.
-    ///
-    /// Mirrors `remargin restrict` arg-for-arg: the projection
-    /// describes every file the live op would touch
-    /// (`.remargin.yaml`, project + user settings, sidecar) plus
-    /// any detectable conflicts (allow-vs-deny overlap, anchor
-    /// surprise, YAML entry shape change). No flags are consumed
-    /// or written.
-    Restrict {
-        /// Subpath relative to the anchor, OR the literal `*` for
-        /// realm-wide. Same shape as `remargin restrict`.
-        path: String,
-        /// Extra Bash commands to deny on the restricted path,
-        /// layered on top of the broad default deny list.
-        /// Comma-separated or repeat the flag.
-        #[arg(long = "also-deny-bash", value_delimiter = ',')]
-        also_deny_bash: Vec<String>,
-        /// When set, the projection allows `Bash(remargin *)` on the
-        /// path so the CLI stays usable.
-        #[arg(long)]
-        cli_allowed: bool,
-        /// User-scope settings file. Defaults to
-        /// `~/.claude/settings.json`. Pin an explicit path for
-        /// hermetic test runs.
-        #[arg(long)]
-        user_settings: Option<PathBuf>,
-        #[command(flatten)]
-        output_args: OutputArgs,
-    },
     /// Project a `sandbox add` op.
     SandboxAdd {
         /// Path to the document.
@@ -1034,30 +1031,6 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Project an `unprotect` op.
-    ///
-    /// Symmetric mirror of `plan restrict` for the reverse direction:
-    /// describes every file the live op would touch
-    /// (`.remargin.yaml`, project + user settings, sidecar) plus
-    /// every detectable drift conflict (manual edits, missing
-    /// entries). No flags are consumed or written.
-    Unprotect {
-        /// Subpath relative to the anchor (matches the on-disk
-        /// `path` field of the original restrict entry), OR the
-        /// literal `*` for realm-wide. Same shape as `remargin
-        /// unprotect`.
-        path: String,
-        /// User-scope settings file. Defaults to
-        /// `~/.claude/settings.json`. Symmetric with `restrict` /
-        /// `unprotect` for hermetic test runs. Accepted for
-        /// surface symmetry but not consulted by the projection
-        /// (the sidecar's `added_to_files` list pins the actual
-        /// targets).
-        #[arg(long)]
-        user_settings: Option<PathBuf>,
-        #[command(flatten)]
-        output_args: OutputArgs,
-    },
     /// Project a `write` op.
     Write {
         /// Path to the file.
@@ -1083,6 +1056,50 @@ enum PlanAction {
         /// carry a `reject_reason`.
         #[arg(long)]
         raw: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+}
+
+/// `remargin plan claude` subcommands. Mirror the live `ClaudeAction`
+/// shape; route through the canonical plan dispatcher.
+#[derive(clap::Subcommand)]
+enum PlanClaudeAction {
+    /// Project a `claude restrict` op.
+    Restrict {
+        /// Subpath relative to the anchor, OR the literal `*` for
+        /// realm-wide. Same shape as `remargin claude restrict`.
+        path: String,
+        /// Extra Bash commands to deny on the restricted path,
+        /// layered on top of the broad default deny list.
+        /// Comma-separated or repeat the flag.
+        #[arg(long = "also-deny-bash", value_delimiter = ',')]
+        also_deny_bash: Vec<String>,
+        /// When set, the projection allows `Bash(remargin *)` on the
+        /// path so the CLI stays usable.
+        #[arg(long)]
+        cli_allowed: bool,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Pin an explicit path for
+        /// hermetic test runs.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Project a `claude unrestrict` op.
+    Unrestrict {
+        /// Subpath relative to the anchor (matches the on-disk
+        /// `path` field of the original restrict entry), OR the
+        /// literal `*` for realm-wide. Same shape as `remargin
+        /// claude unrestrict`.
+        path: String,
+        /// User-scope settings file. Defaults to
+        /// `~/.claude/settings.json`. Accepted for surface symmetry
+        /// but not consulted by the projection (the sidecar's
+        /// `added_to_files` list pins the actual targets).
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1680,20 +1697,35 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::React { output_args, .. }
         | Commands::Registry { output_args, .. }
         | Commands::ResolveMode { output_args, .. }
-        | Commands::Restrict { output_args, .. }
         | Commands::Rm { output_args, .. }
         | Commands::Sandbox { output_args, .. }
         | Commands::Search { output_args, .. }
         | Commands::Sign { output_args, .. }
         | Commands::Skill { output_args, .. }
-        | Commands::Unprotect { output_args, .. }
         | Commands::Verify { output_args, .. }
         | Commands::Write { output_args, .. } => Some(output_args),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { output_args, .. } => Some(output_args),
+        Commands::Claude { action } => Some(claude_action_output(action)),
         Commands::Permissions { action } => Some(permissions_action_output(action)),
         Commands::Plan { action, .. } => Some(plan_action_output(action)),
         Commands::Version => None,
+    }
+}
+
+/// Pull the per-action [`OutputArgs`] from a [`ClaudeAction`] variant.
+const fn claude_action_output(action: &ClaudeAction) -> &OutputArgs {
+    match action {
+        ClaudeAction::Restrict { output_args, .. }
+        | ClaudeAction::Unrestrict { output_args, .. } => output_args,
+    }
+}
+
+/// Pull the per-action [`OutputArgs`] from a [`PlanClaudeAction`] variant.
+const fn plan_claude_action_output(action: &PlanClaudeAction) -> &OutputArgs {
+    match action {
+        PlanClaudeAction::Restrict { output_args, .. }
+        | PlanClaudeAction::Unrestrict { output_args, .. } => output_args,
     }
 }
 
@@ -1719,12 +1751,11 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
         | PlanAction::Mv { output_args, .. }
         | PlanAction::Purge { output_args, .. }
         | PlanAction::React { output_args, .. }
-        | PlanAction::Restrict { output_args, .. }
         | PlanAction::SandboxAdd { output_args, .. }
         | PlanAction::SandboxRemove { output_args, .. }
         | PlanAction::Sign { output_args, .. }
-        | PlanAction::Unprotect { output_args, .. }
         | PlanAction::Write { output_args, .. } => output_args,
+        PlanAction::Claude { action: claude } => plan_claude_action_output(claude),
     }
 }
 
@@ -1853,13 +1884,12 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
     match cmd {
         Commands::Version
         | Commands::Activity { .. }
+        | Commands::Claude { .. }
         | Commands::Identity { .. }
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
-        | Commands::Restrict { .. }
         | Commands::Keygen { .. }
-        | Commands::Skill { .. }
-        | Commands::Unprotect { .. } => true,
+        | Commands::Skill { .. } => true,
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => true,
         Commands::Ack { .. }
@@ -1916,7 +1946,8 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Sign { identity_args, .. }
         | Commands::Verify { identity_args, .. }
         | Commands::Write { identity_args, .. } => Some(identity_args),
-        Commands::Comments { .. }
+        Commands::Claude { .. }
+        | Commands::Comments { .. }
         | Commands::Get { .. }
         | Commands::Keygen { .. }
         | Commands::Lint { .. }
@@ -1925,10 +1956,8 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Permissions { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
-        | Commands::Restrict { .. }
         | Commands::Search { .. }
         | Commands::Skill { .. }
-        | Commands::Unprotect { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => None,
@@ -1944,6 +1973,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Edit { assets_args, .. } => Some(assets_args),
         Commands::Ack { .. }
         | Commands::Activity { .. }
+        | Commands::Claude { .. }
         | Commands::Comments { .. }
         | Commands::Delete { .. }
         | Commands::Get { .. }
@@ -1962,13 +1992,11 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::React { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
-        | Commands::Restrict { .. }
         | Commands::Rm { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
         | Commands::Skill { .. }
-        | Commands::Unprotect { .. }
         | Commands::Verify { .. }
         | Commands::Version
         | Commands::Write { .. } => None,
@@ -1999,6 +2027,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         Commands::Ack { .. }
         | Commands::Activity { .. }
         | Commands::Batch { .. }
+        | Commands::Claude { .. }
         | Commands::Comment { .. }
         | Commands::Comments { .. }
         | Commands::Delete { .. }
@@ -2016,12 +2045,10 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::React { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
-        | Commands::Restrict { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
         | Commands::Skill { .. }
-        | Commands::Unprotect { .. }
         | Commands::Verify { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
@@ -2129,8 +2156,7 @@ fn try_dispatch_config_free(
         Commands::Skill { .. } => handle_skill(&cli.command, sinks, system).map(Some),
         Commands::Activity { .. } => handle_activity(&cli.command, sinks, system, cwd).map(Some),
         Commands::Permissions { action } => cmd_permissions(sinks, system, cwd, action).map(Some),
-        Commands::Restrict { .. } => handle_restrict(&cli.command, sinks, system, cwd).map(Some),
-        Commands::Unprotect { .. } => handle_unprotect(&cli.command, sinks, system, cwd).map(Some),
+        Commands::Claude { action } => handle_claude(action, sinks, system, cwd).map(Some),
         _ => {
             debug_assert!(
                 !subcommand_is_config_free(&cli.command),
@@ -2305,56 +2331,44 @@ fn handle_activity(
     cmd_activity(sinks, system, cwd, &p)
 }
 
-fn handle_restrict(
-    command: &Commands,
+fn handle_claude(
+    action: &ClaudeAction,
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
     cwd: &Path,
 ) -> Result<()> {
-    let Commands::Restrict {
-        path,
-        also_deny_bash,
-        cli_allowed,
-        user_settings,
-        output_args,
-    } = command
-    else {
-        bail!("internal: handle_restrict called with wrong subcommand");
-    };
-    let p = RestrictParams {
-        also_deny_bash,
-        cli_allowed: *cli_allowed,
-        json_mode: output_args.json,
-        path,
-        user_settings_explicit: user_settings.as_deref(),
-    };
-    cmd_restrict(sinks, system, cwd, &p)
-}
-
-fn handle_unprotect(
-    command: &Commands,
-    sinks: &mut IoSinks<'_>,
-    system: &dyn System,
-    cwd: &Path,
-) -> Result<()> {
-    let Commands::Unprotect {
-        path,
-        strict,
-        user_settings,
-        output_args,
-    } = command
-    else {
-        bail!("internal: handle_unprotect called with wrong subcommand");
-    };
-    cmd_unprotect(
-        sinks,
-        system,
-        cwd,
-        path,
-        *strict,
-        user_settings.as_deref(),
-        output_args.json,
-    )
+    match action {
+        ClaudeAction::Restrict {
+            path,
+            also_deny_bash,
+            cli_allowed,
+            user_settings,
+            output_args,
+        } => {
+            let p = RestrictParams {
+                also_deny_bash,
+                cli_allowed: *cli_allowed,
+                json_mode: output_args.json,
+                path,
+                user_settings_explicit: user_settings.as_deref(),
+            };
+            cmd_restrict(sinks, system, cwd, &p)
+        }
+        ClaudeAction::Unrestrict {
+            path,
+            strict,
+            user_settings,
+            output_args,
+        } => cmd_unprotect(
+            sinks,
+            system,
+            cwd,
+            path,
+            *strict,
+            user_settings.as_deref(),
+            output_args.json,
+        ),
+    }
 }
 
 fn dispatch_with_config(
@@ -2390,14 +2404,13 @@ fn dispatch_with_config(
         Commands::Write { .. } => handle_write(&cli.command, sinks, system, cwd, config),
         Commands::Version
         | Commands::Activity { .. }
+        | Commands::Claude { .. }
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
-        | Commands::Restrict { .. }
-        | Commands::Skill { .. }
-        | Commands::Unprotect { .. } => Ok(()),
+        | Commands::Skill { .. } => Ok(()),
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => Ok(()),
     }
@@ -4280,6 +4293,10 @@ fn cmd_plan(
     let request = match action {
         PlanAction::Ack { .. } => build_plan_ack(action, system, cwd)?,
         PlanAction::Batch { .. } => build_plan_batch(action, system, cwd)?,
+        PlanAction::Claude { action: claude, .. } => match claude {
+            PlanClaudeAction::Restrict { .. } => build_plan_claude_restrict(claude, system, cwd)?,
+            PlanClaudeAction::Unrestrict { .. } => build_plan_claude_unrestrict(claude, cwd)?,
+        },
         PlanAction::Comment { .. } => build_plan_comment(
             action,
             system,
@@ -4293,11 +4310,9 @@ fn cmd_plan(
         PlanAction::Mv { .. } => build_plan_mv(action, system)?,
         PlanAction::Purge { .. } => build_plan_purge(action, system, cwd)?,
         PlanAction::React { .. } => build_plan_react(action, system, cwd)?,
-        PlanAction::Restrict { .. } => build_plan_restrict(action, system, cwd)?,
         PlanAction::SandboxAdd { .. } => build_plan_sandbox_add(action, system, cwd)?,
         PlanAction::SandboxRemove { .. } => build_plan_sandbox_remove(action, system, cwd)?,
         PlanAction::Sign { .. } => build_plan_sign(action, system, cwd)?,
-        PlanAction::Unprotect { .. } => build_plan_unprotect(action, cwd)?,
         PlanAction::Write { .. } => build_plan_write(action, system, &mut write_body)?,
     };
 
@@ -4491,12 +4506,12 @@ fn build_plan_react<'cmd>(
 /// Anchor-walk failure surfaces via the projection's reject path; on
 /// that path we still produce a report rather than bail here. The
 /// fallback project-scope path is unused on the reject branch.
-fn build_plan_restrict(
-    action: &PlanAction,
+fn build_plan_claude_restrict(
+    action: &PlanClaudeAction,
     system: &dyn System,
     cwd: &Path,
 ) -> Result<plan_ops::PlanRequest<'static>> {
-    let PlanAction::Restrict {
+    let PlanClaudeAction::Restrict {
         path,
         also_deny_bash,
         cli_allowed,
@@ -4504,7 +4519,7 @@ fn build_plan_restrict(
         ..
     } = action
     else {
-        bail!("internal: helper called with wrong PlanAction variant");
+        bail!("internal: helper called with wrong PlanClaudeAction variant");
     };
     let user_scope = match user_settings {
         Some(explicit) => expand_cli_pathbuf(system, explicit)?,
@@ -4571,9 +4586,12 @@ fn build_plan_sign(
     })
 }
 
-fn build_plan_unprotect(action: &PlanAction, cwd: &Path) -> Result<plan_ops::PlanRequest<'static>> {
-    let PlanAction::Unprotect { path, .. } = action else {
-        bail!("internal: helper called with wrong PlanAction variant");
+fn build_plan_claude_unrestrict(
+    action: &PlanClaudeAction,
+    cwd: &Path,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanClaudeAction::Unrestrict { path, .. } = action else {
+        bail!("internal: helper called with wrong PlanClaudeAction variant");
     };
     Ok(plan_ops::PlanRequest::Unprotect {
         args: permissions_unprotect::UnprotectArgs::new(path.clone()),

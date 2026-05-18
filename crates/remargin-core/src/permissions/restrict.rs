@@ -1,4 +1,4 @@
-//! `remargin restrict` core.
+//! `remargin claude restrict` core.
 //!
 //! [`restrict`] is the public entry point: anchor discovery (walk up
 //! to the nearest `.claude/` ancestor), path canonicalisation, an

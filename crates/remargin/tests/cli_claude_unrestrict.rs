@@ -1,8 +1,8 @@
-//! `remargin unprotect` integration tests.
+//! `remargin claude unrestrict` integration tests.
 //!
 //! Exercises the CLI subcommand and the matching MCP tool against
 //! real-filesystem temp dirs. Covers scenarios 12-16 of the
-//! plan: end-to-end restrict + unprotect round-trip,
+//! plan: end-to-end restrict + unrestrict round-trip,
 //! Layer 1 enforcement transitions, wildcard cycle, --json output,
 //! MCP parity.
 
@@ -58,6 +58,7 @@ mod tests {
         let out = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 path,
                 "--user-settings",
@@ -80,7 +81,7 @@ mod tests {
         let before = fs::read_to_string(&project_scope).unwrap();
         assert!(before.contains("Bash(remargin *)"));
 
-        let out = run_in(realm.path(), &["unprotect", "src/secret"]);
+        let out = run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
         assert_status(&out, 0);
 
         let after = fs::read_to_string(&project_scope).unwrap();
@@ -135,7 +136,7 @@ mod tests {
             "expected outside-allow-list refusal, got: {blocked_stderr}"
         );
 
-        let unprotect = run_in(realm.path(), &["unprotect", "src/secret"]);
+        let unprotect = run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
         assert_status(&unprotect, 0);
 
         // No restrict declared → open mode → write proceeds.
@@ -166,7 +167,7 @@ mod tests {
         fs::write(realm.path().join("anywhere.md"), "x").unwrap();
         run_restrict(&realm, "*");
 
-        let unprotect = run_in(realm.path(), &["unprotect", "*"]);
+        let unprotect = run_in(realm.path(), &["claude", "unrestrict", "*"]);
         assert_status(&unprotect, 0);
 
         let body = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
@@ -184,7 +185,10 @@ mod tests {
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         run_restrict(&realm, "src/secret");
 
-        let out = run_in(realm.path(), &["unprotect", "src/secret", "--json"]);
+        let out = run_in(
+            realm.path(),
+            &["claude", "unrestrict", "src/secret", "--json"],
+        );
         assert_status(&out, 0);
         let stdout = str::from_utf8(&out.stdout).unwrap();
         let value: Value = serde_json::from_str(stdout).unwrap();
@@ -222,17 +226,18 @@ mod tests {
         let tools = list_response["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(
-            !names.contains(&"unprotect"),
-            "unprotect must not appear in tools/list, got: {names:?}"
+            !names.contains(&"claude_unrestrict"),
+            "claude_unrestrict must not appear in tools/list, got: {names:?}"
         );
 
-        // tools/call with name=unprotect returns a CLI-pointing tool error.
+        // tools/call with name=claude_unrestrict returns a CLI-pointing tool
+        // error.
         let call_request = json!({
             "jsonrpc": "2.0",
             "id": 2_i32,
             "method": "tools/call",
             "params": {
-                "name": "unprotect",
+                "name": "claude_unrestrict",
                 "arguments": { "path": "src/secret" }
             }
         });
@@ -244,7 +249,7 @@ mod tests {
         assert_eq!(
             call_response["result"]["isError"].as_bool(),
             Some(true),
-            "unprotect dispatch must surface as a tool error"
+            "claude_unrestrict dispatch must surface as a tool error"
         );
         let text = call_response["result"]["content"][0]["text"]
             .as_str()
@@ -253,7 +258,7 @@ mod tests {
             text.contains("not available via MCP"),
             "expected refusal pointing to CLI, got: {text}"
         );
-        assert!(text.contains("remargin unprotect"), "got: {text}");
+        assert!(text.contains("remargin claude unrestrict"), "got: {text}");
     }
 
     /// When the projected deny rule has been hand-deleted from BOTH
@@ -290,7 +295,7 @@ mod tests {
             .unwrap();
         }
 
-        let out = run_in(realm.path(), &["unprotect", "src/secret"]);
+        let out = run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
         assert_status(&out, 0);
         let stderr = str::from_utf8(&out.stderr).unwrap();
 
@@ -351,8 +356,8 @@ mod tests {
         let realm = realm_with_claude();
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         run_restrict(&realm, "src/secret");
-        run_in(realm.path(), &["unprotect", "src/secret"]);
-        let second = run_in(realm.path(), &["unprotect", "src/secret"]);
+        run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
+        let second = run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
         assert_status(&second, 0);
         let stderr = str::from_utf8(&second.stderr).unwrap();
         assert!(
@@ -367,7 +372,10 @@ mod tests {
     fn cli_unprotect_strict_unrestricted_path_fails() {
         let realm = realm_with_claude();
         let yaml_path = realm.path().join(".remargin.yaml");
-        let out = run_in(realm.path(), &["unprotect", "src/secret", "--strict"]);
+        let out = run_in(
+            realm.path(),
+            &["claude", "unrestrict", "src/secret", "--strict"],
+        );
         assert_ne!(out.status.code(), Some(0_i32));
         let stderr = str::from_utf8(&out.stderr).unwrap();
         assert!(
@@ -466,7 +474,8 @@ mod tests {
         let out = run_in(
             realm_path,
             &[
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),

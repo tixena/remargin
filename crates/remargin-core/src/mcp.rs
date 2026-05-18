@@ -80,9 +80,9 @@ const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 /// caller hands in, even one outside `trusted_roots`. Gating it
 /// would defeat its purpose. Other listed tools take no path at all.
 ///
-/// `restrict` and `unprotect` are intentionally absent from the MCP
-/// surface: they mutate permission policy and must only be
-/// invokable by the human via the CLI.
+/// `claude_restrict` and `claude_unrestrict` are intentionally absent
+/// from the MCP surface: they mutate permission policy and must only
+/// be invokable by the human via the CLI.
 const NO_PATH_TOOLS: &[&str] = &[
     "identity_create",
     "permissions_check",
@@ -443,7 +443,7 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (restrict / unprotect) are CLI-only - use `remargin plan restrict` / `remargin plan unprotect`.",
+        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
         schema: with_identity_flag_schema(json!({
             "type": "object",
             "properties": {
@@ -1366,11 +1366,17 @@ fn dispatch_tool(
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
-        "restrict" | "unprotect" => {
-            return tool_result_error(&format!(
-                "tool '{tool_name}' is not available via MCP - use the CLI: 'remargin {tool_name}' \
-                 or 'remargin plan {tool_name}'"
-            ));
+        "claude_restrict" => {
+            return tool_result_error(
+                "tool 'claude_restrict' is not available via MCP - use the CLI: 'remargin claude \
+                 restrict' or 'remargin plan claude restrict'",
+            );
+        }
+        "claude_unrestrict" => {
+            return tool_result_error(
+                "tool 'claude_unrestrict' is not available via MCP - use the CLI: 'remargin claude \
+                 unrestrict' or 'remargin plan claude unrestrict'",
+            );
         }
         "rm" => handle_rm(system, base_dir, config, p),
         "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
@@ -1783,11 +1789,16 @@ fn handle_metadata(
 }
 
 /// Build the canonical "this plan op is CLI-only" error returned when
-/// `mcp__remargin__plan` is called with `op="restrict"` or
-/// `op="unprotect"`. Pulled out so [`handle_plan`] stays
+/// `mcp__remargin__plan` is called with `op="claude_restrict"` or
+/// `op="claude_unrestrict"`. Pulled out so [`handle_plan`] stays
 /// under the adapter LOC cap.
 fn plan_op_cli_only_error(op: &str) -> anyhow::Error {
-    anyhow::anyhow!("plan op '{op}' is not available via MCP - use the CLI: 'remargin plan {op}'")
+    let cli = match op {
+        "claude_restrict" => "remargin plan claude restrict",
+        "claude_unrestrict" => "remargin plan claude unrestrict",
+        _ => "remargin plan",
+    };
+    anyhow::anyhow!("plan op '{op}' is not available via MCP - use the CLI: '{cli}'")
 }
 
 /// Handle the `plan` tool: parse the request shape, build a
@@ -1866,7 +1877,7 @@ fn handle_plan(
             path: base_dir.join(required_str(params, "file")?),
             recursive: optional_bool(params, "recursive"),
         },
-        "restrict" | "unprotect" => return Err(plan_op_cli_only_error(op)),
+        "claude_restrict" | "claude_unrestrict" => return Err(plan_op_cli_only_error(op)),
         "sandbox-add" => plan_ops::PlanRequest::SandboxAdd {
             path: base_dir.join(required_str(params, "file")?),
         },

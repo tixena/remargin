@@ -275,7 +275,7 @@ fn tools_list_returns_all_tools() {
     ];
     /// Tool names that are intentionally CLI-only and must NOT appear
     /// on the MCP surface.
-    const CLI_ONLY_TOOLS: &[&str] = &["restrict", "unprotect"];
+    const CLI_ONLY_TOOLS: &[&str] = &["claude_restrict", "claude_unrestrict"];
 
     let base = Path::new("/docs");
     let system = MockSystem::new();
@@ -647,10 +647,10 @@ fn unknown_tool_returns_error() {
     assert!(is_tool_error(&response));
 }
 
-/// `restrict` is intentionally absent from the MCP surface;
+/// `claude_restrict` is intentionally absent from the MCP surface;
 /// dispatching it returns a tool error pointing the caller at the CLI.
 #[test]
-fn restrict_tool_dispatch_rejected() {
+fn claude_restrict_tool_dispatch_rejected() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -664,7 +664,7 @@ fn restrict_tool_dispatch_rejected() {
             "id": 1_i32,
             "method": "tools/call",
             "params": {
-                "name": "restrict",
+                "name": "claude_restrict",
                 "arguments": { "path": "src/secret" }
             }
         }),
@@ -677,13 +677,13 @@ fn restrict_tool_dispatch_rejected() {
         text.contains("not available via MCP"),
         "expected refusal pointing to CLI, got: {text}"
     );
-    assert!(text.contains("remargin restrict"), "got: {text}");
+    assert!(text.contains("remargin claude restrict"), "got: {text}");
 }
 
-/// `unprotect` is intentionally absent from the MCP surface;
+/// `claude_unrestrict` is intentionally absent from the MCP surface;
 /// dispatching it returns a tool error pointing the caller at the CLI.
 #[test]
-fn unprotect_tool_dispatch_rejected() {
+fn claude_unrestrict_tool_dispatch_rejected() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -697,7 +697,7 @@ fn unprotect_tool_dispatch_rejected() {
             "id": 1_i32,
             "method": "tools/call",
             "params": {
-                "name": "unprotect",
+                "name": "claude_unrestrict",
                 "arguments": { "path": "src/secret" }
             }
         }),
@@ -710,13 +710,13 @@ fn unprotect_tool_dispatch_rejected() {
         text.contains("not available via MCP"),
         "expected refusal pointing to CLI, got: {text}"
     );
-    assert!(text.contains("remargin unprotect"), "got: {text}");
+    assert!(text.contains("remargin claude unrestrict"), "got: {text}");
 }
 
-/// `plan` with `op="restrict"` rejects with a CLI-pointing
+/// `plan` with `op="claude_restrict"` rejects with a CLI-pointing
 /// error; the projection itself stays reachable via the CLI.
 #[test]
-fn plan_restrict_op_rejected_via_mcp() {
+fn plan_claude_restrict_op_rejected_via_mcp() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -731,7 +731,7 @@ fn plan_restrict_op_rejected_via_mcp() {
             "method": "tools/call",
             "params": {
                 "name": "plan",
-                "arguments": { "op": "restrict", "path": "src/secret" }
+                "arguments": { "op": "claude_restrict", "path": "src/secret" }
             }
         }),
     );
@@ -743,13 +743,16 @@ fn plan_restrict_op_rejected_via_mcp() {
         text.contains("not available via MCP"),
         "expected refusal pointing to CLI, got: {text}"
     );
-    assert!(text.contains("remargin plan restrict"), "got: {text}");
+    assert!(
+        text.contains("remargin plan claude restrict"),
+        "got: {text}"
+    );
 }
 
-/// `plan` with `op="unprotect"` rejects with a CLI-pointing
+/// `plan` with `op="claude_unrestrict"` rejects with a CLI-pointing
 /// error; the projection itself stays reachable via the CLI.
 #[test]
-fn plan_unprotect_op_rejected_via_mcp() {
+fn plan_claude_unrestrict_op_rejected_via_mcp() {
     let base = Path::new("/docs");
     let system = MockSystem::new();
     let config = test_config();
@@ -764,7 +767,7 @@ fn plan_unprotect_op_rejected_via_mcp() {
             "method": "tools/call",
             "params": {
                 "name": "plan",
-                "arguments": { "op": "unprotect", "path": "src/secret" }
+                "arguments": { "op": "claude_unrestrict", "path": "src/secret" }
             }
         }),
     );
@@ -776,7 +779,10 @@ fn plan_unprotect_op_rejected_via_mcp() {
         text.contains("not available via MCP"),
         "expected refusal pointing to CLI, got: {text}"
     );
-    assert!(text.contains("remargin plan unprotect"), "got: {text}");
+    assert!(
+        text.contains("remargin plan claude unrestrict"),
+        "got: {text}"
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! `remargin restrict` integration tests.
+//! `remargin claude restrict` integration tests.
 //!
 //! Exercises the CLI subcommand and the matching MCP tool against
 //! real-filesystem temp dirs. Covers scenarios 14-20 of the
@@ -54,7 +54,7 @@ mod tests {
     }
 
     /// End-to-end restrict + Layer 1 enforcement post-polarity-flip:
-    /// after `remargin restrict src/secret`, a write OUTSIDE that
+    /// after `remargin claude restrict src/secret`, a write OUTSIDE that
     /// allow-list is refused by `op_guard`.
     #[test]
     fn restrict_then_write_outside_allow_list_is_refused() {
@@ -67,6 +67,7 @@ mod tests {
         let restrict = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -108,6 +109,7 @@ mod tests {
         let out = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -160,6 +162,7 @@ mod tests {
         let restrict = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "*",
                 "--user-settings",
@@ -204,6 +207,7 @@ mod tests {
         let out = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -259,17 +263,18 @@ mod tests {
         let tools = list_response["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(
-            !names.contains(&"restrict"),
-            "restrict must not appear in tools/list, got: {names:?}"
+            !names.contains(&"claude_restrict"),
+            "claude_restrict must not appear in tools/list, got: {names:?}"
         );
 
-        // tools/call with name=restrict returns a CLI-pointing tool error.
+        // tools/call with name=claude_restrict returns a CLI-pointing tool
+        // error.
         let call_request = json!({
             "jsonrpc": "2.0",
             "id": 2_i32,
             "method": "tools/call",
             "params": {
-                "name": "restrict",
+                "name": "claude_restrict",
                 "arguments": { "path": "src/secret" }
             }
         });
@@ -281,7 +286,7 @@ mod tests {
         assert_eq!(
             call_response["result"]["isError"].as_bool(),
             Some(true),
-            "restrict dispatch must surface as a tool error"
+            "claude_restrict dispatch must surface as a tool error"
         );
         let text = call_response["result"]["content"][0]["text"]
             .as_str()
@@ -290,10 +295,10 @@ mod tests {
             text.contains("not available via MCP"),
             "expected refusal pointing to CLI, got: {text}"
         );
-        assert!(text.contains("remargin restrict"), "got: {text}");
+        assert!(text.contains("remargin claude restrict"), "got: {text}");
     }
 
-    /// helper that runs `restrict src/secret` with the
+    /// helper that runs `claude restrict src/secret` with the
     /// given `--also-deny-bash` argv and returns the resulting
     /// `permissions.trusted_roots[0].also_deny_bash` list parsed from
     /// `.remargin.yaml`.
@@ -302,6 +307,7 @@ mod tests {
         fs::create_dir_all(realm.path().join("src/secret")).unwrap();
         let user_settings = user_settings_arg(&realm);
         let mut args: Vec<&str> = vec![
+            "claude",
             "restrict",
             "src/secret",
             "--user-settings",
@@ -380,6 +386,7 @@ mod tests {
         let out = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -434,6 +441,7 @@ mod tests {
         let restrict = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -445,7 +453,8 @@ mod tests {
         let unprotect = run_in(
             realm.path(),
             &[
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -510,6 +519,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -556,6 +566,7 @@ mod tests {
         let user_settings = user_settings_arg(&realm);
 
         let args = [
+            "claude",
             "restrict",
             "src/secret",
             "--user-settings",

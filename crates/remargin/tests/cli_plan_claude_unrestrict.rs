@@ -1,7 +1,7 @@
-//! `remargin plan unprotect` integration tests.
+//! `remargin plan claude unrestrict` integration tests.
 //!
-//! Mirrors the `cli_plan_restrict.rs` patterns: real-filesystem temp
-//! dirs, `assert_cmd` invocations, JSON output assertions. Covers
+//! Mirrors the `cli_plan_claude_restrict.rs` patterns: real-filesystem
+//! temp dirs, `assert_cmd` invocations, JSON output assertions. Covers
 //! the testing-plan scenarios from the T43 spec: plan-then-act
 //! parity, --json output, MCP / CLI parity, wildcard end-to-end,
 //! drift detection, multi-path independence, and the no-write
@@ -64,6 +64,7 @@ mod tests {
         let apply = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -85,7 +86,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -117,6 +119,7 @@ mod tests {
         let apply = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -129,7 +132,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -151,7 +155,8 @@ mod tests {
         let unprotect = run_in(
             realm.path(),
             &[
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -163,7 +168,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -193,6 +199,7 @@ mod tests {
         let apply = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -224,7 +231,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/secret",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -256,6 +264,7 @@ mod tests {
         let apply = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "*",
                 "--user-settings",
@@ -268,7 +277,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "*",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -288,7 +298,8 @@ mod tests {
         let unprotect = run_in(
             realm.path(),
             &[
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "*",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -300,7 +311,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "*",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -325,6 +337,7 @@ mod tests {
         let restrict_a = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/a",
                 "--user-settings",
@@ -335,6 +348,7 @@ mod tests {
         let restrict_b = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/b",
                 "--user-settings",
@@ -347,7 +361,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "src/a",
                 "--user-settings",
                 user_settings.to_str().unwrap(),
@@ -392,7 +407,8 @@ mod tests {
             realm.path(),
             &[
                 "plan",
-                "unprotect",
+                "claude",
+                "unrestrict",
                 "nonexistent",
                 "--user-settings",
                 user_settings.to_str().unwrap(),

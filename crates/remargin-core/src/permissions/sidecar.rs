@@ -1,11 +1,11 @@
 //! Sidecar manager for `restrict` reversal.
 //!
-//! `remargin restrict` writes Claude permission rules into both
+//! `remargin claude restrict` writes Claude permission rules into both
 //! `.claude/settings.local.json` (project-scope) and
-//! `~/.claude/settings.json` (user-scope). To `unprotect` cleanly the
-//! reverse path needs to know **exactly** which rule strings each
-//! `restrict` invocation added — otherwise it would be guessing at
-//! manually-maintained rules.
+//! `~/.claude/settings.json` (user-scope). To `claude unrestrict`
+//! cleanly the reverse path needs to know **exactly** which rule
+//! strings each `claude restrict` invocation added — otherwise it
+//! would be guessing at manually-maintained rules.
 //!
 //! The sidecar lives at `<anchor>/.claude/.remargin-restrictions.json`
 //! and records, per restricted path, the deny + allow strings that

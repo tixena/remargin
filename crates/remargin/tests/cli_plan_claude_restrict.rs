@@ -1,4 +1,4 @@
-//! `remargin plan restrict` integration tests.
+//! `remargin plan claude restrict` integration tests.
 //!
 //! Mirrors the `cli_restrict.rs` patterns: real-filesystem temp dirs,
 //! `assert_cmd` invocations, JSON output assertions. Covers
@@ -66,6 +66,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -103,6 +104,7 @@ mod tests {
         let apply = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -115,6 +117,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -157,6 +160,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",
@@ -195,6 +199,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "*",
                 "--user-settings",
@@ -225,6 +230,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "*",
                 "--user-settings",
@@ -274,6 +280,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "*",
                 "--user-settings",
@@ -307,6 +314,7 @@ mod tests {
             &deep,
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "sub/sub2/file",
                 "--user-settings",
@@ -335,6 +343,7 @@ mod tests {
             realm.path(),
             &[
                 "plan",
+                "claude",
                 "restrict",
                 "*",
                 "--user-settings",

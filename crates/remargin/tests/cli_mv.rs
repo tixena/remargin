@@ -347,7 +347,7 @@ mod tests {
         assert!(!realm.path().join("dst").exists());
     }
 
-    /// `remargin restrict` projects the full native-tool
+    /// `remargin claude restrict` projects the full native-tool
     /// fence into Claude settings — editor-tool denies, dot-folder
     /// defaults, the `BASH_MUTATORS` list (including dest-side `mv *`),
     /// and source-side `mv` patterns. Slice A of
@@ -363,6 +363,7 @@ mod tests {
         let out = run_in(
             realm.path(),
             &[
+                "claude",
                 "restrict",
                 "src/secret",
                 "--user-settings",

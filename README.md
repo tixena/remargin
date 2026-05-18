@@ -340,7 +340,7 @@ permissions:
   `.remargin.yaml` between two ops takes effect on the second op
   without a restart.
 - **Layer 2 (Claude Code permission sync, one-shot).** Running
-  `remargin restrict <path>` projects the entry into
+  `remargin claude restrict <path>` projects the entry into
   `.claude/settings.local.json` + `~/.claude/settings.json` so
   Claude's NATIVE Read / Edit / Write / Bash tools respect the same
   boundaries. Claude needs to reload its settings (typically a
@@ -354,7 +354,7 @@ sandbox cannot be expanded mid-session.
 
 `trusted_roots` and the dot-folder default-deny only gate
 **write-side** ops. Read-side ops bypass `trusted_roots` entirely so a
-restricted path can still be inspected without unprotect/restrict
+restricted path can still be inspected without unrestrict/restrict
 ceremony. To block reads on a path, declare an explicit `deny_ops`
 entry naming the read op (`deny_ops` is evaluated for both kinds).
 
@@ -380,17 +380,17 @@ canonical templates are:
 
 ```
 # Add / remove restrictions
-remargin restrict <PATH | *> [--also-deny-bash CMD,CMD] [--cli-allowed]
-remargin unprotect <PATH | *>
+remargin claude restrict <PATH | *> [--also-deny-bash CMD,CMD] [--cli-allowed]
+remargin claude unrestrict <PATH | *>
 
 # Inspect
 remargin permissions show [--json]
 remargin permissions check <PATH> [--why]
 ```
 
-`restrict` records the exact rule strings it added in a sidecar at
-`<.claude-anchor>/.claude/.remargin-restrictions.json` so
-`unprotect` reverses cleanly without ever touching user-added
+`claude restrict` records the exact rule strings it added in a sidecar
+at `<.claude-anchor>/.claude/.remargin-restrictions.json` so
+`claude unrestrict` reverses cleanly without ever touching user-added
 rules. The sidecar is `.gitignore`d automatically (its absolute
 paths and per-machine timestamps don't belong in version control).
 
@@ -407,10 +407,10 @@ Rust types without updating the doc fails the build.
 
 The read-only inspection surfaces are exposed via MCP as
 `mcp__remargin__permissions_show` and `mcp__remargin__permissions_check`.
-`restrict` and `unprotect` are intentionally CLI-only: they
-mutate permission policy and that decision belongs to the human, not
-to the agent. `mcp__remargin__plan` likewise rejects `op="restrict"`
-and `op="unprotect"`.
+`claude restrict` and `claude unrestrict` are intentionally CLI-only:
+they mutate permission policy and that decision belongs to the human,
+not to the agent. `mcp__remargin__plan` likewise rejects
+`op="claude_restrict"` and `op="claude_unrestrict"`.
 
 ## CLI Reference
 

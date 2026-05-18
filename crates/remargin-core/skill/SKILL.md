@@ -26,11 +26,11 @@ question doesn't need to be asked.
 
 EXCEPTION — if the denial cites a `trusted_roots` or `deny_ops` rule,
 the user has declared this path off-limits. Surface the denial.
-**Always ask before `unprotect`** — never call `remargin unprotect`
-(or any other path that would reverse a user-declared restriction) on
-your own initiative. That is the worst failure mode of the permissions
-system. Wait for explicit consent before any action that would clear
-the obstacle.
+**Always ask before `unrestrict`** — never call
+`remargin claude unrestrict` (or any other path that would reverse a
+user-declared restriction) on your own initiative. That is the worst
+failure mode of the permissions system. Wait for explicit consent
+before any action that would clear the obstacle.
 
 ### Compound-denial priority order
 
@@ -38,7 +38,7 @@ When a denial mentions multiple reasons, evaluate in this order and
 stop at the first match:
 
 1. **`trusted_roots` or `deny_ops` rule named** → surface the denial
-   to the user. Never auto-recover. **Ask before `unprotect`.**
+   to the user. Never auto-recover. **Ask before `unrestrict`.**
 2. **`path escapes sandbox`** → configuration issue (insufficient
    `trusted_roots` for the MCP). Surface to the user; do not retry.
 3. **Otherwise (managed-file native-tool denial)** → switch to the
@@ -52,7 +52,7 @@ stop at the first match:
 | `Edit` / `Write` denied on a `.md` file | `mcp__remargin__write` (or `comment` if it's a thread reply) |
 | `Bash(cat ...)` / `Bash(sed ...)` / `Bash(rm ...)` denied | `mcp__remargin__get` / `mcp__remargin__write` / `mcp__remargin__delete` |
 | `NotebookEdit` denied on a `.md` file | `mcp__remargin__write` |
-| Op denied with **`trusted_roots`** rule | surface the denial; **ask before `unprotect`**; do not call `remargin unprotect` |
+| Op denied with **`trusted_roots`** rule | surface the denial; **ask before `unrestrict`**; do not call `remargin claude unrestrict` |
 | Op denied with **`deny_ops`** rule | surface the denial; user has explicitly disallowed this op on this path |
 | `path escapes sandbox` from MCP | configuration issue (insufficient `trusted_roots`); surface to user; do not retry |
 
@@ -63,11 +63,11 @@ stop at the first match:
   remargin." The skill exists precisely so this question doesn't need
   to be asked. Switch to the MCP equivalent and proceed silently
   (see the recovery directive above).
-- **Anti-pattern: do not call `remargin unprotect` to clear a
-  `trusted_roots` denial.** The user's `restrict` invocation that
-  added it is user intent. Reversing it without explicit consent is
-  the worst failure mode of the permissions system. **Ask before
-  `unprotect`.** This rule applies regardless of surface: MCP doesn't
+- **Anti-pattern: do not call `remargin claude unrestrict` to clear a
+  `trusted_roots` denial.** The user's `claude restrict` invocation
+  that added it is user intent. Reversing it without explicit consent
+  is the worst failure mode of the permissions system. **Ask before
+  `unrestrict`.** This rule applies regardless of surface: MCP doesn't
   expose the tool, but the Bash subprocess path to the CLI is still
   reachable — and the prohibition stands there too. The fence is your
   behavior, not the surface.
@@ -239,25 +239,27 @@ remargin permissions show  # what's restricted in this realm?
 
 In strict mode, an unsigned or unregistered post is rejected by the verify gate before write. Don't assume an earlier op succeeding implies the next will.
 
-### Q: I want to restrict (or unprotect) a path.
+### Q: I want to restrict (or unrestrict) a path.
 
-1. `remargin restrict <path>` — appends an entry to
+1. `remargin claude restrict <path>` — appends an entry to
    `<.claude-anchor>/.remargin.yaml` AND syncs the equivalent rules
    into `.claude/settings.local.json` + `~/.claude/settings.json`.
    Layer 1 (remargin-core) starts refusing ops on the path on the
    very next call. Layer 2 (Claude's NATIVE Read/Edit/Write/Bash
    tools) takes effect when Claude reloads its settings (typically
    a Claude restart — outside remargin's control).
-2. `remargin unprotect <path>` — exact reverse. Uses a sidecar
-   (`<.claude-anchor>/.claude/.remargin-restrictions.json`) to know
-   precisely which rules to remove; never touches user-added rules.
+2. `remargin claude unrestrict <path>` — exact reverse. Uses a
+   sidecar (`<.claude-anchor>/.claude/.remargin-restrictions.json`)
+   to know precisely which rules to remove; never touches user-added
+   rules.
 3. `remargin permissions show` — print the resolved permissions
    tree at cwd. JSON via `--json`.
 4. `remargin permissions check <path> [--why]` — gitignore-style:
    exit 0 when restricted, 1 when not.
 
-Wildcard form: `remargin restrict "*"` and `remargin unprotect "*"`
-cover the entire realm anchored at the matching `.remargin.yaml`.
+Wildcard form: `remargin claude restrict "*"` and
+`remargin claude unrestrict "*"` cover the entire realm anchored at
+the matching `.remargin.yaml`.
 
 Optional flags:
 - `--also-deny-bash <cmd>` (repeatable) — extra Bash command names
@@ -439,17 +441,18 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 | Need | MCP tool | CLI |
 |---|---|---|
-| Restrict a path | _CLI-only_ | `remargin restrict` |
-| Unprotect a path | _CLI-only_ | `remargin unprotect` |
+| Restrict a path | _CLI-only_ | `remargin claude restrict` |
+| Unrestrict a path | _CLI-only_ | `remargin claude unrestrict` |
 | Show resolved permissions | `mcp__remargin__permissions_show` | `remargin permissions show` |
 | Check if path is restricted | `mcp__remargin__permissions_check` | `remargin permissions check` |
 
-`restrict` and `unprotect` are intentionally CLI-only: they mutate
-permission policy and that decision belongs to the human, not to the
-agent. The MCP surface deliberately omits them, and `mcp__remargin__plan`
-also rejects `op="restrict"` and `op="unprotect"` for the same reason.
-Never call `remargin unprotect` from a Bash subprocess to clear a
-denial — surface the denial to the user and wait for explicit consent.
+`claude restrict` and `claude unrestrict` are intentionally CLI-only:
+they mutate permission policy and that decision belongs to the human,
+not to the agent. The MCP surface deliberately omits them, and
+`mcp__remargin__plan` also rejects `op="claude_restrict"` and
+`op="claude_unrestrict"` for the same reason. Never call
+`remargin claude unrestrict` from a Bash subprocess to clear a denial
+— surface the denial to the user and wait for explicit consent.
 
 No identity flags on these commands — editing your own permissions doesn't need an identity declaration.
 
@@ -536,8 +539,8 @@ explicit per-call oversight of remargin's MCP tools, since remargin
 may be the only path reaching the restricted content.
 
 If a user prefers silent forwarding (no prompts), it is **their**
-opt-in choice — `remargin restrict` does not make this decision for
-them. Suggest, but do not assume, that they add this block to
+opt-in choice — `remargin claude restrict` does not make this decision
+for them. Suggest, but do not assume, that they add this block to
 `.claude/settings.local.json`:
 
 ```json
@@ -551,15 +554,16 @@ them. Suggest, but do not assume, that they add this block to
 Approves all remargin tools at once. The wildcard automatically covers
 the read-only inspection tools (`mcp__remargin__permissions_show`,
 `mcp__remargin__permissions_check`) — no edit needed when new commands
-ship. (`restrict` / `unprotect` are CLI-only and not exposed via MCP.)
+ship. (`claude restrict` / `claude unrestrict` are CLI-only and not
+exposed via MCP.)
 
-When `remargin restrict <path>` itself runs, it APPENDS deny rules
-(plus any explicit `allow_dot_folders` re-allows) to the same
-`permissions` block (see the "restrict / unprotect" decision flowchart
+When `remargin claude restrict <path>` itself runs, it APPENDS deny
+rules (plus any explicit `allow_dot_folders` re-allows) to the same
+`permissions` block (see the "restrict / unrestrict" decision flowchart
 above for the full mechanism). The synchronizer is idempotent.
-Crucially, `restrict` does **not** add `mcp__remargin__*` to the allow
-list — if the user has it there, it is because they put it there
-themselves, and `unprotect` will leave it alone.
+Crucially, `claude restrict` does **not** add `mcp__remargin__*` to the
+allow list — if the user has it there, it is because they put it there
+themselves, and `claude unrestrict` will leave it alone.
 
 ---
 

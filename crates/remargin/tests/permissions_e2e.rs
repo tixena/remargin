@@ -64,7 +64,13 @@ mod tests {
 
     fn restrict_in(realm: &TempDir, path: &str, extra_args: &[&str]) {
         let user = user_settings(realm);
-        let mut args: Vec<&str> = vec!["restrict", path, "--user-settings", user.to_str().unwrap()];
+        let mut args: Vec<&str> = vec![
+            "claude",
+            "restrict",
+            path,
+            "--user-settings",
+            user.to_str().unwrap(),
+        ];
         args.extend_from_slice(extra_args);
         let out = run_in(realm.path(), &args);
         assert_status(&out, 0);
@@ -74,7 +80,13 @@ mod tests {
         let user = user_settings(realm);
         let out = run_in(
             realm.path(),
-            &["unprotect", path, "--user-settings", user.to_str().unwrap()],
+            &[
+                "claude",
+                "unrestrict",
+                path,
+                "--user-settings",
+                user.to_str().unwrap(),
+            ],
         );
         assert_status(&out, 0);
     }
@@ -111,7 +123,7 @@ mod tests {
             "id": 1_i32,
             "method": "tools/call",
             "params": {
-                "name": "restrict",
+                "name": "claude_restrict",
                 "arguments": {
                     "path": "src/secret",
                     "user_settings": mcp_user_settings.to_string_lossy(),
@@ -126,7 +138,7 @@ mod tests {
         assert_eq!(
             response["result"]["isError"].as_bool(),
             Some(true),
-            "MCP restrict must surface as a tool error"
+            "MCP claude_restrict must surface as a tool error"
         );
 
         // No realm artifacts may have been created by the rejected
