@@ -80,6 +80,10 @@ const PERMISSIONS_NOT_RESTRICTED_MARKER: &str = "__remargin_permissions_check_no
 /// `--user-settings` flag).
 const DEFAULT_USER_SETTINGS: &str = "~/.claude/settings.json";
 
+const PLUGIN_MARKETPLACE_SOURCE: &str = "tixena/remargin";
+const PLUGIN_MARKETPLACE_NAME: &str = "remargin-marketplace";
+const PLUGIN_REF: &str = "remargin@remargin-marketplace";
+
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 #[derive(Parser)]
@@ -5633,58 +5637,109 @@ fn render_sign_result_text(
     Ok(())
 }
 
+fn plugin_is_installed() -> Result<bool> {
+    use std::process::Command;
+    let output = Command::new("claude")
+        .args(["plugins", "list"])
+        .output()
+        .context("running 'claude plugins list' -- is Claude Code CLI installed?")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().any(|l| l.contains(PLUGIN_REF)))
+}
+
+fn plugin_install_fresh(sinks: &mut IoSinks<'_>, scope: &str, json_mode: bool) -> Result<()> {
+    use std::process::Command;
+    // marketplace add is idempotent on the claude side; tolerate the
+    // already-registered case by inspecting stderr only on failure.
+    let market = Command::new("claude")
+        .args(["plugins", "marketplace", "add", PLUGIN_MARKETPLACE_SOURCE])
+        .output()
+        .context("running 'claude plugins marketplace add' -- is Claude Code CLI installed?")?;
+    if !market.status.success() {
+        let stderr = String::from_utf8_lossy(&market.stderr);
+        if !stderr.contains("already") {
+            anyhow::bail!("claude plugins marketplace add failed: {stderr}");
+        }
+    }
+
+    let install = Command::new("claude")
+        .args(["plugins", "install", PLUGIN_REF, "--scope", scope])
+        .output()
+        .context("running 'claude plugins install' -- is Claude Code CLI installed?")?;
+    if !install.status.success() {
+        let stderr = String::from_utf8_lossy(&install.stderr);
+        anyhow::bail!("claude plugins install failed: {stderr}");
+    }
+
+    if json_mode {
+        print_output(
+            sinks,
+            true,
+            &json!({
+                "installed": true,
+                "marketplace": PLUGIN_MARKETPLACE_SOURCE,
+                "plugin": PLUGIN_REF,
+                "scope": scope,
+            }),
+        )
+    } else {
+        writeln!(
+            sinks.stderr,
+            "Plugin {PLUGIN_REF} installed from {PLUGIN_MARKETPLACE_SOURCE} at {scope} scope.",
+        )
+        .context("writing to stderr")?;
+        Ok(())
+    }
+}
+
+fn plugin_install_update(sinks: &mut IoSinks<'_>, json_mode: bool) -> Result<()> {
+    use std::process::Command;
+    let market_update = Command::new("claude")
+        .args(["plugins", "marketplace", "update", PLUGIN_MARKETPLACE_NAME])
+        .output()
+        .context("running 'claude plugins marketplace update' -- is Claude Code CLI installed?")?;
+    if !market_update.status.success() {
+        let stderr = String::from_utf8_lossy(&market_update.stderr);
+        anyhow::bail!("claude plugins marketplace update failed: {stderr}");
+    }
+
+    let plugin_update = Command::new("claude")
+        .args(["plugins", "update", PLUGIN_REF])
+        .output()
+        .context("running 'claude plugins update' -- is Claude Code CLI installed?")?;
+    if !plugin_update.status.success() {
+        let stderr = String::from_utf8_lossy(&plugin_update.stderr);
+        anyhow::bail!("claude plugins update failed: {stderr}");
+    }
+
+    if json_mode {
+        print_output(
+            sinks,
+            true,
+            &json!({
+                "updated": true,
+                "marketplace": PLUGIN_MARKETPLACE_NAME,
+                "plugin": PLUGIN_REF,
+            }),
+        )
+    } else {
+        writeln!(sinks.stderr, "Plugin {PLUGIN_REF} updated.").context("writing to stderr")?;
+        Ok(())
+    }
+}
+
 fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -> Result<()> {
     use std::process::Command;
-    const MARKETPLACE: &str = "tixena/remargin";
-    const PLUGIN_REF: &str = "remargin@remargin-marketplace";
 
     let scope_for = |local: bool| if local { "project" } else { "user" };
 
     match action {
         PluginAction::Install { local } => {
             let scope = scope_for(*local);
-            // marketplace add is idempotent on the claude side; tolerate the
-            // already-registered case by inspecting stderr only on failure.
-            let market = Command::new("claude")
-                .args(["plugins", "marketplace", "add", MARKETPLACE])
-                .output()
-                .context(
-                    "running 'claude plugins marketplace add' -- is Claude Code CLI installed?",
-                )?;
-            if !market.status.success() {
-                let stderr = String::from_utf8_lossy(&market.stderr);
-                if !stderr.contains("already") {
-                    anyhow::bail!("claude plugins marketplace add failed: {stderr}");
-                }
-            }
-
-            let install = Command::new("claude")
-                .args(["plugins", "install", PLUGIN_REF, "--scope", scope])
-                .output()
-                .context("running 'claude plugins install' -- is Claude Code CLI installed?")?;
-            if !install.status.success() {
-                let stderr = String::from_utf8_lossy(&install.stderr);
-                anyhow::bail!("claude plugins install failed: {stderr}");
-            }
-
-            if json_mode {
-                print_output(
-                    sinks,
-                    true,
-                    &json!({
-                        "installed": true,
-                        "marketplace": MARKETPLACE,
-                        "plugin": PLUGIN_REF,
-                        "scope": scope,
-                    }),
-                )
+            if plugin_is_installed()? {
+                plugin_install_update(sinks, json_mode)
             } else {
-                writeln!(
-                    sinks.stderr,
-                    "Plugin {PLUGIN_REF} installed from {MARKETPLACE} at {scope} scope.",
-                )
-                .context("writing to stderr")?;
-                Ok(())
+                plugin_install_fresh(sinks, scope, json_mode)
             }
         }
         PluginAction::Uninstall { local } => {
@@ -5711,21 +5766,11 @@ fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -
         }
         PluginAction::Test { local } => {
             let scope = scope_for(*local);
-            // `claude plugins list` itself has no --scope filter; it lists
-            // installed plugins across scopes. We surface the scope label so
-            // JSON consumers know which scope the caller cares about.
-            let output = Command::new("claude")
-                .args(["plugins", "list"])
-                .output()
-                .context("running 'claude plugins list' -- is Claude Code CLI installed?")?;
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let installed = stdout.lines().any(|l| l.contains("remargin"));
-            let status_str = if installed {
+            let status_str = if plugin_is_installed()? {
                 "installed"
             } else {
                 "not_installed"
             };
-
             if json_mode {
                 print_output(
                     sinks,
