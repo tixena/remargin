@@ -7,12 +7,14 @@
 //!    [`RowStatus`] plus an aggregated `ok` flag. The aggregation uses
 //!    a mode-driven severity table.
 //!
-//! 2. [`commit_with_verify`] — a one-shot helper every mutating op wraps
-//!    its write call in. It runs [`verify_document`] against the staged
-//!    in-memory document, and only invokes the caller's write closure when
-//!    the report is clean under the active mode. The invariant "no
-//!    mutation reaches disk without passing verify" is mechanically
-//!    enforced at this one site.
+//! 2. [`commit_with_verify`] — a one-shot helper every mutating op
+//!    wraps its write call in. It compares anomaly sets: P (the
+//!    on-disk pre-state) vs Q (the staged in-memory post-state). The
+//!    write closure runs iff `Q ⊆ P` — i.e. the op did not introduce
+//!    any new anomaly. The invariant "no mutation reaches disk that
+//!    introduces a new anomaly" is mechanically enforced at this one
+//!    site. Repair ops that strictly reduce the anomaly set always
+//!    succeed.
 //!
 //! The severity table (status × mode → bad?):
 //!
@@ -289,6 +291,114 @@ impl VerifyFailure {
     }
 }
 
+/// Verifier-detected anomaly, identified by `(comment_id, kind)`.
+///
+/// The subset gate uses this pair as the stable identity: anomalies in
+/// the post-mutation state must all be present (under the same pair)
+/// in the pre-mutation state.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct Anomaly {
+    /// Comment ID the anomaly is attached to.
+    pub id: String,
+    /// What kind of anomaly fired on this comment.
+    pub kind: AnomalyKind,
+}
+
+/// Disjoint anomaly kinds the verify pass emits. Severity is
+/// mode-driven via [`row_is_bad`]; the kind itself is mode-independent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum AnomalyKind {
+    /// Recomputed content checksum did not match the stored one.
+    ChecksumInvalid,
+    /// Signature block present but did not match any active pubkey.
+    SignatureInvalid,
+    /// No signature block.
+    SignatureMissing,
+    /// Author is not in the registry.
+    SignatureUnknownAuthor,
+}
+
+impl AnomalyKind {
+    /// Stable string for diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ChecksumInvalid => "checksum_invalid",
+            Self::SignatureInvalid => "signature_invalid",
+            Self::SignatureMissing => "signature_missing",
+            Self::SignatureUnknownAuthor => "signature_unknown_author",
+        }
+    }
+}
+
+/// Subset-gate refusal.
+///
+/// Raised by [`commit_with_verify`] when the in-memory post-mutation
+/// anomaly set introduces entries not present in the on-disk
+/// pre-mutation set (`Q ⊄ P`).
+#[derive(Debug, Clone, Error)]
+#[error("{}", self.legacy_text())]
+#[non_exhaustive]
+pub struct SubsetGateFailure {
+    /// `Q \ P`: anomalies in the post-state that weren't in the pre-state.
+    pub introduced: Vec<Anomaly>,
+    /// Active mode at refusal time.
+    pub mode: Mode,
+    /// Document the gate was protecting.
+    pub path: PathBuf,
+}
+
+impl SubsetGateFailure {
+    /// One-line plain-English summary.
+    #[must_use]
+    pub fn headline(&self) -> String {
+        let n = self.introduced.len();
+        let path = self.path.display();
+        if n == 1 {
+            format!("op would introduce 1 new anomaly in {path}")
+        } else {
+            format!("op would introduce {n} new anomalies in {path}")
+        }
+    }
+
+    /// Actionable next-step.
+    #[must_use]
+    pub fn hint(&self) -> String {
+        format!(
+            "Try `remargin verify {} --json` for the full breakdown.",
+            self.path.display()
+        )
+    }
+
+    fn legacy_text(&self) -> String {
+        let mut out = format!("verify failed (mode: {}):\n", self.mode.as_str());
+        for a in &self.introduced {
+            let _ = writeln!(out, "  {}: introduced {}", a.id, a.kind.as_str());
+        }
+        out
+    }
+
+    /// JSON shape for `--json` / MCP tool errors.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let introduced: Vec<Value> = self
+            .introduced
+            .iter()
+            .map(|a| json!({ "id": a.id, "kind": a.kind.as_str() }))
+            .collect();
+        json!({
+            "error_kind": "subset_gate_failed",
+            "introduced": introduced,
+            "headline": self.headline(),
+            "hint": self.hint(),
+            "mode": self.mode.as_str(),
+            "path": self.path.display().to_string(),
+        })
+    }
+}
+
 /// Walk every comment in `doc` and produce a [`VerifyReport`] under the
 /// active mode and registry taken from `cfg`.
 ///
@@ -329,6 +439,56 @@ pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyRepo
     }
 
     VerifyReport { ok, results }
+}
+
+/// Derive the anomaly set for `doc` under `cfg`.
+///
+/// Only rows that would flip `report.ok` to `false` under the active
+/// mode contribute. Distinct anomalies can co-fire on the same comment
+/// (e.g. a bad checksum *and* a missing signature) and are returned as
+/// separate entries.
+#[must_use]
+pub fn anomalies_for_doc(doc: &ParsedDocument, cfg: &ResolvedConfig) -> HashSet<Anomaly> {
+    let mut out = HashSet::new();
+    let report = verify_document(doc, cfg);
+    for (row, cm) in report.results.iter().zip(doc.comments().iter()) {
+        let registered_active = is_registered_active(cm, cfg.registry.as_ref());
+        if !row_is_bad(&cfg.mode, row.checksum_ok, row.signature, registered_active) {
+            continue;
+        }
+        if !row.checksum_ok {
+            out.insert(Anomaly {
+                id: row.id.clone(),
+                kind: AnomalyKind::ChecksumInvalid,
+            });
+        }
+        match row.signature {
+            SignatureStatus::Invalid => {
+                out.insert(Anomaly {
+                    id: row.id.clone(),
+                    kind: AnomalyKind::SignatureInvalid,
+                });
+            }
+            SignatureStatus::Missing => {
+                if matches!(cfg.mode, Mode::Strict) && registered_active {
+                    out.insert(Anomaly {
+                        id: row.id.clone(),
+                        kind: AnomalyKind::SignatureMissing,
+                    });
+                }
+            }
+            SignatureStatus::UnknownAuthor => {
+                if matches!(cfg.mode, Mode::Registered | Mode::Strict) {
+                    out.insert(Anomaly {
+                        id: row.id.clone(),
+                        kind: AnomalyKind::SignatureUnknownAuthor,
+                    });
+                }
+            }
+            SignatureStatus::Valid => {}
+        }
+    }
+    out
 }
 
 /// Run [`verify_document`] and refresh `remargin_*` frontmatter on
@@ -383,21 +543,21 @@ pub fn format_report_diagnostic(report: &VerifyReport, mode: &Mode) -> String {
     out
 }
 
-/// Wrap `write_fn` with a post-mutation verify gate.
+/// Wrap `write_fn` with the post-mutation subset gate.
 ///
-/// The closure is invoked iff the report against `doc` under `cfg` is
-/// clean; otherwise a diagnostic error is returned and `write_fn` is never
-/// called. Because every remargin op is an in-memory-then-write pipeline,
-/// not calling `write_fn` leaves the on-disk file byte-identical to before
-/// the call.
+/// Computes P (anomalies on the on-disk file at `path`) and Q
+/// (anomalies in the in-memory candidate `doc`). The closure is
+/// invoked iff `Q ⊆ P` — the mutation did not introduce any new
+/// anomaly. Repair ops that strictly reduce the anomaly set
+/// (`Q ⊂ P`) and no-op identity transformations (`Q == P`) both
+/// succeed. Damaging ops (`Q ⊄ P`) are refused before any byte
+/// touches disk.
 ///
 /// # Errors
 ///
-/// Returns an error whenever the verify report for `doc` would be `ok ==
-/// false` under `cfg.mode`. The error is a downcastable
-/// [`VerifyFailure`]; the CLI / MCP layer pulls the typed shape out for
-/// structured presentation while legacy `format!("{err}")` callers keep
-/// the multi-line diagnostic. In that case `write_fn` is not invoked.
+/// Returns a downcastable [`SubsetGateFailure`] when `Q ⊄ P`. The
+/// CLI / MCP layer pulls the typed shape out for structured
+/// presentation. In that case `write_fn` is not invoked.
 /// Otherwise the return value is whatever `write_fn` returns.
 pub fn commit_with_verify<F>(
     system: &dyn System,
@@ -410,9 +570,28 @@ where
     F: FnOnce(&ParsedDocument) -> Result<()>,
 {
     let realm_cfg = cfg.escalate_mode_for_doc(system, path)?;
-    let report = verify_document(doc, &realm_cfg);
-    if !report.ok {
-        return Err(VerifyFailure::from_document(doc, &realm_cfg, path).into());
+
+    // P: anomalies the on-disk file already has. An absent file (or
+    // unparsable bytes) means P = empty — fresh writes start clean.
+    let pre = pre_anomalies(system, path, &realm_cfg);
+
+    // Q: anomalies the in-memory candidate would have.
+    let post = anomalies_for_doc(doc, &realm_cfg);
+
+    // Subset gate: refuse iff Q ⊄ P (anything in Q that wasn't in P
+    // is a NEW anomaly this op would introduce).
+    let mut introduced: Vec<Anomaly> = post.difference(&pre).cloned().collect();
+    if !introduced.is_empty() {
+        introduced.sort_by(|a, b| {
+            a.id.cmp(&b.id)
+                .then_with(|| a.kind.as_str().cmp(b.kind.as_str()))
+        });
+        return Err(SubsetGateFailure {
+            introduced,
+            mode: realm_cfg.mode,
+            path: path.to_path_buf(),
+        }
+        .into());
     }
     write_fn(doc)
 }
@@ -498,6 +677,19 @@ fn is_registered_active(cm: &Comment, registry: Option<&Registry>) -> bool {
     reg.participants
         .get(&cm.author)
         .is_some_and(|p| p.status == RegistryParticipantStatus::Active)
+}
+
+/// Compute the pre-mutation anomaly set from the on-disk file. Missing
+/// or unparsable files yield an empty set so fresh writes don't hit a
+/// spurious gate.
+fn pre_anomalies(system: &dyn System, path: &Path, cfg: &ResolvedConfig) -> HashSet<Anomaly> {
+    let Ok(existing) = system.read_to_string(path) else {
+        return HashSet::new();
+    };
+    let Ok(existing_doc) = parser::parse(&existing) else {
+        return HashSet::new();
+    };
+    anomalies_for_doc(&existing_doc, cfg)
 }
 
 #[cfg(test)]

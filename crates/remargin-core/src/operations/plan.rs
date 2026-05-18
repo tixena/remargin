@@ -32,7 +32,7 @@ use crate::document::allowlist;
 use crate::document::{self, WriteOptions, WriteProjection};
 use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
 use crate::operations::sign::SignSelection;
-use crate::operations::verify::{VerifyReport, verify_document};
+use crate::operations::verify::{Anomaly, VerifyReport, anomalies_for_doc, verify_document};
 use crate::parser::{self, ParsedDocument};
 use crate::permissions::claude_sync::rule_shape::OverlapKind;
 use crate::permissions::restrict::{RestrictArgs, RestrictEntryProjection};
@@ -845,7 +845,7 @@ pub fn project_report(
     let raw_verify = verify_document(after, cfg);
     let verify_after = PlanVerifyReport::from_report(&raw_verify);
 
-    let (would_commit, reject_reason) = decide_commit(&raw_verify, cfg);
+    let (would_commit, reject_reason) = decide_commit(before, after, cfg);
 
     Ok(PlanReport {
         changed_line_ranges,
@@ -1554,17 +1554,35 @@ fn whole_file_checksum(content: &str) -> String {
     format!("sha256:{hex}")
 }
 
-/// Collapse a [`VerifyReport`] into the `would_commit` / `reject_reason`
-/// pair emitted in [`PlanReport`].
-fn decide_commit(report: &VerifyReport, cfg: &ResolvedConfig) -> (bool, Option<String>) {
-    if report.ok {
+/// Mirror the subset gate from [`commit_with_verify`]. Plan flips
+/// `would_commit` to false iff Q ⊄ P — the projected mutation would
+/// introduce a new anomaly not present in the pre-state.
+fn decide_commit(
+    before: &ParsedDocument,
+    after: &ParsedDocument,
+    cfg: &ResolvedConfig,
+) -> (bool, Option<String>) {
+    let pre = anomalies_for_doc(before, cfg);
+    let post = anomalies_for_doc(after, cfg);
+    let mut introduced: Vec<&Anomaly> = post.difference(&pre).collect();
+    if introduced.is_empty() {
         return (true, None);
     }
-    let mut reason = format!("verify_after would fail under mode {}:", cfg.mode.as_str());
-    for row in &report.results {
-        if !row.checksum_ok {
-            let _ = write!(reason, " checksum mismatch on {};", row.id);
-        }
+    introduced.sort_by(|a, b| {
+        a.id.cmp(&b.id)
+            .then_with(|| a.kind.as_str().cmp(b.kind.as_str()))
+    });
+    let mut reason = format!("op would introduce {} new anomal", introduced.len());
+    if introduced.len() == 1 {
+        reason.push('y');
+    } else {
+        reason.push_str("ies");
+    }
+    reason.push_str(" under mode ");
+    reason.push_str(cfg.mode.as_str());
+    reason.push(':');
+    for a in introduced {
+        let _ = write!(reason, " {}:{};", a.id, a.kind.as_str());
     }
     (false, Some(reason))
 }

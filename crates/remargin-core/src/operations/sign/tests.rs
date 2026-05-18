@@ -467,15 +467,16 @@ fn edit_fence_content_in_place(doc: &str, needle: &str, replacement: &str) -> St
 }
 
 #[test]
-fn sign_refuses_tampered_content_without_repair_checksum() {
-    // Baseline for the repair_checksum tests below: a stale checksum
-    // trips the verify gate, and sign without --repair-checksum refuses
-    // to write. Keeping the safety rail is the default behavior; the
-    // repair flag is an explicit opt-in.
+fn sign_on_tampered_content_without_repair_checksum_lands_signature() {
+    // Under the subset gate: P = {(alc, checksum_invalid)} (tampered
+    // bytes). Default sign (no --repair-checksum) leaves the checksum
+    // field alone but attaches a signature over the current content.
+    // Q = {(alc, checksum_invalid)} (still bad checksum). Q ⊆ P →
+    // allowed. The signature lands but the checksum stays stale until
+    // someone explicitly repairs it.
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    // Out-of-band edit to alice's comment body.
     let before = system.read_to_string(Path::new("/d/a.md")).unwrap();
     let tampered = edit_fence_content_in_place(&before, "alice's note", "alice's NOTE (edited)");
     assert_ne!(before, tampered, "tamper must actually change bytes");
@@ -483,22 +484,21 @@ fn sign_refuses_tampered_content_without_repair_checksum() {
         .write(Path::new("/d/a.md"), tampered.as_bytes())
         .unwrap();
 
-    let err = sign_comments(
+    sign_comments(
         &system,
         Path::new("/d/a.md"),
         &cfg,
         &SignSelection::Ids(vec![String::from("alc")]),
         SignOptions::default(),
     )
-    .unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.to_lowercase().contains("checksum") || msg.to_lowercase().contains("verify"),
-        "stale checksum must surface in the refusal, got: {msg}"
-    );
+    .unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
-    assert_eq!(after, tampered, "verify-gate refusal must not touch disk");
+    let after = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
+    let alc = after.find_comment("alc").unwrap();
+    assert!(
+        alc.signature.is_some(),
+        "subset gate allows the signature to land even with stale checksum"
+    );
 }
 
 #[test]
@@ -629,22 +629,23 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
         .write(Path::new("/d/a.md"), tampered.as_bytes())
         .unwrap();
 
-    // Sanity: baseline sign (no repair flag) classifies it as
-    // already-signed and skips — exactly the behavior the user hit in
-    // production.
+    // Under the subset gate: stale checksum is in P, so the op no
+    // longer trips the gate on its presence. But the comment is
+    // already signed → default sign classifies it as already_signed
+    // and skips, leaving content/checksum untouched.
     let baseline = sign_comments(
         &system,
         Path::new("/d/a.md"),
         &cfg,
         &SignSelection::Ids(vec![String::from("alc")]),
         SignOptions::default(),
-    );
-    // Default sign bails in the verify gate because the stale
-    // checksum trips `row_is_bad`; the skip list never gets emitted.
+    )
+    .unwrap();
     assert!(
-        baseline.is_err(),
-        "default sign (no repair) must refuse a doc with stale checksum/signature"
+        baseline.signed.is_empty(),
+        "already-signed comment must be skipped without --repair-checksum"
     );
+    assert_eq!(baseline.skipped.len(), 1);
 
     // With --repair-checksum: overwrite both fields, write, verify
     // passes.

@@ -4383,15 +4383,12 @@ fn mcp_plan_mv_directory_emits_is_directory() {
     assert!(!system.exists(&base.join("dst")).unwrap());
 }
 
-/// Verify-gate refusal flowing out of `mcp__remargin__ack` carries a
-/// structured error JSON in the tool result's `text` field, not a free-
-/// form `verify failed (mode: …)` blob. Callers branch on `error_kind`
-/// instead of regex-matching the string.
+/// Under the subset gate, an `ack` on a file whose only anomaly is
+/// a pre-existing bad checksum must SUCCEED — the anomaly is in P,
+/// so it's also in Q, Q ⊆ P. The old absolute-gate trip is gone.
 #[test]
-fn mcp_ack_verify_failure_returns_structured_error_json() {
+fn mcp_ack_succeeds_when_pre_existing_bad_checksum() {
     let base = Path::new("/docs");
-    // Bad-checksum doc: open mode tolerates Missing / UnknownAuthor,
-    // but a bad checksum is always a verify-gate trip.
     let bad_doc = "\
 ---
 title: Doc
@@ -4434,27 +4431,8 @@ hello
     );
 
     assert!(
-        is_tool_error(&response),
-        "verify-gate trip should be a tool error"
-    );
-    let payload = extract_tool_text(&response);
-    assert_eq!(payload["error_kind"], "verify_failed");
-    assert_eq!(payload["mode"], "open");
-    let failures = payload["failures"].as_array().unwrap();
-    assert_eq!(failures.len(), 1);
-    assert_eq!(failures[0]["id"], "abc");
-    assert_eq!(failures[0]["checksum_ok"], false);
-    assert!(
-        payload["headline"]
-            .as_str()
-            .unwrap()
-            .starts_with("verify failed:")
-    );
-    assert!(
-        payload["hint"]
-            .as_str()
-            .unwrap()
-            .contains("remargin verify")
+        !is_tool_error(&response),
+        "subset gate must allow ack when no new anomaly is introduced: {response}"
     );
 }
 

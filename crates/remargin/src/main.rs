@@ -2091,6 +2091,7 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> E
             let is_silent_sentinel = err_msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER);
             let exit_code = classify_error(&err);
             let verify_failure = err.downcast_ref::<operations::verify::VerifyFailure>();
+            let subset_failure = err.downcast_ref::<operations::verify::SubsetGateFailure>();
             if is_silent_sentinel {
                 // Sentinel for `permissions check`.
                 // Output already emitted on the success path; we only
@@ -2102,16 +2103,18 @@ fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> E
                 // just the bare reason.
                 let _ = writeln!(sinks.stderr, "{reason}");
             } else if json_mode {
-                let payload = verify_failure.map_or_else(
-                    || json!({ "error": err_msg }),
-                    operations::verify::VerifyFailure::to_json,
-                );
+                let payload = subset_failure
+                    .map(operations::verify::SubsetGateFailure::to_json)
+                    .or_else(|| verify_failure.map(operations::verify::VerifyFailure::to_json))
+                    .unwrap_or_else(|| json!({ "error": err_msg }));
                 let error_json = inject_elapsed_ms(&payload);
                 let _ = writeln!(
                     sinks.stderr,
                     "{}",
                     serde_json::to_string_pretty(&error_json).unwrap_or_default()
                 );
+            } else if let Some(sg) = subset_failure {
+                let _ = writeln!(sinks.stderr, "error: {}\n\n{}", sg.headline(), sg.hint());
             } else if let Some(vf) = verify_failure {
                 let _ = writeln!(sinks.stderr, "error: {}", vf.human_text());
             } else {

@@ -17,8 +17,8 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
 use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::operations::verify::{
-    RowStatus, SignatureStatus, VerifyFailure, commit_with_verify, verify_and_refresh,
-    verify_document,
+    Anomaly, AnomalyKind, RowStatus, SignatureStatus, SubsetGateFailure, VerifyFailure,
+    anomalies_for_doc, commit_with_verify, verify_and_refresh, verify_document,
 };
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, react,
@@ -488,17 +488,20 @@ fn verify_failure_human_text_has_three_blocks() {
 }
 
 #[test]
-fn commit_with_verify_returns_typed_failure() {
+fn commit_with_verify_returns_typed_subset_gate_failure() {
+    // Fresh file (no on-disk state → P = ∅). The in-memory doc has a
+    // charlie comment, which under strict+alice-registry is
+    // unknown_author. Q = {(abc, SignatureUnknownAuthor)}. Q ⊄ P →
+    // SubsetGateFailure.
     let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
     let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
     let system = realm_at_d(&Mode::Strict, Some(ALICE_ACTIVE_REGISTRY_YAML));
     let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| Ok(()));
     let err = result.unwrap_err();
-    let downcast = err.downcast_ref::<VerifyFailure>();
-    assert!(downcast.is_some(), "error must downcast to VerifyFailure");
-    let vf = downcast.unwrap();
-    assert_eq!(vf.path, Path::new("/d/a.md"));
-    assert_eq!(vf.failures.len(), 1);
+    let sg = err.downcast_ref::<SubsetGateFailure>().unwrap();
+    assert_eq!(sg.path, Path::new("/d/a.md"));
+    assert_eq!(sg.introduced.len(), 1);
+    assert_eq!(sg.introduced[0].id, "abc");
 }
 
 // ---------- row rendering sanity ----------
@@ -701,13 +704,11 @@ fn ack_op_open_mode_identity_not_in_registry_succeeds() {
 }
 
 #[test]
-fn ack_op_gate_blocks_when_existing_comment_has_bad_checksum() {
-    // A document that already has a comment with a bad checksum is an
-    // integrity incident. Any subsequent mutation must be blocked and
-    // leave the file byte-identical (the gate catches it on the way out).
-    //
-    // This is the "bad checksum on disk" regression guard 's
-    // acceptance list.
+fn ack_op_passes_when_existing_comment_has_bad_checksum() {
+    // Under the subset gate, a pre-existing bad checksum (in P) does
+    // not block a mutating op that doesn't introduce new anomalies.
+    // ack only adds to the comment's ack list — Q has the same
+    // checksum_invalid anomaly P does, so Q ⊆ P. Allowed.
     let corrupted = "\
 ---
 title: Test
@@ -729,21 +730,12 @@ alice's note
     let system = mock_with_doc(corrupted);
     let cfg = open_cfg_as("alice");
 
-    let result = ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false);
-    let msg = format!("{:#}", result.unwrap_err());
-    assert!(
-        msg.contains("verify failed"),
-        "error should mention verify: {msg}"
-    );
-    assert!(
-        msg.contains("checksum=FAIL"),
-        "error should call out the bad row: {msg}"
-    );
+    ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false).unwrap();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
-    assert_eq!(
-        after, corrupted,
-        "file must be byte-identical after gate trip"
+    assert!(
+        after.contains("alice@"),
+        "open-mode ack should land even with pre-existing bad checksum: {after}"
     );
 }
 
@@ -879,32 +871,30 @@ fn create_comment_open_mode_no_key_still_writes_unsigned() {
 }
 
 #[test]
-fn edit_comment_strict_registered_active_no_key_fails_fast() {
-    // edit_comment is a signed-artifact-producing op: it re-signs on edit
-    // when the identity requires signing. Same fail-fast rule applies.
+fn edit_comment_strict_registered_active_no_key_passes_under_subset_gate() {
+    // alice_doc_content has an unsigned alice comment. Under strict +
+    // alice-registered-active, P = {(alc, signature_missing)}. The
+    // edit recomputes the checksum to match the new content but
+    // produces no new signature (no key). Q still = {(alc,
+    // signature_missing)}. Q ⊆ P → allowed. The edit lands.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
 
-    let result = edit_comment(
+    edit_comment(
         &system,
         Path::new("/d/a.md"),
         &cfg,
         "alc",
-        "new content that must not land",
+        "new content that lands under subset gate",
         None,
-    );
-
-    result.unwrap_err();
+    )
+    .unwrap();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
-    assert_eq!(
-        after, before,
-        "file must be byte-identical when the verify gate trips on an edit",
-    );
     assert!(
-        !after.contains("new content that must not land"),
-        "rejected content must never reach disk"
+        after.contains("new content that lands under subset gate"),
+        "edit must land under subset gate when no new anomalies are introduced"
     );
 }
 
@@ -934,10 +924,11 @@ fn batch_comment_strict_registered_active_no_key_file_byte_identical() {
 }
 
 #[test]
-fn delete_op_gate_blocks_over_corrupted_doc() {
-    // Even an op whose purpose is to remove a comment cannot land if the
-    // resulting in-memory doc still has a bad checksum on a surviving
-    // comment.
+fn delete_op_passes_over_corrupted_doc_under_subset_gate() {
+    // P contains (bad, checksum_invalid). Deleting `alc` leaves only
+    // the still-corrupted `bad` row → Q = {(bad, checksum_invalid)}.
+    // Q ⊆ P → allowed. Pre-existing anomalies are not magnified into
+    // a block; the op proceeds.
     let corrupted = "\
 ---
 title: Test
@@ -970,15 +961,16 @@ surviving corrupt row
     let system = mock_with_doc(corrupted);
     let cfg = open_cfg_as("alice");
 
-    // Try to delete `alc` (the good one). The surviving `bad` row still
-    // fails verify, so the gate blocks.
-    let result = delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]);
-    let _err: anyhow::Error = result.unwrap_err();
+    delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]).unwrap();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
-    assert_eq!(
-        after, corrupted,
-        "file must be byte-identical after blocked delete"
+    assert!(
+        !after.contains("alice's note"),
+        "delete must remove alc; file: {after}"
+    );
+    assert!(
+        after.contains("surviving corrupt row"),
+        "delete must leave bad row in place; file: {after}"
     );
 }
 
@@ -1269,55 +1261,45 @@ title: T
 }
 
 #[test]
-fn ack_bypasses_realm_strict_mode_today() {
-    let before = alice_doc_content();
-    let system = mock_with_doc_in_strict_realm(&before);
-    // Caller says Open + has a registry where alice is active. The doc
-    // already carries an unsigned alice comment. Under the realm's
-    // strict mode, alice as registered-active with a Missing signature
-    // is fatal; under the caller's Open mode, Missing is neutral and
-    // the ack lands.
-    let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
-    cfg.identity = Some(String::from("alice"));
-
-    let result = ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false);
-
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
-    assert!(
-        result.is_err(),
-        "realm declares strict; the ack must be blocked by the realm's gate"
-    );
-    assert_eq!(
-        after, before,
-        "file must be byte-identical when the realm-strict gate trips"
-    );
-}
-
-#[test]
-fn react_bypasses_realm_strict_mode_today() {
+fn ack_allowed_under_realm_strict_when_no_new_anomalies() {
+    // Realm declares strict + alice registered active; the on-disk doc
+    // carries an unsigned alice comment (in P). ack only touches the
+    // ack list — Q has the same anomaly. Q ⊆ P → allowed.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
     cfg.identity = Some(String::from("alice"));
 
-    let result = react(&system, Path::new("/d/a.md"), &cfg, "alc", "+1", false);
+    ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false).unwrap();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
     assert!(
-        result.is_err(),
-        "realm declares strict; the reaction must be blocked by the realm's gate"
-    );
-    assert_eq!(
-        after, before,
-        "file must be byte-identical when the realm-strict gate trips"
+        after.contains("alice@"),
+        "ack must land under subset gate: {after}"
     );
 }
 
 #[test]
-fn delete_bypasses_realm_strict_mode_today() {
-    // Doc carries two unsigned alice comments. Deleting one leaves the
-    // other on disk — under the realm's strict mode, that surviving
-    // unsigned comment must trip the post-write gate.
+fn react_allowed_under_realm_strict_when_no_new_anomalies() {
+    let before = alice_doc_content();
+    let system = mock_with_doc_in_strict_realm(&before);
+    let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
+    cfg.identity = Some(String::from("alice"));
+
+    react(&system, Path::new("/d/a.md"), &cfg, "alc", "+1", false).unwrap();
+
+    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    assert!(
+        after.contains("+1"),
+        "reaction must land under subset gate: {after}"
+    );
+}
+
+#[test]
+fn delete_allowed_under_realm_strict_when_no_new_anomalies() {
+    // Two unsigned alice comments → P has two signature_missing entries.
+    // Delete one; the surviving one's anomaly was already in P. Q ⊆ P
+    // → allowed.
     let content1 = "alice's first note";
     let content2 = "alice's second note";
     let cksum1 = crypto::compute_checksum(content1, &[]);
@@ -1357,27 +1339,25 @@ checksum: {cksum2}
     let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
     cfg.identity = Some(String::from("alice"));
 
-    let result = delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]);
+    delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]).unwrap();
 
     let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
     assert!(
-        result.is_err(),
-        "realm declares strict; the surviving unsigned comment must \
-         trip the realm's gate even though the delete only removed one"
+        !after.contains(content1),
+        "deleted comment must be gone: {after}"
     );
-    assert_eq!(
-        after, before,
-        "file must be byte-identical when the realm-strict gate trips"
+    assert!(
+        after.contains(content2),
+        "surviving comment must remain: {after}"
     );
 }
 
 #[test]
-fn commit_with_verify_does_not_consult_realm_today() {
-    // Architectural pin: commit_with_verify takes (doc, cfg, path) and
-    // could derive the realm from `path`, but it uses cfg.mode directly.
-    // A doc that lives in a strict realm + carries an unsigned
-    // registered-active comment must trip the gate even when the cfg
-    // handed in says Open.
+fn commit_with_verify_passes_when_in_memory_doc_matches_disk() {
+    // Identity transformation: parse the on-disk file, re-pass the
+    // parsed doc back to commit_with_verify. P == Q (same anomaly
+    // set), so the subset gate allows it regardless of what the
+    // realm's mode says.
     let doc_content = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&doc_content);
     let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
@@ -1387,12 +1367,7 @@ fn commit_with_verify_does_not_consult_realm_today() {
 
     let result = commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_d| Ok(()));
 
-    assert!(
-        result.is_err(),
-        "commit_with_verify must escalate to the realm's mode before \
-         verifying; today it trusts the caller's cfg.mode and the gate \
-         silently passes"
-    );
+    assert!(result.is_ok(), "Q == P → subset gate allows: {result:?}");
 }
 
 #[test]
@@ -1429,4 +1404,176 @@ fn escalate_mode_for_doc_keeps_caller_registry_today() {
          registered-active for THIS realm; but the helper kept the \
          caller's registry, which has her as active"
     );
+}
+
+// ===========================================================================
+// Subset gate (Q ⊆ P) scenarios. The gate refuses iff the in-memory
+// post-mutation anomaly set introduces an entry not present in the
+// on-disk pre-mutation set.
+// ===========================================================================
+
+#[test]
+fn anomalies_open_mode_returns_empty_for_clean_doc() {
+    let doc = doc_with(vec![make_comment("a", "alice", "hello")]);
+    let cfg = make_config(Mode::Open, None);
+    assert!(anomalies_for_doc(&doc, &cfg).is_empty());
+}
+
+#[test]
+fn anomalies_reports_bad_checksum_under_open_mode() {
+    let mut cm = make_comment("a", "alice", "hello");
+    cm.checksum = String::from("sha256:deadbeef");
+    let doc = doc_with(vec![cm]);
+    let cfg = make_config(Mode::Open, None);
+    let set = anomalies_for_doc(&doc, &cfg);
+    assert_eq!(set.len(), 1);
+    assert!(set.contains(&Anomaly {
+        id: String::from("a"),
+        kind: AnomalyKind::ChecksumInvalid,
+    }));
+}
+
+#[test]
+fn anomalies_reports_missing_signature_under_strict_for_registered_active() {
+    let doc = doc_with(vec![make_comment("a", "alice", "hello")]);
+    let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
+    let set = anomalies_for_doc(&doc, &cfg);
+    assert!(set.contains(&Anomaly {
+        id: String::from("a"),
+        kind: AnomalyKind::SignatureMissing,
+    }));
+}
+
+#[test]
+fn subset_gate_allows_op_when_q_equals_p() {
+    // P == Q. Identity transformation: rewrite the same bytes.
+    let corrupted = "\
+---
+title: Test
+---
+
+# Hello
+
+```remargin
+---
+id: alc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:deadbeef
+---
+alice's note
+```
+";
+    let system = mock_with_doc(corrupted);
+    let cfg = open_cfg_as("alice");
+    let doc = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
+
+    commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| Ok(())).unwrap();
+}
+
+#[test]
+fn subset_gate_refuses_op_that_introduces_new_anomaly() {
+    // Pre-clean doc → P = ∅. Synthesise an in-memory doc with a bad
+    // checksum on a NEW comment. Q = {(b, checksum_invalid)}. Q ⊄ P
+    // → refuse with SubsetGateFailure.
+    let before = "\
+---
+title: Test
+---
+
+# Hello
+
+```remargin
+---
+id: alc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
+---
+alice's note
+```
+";
+    let system = mock_with_doc(before);
+    let cfg = open_cfg_as("alice");
+
+    // Hand-craft an in-memory doc that introduces a new bad-checksum
+    // comment.
+    let mut new = make_comment("b", "alice", "new comment");
+    new.checksum = String::from("sha256:deadbeef");
+    let doc = doc_with(vec![
+        // Re-parse the existing alice comment so its checksum stays good.
+        parser::parse_file(&system, Path::new("/d/a.md"))
+            .unwrap()
+            .find_comment("alc")
+            .unwrap()
+            .clone(),
+        new,
+    ]);
+
+    let err =
+        commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| Ok(())).unwrap_err();
+    let sg = err.downcast_ref::<SubsetGateFailure>().unwrap();
+    assert_eq!(sg.introduced.len(), 1);
+    assert_eq!(sg.introduced[0].id, "b");
+    assert_eq!(sg.introduced[0].kind, AnomalyKind::ChecksumInvalid);
+}
+
+#[test]
+fn subset_gate_allows_repair_op_that_reduces_anomaly_set() {
+    // P contains a bad checksum. The op produces a clean doc (Q = ∅).
+    // Q ⊆ P → allowed.
+    let corrupted = "\
+---
+title: Test
+---
+
+# Hello
+
+```remargin
+---
+id: alc
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:deadbeef
+---
+alice's note
+```
+";
+    let system = mock_with_doc(corrupted);
+    let cfg = open_cfg_as("alice");
+
+    // Hand a clean in-memory doc to the gate (the checksum now matches
+    // the content).
+    let doc = doc_with(vec![make_comment("alc", "alice", "alice's note")]);
+    commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| Ok(())).unwrap();
+}
+
+#[test]
+fn subset_gate_allows_op_when_pre_file_missing_and_post_is_clean() {
+    // Fresh file (P = ∅). Clean Q. Q ⊆ P (both empty). Allowed.
+    let system = MockSystem::new();
+    let cfg = open_cfg_as("alice");
+    let doc = doc_with(vec![make_comment("alc", "alice", "alice's note")]);
+    commit_with_verify(&system, &doc, &cfg, Path::new("/d/new.md"), |_| Ok(())).unwrap();
+}
+
+#[test]
+fn anomaly_kind_pair_distinguishes_checksum_from_signature() {
+    // Same id, different kind = different anomaly identity.
+    let mut cm_bad_checksum = make_comment("a", "alice", "hello");
+    cm_bad_checksum.checksum = String::from("sha256:deadbeef");
+    let doc_bad_checksum = doc_with(vec![cm_bad_checksum]);
+    let cfg = make_config(Mode::Open, None);
+    let p = anomalies_for_doc(&doc_bad_checksum, &cfg);
+    assert!(p.contains(&Anomaly {
+        id: String::from("a"),
+        kind: AnomalyKind::ChecksumInvalid,
+    }));
+    assert!(!p.contains(&Anomaly {
+        id: String::from("a"),
+        kind: AnomalyKind::SignatureMissing,
+    }));
 }

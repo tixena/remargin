@@ -1268,10 +1268,15 @@ fn dispatch_tool(
             }
         }
         Err(err) => err
-            .downcast_ref::<operations::verify::VerifyFailure>()
+            .downcast_ref::<operations::verify::SubsetGateFailure>()
+            .map(operations::verify::SubsetGateFailure::to_json)
+            .or_else(|| {
+                err.downcast_ref::<operations::verify::VerifyFailure>()
+                    .map(operations::verify::VerifyFailure::to_json)
+            })
             .map_or_else(
                 || tool_result_error(&format!("{err:#}")),
-                |vf| tool_result_error_json(&vf.to_json()),
+                |payload| tool_result_error_json(&payload),
             ),
     }
 }
