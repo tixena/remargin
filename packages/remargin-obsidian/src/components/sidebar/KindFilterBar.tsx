@@ -30,10 +30,10 @@ export interface KindFilterBarProps {
  * so a vanilla vault without kind usage shows no UI overhead.
  *
  * The bar is the single control for both the Inbox and Current-file
- * sections (rem-u8br acceptance criterion: "OR filter across both
- * sections"). Filter state lives in `RemarginSidebar` and resets on
- * reload — we deliberately do NOT persist it to plugin settings so
- * opening a file in a new session starts with everything visible.
+ * sections (OR filter across both). Filter state lives in
+ * `RemarginSidebar` and resets on reload — we deliberately do NOT
+ * persist it to plugin settings so opening a file in a new session
+ * starts with everything visible.
  */
 export function KindFilterBar({ availableKinds, selected, onChange }: KindFilterBarProps) {
   const toggle = useCallback(

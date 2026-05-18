@@ -15,7 +15,7 @@ interface FilePathHeaderProps {
   pendingCount?: number;
   /**
    * Monotonically bumped by the sidebar shell on any mutation. Used by
-   * the 'Initialize' flow (rem-rvk6) so the file contents re-read after
+   * the 'Initialize' flow so the file contents re-read after
    * `remargin write` injects frontmatter — the button then disappears
    * because `hasRemarginFrontmatter` now returns true.
    */
@@ -65,9 +65,9 @@ export function FilePathHeader({
   // title can follow H1 edits. Uses cachedRead (non-blocking, metadata-
   // cache-backed) to avoid hammering the vault on every render.
   // `refreshKey` bumps force a re-read after any sidebar mutation —
-  // specifically so the 'Initialize' button (rem-rvk6) disappears once
-  // frontmatter has been injected.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a trigger-only dep; bumping it must re-run the read (rem-rvk6).
+  // specifically so the 'Initialize' button disappears once frontmatter
+  // has been injected.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a trigger-only dep; bumping it must re-run the read.
   useEffect(() => {
     let cancelled = false;
     setFileContents("");
@@ -95,10 +95,10 @@ export function FilePathHeader({
 
   /**
    * Bare .md files (no remargin frontmatter) get an 'Initialize'
-   * affordance so users can one-click them into the managed tree
-   * (rem-rvk6). The check runs off the already-read `fileContents`,
-   * so it costs nothing beyond the existing title read. Files with
-   * non-markdown extensions never qualify — they're not documents.
+   * affordance so users can one-click them into the managed tree. The
+   * check runs off the already-read `fileContents` so it costs nothing
+   * beyond the existing title read. Files with non-markdown extensions
+   * never qualify — they're not documents.
    */
   const isBareMarkdown = useMemo(() => {
     if (!filePath || !filePath.toLowerCase().endsWith(".md")) return false;
@@ -114,10 +114,9 @@ export function FilePathHeader({
     setInitializing(true);
     try {
       // `remargin write <path> <current-contents>` triggers the
-      // frontmatter-injection pass that every managed file already
-      // runs through (rem-is4z / rem-rvk6). No special subcommand:
-      // the write is a no-op on the body but a full canonicalization
-      // on the frontmatter.
+      // frontmatter-injection pass every managed file runs through. No
+      // special subcommand: the write is a no-op on the body but a
+      // full canonicalization on the frontmatter.
       await plugin.backend.write(filePath, fileContents);
       onInitialized?.();
     } catch (err) {

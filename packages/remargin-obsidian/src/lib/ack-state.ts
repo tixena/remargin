@@ -52,7 +52,7 @@ export interface AckAffordance {
  * this directly instead of SSR-rendering the full `CommentCard` (which
  * pulls in the Obsidian runtime).
  *
- * Rules (rem-lcx + rem-pmun):
+ * Rules:
  *
  * 1. Viewer wrote the comment (`comment.author === me`):
  *    - pill is always a non-interactive label.

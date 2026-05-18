@@ -35,7 +35,7 @@ export interface WidgetProvidersProps {
  *
  * Without this wrapper, the editor-side mounts (reading-mode and CM6)
  * crash on first render with `useBackend must be used within a
- * BackendContext.Provider` — see ticket rem-ob35.
+ * BackendContext.Provider`.
  */
 export function WidgetProviders({ plugin, portalContainer, children }: WidgetProvidersProps) {
   return createElement(

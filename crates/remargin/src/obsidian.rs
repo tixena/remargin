@@ -1,36 +1,13 @@
 //! Obsidian plugin install/uninstall.
 //!
-//! This module is gated behind the `obsidian` cargo feature. When enabled,
-//! it exposes `remargin obsidian install|uninstall` subcommands that install
-//! the remargin Obsidian plugin into a vault's `.obsidian/plugins/remargin/`
-//! directory.
-//!
-//! ## Where the plugin bytes come from
-//!
-//! The install path fetches `main.js` and `manifest.json` at runtime from
-//! the GitHub release tagged `obsidian-v{CARGO_PKG_VERSION}`:
-//!
-//! ```text
-//! https://github.com/tixena/remargin/releases/download/obsidian-v{version}/main.js
-//! https://github.com/tixena/remargin/releases/download/obsidian-v{version}/manifest.json
-//! ```
-//!
-//! The version is baked in from the workspace `Cargo.toml` at compile time,
-//! so a given CLI binary always installs the plugin build that ships with
-//! its own release. No TypeScript source tree is required to compile the
-//! CLI — `cargo install --git … --features obsidian` succeeds on a clean
-//! checkout.
-//!
-//! The module splits the install flow into two pieces so tests stay pure:
-//!
-//! - [`fetch_plugin_assets`] performs the network round-trips and returns
-//!   raw bytes.
-//! - [`install_from_bytes`] takes the bytes plus a vault path and writes
-//!   them to disk, preserving any existing `data.json`.
-//!
-//! The public [`install`] entry point composes the two. Unit tests drive
-//! [`install_from_bytes`] directly with stub byte slices so no test touches
-//! the network.
+//! Gated behind the `obsidian` feature. Install fetches `main.js` and
+//! `manifest.json` from the GitHub release tagged
+//! `obsidian-v{CARGO_PKG_VERSION}` so a CLI binary always installs
+//! the plugin build shipped with its own release — no TypeScript
+//! source tree required to compile. [`fetch_plugin_assets`] does the
+//! network; [`install_from_bytes`] writes bytes to disk preserving
+//! `data.json`. Tests drive the latter with stub bytes so no test
+//! touches the network.
 
 use core::fmt::Write as _;
 use core::time::Duration;

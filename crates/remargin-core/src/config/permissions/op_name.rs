@@ -1,28 +1,11 @@
-//! Single-source-of-truth registry of canonical op names.
+//! Single source of truth for canonical op names.
 //!
-//! Every op the remargin CLI / MCP surface dispatches to remargin-core
-//! has a [`OpName`] variant. Configuration surfaces — currently
-//! `permissions.deny_ops.ops` — deserialise into [`Vec<OpName>`] so an
-//! unknown op name in `.remargin.yaml` fails loudly at parse time
-//! instead of silently no-op-ing at runtime.
-//!
-//! ## Wire form
-//!
-//! Variants serialise to kebab-case (`sandbox-add`, `sandbox-remove`,
-//! …). The kebab-case form is also what the op guard uses when
-//! comparing against the runtime op string passed by the CLI / MCP.
-//!
-//! ## Adding a new op
-//!
-//! 1. Add a variant to [`OpName`].
-//! 2. Add it to [`OpName::ALL`] (the source for every op-name list,
-//!    including the user-facing "valid ops" diagnostic).
-//! 3. Add it to [`OpName::READ`] OR [`OpName::WRITE`] (read-vs-write
-//!    classification — drives whether `trusted_roots` gates the op).
-//!
-//! No other code changes are required for `deny_ops` to accept the new
-//! op name. Forgetting step 2 or 3 surfaces in the partition-coverage
-//! and length-coverage tests in `op_name::tests`.
+//! Config surfaces deserialise into [`Vec<OpName>`] so unknown op
+//! names in `.remargin.yaml` fail loudly at parse time. Variants
+//! serialise to kebab-case, the same form the op guard compares
+//! against the runtime op string. Adding an op: add a variant, add
+//! it to [`OpName::ALL`], and add it to [`OpName::READ`] or
+//! [`OpName::WRITE`] — partition-coverage tests catch omissions.
 
 use core::fmt;
 

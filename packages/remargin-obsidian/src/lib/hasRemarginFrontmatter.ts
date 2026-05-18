@@ -1,6 +1,6 @@
 /**
  * Detect whether a markdown document's leading YAML frontmatter block
- * contains any `remargin_*` field (rem-rvk6).
+ * contains any `remargin_*` field.
  *
  * A "bare" markdown file — one `remargin write` has never touched —
  * has no `remargin_total` / `remargin_pending` / `remargin_pending_for`

@@ -3,11 +3,10 @@ import { describe, it } from "node:test";
 import { parseRemarginBlocks } from "./parseRemarginBlocks.ts";
 
 // The Rust writer (`crates/remargin-core/src/writer.rs::serialize_comment`)
-// is the canonical on-disk format. These tests pin the parser to that
-// shape — `type:` (NOT `author_type:`) and `reply-to:` (NOT
-// `reply_to:`). Drift here means flat threads + wrong author badges in
-// the widget (rem-wut1).
-describe("parseRemarginBlocks — canonical on-disk YAML keys (rem-wut1)", () => {
+// is the canonical on-disk format. These tests pin the parser to
+// `type:` (NOT `author_type:`) and `reply-to:` (NOT `reply_to:`); drift
+// flattens threads and inverts author badges in the widget.
+describe("parseRemarginBlocks — canonical on-disk YAML keys", () => {
   it("reads `type: agent` from YAML and lands it on comment.author_type", () => {
     const doc = [
       "```remargin",

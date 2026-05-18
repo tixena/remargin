@@ -30,22 +30,12 @@ describe("ackStateFor", () => {
 });
 
 /**
- * rem-pmun: the ack affordance on a comment card depends on BOTH
- * whether the viewer has acked and whether the viewer is the comment's
- * author. The helper collapses that two-axis decision into a single
- * value the card consumes verbatim.
- *
- * Grid the tests walk, with every cell covered:
- *
- *   viewerIsAuthor × viewerAcked × ackRoster
- *   ┌────────────┬─────────────┬────────────┬──────────────┐
- *   │            │ roster=[]   │ me∈roster  │ others only  │
- *   ├────────────┼─────────────┼────────────┼──────────────┤
- *   │ author=me  │ label, ack  │ label,unack│ label, ack   │
- *   │ author≠me  │ button,none │ label,unack│ button, none │
- *   └────────────┴─────────────┴────────────┴──────────────┘
+ * The ack affordance on a comment card depends on BOTH whether the
+ * viewer has acked and whether the viewer is the comment's author. The
+ * helper collapses that two-axis decision into a single value the card
+ * consumes verbatim.
  */
-describe("ackAffordanceFor (rem-pmun)", () => {
+describe("ackAffordanceFor", () => {
   // --- Viewer is the author ------------------------------------------
 
   it("author is me, empty roster → label + Ack kebab", () => {
@@ -56,10 +46,8 @@ describe("ackAffordanceFor (rem-pmun)", () => {
   });
 
   it("author is me, others acked but not me → label + Ack kebab", () => {
-    // Viewer wrote the comment, somebody else acked; the viewer has
-    // not yet acked their own comment. Per rule 1 the pill is always
-    // a label for my own comment, and the kebab offers 'Ack' because
-    // I have not acked yet.
+    // Pill stays a label for own-comments (rule 1); kebab offers Ack
+    // because viewer has not acked yet.
     assert.deepStrictEqual(ackAffordanceFor("eduardo", ["alice"], "eduardo"), {
       kind: "label",
       kebab: "ack",
@@ -80,7 +68,7 @@ describe("ackAffordanceFor (rem-pmun)", () => {
     );
   });
 
-  // --- Viewer is NOT the author (rem-lcx rules) ----------------------
+  // --- Viewer is NOT the author --------------------------------------
 
   it("author is someone else, empty roster → interactive button, no kebab item", () => {
     assert.deepStrictEqual(ackAffordanceFor("alice", [], "eduardo"), {

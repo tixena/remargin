@@ -11,7 +11,7 @@ function settingsWith(overrides: Partial<RemarginSettings>): RemarginSettings {
   return { ...DEFAULT_SETTINGS, ...overrides };
 }
 
-describe("buildIdentityArgs (rem-ce4)", () => {
+describe("buildIdentityArgs", () => {
   // ---- Config mode: forward ONLY --config ----
 
   it("config mode with a config file path emits only --config", () => {
@@ -40,10 +40,10 @@ describe("buildIdentityArgs (rem-ce4)", () => {
   });
 
   it("config mode never emits --identity, --type, or --key", () => {
-    // Regression guard for the original rem-ce4 bug: the plugin used to
-    // forward --type on every CLI call even in config mode, silently
-    // overriding the YAML's type: field. That combination prevented the
-    // CLI from resolving a type-scoped signing key.
+    // Regression guard: the plugin used to forward --type on every CLI
+    // call even in config mode, silently overriding the YAML's type:
+    // field. That combination prevented the CLI from resolving a
+    // type-scoped signing key.
     const args = buildIdentityArgs(
       settingsWith({
         identityMode: "config",

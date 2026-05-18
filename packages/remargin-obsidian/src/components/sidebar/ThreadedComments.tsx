@@ -14,10 +14,10 @@ interface ThreadedCommentsProps {
   onGoToLine?: (line: number) => void;
   onMutation?: () => void;
   /**
-   * Monotonic counter bumped by the shell when any sidebar section should
-   * refetch. We observe it as a prop (rather than being keyed off it) so
-   * the component refetches in place, preserving the scroll offset of the
-   * outer sidebar viewport — see rem-8w5.
+   * Monotonic counter bumped by the shell when any sidebar section
+   * should refetch. We observe it as a prop (rather than being keyed
+   * off it) so the component refetches in place, preserving the scroll
+   * offset of the outer sidebar viewport.
    */
   refreshKey?: number;
   /**
@@ -76,7 +76,7 @@ export function ThreadedComments({
   // resolves. Subsequent refetches (from refreshKey bumps, reactions,
   // acks, or reply submits) do NOT flip this back to true — that would
   // collapse the rendered list to a "Loading..." placeholder and the
-  // outer sidebar viewport would snap to scrollTop=0 (rem-8w5).
+  // outer sidebar viewport would snap to scrollTop=0.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);

@@ -1,32 +1,11 @@
 //! `plan restrict` projection.
 //!
-//! [`project_restrict`] mirrors [`crate::permissions::restrict::restrict`]
-//! up through the merge / rule-generation step, but never writes. The
-//! return value — [`crate::operations::plan::ConfigPlanDiff`] — names
-//! every file the live op would touch and every entry that would
-//! change, so callers can preview the full set of mutations before
-//! committing.
-//!
-//! ## Drift prevention
-//!
-//! Both the live and the projection paths walk through the same
-//! simulation helpers
-//! ([`crate::permissions::restrict::simulate_upsert_remargin_yaml`] and
-//! [`crate::permissions::claude_sync::simulate_apply_rules`]). The live
-//! `restrict` calls them and then writes; this projection calls them
-//! and then describes. New behaviour landed in those helpers shows up
-//! on both sides automatically.
-//!
-//! ## Why pure-with-respect-to-writes (not pure)
-//!
-//! the document-projection helpers in
-//! [`crate::operations::projections`] are pure: they accept a parsed
-//! document in memory and never read disk. Config projections are
-//! different — the entire point of `plan restrict` is to compare the
-//! requested mutation against what is currently on disk, so the
-//! projection must read `.remargin.yaml`, the project + user-scope
-//! settings files, and the sidecar. It still never writes; that is
-//! the invariant the integration test guards.
+//! Mirrors `restrict` up through the merge / rule-generation step but
+//! never writes. Live and projection paths share the same simulation
+//! helpers so new behaviour lands on both automatically. Reads
+//! on-disk state (YAML, settings, sidecar) so a `plan` can compare
+//! against current reality; the never-write invariant is guarded by
+//! integration tests.
 
 #[cfg(test)]
 mod tests;

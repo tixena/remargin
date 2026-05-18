@@ -1,35 +1,8 @@
 //! Comment classification tags (`remargin_kind`).
 //!
-//! Comments carry an optional list of short classification strings so
-//! downstream tools (UI filters, agent routing, query) can group work
-//! without re-inspecting the free-text content. The field is
-//! intentionally permissive — any non-surprising identifier passes —
-//! but the grammar is tight enough that a malformed value cannot crash
-//! downstream consumers or change the YAML wire format.
-//!
-//! ## Validation grammar
-//!
-//! Each kind:
-//!
-//! - Matches [`VALID_KIND_REGEX`], i.e. 1..=[`MAX_KIND_LENGTH`] characters
-//!   drawn from `[A-Za-z0-9_ \-]`.
-//! - Does not begin or end with a space — embedded spaces are allowed
-//!   (so `action item` is legal) but leading/trailing space would round-trip
-//!   badly through YAML flow sequences.
-//! - Is distinct from every other kind on the same comment (case sensitive
-//!   for now: `Question` and `question` are two different tags).
-//!
-//! A comment carries at most [`MAX_KINDS_PER_COMMENT`] kinds.
-//!
-//! ## Wire-format note
-//!
-//! The YAML serializer emits `remargin_kind: [a, b, c]` when the vector
-//! is non-empty; empty vectors are dropped from the output entirely so
-//! pre-`remargin_kind` comments round-trip byte-for-byte. See
-//! [`crate::parser`] for the serializer and [`crate::crypto`] for the
-//! matching "empty adds nothing" contribution to checksum and
-//! signature payloads — that is the back-compat lynchpin that keeps
-//! pre-existing comments verifiable.
+//! Permissive grammar, tight enough that malformed values cannot
+//! change the YAML wire format. Empty vectors are dropped from output
+//! so pre-`remargin_kind` comments round-trip byte-for-byte.
 
 use anyhow::{Result, bail};
 

@@ -1,91 +1,19 @@
 //! Claude-settings synchronizer rule generation.
 //!
-//! [`rules_for`] is a pure function over a [`ResolvedTrustedRoot`] +
-//! anchor + `allow_dot_folders` list. Given those inputs it produces
-//! the exact `permissions.deny` / `permissions.allow` rule strings
-//! that the Claude-settings merger writes into
-//! `.claude/settings.local.json` and `~/.claude/settings.json`.
+//! Pure function over a resolved root, anchor, and `allow_dot_folders`
+//! list; produces the exact deny/allow strings the merger writes into
+//! `.claude/settings.local.json` and `~/.claude/settings.json`. No
+//! filesystem access — inputs are materialised by the caller.
 //!
-//! ## Output shape
+//! Dot-folder denies use a single `.*/**` wildcard rather than walking
+//! the filesystem at generation time (which would race against folder
+//! creation). When `allow_dot_folders` names specific folders, narrow
+//! re-allows override the broader deny.
 //!
-//! `<path>` below is a single-leading-slash absolute path glob —
-//! Claude's documented form. Earlier revisions emitted `//<path>` /
-//! `///<path>`; legacy on-disk rules in either of those
-//! forms are still recognised for membership / overlap purposes via
-//! [`canonicalize_rule`].
-//!
-//! ```text
-//! deny:
-//! Edit(<path>/**) ← editor-tool fence
-//! Write(<path>/**)
-//! Read(<path>/**)
-//! NotebookEdit(<path>/**)
-//! Edit(<path>/.*/**) ← dot-folder default-deny
-//! Write(<path>/.*/**) (one wildcard rule per
-//! Read(<path>/.*/**) editor tool; suppressed
-//! NotebookEdit(<path>/.*/**) for dot-folders named
-//! in allow_dot_folders)
-//! Bash(<cmd> [*] <path>/**) ← every BASH_MUTATORS
-//! entry: file-mutating
-//! surface (delete /
-//! create / link / metadata
-//! / editors / scriptable
-//! interpreters / archives
-//! / sync / patch /
-//! downloads / shells /
-//! VCS / build / disk /
-//! navigation cd-pushd)
-//! Bash(mv <path>/**) ← mv source-side coverage
-//! Bash(mv <path>/** *)
-//! Bash(mv <path>/** <path>/**)
-//! <per also_deny_bash entry, Bash(<cmd> * <path>/**)>
-//! Bash(remargin *) ← only when cli_allowed=false
-//!
-//! allow:
-//! <per allow_dot_folders entry, RE-allow rules> ← only emitted
-//! when the user
-//! explicitly names
-//! a dot-folder
-//! ```
-//!
-//! ## Why a single wildcard for dot-folder denies
-//!
-//! The spec proposed two options: enumerate every `.<name>/` under the
-//! path, or emit one wildcard `.*` rule. Walking the filesystem at
-//! rule-generation time is expensive AND races against folder
-//! creation. A single `.*/**` wildcard rule covers all current and
-//! future dot-folders without filesystem access. When
-//! `allow_dot_folders` lists specific names that should remain
-//! reachable (e.g. `.github`), we add narrow re-allows that override
-//! the broader deny — Claude's permission resolution gives the more-
-//! specific allow precedence.
-//!
-//! ## remargin CLI deny (`Bash(remargin *)`)
-//!
-//! The `remargin` CLI deny is emitted as a coarse global rule with
-//! no path tail. Path-shape-independent —
-//! tilde, `$HOME`, relative paths, and implicit-cwd subcommands
-//! cannot evade it because there is no path on the command line for
-//! the matcher to compare against. `cli_allowed: true` skips this
-//! single rule; the editor-tool / Bash-mutator fences above still
-//! emit so native-tool routes remain blocked even when the human is
-//! authorised to invoke remargin from a shell.
-//!
-//! ## No automatic `mcp__remargin__*` allow
-//!
-//! Earlier revisions prepended `mcp__remargin__*` to every projected
-//! `allow` list so that a blanket `restrict` could not lock the user out
-//! of the very tools needed to call `unprotect`. That carve-out is
-//! gone: under `restrict` the user wants Claude to prompt before each
-//! MCP call to remargin. Users who want silent forwarding can opt in
-//! by adding `mcp__remargin__*` to `.claude/settings.local.json`
-//! themselves — `restrict` no longer does it for them.
-//!
-//! ## No filesystem access
-//!
-//! Every input is materialised by the caller; this module produces
-//! `Vec<String>` only. That keeps it trivially testable with
-//! `MockSystem` not even needed — pure data in, pure data out.
+//! `Bash(remargin *)` is emitted as a path-tail-free global rule so
+//! tilde, `$HOME`, relative paths, and implicit-cwd subcommands cannot
+//! evade it. `cli_allowed: true` skips that single rule; editor-tool
+//! and Bash-mutator fences still emit.
 
 pub mod rule_shape;
 #[cfg(test)]

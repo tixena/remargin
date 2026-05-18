@@ -16,8 +16,8 @@ path = "src/main.rs"
 
 [features]
 # `obsidian` is on by default so the Obsidian plugin's Update button
-# (rem-9trw) can shell out to `remargin obsidian install --vault-path <vault>`
-# on any cargo-installed binary without users having to pass an extra
+# can shell out to `remargin obsidian install --vault-path <vault>` on
+# any cargo-installed binary without users having to pass an extra
 # `--features` flag. Consumers who want a smaller binary without the
 # self-update path can opt out via `--no-default-features --features "zod
 # jsonschema"`.

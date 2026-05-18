@@ -1,42 +1,12 @@
 //! `remargin claude unrestrict` core.
 //!
-//! [`unprotect`] is the public entry point: anchor discovery (walk
-//! up to the nearest `.claude/` ancestor), sidecar lookup, removal
-//! of the matching `permissions.trusted_roots` entry from
-//! `<anchor>/.remargin.yaml`, and finally a call into
-//! [`crate::permissions::claude_sync::revert_rules`] to scrub the
-//! settings-file rules + drop the sidecar entry.
-//!
-//! ## Three forks of state to clean up
-//!
-//! `restrict()` writes three pieces of state. `unprotect()` reverses
-//! them in the order that minimises divergence:
-//!
-//! 1. `<anchor>/.remargin.yaml` — the source-of-truth `trusted_roots`
-//!    declaration. Removed first so the per-op guard stops enforcing
-//!    on the next call.
-//! 2. `<anchor>/.claude/.remargin-restrictions.json` (the sidecar)
-//!    — gone via [`revert_rules`] (which also returns the rules it
-//!    found in the settings files).
-//! 3. The two Claude settings files — scrubbed of the sidecar-
-//!    tracked rules (and only those rules; never user-added ones).
-//!
-//! ## Diagnostic warnings, not errors
-//!
-//! Manual edits between `restrict` and `unprotect` are common (a
-//! user who hand-tweaks a Claude settings file, or a teammate who
-//! removed an entry from `.remargin.yaml` without going through
-//! `unprotect`). The function surfaces these via
-//! [`UnprotectOutcome::warnings`] without failing — the goal is to
-//! reach the cleanest possible final state, not to police prior
+//! Reverses the three forks `restrict` writes — `.remargin.yaml`
+//! first (so the per-op guard stops enforcing immediately), then the
+//! sidecar, then the two Claude settings files (only the sidecar-
+//! tracked rules, never user-added ones). Manual mid-state edits
+//! surface as [`UnprotectOutcome::warnings`] rather than errors — the
+//! goal is the cleanest possible final state, not policing prior
 //! edits.
-//!
-//! ## Sanctioned `.remargin.yaml` write
-//!
-//! Same scoping as `restrict`: this module is the only place besides
-//! [`crate::permissions::restrict`] that writes `.remargin.yaml`
-//! through the dedicated
-//! [`crate::permissions::restrict::write_remargin_yaml`] helper.
 
 #[cfg(test)]
 mod tests;

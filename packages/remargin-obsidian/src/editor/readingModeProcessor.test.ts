@@ -272,11 +272,10 @@ afterEach(() => {
 });
 
 describe("parseFromInnerContent", () => {
-  // AC (rem-hghw): the helper accepts the bare YAML+content shape that
+  // The helper accepts the bare YAML+content shape that
   // `<pre><code class="language-remargin">…</code></pre>` exposes via
-  // `code.textContent` (markdown rendering strips the outer fences) and
-  // returns exactly one valid parsed block. This is the regression that
-  // kept reading-mode pretty widgets from rendering.
+  // `code.textContent` (markdown rendering strips the outer fences)
+  // and returns exactly one valid parsed block.
   it("test #2-helper: bare YAML+content (no fences) → exactly one valid block", () => {
     const inner = [
       "---",
@@ -329,7 +328,7 @@ describe("remarginPostProcessor", () => {
     // Host className must carry both the structural class AND
     // `remargin-container` so Tailwind utilities scoped via
     // tailwind.config.ts's `important: ".remargin-container"` apply
-    // inside the widget. See ticket rem-ob35.
+    // inside the widget.
     assert.ok(
       host.className.split(/\s+/).includes("remargin-reading-host"),
       `expected host className to include remargin-reading-host, got: "${host.className}"`
@@ -585,12 +584,11 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // AC (rem-ob35): the rendered React element must be a `WidgetProviders`
-  // wrapping the thread block (a <div> containing the toolbar + thread),
-  // and `WidgetProviders` must receive the plugin + the host element as
-  // its portal container. Without the wrapper, mounting crashes with
-  // "useBackend must be used within a BackendContext.Provider" — so this
-  // assertion guards the runtime fix.
+  // The rendered React element must be a `WidgetProviders` wrapping
+  // the thread block (a <div> containing toolbar + thread), and
+  // `WidgetProviders` must receive the plugin + host as its portal
+  // container. Without the wrapper, mounting crashes with
+  // "useBackend must be used within a BackendContext.Provider".
   it("test #9: render wraps the thread block in WidgetProviders with plugin + host", async () => {
     const plugin = makePlugin(true);
     const parsed = parseFromInnerContent(VALID_BLOCK)[0];

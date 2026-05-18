@@ -1,35 +1,11 @@
-//! Heading-anchored insertion: resolve `--after-heading` paths to a
-//! 1-indexed line number in a parsed document.
+//! Heading-anchored insertion.
 //!
-//! Callers (CLI + MCP `comment` and `batch`) want to say "put this
-//! comment after `### P3.`" without having to track line numbers. This
-//! module walks the document's markdown looking for ATX headings and
-//! returns the line of the first heading whose text matches the
-//! requested path.
-//!
-//! ## Match rules
-//!
-//! - Only ATX headings (`#` … `######`) outside fenced code blocks and
-//!   outside the YAML frontmatter participate in the walk. Setext
-//!   underline headings are NOT supported in v1.
-//! - Match is a case-sensitive prefix comparison on the heading's
-//!   stripped text. Trailing `#` characters and surrounding whitespace
-//!   are removed before comparing, per the `CommonMark` ATX spec.
-//! - Paths use `>` as the segment separator. Each segment is a prefix
-//!   match against a heading. Segments after the first must be at a
-//!   STRICTLY DEEPER level than the previous segment, and must appear
-//!   before the next heading at the previous segment's level (i.e.
-//!   within the parent's section). Levels can skip — `# A > ### C`
-//!   resolves so long as no `# A` sibling closes the section first.
-//! - First match wins. Ambiguity is resolved by adding more path
-//!   segments, not by an error.
-//!
-//! ## Storage
-//!
-//! The resolver is a lookup convenience. It returns the heading's
-//! 1-indexed line; the caller forwards that to the existing
+//! Resolves `--after-heading` paths to a 1-indexed line number. ATX
+//! headings only; case-sensitive prefix match; `>` separates path
+//! segments which must descend strictly deeper. The resolver returns
+//! a line number; downstream uses
 //! [`InsertPosition::AfterLine`](crate::writer::InsertPosition::AfterLine)
-//! pipeline, so the comment's stored `line` field is unchanged.
+//! so the comment's stored `line` field is unchanged.
 
 use anyhow::{Context as _, Result, bail};
 

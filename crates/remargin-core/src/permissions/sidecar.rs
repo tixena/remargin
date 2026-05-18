@@ -1,47 +1,12 @@
 //! Sidecar manager for `restrict` reversal.
 //!
-//! `remargin claude restrict` writes Claude permission rules into both
-//! `.claude/settings.local.json` (project-scope) and
-//! `~/.claude/settings.json` (user-scope). To `claude unrestrict`
-//! cleanly the reverse path needs to know **exactly** which rule
-//! strings each `claude restrict` invocation added — otherwise it
-//! would be guessing at manually-maintained rules.
-//!
-//! The sidecar lives at `<anchor>/.claude/.remargin-restrictions.json`
-//! and records, per restricted path, the deny + allow strings that
-//! were appended and which settings files they were appended to,
-//! plus an ISO 8601 `added_at` timestamp.
-//!
-//! ## Format
-//!
-//! ```json
-//! {
-//! "version": 1,
-//! "entries": {
-//! "/abs/path/to/restricted": {
-//! "added_at": "2026-04-26T10:00:00Z",
-//! "added_to_files": [
-//! ".claude/settings.local.json",
-//! "/home/u/.claude/settings.json"
-//! ],
-//! "allow": [],
-//! "deny": ["Edit(/abs/path/to/restricted/**)", "..."]
-//! }
-//! }
-//! }
-//! ```
-//!
-//! `entries` keys are the canonical absolute restricted-path strings
-//! used as the sidecar's primary index — these are the same paths the
-//! rule generator (slice 1) builds the rule strings around.
-//!
-//! ## `.gitignore` automation
-//!
-//! Per Decision 3, the sidecar must not be committed (it embeds
-//! absolute paths and per-machine timestamps). [`save`] adds
-//! `.claude/.remargin-restrictions.json` to `<anchor>/.gitignore` on
-//! the first write. Idempotent: re-running [`save`] does not duplicate
-//! the line.
+//! Records exactly which deny/allow strings each `restrict`
+//! invocation appended and to which settings files, so `unrestrict`
+//! can scrub only those rules without touching user-added entries.
+//! Lives at `<anchor>/.claude/.remargin-restrictions.json` and must
+//! not be committed (embeds absolute paths and per-machine
+//! timestamps); [`save`] idempotently adds it to `<anchor>/.gitignore`
+//! on first write.
 
 #[cfg(test)]
 mod tests;

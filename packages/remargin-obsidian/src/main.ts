@@ -254,10 +254,9 @@ export default class RemarginPlugin extends Plugin {
     // `build()`, so toggling the setting or flipping editor modes
     // takes effect on the next document change.
     //
-    // The companion `collapseEffectBridge` ViewPlugin is the rem-jq30
-    // Bug B fix: it adapts the plugin-wide `CollapseState` store into
-    // CM6 transactions so the StateField can rebuild on chevron clicks
-    // without waiting for a doc change.
+    // `collapseEffectBridge` adapts the plugin-wide `CollapseState`
+    // store into CM6 transactions so the StateField rebuilds on chevron
+    // clicks without waiting for a doc change.
     this.registerEditorExtension([commentWidgetPlugin(this), collapseEffectBridge(this)]);
     // T37: pretty-print reading-mode widget. The post-processor reads
     // `settings.editorWidgets` on every render call, so toggling the
@@ -368,7 +367,7 @@ export default class RemarginPlugin extends Plugin {
    *
    * Honors the `checkForUpdates` settings toggle: when off, no fetcher
    * is invoked and no Notice fires. `force=true` bypasses both the cache
-   * TTL and the toggle (used by the Settings "Check now" button — rem-9trw).
+   * TTL and the toggle (used by the Settings "Check now" button).
    *
    * Returns nothing — the caller reads `this.settings.updateCheck` for
    * the freshest snapshot (the SettingsTab re-reads settings through

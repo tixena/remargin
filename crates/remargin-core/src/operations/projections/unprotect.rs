@@ -1,21 +1,10 @@
 //! `plan unprotect` projection.
 //!
-//! [`project_unprotect`] mirrors [`crate::permissions::unprotect::unprotect`]
-//! up through the lookup / rule-discovery step, but never writes. The
-//! return value — [`crate::operations::plan::UnprotectConfigDiff`] —
-//! names every file the live op would touch and every drift conflict
-//! it would surface, so callers can preview the full reversal before
-//! committing.
-//!
-//! ## Read-only by construction
-//!
-//! Unlike the document-projection helpers in
-//! [`crate::operations::projections`] (pure with respect to disk),
-//! config projections must read on-disk state to compare against the
-//! requested mutation: the YAML's `permissions.trusted_roots` list, the
-//! sidecar entry, and each settings file the sidecar's
-//! `added_to_files` array points at. They still never write — that is
-//! the invariant the integration test guards.
+//! Mirrors `unprotect` up through the lookup / rule-discovery step
+//! but never writes. Config projections must read on-disk state
+//! (YAML, sidecar, settings files) to compare against the requested
+//! mutation; the never-write invariant is guarded by integration
+//! tests.
 
 #[cfg(test)]
 mod tests;

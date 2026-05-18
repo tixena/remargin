@@ -151,7 +151,7 @@ export class RemarginWidget extends WidgetType {
     const host = document.createElement("div");
     // `remargin-container` makes Tailwind utilities scoped via
     // tailwind.config.ts's `important: ".remargin-container"` apply
-    // to this widget's subtree (tooltips and all). See ticket rem-ob35.
+    // to this widget's subtree (tooltips and all).
     host.className = "remargin-widget-host remargin-container";
     host.dataset.remarginId = this.id;
     const root = createRootImpl(host);
@@ -275,13 +275,9 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
       // `inclusive: true` lets the replaced range absorb its
       // bounding cursor positions — without this flag CM6 reserves a
       // boundary cursor zone above the widget, which Obsidian's Live
-      // Preview renders as an empty dark-gray bar (rem-jq30 Bug A).
-      // Diagnostic capture (2026-04-28) confirmed the range itself is
-      // correct: charAtStart is the opening backtick, charAtEnd-1 is
-      // the closing fence's terminating newline. The full-line
-      // `block: true` decoration already keeps the caret outside the
-      // widget, so `inclusive: false`'s caret-distinct semantics are
-      // redundant here.
+      // Preview renders as an empty dark-gray bar. The `block: true`
+      // decoration already keeps the caret outside the widget, so
+      // `inclusive: false`'s caret-distinct semantics are redundant.
       Decoration.replace({ widget, block: true, inclusive: true })
     );
   }
@@ -339,10 +335,9 @@ export const collapseEffect = StateEffect.define<{ id: string }>();
  *
  * MUST be a StateField: block decorations are forbidden from
  * per-view plugin instances by CM6 — the runtime check throws
- * `RangeError: Block decorations may not be specified via plugins`
- * (see ticket rem-3dra). Block decorations alter document layout
- * (line heights), which CM6 cannot reflow within a single
- * view-level transaction.
+ * `RangeError: Block decorations may not be specified via plugins`.
+ * Block decorations alter document layout (line heights), which CM6
+ * cannot reflow within a single view-level transaction.
  */
 export function commentWidgetPlugin(plugin: RemarginPlugin) {
   return StateField.define<DecorationSet>({
@@ -356,10 +351,9 @@ export function commentWidgetPlugin(plugin: RemarginPlugin) {
       // not touch the decoration set — just remap existing ranges
       // through the (empty) change set so offsets stay coherent.
       //
-      // The collapse-effect branch is the rem-jq30 Bug B fix: without
-      // it, toggling a widget's chevron flipped the in-memory store but
-      // never re-snapshotted the widget — the visual stayed pinned
-      // until the next docChanged transaction forced a rebuild.
+      // Toggling a widget's chevron flips the in-memory store; without
+      // the collapse-effect branch the widget visual stays pinned until
+      // the next docChanged transaction forces a rebuild.
       if (tr.docChanged) {
         return buildDecorations(tr.state, plugin);
       }
@@ -385,8 +379,7 @@ export function commentWidgetPlugin(plugin: RemarginPlugin) {
  *
  * This plugin produces NO decorations of its own, so the CM6
  * "block decorations from a per-view plugin" prohibition is not
- * violated (rem-3dra). The StateField above remains the sole
- * decoration source.
+ * violated. The StateField above remains the sole decoration source.
  */
 export function collapseEffectBridge(plugin: RemarginPlugin) {
   return ViewPlugin.fromClass(

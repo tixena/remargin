@@ -25,10 +25,9 @@ interface SidebarShellProps {
   inboxCount?: number;
   threadPending?: number;
   /**
-   * Monotonic refresh signal — bumped by the sidebar on any
-   * mutation. Forwarded to children that cache per-file state
-   * (currently the `Initialize` detection in `FilePathHeader`,
-   * rem-rvk6).
+   * Monotonic refresh signal — bumped by the sidebar on any mutation.
+   * Forwarded to children that cache per-file state (currently the
+   * `Initialize` detection in `FilePathHeader`).
    */
   refreshKey?: number;
   /** Called by the `Initialize` flow after `remargin write` succeeds. */

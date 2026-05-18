@@ -33,9 +33,7 @@ let createRootImpl: typeof defaultCreateRoot = defaultCreateRoot;
  * Trade-off: the synthesized text is NOT byte-equal to the source on disk,
  * so `block.startOffset` / `endOffset` are offsets in the synthesized
  * string. The post-processor doesn't read those offsets — it only checks
- * `valid` and `comment.id` — so this is sound. If a future caller needs
- * source-mapping, file a follow-up to extract a `parseRemarginInner` API
- * (Path B from rem-hghw).
+ * `valid` and `comment.id` — so this is sound.
  */
 export function parseFromInnerContent(inner: string): ReturnType<typeof parseRemarginBlocks> {
   const wrapped = `\`\`\`remargin\n${inner.replace(/\n*$/, "")}\n\`\`\`\n`;

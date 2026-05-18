@@ -331,13 +331,12 @@ export class RemarginBackend {
    *
    * The CLI subcommand is responsible for re-staging `main.js`,
    * `manifest.json`, and `styles.css` into this vault's
-   * `.obsidian/plugins/remargin/` directory. It is idempotent by design
-   * (per rem-3c9p: install commands succeed even if already registered).
+   * `.obsidian/plugins/remargin/` directory. Install commands are
+   * idempotent — succeed even if already registered.
    *
-   * Returns `{ ok: true }` on exit code 0. On non-zero exit (or
-   * missing subcommand during the transition period before rem-s7fc
-   * lands) the stderr tail is surfaced verbatim so the UI Notice can
-   * echo the CLI's own error.
+   * Returns `{ ok: true }` on exit code 0. On non-zero exit the stderr
+   * tail is surfaced verbatim so the UI Notice can echo the CLI's own
+   * error.
    *
    * `--vault-path` resolves identically to `exec`'s `cwd` so the CLI
    * mutates the same vault the plugin is running in, regardless of the
@@ -488,14 +487,11 @@ export class RemarginBackend {
 
   /**
    * Ask the CLI which identity is active under the plugin's current
-   * settings. Post rem-3dw0 the `identity` subcommand honors the full
-   * `IdentityArgs` group, so forwarding `buildIdentityArgs(settings)`
-   * keeps this read path aligned with every mutating op — without it
-   * the plugin would pick up the nearest walked `.remargin.yaml`
-   * instead of the config file the user pointed settings at, and
-   * `me` would disagree with the identity writes land under. That
-   * mismatch flipped the ack UI (AckToggle vs AckButton) — see
-   * rem-3dw0 for the full trace.
+   * settings. Forwarding `buildIdentityArgs(settings)` keeps this read
+   * path aligned with every mutating op — without it the plugin picks
+   * up the nearest walked `.remargin.yaml` instead of the config file
+   * the user pointed settings at, and `me` disagrees with the identity
+   * writes land under (which flips the ack UI).
    *
    * `type` still narrows the branch-3 walk filter in manual mode
    * (when the plugin has not been pointed at a config file).

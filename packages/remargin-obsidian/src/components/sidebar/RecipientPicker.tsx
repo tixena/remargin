@@ -17,7 +17,7 @@ export interface RecipientPickerProps {
    * Participant ids that cannot be removed via the UI (e.g. the parent
    * author on a reply). Rendered with a lock icon and no `x` button.
    * This is purely decorative — the CLI enforces the "parent author
-   * always in `to:`" invariant server-side (see task rem-kja).
+   * always in `to:`" invariant server-side.
    */
   locked?: string[];
 }

@@ -52,9 +52,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sandboxView, setSandboxViewState] = useState<ViewMode>(plugin.settings.sandboxView);
   const [inboxView, setInboxViewState] = useState<ViewMode>(plugin.settings.inboxView);
-  // Session-only remargin_kind filter (rem-u8br). Deliberately NOT
-  // persisted to plugin settings: opening the sidebar in a new session
-  // should always start with every comment visible. The two discovered-
+  // Session-only remargin_kind filter — deliberately NOT persisted so a
+  // new session starts with every comment visible. The two discovered-
   // kinds buckets track what each section currently has loaded so the
   // chip row reflects the union across both.
   const [kindFilter, setKindFilter] = useState<string[]>([]);

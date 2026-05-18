@@ -1,5 +1,5 @@
 /**
- * Helpers for the sidebar's `remargin_kind` filter chips (rem-u8br).
+ * Helpers for the sidebar's `remargin_kind` filter chips.
  *
  * Keep these pure and synchronous: they run on every render of the
  * Inbox and Current-file sections to both (a) build the chip set and

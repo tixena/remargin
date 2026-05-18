@@ -16,42 +16,19 @@ import {
 } from "./readingModeProcessor.ts";
 
 /**
- * End-to-end coverage for the pretty-print stack (T39 / rem-fyj8.4).
+ * End-to-end coverage for the pretty-print stack. Exercises the
+ * combined wiring (real `RemarginPlugin`, real `CollapseState`, real
+ * `focusEvents`, real post-processor, real CM6 build) so a click or
+ * collapse toggle in one surface lands on the matching subscriber.
  *
- * Unlike the per-file tests for `readingModeProcessor` and
- * `commentWidget`, the scenarios below exercise the *combined* wiring:
- * a real `RemarginPlugin` instance, a real `CollapseState`, the real
- * `focusEvents` `EventTarget`, the real post-processor, and the real
- * CM6 build path — all mounted against the same plugin so a click in
- * one surface ends up on `plugin.focusEvents` for any subscriber to
- * see, and a collapse toggle in one surface invalidates the next CM6
- * `build()` for the matching id.
+ * Mocking:
  *
- * Mocking strategy (per the T39 ticket's "Mocks authorized" table):
- *
- *  - `obsidian` is replaced module-wide by `test-obsidian-stub.mjs`
- *    via the package's test loader. No real Obsidian runtime.
- *  - `MarkdownRenderer.render` is the obsidian stub's no-op.
- *  - `react-dom/client` is replaced via the per-module
- *    `__setCreateRootForTests` seams already present on the
- *    production code; we install fakes that capture the rendered
- *    React element so we can pull the `onClick` prop and invoke it
- *    directly. This is the same pattern T37 + T38 use — the test
- *    stack has no happy-dom dependency, so we cannot mount a real
- *    React tree.
- *  - `@codemirror/state`'s `EditorState` is mocked at the surface area
- *    `buildDecorations` actually consumes (`state.doc.toString`,
- *    `state.field(editorLivePreviewField, false)`,
- *    `state.field(editorInfoField, false)`). Same mock pattern that
- *    `commentWidget.test.ts` lands post rem-3dra; reused here so the
- *    e2e layer stays consistent with the unit layer.
- *
- * Trade-off documented in the T38 close-out note: until happy-dom (or
- * another DOM polyfill) is added to this package's devDependencies,
- * a "real" `EditorState.create` cannot be instantiated headlessly. The
- * surface-area mock covers every method `buildDecorations` and the
- * `StateField` create/update path actually call, so the production
- * code is exercised on its real path while the runtime DOM is faked.
+ *  - `obsidian` replaced module-wide by `test-obsidian-stub.mjs`.
+ *  - `react-dom/client` replaced via `__setCreateRootForTests` seams
+ *    so tests can capture the rendered element and invoke `onClick`
+ *    directly (no happy-dom).
+ *  - `@codemirror/state`'s `EditorState` mocked at the surface
+ *    `buildDecorations` consumes (`doc.toString`, `field(...)`).
  */
 
 /**
@@ -75,7 +52,7 @@ const VALID_BLOCK_C1 = [
  * Bare YAML+content form of c1, matching what `code.textContent` returns
  * in reading mode after Obsidian's markdown renderer strips the outer
  * fences. The post-processor re-wraps via `parseFromInnerContent` before
- * parsing — see rem-hghw.
+ * parsing.
  */
 const VALID_BLOCK_C1_INNER = [
   "---",
@@ -369,7 +346,7 @@ function captureFocusEvents(plugin: RemarginPlugin): RemarginFocusDetail[] {
   return captured;
 }
 
-describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
+describe("pretty-print end-to-end", () => {
   // Scenario 1: toggle on -> reading-mode widget renders (post-processor
   // replaces the <pre> and registers a child).
   it("scenario 1: editorWidgets=true -> reading-mode widget replaces <pre>", () => {
@@ -385,9 +362,8 @@ describe("pretty-print end-to-end (T39 / rem-fyj8.4)", () => {
     assert.equal(code.parentElement.replaced, true, "<pre> was replaced");
     assert.equal(createdHosts.length, 1, "exactly one reading-mode host element");
     // Host className must carry both the structural class AND
-    // `remargin-container` (added by ticket rem-ob35) so Tailwind
-    // utilities scoped via the `important: ".remargin-container"` rule
-    // apply inside the widget subtree.
+    // `remargin-container` so Tailwind utilities scoped via the
+    // `important: ".remargin-container"` rule apply in the subtree.
     const classes = createdHosts[0].className.split(/\s+/);
     assert.ok(
       classes.includes("remargin-reading-host"),

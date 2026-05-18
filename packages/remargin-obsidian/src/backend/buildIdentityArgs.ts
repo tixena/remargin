@@ -9,9 +9,8 @@ import type { RemarginSettings } from "@/types";
  * selected, emit ONLY `--config <path>` and let the CLI resolve
  * identity, type, and key from that one file. Forwarding `--identity`,
  * `--type`, or `--key` here silently overrides whatever the user's
- * YAML says — which is how nine `eduardo-burgos` comments landed
- * unsigned in strict mode under a config scoped to a different author
- * type (rem-ce4).
+ * YAML says — and that combination produces unsigned comments in
+ * strict mode when the config is scoped to a different author type.
  *
  * Manual mode is the escape hatch for users without a config file:
  * emit `--identity` and `--type`, but never `--key`. If a user truly

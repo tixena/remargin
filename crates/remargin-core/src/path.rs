@@ -1,31 +1,9 @@
-//! Path expansion helpers — the single chokepoint for `~`, `$VAR`, `${VAR}`,
-//! and (on Windows) `%VAR%` substitution.
+//! Path expansion helpers.
 //!
-//! This module consolidates what used to be scattered across the CLI, MCP,
-//! and config layers. Call [`expand_path`] once at each adapter boundary
-//! (CLI clap value parser, MCP tool dispatcher) — downstream code receives
-//! already-expanded paths.
-//!
-//! ## Semantics
-//!
-//! - Leading `~` or `~/` is expanded against `$HOME` (or the platform
-//!   equivalent). `~user` is an explicit error — write out the full path.
-//! - `$VAR`, `${VAR}`, and (on Windows) `%VAR%` are replaced with the
-//!   environment variable's value. Undefined variables produce a clear
-//!   error naming the variable rather than leaving the literal in place.
-//! - Absolute and relative paths without sigils pass through unchanged.
-//! - Expansion is purely string-level — no canonicalization, no symlink
-//!   resolution, no existence check. Callers that need those layer them
-//!   on top.
-//! - Tilde is only special at the very start. `foo~bar` is a literal.
-//! - A `$` not followed by a variable name or `{...}` is a literal.
-//!
-//! ## Env-var isolation in tests
-//!
-//! Tests that manipulate process env vars MUST run serially — Rust's
-//! default parallel test runner races if two tests touch the same vars.
-//! Use the [`EnvGuard`] helper in the `tests` submodule to snapshot and
-//! restore vars around each test body.
+//! Single chokepoint for `~`, `$VAR`, `${VAR}`, and (on Windows)
+//! `%VAR%`. Called at adapter boundaries (CLI value parser, MCP
+//! dispatcher) so downstream code receives already-expanded paths.
+//! Purely string-level — no canonicalization, no symlink resolution.
 
 use std::path::PathBuf;
 

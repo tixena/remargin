@@ -23,10 +23,9 @@ import {
 /**
  * The CM6 `EditorView` machinery requires a real DOM to construct, and
  * the `node --test` harness here doesn't provide one (no happy-dom
- * installed). The post-rem-3dra host is a `StateField`, so tests no
- * longer need a fake `view.dom.closest(...)` chain — they just need a
- * minimal `EditorState` shape exposing the two surfaces production
- * code touches: `state.doc.toString()` and `state.field(field, false)`.
+ * installed). The host is a `StateField`, so tests only need a minimal
+ * `EditorState` shape exposing the two surfaces production code
+ * touches: `state.doc.toString()` and `state.field(field, false)`.
  *
  * The `field()` impl is a per-test record keyed on the sentinel field
  * objects exported from the `obsidian` test stub
@@ -428,9 +427,8 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
         }
       ) as unknown as EditorState,
       changes: { __sentinel: "changes" },
-      // Real CM6 `Transaction.effects` is always a readonly array
-      // (defaults to `[]`). The rem-jq30 Bug B fix iterates this
-      // array, so the test stub must also expose it as iterable.
+      // Real CM6 `Transaction.effects` is always a readonly array;
+      // the update iterates it, so the stub must expose it as iterable.
       effects: [] as unknown[],
     };
     const next = spec.update(previous, tr);
@@ -525,7 +523,7 @@ describe("RemarginWidget", () => {
     assert.equal(renderCalls, 1, "render must run once on mount");
     // Host must carry both the structural class AND `remargin-container`
     // so Tailwind utilities scoped via the `important` selector apply
-    // inside the widget. See ticket rem-ob35.
+    // inside the widget.
     const classes = (dom as MockHost).className.split(/\s+/);
     assert.ok(
       classes.includes("remargin-widget-host"),
@@ -574,11 +572,10 @@ describe("RemarginWidget", () => {
     assert.deepStrictEqual(plugin.__focusCalls, [["c1", "notes/x.md"]]);
   });
 
-  // AC (rem-ob35): toDOM must wrap the rendered tree in WidgetProviders,
-  // passing `plugin: this.plugin` and `portalContainer: host`. Without
-  // the wrapper, the React mount throws on first render with
-  // "useBackend must be used within a BackendContext.Provider". The
-  // wrapper presence is the structural fix this test guards.
+  // toDOM must wrap the rendered tree in WidgetProviders, passing
+  // `plugin: this.plugin` and `portalContainer: host`. Without the
+  // wrapper, the React mount throws on first render with
+  // "useBackend must be used within a BackendContext.Provider".
   it("test #12a: toDOM wraps the rendered tree in WidgetProviders with plugin + host as portal container", () => {
     const plugin = makePlugin(true);
 
@@ -668,10 +665,9 @@ describe("commentWidgetPlugin shape", () => {
   // own class). We also assert the `extension` getter is present
   // (the public surface used to plug the field into EditorState).
   //
-  // Why this matters: block decorations are forbidden from
-  // ViewPlugin instances by CM6 (RangeError: "Block decorations
-  // may not be specified via plugins" — see ticket rem-3dra). If
-  // this test ever fails, the runtime crash returns.
+  // Block decorations are forbidden from ViewPlugin instances by CM6
+  // (RangeError: "Block decorations may not be specified via plugins").
+  // If this test ever fails, the runtime crash returns.
   it("test #14: commentWidgetPlugin returns a CM6 StateField (NOT a ViewPlugin)", () => {
     const plugin = makePlugin(true);
     const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
@@ -684,7 +680,7 @@ describe("commentWidgetPlugin shape", () => {
   });
 });
 
-describe("collapseEffectBridge (rem-jq30 Bug B)", () => {
+describe("collapseEffectBridge", () => {
   /**
    * Build a minimal `EditorView` stub: production code only touches
    * `view.dispatch` on this code path. The dispatched transaction
@@ -754,7 +750,7 @@ describe("collapseEffectBridge (rem-jq30 Bug B)", () => {
   });
 });
 
-describe("commentWidgetPlugin StateField rebuild on collapseEffect (rem-jq30 Bug B)", () => {
+describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
   // Mirror the helper from the earlier StateField suite. We keep a
   // local copy rather than hoisting because both suites rely on the
   // same private-slot dance and a future refactor that breaks one

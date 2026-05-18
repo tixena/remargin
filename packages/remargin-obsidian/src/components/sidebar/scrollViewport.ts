@@ -1,8 +1,8 @@
 /**
  * Walk up from `start` looking for the nearest Radix ScrollArea
  * viewport. Used by `ThreadedComments` to locate the sidebar's scrolling
- * container so it can snapshot/restore scrollTop across refetches
- * (rem-8w5 — posting a comment must not scroll the thread to the top).
+ * container so it can snapshot/restore scrollTop across refetches —
+ * posting a comment must not scroll the thread to the top.
  *
  * Lives in its own module so unit tests can import it without pulling
  * in React or obsidian, neither of which are available in the test

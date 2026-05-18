@@ -24,8 +24,7 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
   const [error, setError] = useState<string | null>(null);
   // Parent author, resolved lazily so we can pre-select and lock the
   // chip when the reply composer opens. The CLI enforces the
-  // parent-in-to invariant server-side (rem-kja); the lock is purely
-  // decorative.
+  // parent-in-to invariant server-side; the lock is purely decorative.
   const [parentAuthor, setParentAuthor] = useState<string | null>(null);
   const [to, setTo] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);

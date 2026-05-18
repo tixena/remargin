@@ -1,32 +1,11 @@
 //! `remargin claude restrict` core.
 //!
-//! [`restrict`] is the public entry point: anchor discovery (walk up
-//! to the nearest `.claude/` ancestor), path canonicalisation, an
-//! in-place edit of `<anchor>/.remargin.yaml`, then a call into
-//! [`crate::permissions::claude_sync::apply_rules`] to project the
-//! new entry into Claude's settings + sidecar.
-//!
-//! ## YAML editing strategy
-//!
-//! Rather than round-trip through the strongly-typed
-//! [`crate::config::permissions::Permissions`] struct (which would
-//! drop unknown keys the user may have added under top-level YAML),
-//! the editor parses the file as a `serde_yaml::Value`, mutates only
-//! the `permissions.trusted_roots` array, and writes the result back. That
-//! preserves the rest of the user's `.remargin.yaml` shape verbatim
-//! at the cost of dropping inline comments — acceptable per the spec
-//! because `.remargin.yaml` is a config file, not a comment-managed
-//! markdown document.
-//!
-//! ## Sanctioned `.remargin.yaml` write
-//!
-//! The agent-side guard against writing `.remargin.yaml` through the
-//! `write` / `edit` ops intentionally does NOT cover this module.
-//! `restrict` (and `unprotect`) is the explicit, sanctioned write
-//! path: the user invokes it deliberately through a dedicated
-//! command. The single helper [`write_remargin_yaml`] is the ONLY way
-//! the bypass is exercised; keeping it scoped here makes the audit
-//! boundary obvious.
+//! Edits the YAML as `serde_yaml::Value` (mutating only
+//! `permissions.trusted_roots`) so unknown top-level keys round-trip
+//! verbatim — at the cost of dropping inline comments, acceptable
+//! for a config file. Sanctioned `.remargin.yaml` write: bypasses
+//! the agent-side write guard via the scoped [`write_remargin_yaml`]
+//! helper so the audit boundary stays obvious.
 
 #[cfg(test)]
 mod tests;
