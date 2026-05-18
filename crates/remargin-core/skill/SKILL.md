@@ -79,14 +79,15 @@ stop at the first match:
 1. **Realm scope.** Every `.md` inside a realm is managed. NEVER use `Read` / `Edit` / `Write` / `Bash` (`cat`, `sed`, `awk`, `cp`, `mv`, `tee`, redirection) on a managed file. Always go through remargin tools.
 2. **MCP > CLI.** If `mcp__remargin__*` tools are reachable, use MCP. The CLI is a shell-context fallback only.
 3. **At least one reply per comment, threaded via `reply_to`.** Use `batch` for N replies in one turn. If a comment raises two distinct subjects, post two replies (each its own thread under the same parent) — that's cleaner than one reply that mixes them. What's NEVER ok is bundling answers to multiple **separate** comments into one consolidated reply.
-4. **Ack only AFTER the action is complete.** Ack is not a read-receipt. Pending comments are work items, not background context.
+4. **Acks AND comments both signal completion.** Don't post either before the work is done. No promissory comments like "rewriting now" / "I'll do X next" — the user can't tell from the comment whether the work happened. Ack is not a read-receipt either: pending comments are work items, not background context.
 5. **Don't return pending comments to the user as their to-do** when the action is yours.
-6. **Line numbers shift on every mutation.** Re-resolve immediately before any line-anchored op, or use `batch` for multi-step.
+6. **Line numbers shift on every mutation.** Re-resolve immediately before any line-anchored op, or use `batch` for multi-step. Bottom-up ordering is not a substitute for `batch` — it's the same anti-pattern in disguise. If you find yourself ordering inserts bottom-up to dodge line shifts, you forgot `batch` exists.
 7. **`--config` XOR `(--identity + --type + --key)`.** Three branches: `--config FILE` alone, full triplet, or filter on the walked candidate. Mixing those two halves in one call is rejected at parse time — the CLI errors before the op runs.
 8. **`auto_ack: true` is allowed only when** (a) the parent comment is addressed to you via `to:` AND (b) your reply fully resolves the ask. `auto_ack` without `reply_to` is rejected.
 9. **Never declare a different identity per call** unless the user explicitly asked. Per-call `identity` / `type` / `config_path` to declare someone else = impersonation.
 10. **Never delete other participants' comments** to unblock your own op. Find another path or ask the user.
 11. **Use `remargin activity` to find what's new in managed `.md` since you last acted.** Do not hand-roll timestamps from `comments` / `query` for this purpose — those tools don't compute the per-file caller-last-action cutoff and don't fold edits / re-sandboxes into a single change list.
+12. **Each participant owns their own ack queue.** Don't ack on someone else's behalf, and never advise them to leave a comment unacked — their queue is their decision. You may deliberately leave your own reply unacked to keep it visible in your own pending queue.
 
 ---
 
@@ -170,6 +171,19 @@ remargin batch --ops '[
 | Delete a file | `rm path=...` |
 
 **Do not** use `Read` / `Edit` / `Write` / `Bash` shell tools on managed `.md` files. The realm rule has no exceptions.
+
+### Q: The doc references an image. Should I view it?
+
+Yes — always view it before acting on the surrounding text. Markdown is often sparse because the visual is the spec (showing a bug, layout, before/after state, etc.). Skipping the image produces vague or wrong conclusions.
+
+Applies to every syntax:
+
+- Obsidian wikilinks `[[diagram.png]]`
+- Markdown image syntax `![alt](path/to/image.png)`
+- HTML `<img src="...">`
+- Relative or absolute paths inside any of the above
+
+Use `get path=... binary=true` for the image. Run `metadata` first if you need to check size.
 
 ### Q: How do I declare identity for a mutating call?
 
@@ -262,7 +276,7 @@ Each is a concrete failure mode that has bitten a session.
 
 ❌ **Bundling N replies into one comment.** Defeats threading. Use `batch` with one op per reply.
 
-❌ **N sequential `comment` calls on the same file.** Line numbers shift between calls; the second/third lands wrong. Use `batch`.
+❌ **N sequential `comment` calls on the same file** — including bottom-up ordering as a workaround. Line numbers shift between calls; the second/third lands wrong. Use `batch`. If you find yourself ordering inserts bottom-up to dodge line shifts, that's the same anti-pattern in disguise — you forgot the `batch` tool exists.
 
 ❌ **Acking before doing the work.** Ack signals "done." Doing it in the wrong order makes the ack a lie.
 
@@ -279,6 +293,8 @@ Each is a concrete failure mode that has bitten a session.
 ❌ **Per-call identity declaration without explicit user instruction.** Impersonation.
 
 ❌ **Replying with a summary of the original comment** instead of doing the work. Reply demonstrates substance, not paraphrase.
+
+❌ **Expanding a reply's scope beyond what the parent comment asked.** If you spot an adjacent issue while answering, note it as a one-line dependency at most — don't restructure the reply around it. The user asked about X; answer X.
 
 ❌ **Cross-referencing internal IDs in user-facing replies OR in document bodies** ("see Decision 13", "as in `xyz`", "per the `abc` thread", "(per `25w`)"). Agents track IDs; users read linearly. The doc body is even worse than replies for this — comments get cleaned up after a discussion, leaving doc-body citations as dangling references that no one can resolve. Restate the relevant content inline. Both replies and doc bodies must stand on their own without knowledge of the comment thread that produced them.
 

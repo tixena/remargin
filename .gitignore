@@ -18,3 +18,7 @@ notes/
 # Claude Code user settings (local-only)
 .claude/settings.json
 .claude/scheduled_tasks.lock
+
+# Remargin identity (workspace-local, not shared)
+.remargin.yaml
+.remargin/
