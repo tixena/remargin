@@ -5636,7 +5636,7 @@ fn render_sign_result_text(
 fn cmd_plugin(sinks: &mut IoSinks<'_>, action: &PluginAction, json_mode: bool) -> Result<()> {
     use std::process::Command;
     const MARKETPLACE: &str = "tixena/remargin";
-    const PLUGIN_REF: &str = "remargin@remargin";
+    const PLUGIN_REF: &str = "remargin@remargin-marketplace";
 
     let scope_for = |local: bool| if local { "project" } else { "user" };
 
