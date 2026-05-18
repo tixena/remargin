@@ -18,9 +18,10 @@ mod tests {
 
     const ALICE_CONFIG: &str = "identity: alice\ntype: human\nmode: open\n";
 
-    /// A short multi-section doc with two `## A10.` / `## P11.` style
-    /// sub-headings under different `#` parents: matches the path-syntax
-    /// disambiguation case in the test plan.
+    /// A short multi-section doc with two prefixed sub-headings (a10
+    /// and p11 in their respective epics) under different top-level
+    /// parents: matches the path-syntax disambiguation case in the
+    /// test plan.
     const HEADINGS_DOC: &str = "\
 ---
 title: Headings
