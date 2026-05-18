@@ -406,7 +406,7 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
+        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/subset_gate/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. The subset_gate field mirrors SubsetGateFailure when the projected op would introduce a new anomaly not present in the on-disk pre-state - the same shape commit_with_verify would return. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
         schema: json!({
             "type": "object",
             "properties": {

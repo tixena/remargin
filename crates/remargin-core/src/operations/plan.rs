@@ -27,7 +27,7 @@ use os_shim::System;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
-use crate::config::ResolvedConfig;
+use crate::config::{Mode, ResolvedConfig};
 use crate::document::allowlist;
 use crate::document::{self, WriteOptions, WriteProjection};
 use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams};
@@ -81,6 +81,66 @@ impl PlanVerifyReport {
         Self {
             ok: report.ok,
             rows,
+        }
+    }
+}
+
+/// One `(comment_id, anomaly_kind)` pair surfaced by [`PlanSubsetGate`].
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct PlanAnomaly {
+    /// Comment ID the anomaly is attached to.
+    pub id: String,
+    /// Stable anomaly kind name (matches
+    /// [`crate::operations::verify::AnomalyKind::as_str`]).
+    pub kind: String,
+}
+
+/// Subset-gate refusal carried inside a [`PlanReport`].
+///
+/// Mirrors [`crate::operations::verify::SubsetGateFailure`] in shape so
+/// `plan` reports and live `commit_with_verify` errors render
+/// identically. `would_commit` is `false` whenever this field is
+/// `Some`.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct PlanSubsetGate {
+    /// One-line plain-English summary.
+    pub headline: String,
+    /// Actionable next-step.
+    pub hint: String,
+    /// `Q \ P`: anomalies the projected op would introduce that
+    /// weren't present in the pre-state.
+    pub introduced: Vec<PlanAnomaly>,
+    /// Active mode (after realm escalation) at refusal time.
+    pub mode: String,
+    /// Document the gate is protecting.
+    pub path: PathBuf,
+}
+
+impl PlanSubsetGate {
+    fn from_introduced(introduced: Vec<Anomaly>, mode: &Mode, path: PathBuf) -> Self {
+        let n = introduced.len();
+        let path_str = path.display().to_string();
+        let headline = if n == 1 {
+            format!("op would introduce 1 new anomaly in {path_str}")
+        } else {
+            format!("op would introduce {n} new anomalies in {path_str}")
+        };
+        let hint = format!("Try `remargin verify {path_str} --json` for the full breakdown.");
+        let plan_anomalies = introduced
+            .into_iter()
+            .map(|a| PlanAnomaly {
+                id: a.id,
+                kind: String::from(a.kind.as_str()),
+            })
+            .collect();
+        Self {
+            headline,
+            hint,
+            introduced: plan_anomalies,
+            mode: String::from(mode.as_str()),
+            path,
         }
     }
 }
@@ -206,6 +266,14 @@ pub struct PlanReport {
     /// the projection would commit cleanly. Specific enough to act on
     /// (which comment, which invariant).
     pub reject_reason: Option<String>,
+    /// Structured subset-gate refusal mirroring
+    /// [`crate::operations::verify::SubsetGateFailure`]. Populated
+    /// alongside `reject_reason` when the projected op would introduce
+    /// new anomalies (`Q ⊄ P`). `None` when the projection is clean or
+    /// when the refusal came from a non-subset-gate source (mv,
+    /// restrict, unprotect, unsupported write).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subset_gate: Option<PlanSubsetGate>,
     /// Reverse projection emitted by the `plan unprotect` op. Names
     /// every file the live `unprotect` would touch (`.remargin.yaml`,
     /// project + user settings, sidecar) plus every detectable
@@ -845,7 +913,7 @@ pub fn project_report(
     let raw_verify = verify_document(after, cfg);
     let verify_after = PlanVerifyReport::from_report(&raw_verify);
 
-    let (would_commit, reject_reason) = decide_commit(before, after, cfg);
+    let (would_commit, reject_reason, subset_gate) = decide_commit(before, after, cfg, None);
 
     Ok(PlanReport {
         changed_line_ranges,
@@ -859,6 +927,70 @@ pub fn project_report(
         op: String::from(op_label),
         purge_dir_diff: None,
         reject_reason,
+        subset_gate,
+        unprotect_diff: None,
+        verify_after,
+        would_commit,
+    })
+}
+
+/// Doc-bearing variant of [`project_report`].
+///
+/// Escalates the mode to the doc's realm (mirroring
+/// [`crate::operations::verify::commit_with_verify`]) and surfaces the
+/// structured [`PlanSubsetGate`] under that realm so plan dry-runs match
+/// what the live op would refuse.
+///
+/// # Errors
+///
+/// Propagates [`ParsedDocument::to_markdown`]'s `serde_yaml::Error` and
+/// any failure from
+/// [`crate::config::ResolvedConfig::escalate_mode_for_doc`] (e.g.
+/// unreadable realm `.remargin.yaml`).
+pub fn project_doc_report(
+    system: &dyn System,
+    path: &Path,
+    op_label: &str,
+    before: &ParsedDocument,
+    after: &ParsedDocument,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+) -> Result<PlanReport> {
+    let realm_cfg = cfg.escalate_mode_for_doc(system, path)?;
+
+    let before_md = before.to_markdown()?;
+    let after_md = after.to_markdown()?;
+
+    let checksum_before = whole_file_checksum(&before_md);
+    let checksum_after = whole_file_checksum(&after_md);
+    let noop = checksum_before == checksum_after;
+
+    let changed_line_ranges = if noop {
+        Vec::new()
+    } else {
+        diff_line_ranges(&before_md, &after_md)
+    };
+
+    let comments = diff_comment_sets(before, after);
+    let raw_verify = verify_document(after, &realm_cfg);
+    let verify_after = PlanVerifyReport::from_report(&raw_verify);
+
+    let (would_commit, reject_reason, subset_gate) =
+        decide_commit(before, after, &realm_cfg, Some(path.to_path_buf()));
+
+    Ok(PlanReport {
+        changed_line_ranges,
+        checksum_after,
+        checksum_before,
+        comments,
+        config_diff: None,
+        identity,
+        mv_diff: None,
+        noop,
+        op: String::from(op_label),
+        purge_dir_diff: None,
+        reject_reason,
+        subset_gate,
         unprotect_diff: None,
         verify_after,
         would_commit,
@@ -891,24 +1023,24 @@ pub fn dispatch(
         PlanRequest::Ack { path, ids, remove } => {
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             let (before, after) = projections::project_ack(system, path, cfg, &id_refs, *remove)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Batch { path, ops } => {
             let (before, after) = projections::project_batch(system, path, cfg, ops)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Comment { path, params } => {
             let (before, after) = projections::project_comment(system, path, cfg, params)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Delete { path, ids } => {
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             let (before, after) = projections::project_delete(system, path, cfg, &id_refs)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Edit { path, id, content } => {
             let (before, after) = projections::project_edit(system, path, cfg, id, content)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Mv { src, dst, force } => {
             dispatch_mv(system, base_dir, cfg, identity, src, dst, *force)
@@ -918,7 +1050,7 @@ pub fn dispatch(
                 dispatch_purge_dir(system, cfg, identity, path)
             } else {
                 let (before, after) = projections::project_purge(system, path, cfg)?;
-                project_report(label, &before, &after, cfg, identity)
+                project_doc_report(system, path, label, &before, &after, cfg, identity)
             }
         }
         PlanRequest::React {
@@ -929,7 +1061,7 @@ pub fn dispatch(
         } => {
             let (before, after) =
                 projections::project_react(system, path, cfg, id, emoji, *remove)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Restrict {
             cwd,
@@ -938,15 +1070,15 @@ pub fn dispatch(
         } => dispatch_restrict(system, cfg, identity, cwd, args, settings_files),
         PlanRequest::SandboxAdd { path } => {
             let (before, after) = projections::project_sandbox_add(system, path, cfg)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::SandboxRemove { path } => {
             let (before, after) = projections::project_sandbox_remove(system, path, cfg)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Sign { path, selection } => {
             let (before, after) = projections::project_sign(system, path, cfg, selection)?;
-            project_report(label, &before, &after, cfg, identity)
+            project_doc_report(system, path, label, &before, &after, cfg, identity)
         }
         PlanRequest::Unprotect { cwd, args } => {
             dispatch_unprotect(system, cfg, identity, cwd, args)
@@ -957,7 +1089,7 @@ pub fn dispatch(
             opts,
         } => {
             let projection = document::project_write(system, base_dir, path, content, cfg, *opts)?;
-            dispatch_write_projection(&projection, cfg, identity)
+            dispatch_write_projection(system, path, &projection, cfg, identity)
         }
     }
 }
@@ -1429,6 +1561,8 @@ fn is_diff_noop(diff: &ConfigPlanDiff) -> bool {
 /// caller so the Markdown / Unsupported handling does not drift between
 /// adapters.
 fn dispatch_write_projection(
+    system: &dyn System,
+    path: &Path,
     projection: &WriteProjection,
     cfg: &ResolvedConfig,
     identity: PlanIdentity,
@@ -1439,7 +1573,8 @@ fn dispatch_write_projection(
             after,
             noop,
         } => {
-            let mut report = project_report("write", before, after, cfg, identity)?;
+            let mut report =
+                project_doc_report(system, path, "write", before, after, cfg, identity)?;
             report.noop = report.noop || *noop;
             Ok(report)
         }
@@ -1557,16 +1692,21 @@ fn whole_file_checksum(content: &str) -> String {
 /// Mirror the subset gate from [`commit_with_verify`]. Plan flips
 /// `would_commit` to false iff Q ⊄ P — the projected mutation would
 /// introduce a new anomaly not present in the pre-state.
+///
+/// `subset_gate_path`, when provided, produces a structured
+/// [`PlanSubsetGate`] that mirrors
+/// [`crate::operations::verify::SubsetGateFailure`].
 fn decide_commit(
     before: &ParsedDocument,
     after: &ParsedDocument,
     cfg: &ResolvedConfig,
-) -> (bool, Option<String>) {
+    subset_gate_path: Option<PathBuf>,
+) -> (bool, Option<String>, Option<PlanSubsetGate>) {
     let pre = anomalies_for_doc(before, cfg);
     let post = anomalies_for_doc(after, cfg);
-    let mut introduced: Vec<&Anomaly> = post.difference(&pre).collect();
+    let mut introduced: Vec<Anomaly> = post.difference(&pre).cloned().collect();
     if introduced.is_empty() {
-        return (true, None);
+        return (true, None, None);
     }
     introduced.sort_by(|a, b| {
         a.id.cmp(&b.id)
@@ -1581,15 +1721,23 @@ fn decide_commit(
     reason.push_str(" under mode ");
     reason.push_str(cfg.mode.as_str());
     reason.push(':');
-    for a in introduced {
+    for a in &introduced {
         let _ = write!(reason, " {}:{};", a.id, a.kind.as_str());
     }
-    (false, Some(reason))
+    let subset_gate =
+        subset_gate_path.map(|p| PlanSubsetGate::from_introduced(introduced, &cfg.mode, p));
+    (false, Some(reason), subset_gate)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PlanIdentity, diff_comment_sets, project_report, whole_file_checksum};
+    use std::path::Path;
+
+    use os_shim::mock::MockSystem;
+
+    use super::{
+        PlanIdentity, diff_comment_sets, project_doc_report, project_report, whole_file_checksum,
+    };
     use crate::config::{Mode, ResolvedConfig};
     use crate::parser;
     use crate::parser::AuthorType;
@@ -1748,5 +1896,121 @@ mod tests {
         assert!(!report.noop);
         // Lines 3 and 4 (1-indexed) differ; expect a single coalesced range.
         assert_eq!(report.changed_line_ranges, vec![[3_usize, 4_usize]]);
+    }
+
+    #[test]
+    fn project_doc_report_clean_projection_has_no_subset_gate() {
+        let before = parser::parse(DOC_ONE_COMMENT).unwrap();
+        let after = parser::parse(DOC_TWO_COMMENTS).unwrap();
+        let path = Path::new("/d/file.md");
+        let system = MockSystem::new()
+            .with_file(path, DOC_ONE_COMMENT.as_bytes())
+            .unwrap();
+
+        let report = project_doc_report(
+            &system,
+            path,
+            "write",
+            &before,
+            &after,
+            &open_config(),
+            test_identity(),
+        )
+        .unwrap();
+
+        assert!(report.would_commit);
+        assert!(report.reject_reason.is_none());
+        assert!(report.subset_gate.is_none());
+    }
+
+    #[test]
+    fn project_doc_report_introduced_anomaly_populates_subset_gate() {
+        // Q introduces (aaa, checksum_invalid) that wasn't in P.
+        let before = parser::parse(DOC_ONE_COMMENT).unwrap();
+        let after = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
+        let path = Path::new("/d/file.md");
+        let system = MockSystem::new()
+            .with_file(path, DOC_ONE_COMMENT.as_bytes())
+            .unwrap();
+
+        let report = project_doc_report(
+            &system,
+            path,
+            "write",
+            &before,
+            &after,
+            &open_config(),
+            test_identity(),
+        )
+        .unwrap();
+
+        assert!(!report.would_commit);
+        let gate = report.subset_gate.unwrap();
+        assert_eq!(gate.path, path);
+        assert_eq!(gate.mode, "open");
+        assert_eq!(gate.introduced.len(), 1);
+        assert_eq!(gate.introduced[0].id, "aaa");
+        assert_eq!(gate.introduced[0].kind, "checksum_invalid");
+        assert!(gate.headline.contains("1 new anomaly"));
+        assert!(gate.headline.contains("file.md"));
+        assert!(gate.hint.contains("remargin verify"));
+    }
+
+    #[test]
+    fn project_doc_report_pre_existing_anomaly_does_not_refuse() {
+        // Both before and after have the same (aaa, checksum_invalid)
+        // entry; Q ⊆ P so the gate must not refuse.
+        let before = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
+        let after = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
+        let path = Path::new("/d/file.md");
+        let system = MockSystem::new()
+            .with_file(path, DOC_AAA_BAD_CHECKSUM.as_bytes())
+            .unwrap();
+
+        let report = project_doc_report(
+            &system,
+            path,
+            "write",
+            &before,
+            &after,
+            &open_config(),
+            test_identity(),
+        )
+        .unwrap();
+
+        assert!(report.would_commit);
+        assert!(report.subset_gate.is_none());
+    }
+
+    #[test]
+    fn project_doc_report_escalates_mode_to_realm_yaml() {
+        // The realm yaml flips mode from Open to Strict. An introduced
+        // bad-checksum is mode-independent, so the subset gate fires
+        // either way; we assert the gate's `mode` field reflects the
+        // *realm* mode, proving escalate_mode_for_doc ran.
+        let path = Path::new("/d/file.md");
+        let system = MockSystem::new()
+            .with_file(Path::new("/d/.remargin.yaml"), b"mode: strict\n")
+            .unwrap()
+            .with_file(path, DOC_ONE_COMMENT.as_bytes())
+            .unwrap();
+
+        let before = parser::parse(DOC_ONE_COMMENT).unwrap();
+        let after = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
+
+        let report = project_doc_report(
+            &system,
+            path,
+            "write",
+            &before,
+            &after,
+            &open_config(),
+            test_identity(),
+        )
+        .unwrap();
+
+        let gate = report.subset_gate.unwrap();
+        assert_eq!(gate.mode, "strict");
+        assert!(!report.would_commit);
     }
 }
