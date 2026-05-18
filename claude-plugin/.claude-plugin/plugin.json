@@ -1,0 +1,9 @@
+{
+  "name": "remargin",
+  "description": "Process sandboxed and individual managed markdown files in a remargin vault. Provides /remargin:process-file and /remargin:process-sandbox-group slash commands and a natural-language skill layer.",
+  "version": "0.1.0",
+  "author": { "name": "Tixena", "url": "https://github.com/tixena" },
+  "repository": "https://github.com/tixena/remargin",
+  "license": "MIT",
+  "keywords": ["remargin", "obsidian", "sandbox", "markdown", "agent-workflow"]
+}

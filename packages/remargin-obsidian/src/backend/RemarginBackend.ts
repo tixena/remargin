@@ -18,6 +18,7 @@ import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
 import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
+import { parsePluginsListOutput } from "./detectPlugin";
 import { IDENTITY_ACCEPTING_SUBCOMMANDS } from "./identityAcceptingSubcommands";
 import { performUpdateCheck } from "./performUpdateCheck";
 import type {
@@ -26,6 +27,7 @@ import type {
   GetOpts,
   IdentityInfo,
   Participant,
+  PluginPresence,
   PromptListEntry,
   QueryOpts,
   ResolvedMode,
@@ -115,6 +117,8 @@ function parseEnvelope<T>(raw: string, schema: z.ZodType<T>, label: string): T {
 }
 
 export class RemarginBackend {
+  private pluginPresenceCache: PluginPresence | null = null;
+
   constructor(
     private settings: RemarginSettings,
     private vaultPath: string
@@ -122,6 +126,38 @@ export class RemarginBackend {
 
   updateSettings(settings: RemarginSettings): void {
     this.settings = settings;
+  }
+
+  /**
+   * Probe `claude plugins list` and report whether the remargin plugin
+   * is installed/enabled. Cached for the lifetime of this backend; call
+   * `invalidatePluginPresence()` to force a fresh probe.
+   */
+  async detectPlugin(): Promise<PluginPresence> {
+    if (this.pluginPresenceCache) return this.pluginPresenceCache;
+    const binary = this.resolveClaudeBinary();
+    const output = await new Promise<string>((resolve) => {
+      const child = spawn(binary, ["plugins", "list"], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const chunks: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      child.on("error", () => {
+        resolve("");
+      });
+      child.on("close", () => {
+        resolve(Buffer.concat(chunks).toString("utf-8"));
+      });
+    });
+    const presence = parsePluginsListOutput(output);
+    this.pluginPresenceCache = presence;
+    return presence;
+  }
+
+  invalidatePluginPresence(): void {
+    this.pluginPresenceCache = null;
   }
 
   async get(path: string, opts?: GetOpts): Promise<string> {
@@ -606,7 +642,7 @@ export class RemarginBackend {
     const binary = this.resolveClaudeBinary();
     const cwd = opts?.cwd ?? (expandPath(this.settings.workingDirectory) || this.vaultPath);
     const timeout = opts?.timeout ?? 300_000;
-    const fullPrompt = files.length > 0 ? `${prompt}\n\nFiles:\n${files.join("\n")}` : prompt;
+    const fullPrompt = buildClaudePrompt(prompt, files, opts?.useSlashCommand);
 
     const identity = await this.identity().catch(() => null);
     const logStream = opts?.logPath
@@ -700,6 +736,17 @@ export class RemarginBackend {
   }
 }
 
+export function buildClaudePrompt(
+  prompt: string,
+  files: string[],
+  slash?: { command: string; arg?: string }
+): string {
+  if (slash) {
+    return slash.arg ? `/${slash.command} ${slash.arg}` : `/${slash.command}`;
+  }
+  return files.length > 0 ? `${prompt}\n\nFiles:\n${files.join("\n")}` : prompt;
+}
+
 export interface InvokeClaudeOpts {
   /** Timeout in ms. Default: 300_000 (5 min). Per-group, not total. */
   timeout?: number;
@@ -715,6 +762,12 @@ export interface InvokeClaudeOpts {
   logPath?: string;
   /** Resolved system-prompt name; used as the log file's H1. */
   promptName?: string;
+  /**
+   * Invoke a slash command instead of the inline-prompt argv. When set,
+   * `prompt` and `files` are ignored — the spawned claude receives
+   * `/<command>[ <arg>]` as its `-p` argument.
+   */
+  useSlashCommand?: { command: string; arg?: string };
 }
 
 interface OpenLogStreamArgs {

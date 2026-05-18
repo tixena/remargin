@@ -161,3 +161,8 @@ export interface PromptListEntry {
   /** Absolute path of the `.remargin.yaml` that declared the prompt. */
   source: string;
 }
+
+export type PluginPresence =
+  | { kind: "absent" }
+  | { kind: "installed_disabled" }
+  | { kind: "installed_enabled" };

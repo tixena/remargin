@@ -219,14 +219,27 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
 
   const handleSandboxSubmit = useCallback(
     async (groups: StagedGroup[], progress?: SubmitProgress): Promise<SubmitGroupResult[]> => {
+      plugin.backend.invalidatePluginPresence();
+      const presence = await plugin.backend.detectPlugin();
+      const useSlash = presence.kind === "installed_enabled";
       const results = await runSubmitAll({
         groups,
         runGroup: (group) =>
-          plugin.backend.invokeClaude(group.prompt.prompt, group.files, {
-            logPath: group.logPath,
-            promptName: group.prompt.name,
-          }),
-        cleanupGroup: (group) => plugin.backend.sandboxRemove(group.files),
+          useSlash
+            ? plugin.backend.invokeClaude("", [], {
+                logPath: group.logPath,
+                promptName: group.prompt.name,
+                useSlashCommand: {
+                  command: "remargin:process-sandbox-group",
+                  arg: group.prompt.name,
+                },
+              })
+            : plugin.backend.invokeClaude(group.prompt.prompt, group.files, {
+                logPath: group.logPath,
+                promptName: group.prompt.name,
+              }),
+        cleanupGroup: (group) =>
+          useSlash ? Promise.resolve() : plugin.backend.sandboxRemove(group.files),
         bumpRefresh,
         progress,
       });
