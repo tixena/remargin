@@ -49,7 +49,9 @@ permissions:
     );
 
     assert_eq!(out.deny_ops.len(), 1);
-    assert_eq!(out.deny_ops[0].ops, vec![String::from("purge")]);
+    assert_eq!(out.deny_ops[0].ops.len(), 1);
+    assert_eq!(out.deny_ops[0].ops[0].name, "purge");
+    assert!(out.deny_ops[0].ops[0].exceptions.is_empty());
 
     assert_eq!(out.allow_dot_folders.len(), 1);
     assert_eq!(

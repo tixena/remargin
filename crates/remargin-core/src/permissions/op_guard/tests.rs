@@ -8,7 +8,7 @@ use crate::config::Mode;
 use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::resolve::trusted_root_covers;
 use crate::config::permissions::resolve::{
-    ResolvedDenyOps, ResolvedPermissions, ResolvedTrustedRoot, TrustedRootPath,
+    ResolvedDenyOps, ResolvedDenyOpsItem, ResolvedPermissions, ResolvedTrustedRoot, TrustedRootPath,
 };
 use crate::parser::AuthorType;
 use crate::permissions::op_guard::{
@@ -418,7 +418,6 @@ fn denial_error_wording_matches_canonical_template() {
         op: String::from("purge"),
         source_file: PathBuf::from("/r/.remargin.yaml"),
         target: PathBuf::from("/r/signed/x.md"),
-        to: Vec::new(),
     };
     let denied_msg = format!("{denied}");
     let denied_expected_backtick =
@@ -440,15 +439,28 @@ fn denial_error_wording_matches_canonical_template() {
     assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{source_file}"));
 }
 
-// Identity-scoped deny_ops + agent ~/.ssh/** default
+// Per-op exceptions on deny_ops + agent ~/.ssh/** default
 
-fn deny_ops_with_to(ops: Vec<OpName>, path: &str, to: &[&str]) -> Vec<ResolvedDenyOps> {
+fn deny_ops_items(ops: Vec<ResolvedDenyOpsItem>, path: &str) -> Vec<ResolvedDenyOps> {
     vec![ResolvedDenyOps {
         ops,
         path: PathBuf::from(path),
         source_file: PathBuf::from("/r/.remargin.yaml"),
-        to: to.iter().copied().map(String::from).collect(),
     }]
+}
+
+fn bare(name: OpName) -> ResolvedDenyOpsItem {
+    ResolvedDenyOpsItem {
+        exceptions: Vec::new(),
+        name,
+    }
+}
+
+fn with_exceptions(name: OpName, exceptions: &[&str]) -> ResolvedDenyOpsItem {
+    ResolvedDenyOpsItem {
+        exceptions: exceptions.iter().copied().map(String::from).collect(),
+        name,
+    }
 }
 
 fn caller(name: &str, author_type: AuthorType, mode: Mode) -> CallerInfo {
@@ -461,57 +473,14 @@ fn caller(name: &str, author_type: AuthorType, mode: Mode) -> CallerInfo {
 }
 
 #[test]
-fn deny_ops_to_matches_caller_in_strict_mode_refuses() {
+fn exceptions_bare_blanket_refuses() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
-        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice"]),
+        deny_ops: deny_ops_items(vec![bare(OpName::Purge)], "/r/secret"),
         trusted_roots: Vec::new(),
         trusted_roots_lock: None,
     };
     let caller = caller("alice", AuthorType::Human, Mode::Strict);
-    let system = MockSystem::new();
-    let err = check_against_resolved_for_caller(
-        &system,
-        "purge",
-        Path::new("/r/secret/x.md"),
-        &resolved,
-        &caller,
-    )
-    .unwrap_err();
-    let chain = format!("{err:#}");
-    assert!(chain.contains("alice"));
-    assert!(chain.contains("deny_ops"));
-}
-
-#[test]
-fn deny_ops_to_does_not_match_caller_in_strict_mode_allows() {
-    let resolved = ResolvedPermissions {
-        allow_dot_folders: Vec::new(),
-        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
-        trusted_roots: Vec::new(),
-        trusted_roots_lock: None,
-    };
-    let caller = caller("alice", AuthorType::Human, Mode::Strict);
-    let system = MockSystem::new();
-    check_against_resolved_for_caller(
-        &system,
-        "purge",
-        Path::new("/r/secret/x.md"),
-        &resolved,
-        &caller,
-    )
-    .unwrap();
-}
-
-#[test]
-fn deny_ops_to_is_ignored_in_open_mode() {
-    let resolved = ResolvedPermissions {
-        allow_dot_folders: Vec::new(),
-        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["bob"]),
-        trusted_roots: Vec::new(),
-        trusted_roots_lock: None,
-    };
-    let caller = caller("alice", AuthorType::Human, Mode::Open);
     let system = MockSystem::new();
     let err = check_against_resolved_for_caller(
         &system,
@@ -527,9 +496,362 @@ fn deny_ops_to_is_ignored_in_open_mode() {
     ));
 }
 
-/// `MockSystem` with a synthetic `$HOME` so the synthesized `~/.ssh/**`
-/// agent default-deny reads a deterministic path without touching the
-/// real process env.
+#[test]
+fn exceptions_bare_unrelated_op_allowed() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(vec![bare(OpName::Purge)], "/r/secret"),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("alice", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "comment",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_match_allows_caller() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(OpName::Purge, &["eduardo-burgos"])],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_miss_refuses_caller() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(OpName::Purge, &["eduardo-burgos"])],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("someone-else", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    let err = check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::DeniedOpNotExcepted { .. })
+    ));
+    let chain = format!("{err:#}");
+    assert!(chain.contains("someone-else"));
+}
+
+#[test]
+fn exceptions_two_entries_first_matches() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(
+                OpName::Write,
+                &["eduardo-burgos", "remargin_dev_agent"],
+            )],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "write",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_two_entries_second_matches() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(
+                OpName::Write,
+                &["eduardo-burgos", "remargin_dev_agent"],
+            )],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("remargin_dev_agent", AuthorType::Agent, Mode::Strict);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "write",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_empty_list_acts_as_blanket() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(vec![with_exceptions(OpName::Purge, &[])], "/r/secret"),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    let err = check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::DeniedOp { .. })
+    ));
+}
+
+#[test]
+fn exceptions_mixed_bare_and_full_list() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![
+                bare(OpName::Sign),
+                with_exceptions(OpName::Purge, &["eduardo-burgos"]),
+                bare(OpName::Delete),
+            ],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+
+    let sign_err = check_against_resolved_for_caller(
+        &system,
+        "sign",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        sign_err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::DeniedOp { .. })
+    ));
+
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+
+    let delete_err = check_against_resolved_for_caller(
+        &system,
+        "delete",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        delete_err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::DeniedOp { .. })
+    ));
+}
+
+#[test]
+fn exceptions_union_semantics_bare_wins_over_full() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: vec![
+            ResolvedDenyOps {
+                ops: vec![bare(OpName::Purge)],
+                path: PathBuf::from("/r/secret"),
+                source_file: PathBuf::from("/r/.remargin.yaml"),
+            },
+            ResolvedDenyOps {
+                ops: vec![with_exceptions(OpName::Purge, &["eduardo-burgos"])],
+                path: PathBuf::from("/r/secret"),
+                source_file: PathBuf::from("/r/.remargin.yaml"),
+            },
+        ],
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    let err = check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err.downcast_ref::<OpGuardError>(),
+        Some(OpGuardError::DeniedOp { .. })
+    ));
+}
+
+#[test]
+fn exceptions_honored_in_open_mode() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(OpName::Purge, &["eduardo-burgos"])],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Open);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_honored_in_registered_mode() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(OpName::Purge, &["eduardo-burgos"])],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Registered);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_honored_in_strict_mode() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(OpName::Purge, &["eduardo-burgos"])],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("eduardo-burgos", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_entry_path_does_not_cover_target_allows() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(vec![bare(OpName::Purge)], "/r/scratch"),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = caller("alice", AuthorType::Human, Mode::Strict);
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/other.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+#[test]
+fn exceptions_match_via_identity_id() {
+    let resolved = ResolvedPermissions {
+        allow_dot_folders: Vec::new(),
+        deny_ops: deny_ops_items(
+            vec![with_exceptions(OpName::Purge, &["alice-id"])],
+            "/r/secret",
+        ),
+        trusted_roots: Vec::new(),
+        trusted_roots_lock: None,
+    };
+    let caller = CallerInfo {
+        author_type: Some(AuthorType::Human),
+        identity_id: Some(String::from("alice-id")),
+        identity_name: Some(String::from("alice-display-name")),
+        mode: Mode::Strict,
+    };
+    let system = MockSystem::new();
+    check_against_resolved_for_caller(
+        &system,
+        "purge",
+        Path::new("/r/secret/x.md"),
+        &resolved,
+        &caller,
+    )
+    .unwrap();
+}
+
+// ~/.ssh/** agent default-deny
+
 fn ssh_test_system() -> MockSystem {
     MockSystem::new().with_env("HOME", "/h").unwrap()
 }
@@ -567,15 +889,14 @@ fn strict_human_can_read_ssh() {
 }
 
 #[test]
-fn strict_agent_default_ssh_override_via_explicit_to_with_empty_ops() {
+fn strict_agent_default_ssh_override_via_user_exception() {
     let system = ssh_test_system();
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         deny_ops: vec![ResolvedDenyOps {
-            ops: Vec::new(),
+            ops: vec![with_exceptions(OpName::Get, &["nimbus"])],
             path: PathBuf::from("/h/.ssh"),
             source_file: PathBuf::from("/r/.remargin.yaml"),
-            to: vec![String::from("nimbus")],
         }],
         trusted_roots: Vec::new(),
         trusted_roots_lock: None,
@@ -604,33 +925,6 @@ fn open_mode_agent_can_read_ssh_no_synthesized_default() {
         &caller,
     )
     .unwrap();
-}
-
-#[test]
-fn deny_ops_to_matches_id_when_name_does_not() {
-    let resolved = ResolvedPermissions {
-        allow_dot_folders: Vec::new(),
-        deny_ops: deny_ops_with_to(vec![OpName::Purge], "/r/secret", &["alice-id"]),
-        trusted_roots: Vec::new(),
-        trusted_roots_lock: None,
-    };
-    let caller = CallerInfo {
-        author_type: Some(AuthorType::Human),
-        identity_id: Some(String::from("alice-id")),
-        identity_name: Some(String::from("alice-display-name")),
-        mode: Mode::Strict,
-    };
-    let system = MockSystem::new();
-    let err = check_against_resolved_for_caller(
-        &system,
-        "purge",
-        Path::new("/r/secret/x.md"),
-        &resolved,
-        &caller,
-    )
-    .unwrap_err();
-    let chain = format!("{err:#}");
-    assert!(chain.contains("alice-id"), "{chain}");
 }
 
 // trusted_roots three-state semantics

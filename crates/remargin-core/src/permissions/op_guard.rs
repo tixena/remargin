@@ -13,8 +13,8 @@ use thiserror::Error;
 use crate::config::Mode;
 use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::resolve::{
-    ResolvedDenyOps, ResolvedPermissions, ResolvedTrustedRoot, resolve_permissions,
-    trusted_root_anchor, trusted_root_covers,
+    ResolvedDenyOps, ResolvedDenyOpsItem, ResolvedPermissions, ResolvedTrustedRoot,
+    resolve_permissions, trusted_root_anchor, trusted_root_covers,
 };
 use crate::parser::AuthorType;
 
@@ -57,15 +57,11 @@ pub enum OpKind {
     Write,
 }
 
-/// Caller-side context for identity-scoped `deny_ops`. Identity
-/// matching only fires in strict mode (other modes can't trust the
-/// declared identity).
+/// Caller-side context for identity-scoped `deny_ops` exceptions.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct CallerInfo {
     pub author_type: Option<AuthorType>,
-    /// `to:` matches `identity_name` first, then falls back to
-    /// `identity_id`.
     pub identity_id: Option<String>,
     pub identity_name: Option<String>,
     pub mode: Mode,
@@ -73,24 +69,32 @@ pub struct CallerInfo {
 
 impl CallerInfo {
     #[must_use]
+    pub fn display_identity(&self) -> String {
+        self.identity_name
+            .clone()
+            .or_else(|| self.identity_id.clone())
+            .unwrap_or_else(|| String::from("<anonymous>"))
+    }
+
+    #[must_use]
     pub const fn is_strict_agent(&self) -> bool {
         matches!(self.author_type, Some(AuthorType::Agent)) && matches!(self.mode, Mode::Strict)
     }
 
-    /// `true` when the caller's name or id matches one of `to`.
-    /// Empty `to` returns `true` (entry applies to all identities).
+    /// `true` when the caller's name or id matches one of `list`.
+    /// Empty `list` returns `false` (caller is in no list).
     #[must_use]
-    pub fn matches_to(&self, to: &[String]) -> bool {
-        if to.is_empty() {
-            return true;
+    pub fn matches_identity_list(&self, list: &[String]) -> bool {
+        if list.is_empty() {
+            return false;
         }
         if let Some(name) = self.identity_name.as_deref()
-            && to.iter().any(|t| t == name)
+            && list.iter().any(|t| t == name)
         {
             return true;
         }
         if let Some(id) = self.identity_id.as_deref()
-            && to.iter().any(|t| t == id)
+            && list.iter().any(|t| t == id)
         {
             return true;
         }
@@ -104,40 +108,40 @@ impl CallerInfo {
 #[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OpGuardError {
-    /// A `deny_ops` entry covers `target` and lists `op`.
-    ///
-    /// Empty `to` = legacy "all identities" deny; non-empty names the
-    /// matching identity in the refusal text.
+    /// A `deny_ops` item covers `target` and matches `op` with no
+    /// `exceptions` configured — blanket deny for every identity.
     #[error(
-        "op `{op}` on `{target}` is denied by `deny_ops{to_clause}` rule in {source_file}",
+        "op `{op}` on `{target}` is denied by `deny_ops` rule in {source_file}",
         target = .target.display(),
         source_file = .source_file.display(),
-        to_clause = format_to_clause(.to),
     )]
     DeniedOp {
-        /// The op name (`comment`, `purge`, …).
         op: String,
-        /// The source `.remargin.yaml` that declared the rule.
         source_file: PathBuf,
-        /// The target path the op was about to mutate.
         target: PathBuf,
-        /// Identities the entry's `to:` field lists. Empty means the
-        /// entry's `to:` was empty / not supplied (legacy shape).
-        to: Vec<String>,
+    },
+
+    /// A `deny_ops` item covers `target` and matches `op`, has
+    /// non-empty `exceptions`, but caller is not in that allowlist.
+    #[error(
+        "op `{op}` on `{target}` is denied by `deny_ops` rule in {source_file} (caller `{caller}` is not in the exception list)",
+        target = .target.display(),
+        source_file = .source_file.display(),
+    )]
+    DeniedOpNotExcepted {
+        caller: String,
+        op: String,
+        source_file: PathBuf,
+        target: PathBuf,
     },
 
     /// The path is inside a dot-folder under a restricted subtree and
     /// the dot-folder is not in `allow_dot_folders`.
     #[error("op `{op}` on `{target}` is denied — path is inside dot-folder `{folder}` (not in allow_dot_folders), under restricted subtree from {source_file}", target = .target.display(), source_file = .source_file.display())]
     DotFolderDenied {
-        /// The dot-folder name (e.g. `.git`).
         folder: String,
-        /// The op name.
         op: String,
-        /// The source `.remargin.yaml` that declared the surrounding
-        /// `trusted_roots` rule.
         source_file: PathBuf,
-        /// The target path.
         target: PathBuf,
     },
 
@@ -145,21 +149,9 @@ pub enum OpGuardError {
     #[error("op `{op}` on `{target}` is denied: outside the allow-list declared by `trusted_roots` in {source_file}", target = .target.display(), source_file = .source_file.display())]
     OutsideAllowedRoots {
         op: String,
-        /// First `.remargin.yaml` in walk order that declared a
-        /// `trusted_roots` entry (used to point the user at where the
-        /// allow-list lives).
         source_file: PathBuf,
         target: PathBuf,
     },
-}
-
-/// Empty `to` = empty string so legacy wording round-trips.
-fn format_to_clause(to: &[String]) -> String {
-    if to.is_empty() {
-        String::new()
-    } else {
-        format!(" {{ to: {} }}", to.join(", "))
-    }
 }
 
 /// Unknown ops default to `true` so missing classification fails
@@ -280,7 +272,8 @@ fn system_home_or_passthrough(system: &dyn System) -> PathBuf {
 }
 
 /// Synthesizes a virtual `~/.ssh/**` deny for strict-mode agents
-/// unless overridden by a same-path entry with `ops: []` + matching `to:`.
+/// unless a user entry on `~/.ssh` opts the caller out via per-op
+/// `exceptions`.
 fn effective_deny_ops(
     home: &Path,
     permissions: &ResolvedPermissions,
@@ -292,18 +285,28 @@ fn effective_deny_ops(
     }
     let ssh_dir = home.join(".ssh");
     let overridden = permissions.deny_ops.iter().any(|entry| {
-        path_covers(&entry.path, &ssh_dir) && entry.ops.is_empty() && caller.matches_to(&entry.to)
+        path_covers(&entry.path, &ssh_dir)
+            && entry
+                .ops
+                .iter()
+                .any(|item| caller.matches_identity_list(&item.exceptions))
     });
     if overridden {
         return out;
     }
+    let virtual_items: Vec<ResolvedDenyOpsItem> = OpName::ALL
+        .iter()
+        .copied()
+        .map(|name| ResolvedDenyOpsItem {
+            exceptions: Vec::new(),
+            name,
+        })
+        .collect();
     let virtual_entry = ResolvedDenyOps {
-        ops: OpName::ALL.to_vec(),
+        ops: virtual_items,
         path: ssh_dir,
         source_file: PathBuf::from("<default: agents cannot access ~/.ssh/**>"),
-        to: Vec::new(),
     };
-    // Prepend: first match wins in `find_deny_ops_violation`.
     out.insert(0, virtual_entry);
     out
 }
@@ -314,34 +317,33 @@ fn find_deny_ops_violation(
     deny_ops: &[ResolvedDenyOps],
     caller: &CallerInfo,
 ) -> Option<OpGuardError> {
-    deny_ops
-        .iter()
-        .find(|entry| {
-            if !path_covers(&entry.path, target) {
-                return false;
+    for entry in deny_ops {
+        if !path_covers(&entry.path, target) {
+            continue;
+        }
+        for item in &entry.ops {
+            if item.name.as_str() != op {
+                continue;
             }
-            if !entry.ops.iter().any(|name| name.as_str() == op) {
-                return false;
+            if item.exceptions.is_empty() {
+                return Some(OpGuardError::DeniedOp {
+                    op: String::from(op),
+                    source_file: entry.source_file.clone(),
+                    target: target.to_path_buf(),
+                });
             }
-            // `to:` filtering is honored only in strict mode. Open /
-            // registered modes ignore the filter (the realm cannot
-            // trust the declared identity); the lint surface warns.
-            if entry.to.is_empty() {
-                return true;
+            if caller.matches_identity_list(&item.exceptions) {
+                continue;
             }
-            if matches!(caller.mode, Mode::Strict) {
-                caller.matches_to(&entry.to)
-            } else {
-                // Open / registered: legacy wide deny; ignore `to:`.
-                true
-            }
-        })
-        .map(|entry| OpGuardError::DeniedOp {
-            op: String::from(op),
-            source_file: entry.source_file.clone(),
-            target: target.to_path_buf(),
-            to: entry.to.clone(),
-        })
+            return Some(OpGuardError::DeniedOpNotExcepted {
+                caller: caller.display_identity(),
+                op: String::from(op),
+                source_file: entry.source_file.clone(),
+                target: target.to_path_buf(),
+            });
+        }
+    }
+    None
 }
 
 /// Empty list returns `true`; callers decide what that means.

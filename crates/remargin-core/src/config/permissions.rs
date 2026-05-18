@@ -6,6 +6,7 @@ pub mod resolve;
 #[cfg(test)]
 mod tests;
 
+use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
 
 use self::op_name::OpName;
@@ -14,12 +15,68 @@ use self::op_name::OpName;
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DenyOpsEntry {
-    pub ops: Vec<OpName>,
+    pub ops: Vec<DenyOpsItem>,
     pub path: String,
-    /// Identity filter; honored only in strict mode (open / registered
-    /// realms can't trust declared identity).
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum DenyOpsItem {
+    Bare(OpName),
+    Full(DenyOpsItemFull),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct DenyOpsItemFull {
     #[serde(default)]
-    pub to: Vec<String>,
+    pub exceptions: Vec<String>,
+    pub name: OpName,
+}
+
+impl<'de> Deserialize<'de> for DenyOpsItem {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_yaml::Value::deserialize(deserializer)?;
+        if value.is_string() {
+            let op = OpName::deserialize(value).map_err(D::Error::custom)?;
+            return Ok(Self::Bare(op));
+        }
+        if value.is_mapping() {
+            let full = DenyOpsItemFull::deserialize(value).map_err(D::Error::custom)?;
+            return Ok(Self::Full(full));
+        }
+        Err(D::Error::custom(
+            "deny_ops item must be either a bare op-name string or a mapping with `name:` and optional `exceptions:`",
+        ))
+    }
+
+    fn deserialize_in_place<D: Deserializer<'de>>(
+        deserializer: D,
+        place: &mut Self,
+    ) -> Result<(), D::Error> {
+        *place = Self::deserialize(deserializer)?;
+        Ok(())
+    }
+}
+
+impl DenyOpsItem {
+    #[must_use]
+    pub const fn exceptions(&self) -> &[String] {
+        match self {
+            Self::Bare(_) => &[],
+            Self::Full(full) => full.exceptions.as_slice(),
+        }
+    }
+
+    #[must_use]
+    pub const fn name(&self) -> &OpName {
+        match self {
+            Self::Bare(name) => name,
+            Self::Full(full) => &full.name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]

@@ -10,7 +10,7 @@ use crate::config::permissions::resolve::{
     TrustedRootPath, lint_permissions_in_parents, resolve_permissions,
     resolve_trusted_roots_for_cwd,
 };
-use crate::config::permissions::{Permissions, TrustedRootEntry};
+use crate::config::permissions::{DenyOpsItem, Permissions, TrustedRootEntry};
 
 #[test]
 fn config_without_permissions_block_defaults_to_empty() {
@@ -44,7 +44,10 @@ permissions:
     assert!(roots[0].cli_allowed());
     assert_eq!(cfg.permissions.deny_ops.len(), 1);
     assert_eq!(cfg.permissions.deny_ops[0].path, "src/secret");
-    assert_eq!(cfg.permissions.deny_ops[0].ops, vec![OpName::Purge]);
+    assert_eq!(
+        cfg.permissions.deny_ops[0].ops,
+        vec![DenyOpsItem::Bare(OpName::Purge)],
+    );
     assert_eq!(
         cfg.permissions.allow_dot_folders,
         vec![String::from(".github")]
@@ -211,7 +214,9 @@ permissions:
         resolved.deny_ops[0].path,
         PathBuf::from("/realm/src/secret")
     );
-    assert_eq!(resolved.deny_ops[0].ops, vec![OpName::Purge]);
+    assert_eq!(resolved.deny_ops[0].ops.len(), 1);
+    assert_eq!(resolved.deny_ops[0].ops[0].name, OpName::Purge);
+    assert!(resolved.deny_ops[0].ops[0].exceptions.is_empty());
     assert_eq!(resolved.deny_ops[0].source_file, source);
 
     assert_eq!(resolved.allow_dot_folders.len(), 1);
@@ -417,6 +422,62 @@ fn lint_permissions_collects_findings_across_parents() {
         PathBuf::from("/realm/.remargin.yaml")
     );
     assert!(findings[1].message.contains("delte"));
+}
+
+#[test]
+fn lint_permissions_flags_legacy_to_field_as_hard_finding() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: .\n      ops: [purge]\n      to: [eduardo-burgos]\n";
+    let system = MockSystem::new()
+        .with_dir(Path::new("/realm"))
+        .unwrap()
+        .with_file(Path::new("/realm/.remargin.yaml"), yaml.as_bytes())
+        .unwrap();
+    let findings = lint_permissions_in_parents(&system, Path::new("/realm")).unwrap();
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.message.contains("legacy `to:`") && f.message.contains("exceptions")),
+        "expected migration-recipe finding; got {findings:#?}",
+    );
+}
+
+#[test]
+fn deny_ops_full_record_with_exceptions_parses() {
+    let yaml = "\
+permissions:
+  deny_ops:
+    - path: .
+      ops:
+        - sign
+        - name: purge
+          exceptions: [eduardo-burgos, remargin_dev_agent]
+        - delete
+        - name: write
+          exceptions: [eduardo-burgos]
+";
+    let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+    let entry = &cfg.permissions.deny_ops[0];
+    assert_eq!(entry.ops.len(), 4);
+    assert_eq!(entry.ops[0].name(), &OpName::Sign);
+    assert!(entry.ops[0].exceptions().is_empty());
+    assert_eq!(entry.ops[1].name(), &OpName::Purge);
+    assert_eq!(
+        entry.ops[1].exceptions(),
+        &[
+            String::from("eduardo-burgos"),
+            String::from("remargin_dev_agent")
+        ],
+    );
+    assert_eq!(entry.ops[2].name(), &OpName::Delete);
+    assert_eq!(entry.ops[3].name(), &OpName::Write);
+    assert_eq!(entry.ops[3].exceptions(), &[String::from("eduardo-burgos")]);
+}
+
+#[test]
+fn deny_ops_legacy_to_field_fails_to_parse() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: .\n      ops: [purge]\n      to: [eduardo-burgos]\n";
+    let result: Result<Config, _> = serde_yaml::from_str(yaml);
+    let _err = result.unwrap_err();
 }
 
 #[test]

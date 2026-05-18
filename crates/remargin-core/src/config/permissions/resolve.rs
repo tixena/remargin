@@ -9,9 +9,12 @@ use serde::Deserialize;
 
 use crate::config::permissions::Permissions;
 use crate::config::permissions::op_name::OpName;
+use crate::config::permissions::{DenyOpsItem, DenyOpsItemFull};
 use crate::path::expand_path;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
+
+const LEGACY_TO_MIGRATION_HINT: &str = "legacy `to:` field on deny_ops is removed; replace entry-level `to: [identities]` with per-op `exceptions: [identities]` on each item in `ops:` (deny EXCEPT for the listed identities)";
 
 /// Wildcard sentinel preserved from `trusted_roots[].path = "*"`.
 const TRUSTED_ROOT_WILDCARD: &str = "*";
@@ -70,19 +73,25 @@ pub struct ResolvedAllowDotFolders {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedDenyOps {
-    /// Op names to deny on `path`. Validated at parse time via
-    /// [`OpName`].
-    pub ops: Vec<OpName>,
+    /// Per-op items to deny on `path`. Each item is either a blanket
+    /// deny (empty `exceptions`) or a deny with an identity allowlist.
+    pub ops: Vec<ResolvedDenyOpsItem>,
 
     /// Resolved absolute path.
     pub path: PathBuf,
 
     /// `.remargin.yaml` that declared the entry.
     pub source_file: PathBuf,
+}
 
-    /// Identity filter; empty = all identities. Honored only in
-    /// strict mode (open mode ignores it; lint surfaces a warning).
-    pub to: Vec<String>,
+/// A single resolved per-op deny rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ResolvedDenyOpsItem {
+    /// Identities exempt from this deny. Empty = blanket deny.
+    pub exceptions: Vec<String>,
+
+    pub name: OpName,
 }
 
 /// Accumulated permissions across every `.remargin.yaml` between
@@ -181,11 +190,11 @@ fn extend_resolved(
 
     for entry in &block.deny_ops {
         let path = resolve_relative(system, source_dir, &entry.path);
+        let ops = entry.ops.iter().map(resolve_deny_ops_item).collect();
         acc.deny_ops.push(ResolvedDenyOps {
-            ops: entry.ops.clone(),
+            ops,
             path,
             source_file: source_file.to_path_buf(),
-            to: entry.to.clone(),
         });
     }
 
@@ -217,6 +226,19 @@ pub fn trusted_root_covers(entry: &TrustedRootPath, target: &Path) -> bool {
     target == anchor || target.starts_with(anchor)
 }
 
+fn resolve_deny_ops_item(item: &DenyOpsItem) -> ResolvedDenyOpsItem {
+    match item {
+        DenyOpsItem::Bare(name) => ResolvedDenyOpsItem {
+            exceptions: Vec::new(),
+            name: *name,
+        },
+        DenyOpsItem::Full(DenyOpsItemFull { name, exceptions }) => ResolvedDenyOpsItem {
+            exceptions: exceptions.clone(),
+            name: *name,
+        },
+    }
+}
+
 fn parse_permissions_block(raw: &str, source_file: &Path) -> Result<Permissions> {
     let projection: PermissionsOnly =
         serde_yaml::from_str(raw).with_context(|| format!("parsing {}", source_file.display()))?;
@@ -239,8 +261,8 @@ fn resolve_relative(system: &dyn System, source_dir: &Path, raw: &str) -> PathBu
 /// Walk parents of `start_dir` and lint each `.remargin.yaml`.
 ///
 /// Doesn't short-circuit — every offending file is reported in one
-/// pass. Surfaces a non-fatal warning when `deny_ops` declares `to:`
-/// outside strict mode (where identity is spoofable).
+/// pass. Flags any legacy `to:` field on `deny_ops` entries as a
+/// hard error with the migration recipe.
 ///
 /// # Errors
 ///
@@ -250,8 +272,6 @@ pub fn lint_permissions_in_parents(
     system: &dyn System,
     start_dir: &Path,
 ) -> Result<Vec<PermissionsLintError>> {
-    use crate::config::{Mode, resolve_mode};
-    let realm_mode = resolve_mode(system, start_dir).map_or(Mode::Open, |r| r.mode);
     let mut findings = Vec::new();
     let mut current = start_dir.to_path_buf();
 
@@ -265,34 +285,15 @@ pub fn lint_permissions_in_parents(
             let raw = system
                 .read_to_string(&candidate)
                 .with_context(|| format!("reading {}", candidate.display()))?;
-            match serde_yaml::from_str::<PermissionsOnly>(&raw) {
-                Ok(projection) => {
-                    if !matches!(realm_mode, Mode::Strict) {
-                        for entry in projection.permissions.deny_ops {
-                            if !entry.to.is_empty() {
-                                findings.push(PermissionsLintError {
-                                    column: None,
-                                    line: None,
-                                    message: format!(
-                                        "deny_ops 'to:' on path '{}' is ignored in non-strict mode (realm mode is {:?}); the deny will fire for every identity",
-                                        entry.path,
-                                        realm_mode,
-                                    ),
-                                    source_file: candidate.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    let location = err.location();
-                    findings.push(PermissionsLintError {
-                        column: location.as_ref().map(serde_yaml::Location::column),
-                        line: location.as_ref().map(serde_yaml::Location::line),
-                        message: err.to_string(),
-                        source_file: candidate.clone(),
-                    });
-                }
+            collect_legacy_to_findings(&raw, &candidate, &mut findings);
+            if let Err(err) = serde_yaml::from_str::<PermissionsOnly>(&raw) {
+                let location = err.location();
+                findings.push(PermissionsLintError {
+                    column: location.as_ref().map(serde_yaml::Location::column),
+                    line: location.as_ref().map(serde_yaml::Location::line),
+                    message: err.to_string(),
+                    source_file: candidate.clone(),
+                });
             }
         }
 
@@ -302,6 +303,39 @@ pub fn lint_permissions_in_parents(
     }
 
     Ok(findings)
+}
+
+fn collect_legacy_to_findings(
+    raw: &str,
+    candidate: &Path,
+    findings: &mut Vec<PermissionsLintError>,
+) {
+    let Ok(value): Result<serde_yaml::Value, _> = serde_yaml::from_str(raw) else {
+        return;
+    };
+    let Some(permissions) = value.get("permissions").and_then(|v| v.as_mapping()) else {
+        return;
+    };
+    let Some(deny_ops) = permissions
+        .get(serde_yaml::Value::String(String::from("deny_ops")))
+        .and_then(|v| v.as_sequence())
+    else {
+        return;
+    };
+    let to_key = serde_yaml::Value::String(String::from("to"));
+    for entry in deny_ops {
+        let Some(mapping) = entry.as_mapping() else {
+            continue;
+        };
+        if mapping.contains_key(&to_key) {
+            findings.push(PermissionsLintError {
+                column: None,
+                line: None,
+                message: String::from(LEGACY_TO_MIGRATION_HINT),
+                source_file: candidate.to_path_buf(),
+            });
+        }
+    }
 }
 
 /// Walk up from `start_dir`, parse every `.remargin.yaml`, accumulate

@@ -12,7 +12,7 @@ use os_shim::System;
 use serde::Serialize;
 
 use crate::config::permissions::resolve::{
-    ResolvedPermissions, TrustedRootPath, resolve_permissions,
+    ResolvedDenyOpsItem, ResolvedPermissions, TrustedRootPath, resolve_permissions,
 };
 use crate::permissions::op_guard::target_is_sanctioned;
 
@@ -41,9 +41,16 @@ pub struct CheckOutput {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DenyOpsView {
-    pub ops: Vec<String>,
+    pub ops: Vec<DenyOpsItemView>,
     pub path: PathBuf,
     pub source_file: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DenyOpsItemView {
+    pub exceptions: Vec<String>,
+    pub name: String,
 }
 
 /// Description of the rule that caused a `check()` to report
@@ -134,12 +141,13 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
         .iter()
         .find(|entry| canonical == entry.path || canonical.starts_with(&entry.path))
     {
-        let op_names: Vec<&str> = entry.ops.iter().map(|op| op.as_str()).collect();
+        let rendered: Vec<String> = entry.ops.iter().map(render_deny_ops_item).collect();
         return Some(MatchingRule {
             kind: "deny_ops",
             rule_text: format!(
-                "deny_ops {{ path: {}, ops: {op_names:?} }}",
+                "deny_ops {{ path: {}, ops: [{}] }}",
                 entry.path.display(),
+                rendered.join(", "),
             ),
             source_file: entry.source_file.clone(),
         });
@@ -193,12 +201,27 @@ fn group_deny_ops(resolved: &ResolvedPermissions) -> Vec<DenyOpsView> {
             ops: entry
                 .ops
                 .iter()
-                .map(|op| String::from(op.as_str()))
+                .map(|item| DenyOpsItemView {
+                    exceptions: item.exceptions.clone(),
+                    name: String::from(item.name.as_str()),
+                })
                 .collect(),
             path: entry.path.clone(),
             source_file: entry.source_file.clone(),
         })
         .collect()
+}
+
+fn render_deny_ops_item(item: &ResolvedDenyOpsItem) -> String {
+    if item.exceptions.is_empty() {
+        String::from(item.name.as_str())
+    } else {
+        format!(
+            "{} (except {})",
+            item.name.as_str(),
+            item.exceptions.join(", "),
+        )
+    }
 }
 
 fn group_trusted_roots(resolved: &ResolvedPermissions) -> Vec<TrustedRootView> {

@@ -3769,12 +3769,24 @@ fn emit_permissions_show_text(
         for entry in &report.deny_ops {
             writeln!(
                 stderr,
-                "    {}  ops={}  (source: {})",
+                "    {}  (source: {})",
                 entry.path.display(),
-                format_string_list(&entry.ops),
                 entry.source_file.display()
             )
             .context("writing to stderr")?;
+            for item in &entry.ops {
+                if item.exceptions.is_empty() {
+                    writeln!(stderr, "      - {}", item.name).context("writing to stderr")?;
+                } else {
+                    writeln!(
+                        stderr,
+                        "      - {} (exceptions: {})",
+                        item.name,
+                        format_string_list(&item.exceptions),
+                    )
+                    .context("writing to stderr")?;
+                }
+            }
         }
     }
     writeln!(stderr).context("writing to stderr")?;

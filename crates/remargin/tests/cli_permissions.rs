@@ -47,9 +47,16 @@ mod tests {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct DenyOpsSchema {
-        ops: Vec<String>,
+        ops: Vec<DenyOpsItemSchema>,
         path: String,
         source_file: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct DenyOpsItemSchema {
+        exceptions: Vec<String>,
+        name: String,
     }
 
     #[derive(serde::Deserialize)]
@@ -124,7 +131,14 @@ mod tests {
         assert_eq!(deny_ops.len(), 1);
         let ops = deny_ops[0].get("ops").and_then(Value::as_array).unwrap();
         assert_eq!(ops.len(), 1);
-        assert_eq!(ops[0].as_str().unwrap(), "purge");
+        assert_eq!(ops[0].get("name").and_then(Value::as_str).unwrap(), "purge");
+        assert!(
+            ops[0]
+                .get("exceptions")
+                .and_then(Value::as_array)
+                .unwrap()
+                .is_empty(),
+        );
     }
 
     /// `permissions check` exits 0 when the path is OUTSIDE the
@@ -375,7 +389,9 @@ mod tests {
         assert!(!dot.source_file.is_empty());
         assert_eq!(parsed.deny_ops.len(), 1);
         let deny = &parsed.deny_ops[0];
-        assert_eq!(deny.ops, vec![String::from("purge")]);
+        assert_eq!(deny.ops.len(), 1);
+        assert_eq!(deny.ops[0].name, "purge");
+        assert!(deny.ops[0].exceptions.is_empty());
         assert!(!deny.path.is_empty());
         assert!(!deny.source_file.is_empty());
 
