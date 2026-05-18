@@ -1,0 +1,16 @@
+{
+  "name": "remargin-marketplace",
+  "description": "Marketplace for the remargin Claude Code plugin",
+  "owner": {
+    "name": "Tixena",
+    "url": "https://github.com/tixena"
+  },
+  "plugins": [
+    {
+      "name": "remargin",
+      "source": "./claude-plugin",
+      "description": "Process sandboxed and individual managed markdown files in a remargin vault. Provides /remargin:process-file and /remargin:process-sandbox-group slash commands and a natural-language skill layer.",
+      "version": "0.1.0"
+    }
+  ]
+}
