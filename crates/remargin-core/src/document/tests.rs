@@ -585,7 +585,7 @@ fn read_binary_rejects_markdown() {
         &[],
     )
     .unwrap_err();
-    assert!(format!("{err}").contains("cannot fetch .md as binary"));
+    assert!(format!("{err}").contains("cannot fetch markdown file as binary"));
 }
 
 #[test]
@@ -742,6 +742,42 @@ fn write_create_new_file() {
         .read_to_string(Path::new("/project/docs/new.md"))
         .unwrap();
     assert!(result.contains("New Document"));
+}
+
+#[test]
+fn write_skips_frontmatter_injection_for_non_md_extensions() {
+    // Frontmatter injection is a markdown-only concern; writing to a
+    // `.pen` (or any non-.md/.mdx) file must round-trip byte-for-byte.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_dir(Path::new("/project"))
+        .unwrap();
+
+    let config = open_config();
+    let content = "opaque pen content\nno frontmatter expected\n";
+
+    document::write(
+        &system,
+        Path::new("/project"),
+        Path::new("design.pen"),
+        content,
+        &config,
+        WriteOptions {
+            create: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let result = system
+        .read_to_string(Path::new("/project/design.pen"))
+        .unwrap();
+    assert_eq!(
+        result, content,
+        "non-markdown extension must round-trip byte-for-byte; \
+         frontmatter injection is markdown-only"
+    );
 }
 
 #[test]
@@ -1145,39 +1181,6 @@ fn write_raw_rejected_for_markdown() {
         err.to_string()
             .contains("raw mode is not supported for markdown files"),
         "expected raw mode error, got: {err}"
-    );
-}
-
-#[test]
-fn write_default_still_adds_frontmatter() {
-    let system = MockSystem::new()
-        .with_current_dir("/project")
-        .unwrap()
-        .with_dir(Path::new("/project"))
-        .unwrap();
-
-    let config = open_config();
-    let content = r#"{"nodes":[]}"#;
-    document::write(
-        &system,
-        Path::new("/project"),
-        Path::new("design.pen"),
-        content,
-        &config,
-        WriteOptions {
-            create: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-
-    let result = system
-        .read_to_string(Path::new("/project/design.pen"))
-        .unwrap();
-    // Non-raw write adds frontmatter, so content should differ from raw input.
-    assert!(
-        result.contains("---"),
-        "expected frontmatter injection, got: {result}"
     );
 }
 

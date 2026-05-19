@@ -108,7 +108,7 @@ mod tests {
         assert!(!output.status.success(), "expected failure: {output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("cannot fetch .md as binary"),
+            stderr.contains("cannot fetch markdown file as binary"),
             "unexpected stderr: {stderr}"
         );
     }

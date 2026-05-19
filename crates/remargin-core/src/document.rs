@@ -304,9 +304,7 @@ pub fn ls(
             system.metadata(entry_path).ok().map(|m| m.len)
         };
 
-        let has_md_extension = Path::new(filename)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+        let has_md_extension = is_markdown_extension(Path::new(filename));
         let (remargin_pending, remargin_last_activity) = if !is_dir && has_md_extension {
             get_remargin_metadata(system, entry_path)
         } else {
@@ -424,15 +422,10 @@ pub fn read_binary(
     }
 
     // Never bypass comment-preservation through the binary surface. Symmetric
-    // with `write`'s `.md`-rejects-binary behaviour.
-    let ext = resolved
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default()
-        .to_lowercase();
-    if ext == "md" {
+    // with `write`'s markdown-rejects-binary behaviour.
+    if is_markdown_extension(&resolved) {
         bail!(
-            "cannot fetch .md as binary: {} (use `get` without --binary)",
+            "cannot fetch markdown file as binary: {} (use `get` without --binary)",
             path.display()
         );
     }
@@ -604,6 +597,27 @@ pub fn write(
         return Ok(WriteOutcome { noop: false });
     }
 
+    // Non-markdown extensions skip parse / ensure_frontmatter / verify
+    // and write the payload as-is. Partial-line writes still splice
+    // textually; frontmatter injection is markdown-only.
+    if !is_markdown_extension(&resolved) {
+        let bytes: Vec<u8> = if let Some((start, end)) = opts.lines {
+            let existing = system
+                .read_to_string(&resolved)
+                .with_context(|| format!("reading {} for partial write", resolved.display()))?;
+            splice_lines(&existing, start, end, content).into_bytes()
+        } else {
+            content.as_bytes().to_vec()
+        };
+        if is_byte_identical(system, &resolved, &bytes) {
+            return Ok(WriteOutcome { noop: true });
+        }
+        system
+            .write(&resolved, &bytes)
+            .with_context(|| format!("writing {}", resolved.display()))?;
+        return Ok(WriteOutcome { noop: false });
+    }
+
     // Partial write: splice the replacement content into `[start..=end]`,
     // then fall through to the same parse + comment-preservation +
     // verify-gate pipeline whole-file writes use. Everything after this
@@ -767,6 +781,19 @@ pub fn project_write(
 /// because that is the only read primitive `System` exposes; binary
 /// files that aren't valid UTF-8 won't trip the no-op fast path, but the
 /// correctness guarantee (never skip a real change) still holds.
+/// True when the path's extension marks it as part of the markdown family
+/// (`.md` or `.mdx`, case-insensitive). Frontmatter injection,
+/// comment-preservation, and the post-mutation verify gate apply only to
+/// these files.
+fn is_markdown_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            let lower = ext.to_ascii_lowercase();
+            lower == "md" || lower == "mdx"
+        })
+}
+
 fn is_byte_identical(system: &dyn System, path: &Path, new_bytes: &[u8]) -> bool {
     system
         .read_to_string(path)
@@ -776,10 +803,7 @@ fn is_byte_identical(system: &dyn System, path: &Path, new_bytes: &[u8]) -> bool
 /// Validate mutually-exclusive `WriteOptions` combinations up front so
 /// both CLI and MCP callers surface identical diagnostics.
 fn validate_write_opts(path: &Path, opts: &WriteOptions) -> Result<()> {
-    let is_md = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+    let is_md = is_markdown_extension(path);
 
     if opts.binary && is_md {
         bail!("binary mode is not supported for markdown files");
