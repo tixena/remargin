@@ -1,77 +1,210 @@
 # Remargin
 
-Enhanced inline review protocol and document access layer for markdown.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.12-7F6DF2.svg)](Cargo.toml)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://rustup.rs)
+[![Made by Tixena Labs](https://img.shields.io/badge/made_by-Tixena_Labs-7F6DF2.svg)](https://tixenalabs.com/)
 
-Remargin turns any markdown document into a multi-player collaboration surface with threaded comments, integrity verification, and a complete document access layer that guarantees comments are never lost or corrupted.
+> A communication protocol for humans and AI agents — and between agents themselves.
+
+Remargin turns any markdown file into a multi-player surface where humans and AI agents leave threaded, addressable, signed, integrity-checked comments. Mutating operations are gated to preserve the conversation. That makes it a credible substrate for multi-agent orchestration — agents coordinate by leaving comments on shared documents, not by sharing memory or a bespoke message bus.
+
+The protocol is a tiny structured comment format inside standard markdown fenced code blocks. The CLI enforces it. The MCP server exposes the same surface to any MCP client. No proprietary format, no database, no SaaS. Just markdown files in your repo.
+
+## Table of contents
+
+- [At a glance](#at-a-glance)
+- [Why Remargin?](#why-remargin)
+- [Multi-agent example](#multi-agent-example)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Scope: what remargin manages](#scope-what-remargin-manages)
+- [Claude Code integration](#claude-code-integration)
+- [Comment format](#comment-format)
+- [Configuration](#configuration)
+- [Permissions and access control](#permissions-and-access-control)
+- [Integrity and security](#integrity-and-security)
+- [CLI reference](#cli-reference)
+- [Tracking change](#tracking-change)
+- [Typical workflows](#typical-workflows)
+- [Exit codes](#exit-codes)
+- [Building](#building)
+- [Contributing](#contributing)
+- [License](#license)
+
+## At a glance
+
+This is what a remargin comment looks like inside a markdown file:
+
+````markdown
+```remargin
+---
+id: pl1
+author: planner
+type: agent
+ts: 2026-05-19T14:30:00-04:00
+to: [engineer]
+remargin_kind: [design-question]
+checksum: sha256:a1b2c3d4e5f6...
+signature: ed25519:LS0tLS1CRUdJTi...
+---
+Two open choices for the CSV sort CLI:
+1. column addressed by **name** vs **index**
+2. **in-place** rewrite vs **streaming** output
+
+Vote on each — I'll commit the spec to whatever you pick.
+```
+````
+
+Standard markdown renderers ignore the `remargin` fenced block. The CLI and MCP server parse and verify it: identity, timestamp, threading (`reply-to`, `thread`), addressing (`to`), free-form labels (`remargin_kind`), SHA-256 content checksum, and optional Ed25519 signature. The full [header field reference](#comment-format) is below.
 
 ## Why Remargin?
 
-Collaborative document review in markdown is fragile. AI agents delete comments, break formatting, skip acknowledgments, or reply only in chat instead of inline. Manual comment conventions (`<!-- TODO -->`, custom fenced blocks) lack threading, identity, checksums, or any enforcement.
+Multi-agent systems coordinate today through ad-hoc message buses, shared memory, or scrollback chat logs that no one can audit later. Every team rebuilds the same plumbing, badly. Documents and code — the actual artifacts under negotiation — sit on the side, disconnected from the trail of decisions that produced them.
 
-Remargin fixes this with:
+Remargin proposes a simpler substrate:
 
-- **A protocol** that defines a structured comment format inside standard markdown fenced code blocks
-- **A CLI tool** that enforces the protocol, manages comments, and serves as the exclusive document access layer
-- **An MCP server** that exposes the same capabilities to AI agents via [Model Context Protocol](https://modelcontextprotocol.io/)
+- **Agents communicate by leaving comments on shared markdown documents.** Each comment carries identity, time, threading, addressing, and content integrity.
+- **The protocol guarantees no comment is ever silently dropped.** Every mutating op runs a comment-preservation check — if the post-write set of comment IDs would lose anything from the pre-write set, the write is rejected (exit code 5).
+- **Humans participate in the same conversation through the same protocol.** No special role, no separate UI required.
+- **The decision trail lives in plain markdown.** Open any file in any editor and read the entire conversation. Replayable, auditable, queryable. No proprietary database.
 
-Documents remain valid markdown. Comments are human-readable. No proprietary formats, no databases, no lock-in.
+It also solves the older problem the project started with — humans and a single agent reviewing a document together, with the agent reliably preserving comments and threading. That problem hasn't gone away; the multi-agent framing is a superset.
 
-## Scope: what remargin manages
+## Multi-agent example
 
-A **remargin realm** is any directory tree that contains a `.remargin.yaml` (discovered by walking upward from the current directory, like `.git`). **Every `.md` file inside a realm is a remargin-managed document**, full stop — there is no per-file opt-in, no "this file has comments so it is tracked and that one isn't." Once the config file is present, every markdown file under that tree is accessed through `remargin` (CLI or MCP), not through raw filesystem edits.
+Three agents — `planner`, `engineer`, `qa` — collaborating on a single `spec.md`. The full conversation lives as threaded comments in the file itself.
 
-This covers notes, drafts, READMEs, scratch files, and anything else ending in `.md`. A file that has never had a comment is still managed: remargin's frontmatter tracking, comment-preservation invariants, and identity/mode enforcement apply the moment any tool touches it.
+`spec.md`:
+
+````markdown
+# CSV sort CLI
+
+Sort a CSV file by a column.
+
+```remargin
+---
+id: pl1
+author: planner
+type: agent
+ts: 2026-05-19T14:30:00-04:00
+to: [engineer]
+remargin_kind: [design-question]
+checksum: sha256:...
+signature: ed25519:...
+---
+Two open choices:
+1. column addressed by **name** vs **index**
+2. **in-place** rewrite vs **streaming** output
+
+Vote on each.
+```
+
+```remargin
+---
+id: en1
+author: engineer
+type: agent
+ts: 2026-05-19T14:33:00-04:00
+to: [planner]
+reply-to: pl1
+thread: pl1
+ack:
+  - planner@2026-05-19T14:34:00-04:00
+checksum: sha256:...
+signature: ed25519:...
+---
+1. **name** — friendlier; error out if the row has no header.
+2. **streaming** — predictable memory for large files.
+```
+
+```remargin
+---
+id: pl2
+author: planner
+type: agent
+ts: 2026-05-19T14:36:00-04:00
+to: [qa]
+reply-to: en1
+thread: pl1
+ack:
+  - engineer@2026-05-19T14:40:00-04:00
+checksum: sha256:...
+signature: ed25519:...
+---
+Spec updated. QA, draft acceptance tests covering name-based selection,
+streaming on a 10M-row file, and a clear error on a headerless CSV.
+```
+````
+
+Each comment is Ed25519-signed by its author's registered key (in `strict` mode). Threading (`reply-to`, `thread`) preserves the tree. `ack:` records consent. To see this conversation rendered in the terminal:
+
+```bash
+remargin comments spec.md --pretty
+```
+
+To see every comment addressed to you across an entire project (your "inbox"):
+
+```bash
+remargin query . --pending-for-me --pretty
+```
 
 ## Features
 
-- **Threaded comments** with reply chains, acknowledgments, and emoji reactions
+- **Threaded comments** with reply chains (`reply-to`, `thread`), acknowledgments (`ack`), and emoji reactions
 - **Multi-player identity** with three enforcement modes (open, registered, strict)
 - **Cryptographic integrity** via SHA-256 checksums and optional Ed25519 signatures
-- **Comment preservation guarantee** -- writes never destroy or corrupt existing comments
+- **Comment preservation guarantee** — writes never destroy or corrupt existing comments
+- **Free-form `remargin_kind` labels** for triage filters (`urgent`, `to-read`, `design-question`, anything)
 - **Batch operations** for atomic multi-comment updates in a single write
-- **Cross-document queries** to find pending comments, filter by author/recipient/date
+- **Cross-document queries** to find pending comments, filter by author, recipient, date, or kind
 - **Full-text search** across documents with regex support
 - **Document access layer** with allowlisted file types, dotfile hiding, and path sandboxing
-- **Automatic frontmatter** tracking pending comment counts and last activity
+- **Per-realm permissions** with two-layer enforcement (CLI/MCP + Claude Code native tools)
+- **Activity feed** — what's new since you last acted, per-file, across the realm
+- **Sandbox staging** — per-identity soft claims on files before a structured processing pass
+- **Plan-based previews** — dry-run any mutating op before it touches disk
 - **Structural linting** that validates markdown and comment block integrity
 - **Migration** from older inline comment formats
-- **Dual interface** -- works as a standalone CLI or as an MCP server for Claude Code
+- **Dual interface** — works as a standalone CLI or as an MCP server for any MCP client
 
 ## Installation
 
-### From Source
+### Install from the GitHub repo (recommended)
 
-Requires [Rust](https://rustup.rs/) (1.85+):
+Requires [Rust](https://rustup.rs/) 1.85+.
+
+```bash
+cargo install --git https://github.com/tixena/remargin
+remargin version
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/tixena/remargin.git
 cd remargin
 cargo build --release
-```
 
-The binary will be at `target/release/remargin`. Add it to your `PATH`:
-
-```bash
-# Copy to a directory in your PATH
+# Either copy the binary onto your PATH...
 cp target/release/remargin ~/.local/bin/
 
-# Or install directly with cargo
-cargo install --path .
+# ...or install via cargo from the local checkout
+cargo install --path crates/remargin
 ```
 
-Verify the installation:
+Verify:
 
 ```bash
 remargin version
 ```
 
-## Quick Start
+## Quick start
 
-### Initialize a Project
+### Create your identity
 
-Create a `.remargin.yaml` config file in your project root. The
-quickest path is `remargin identity create`, which prints a
-ready-to-use YAML block to stdout so you can redirect it into place:
+Create a `.remargin.yaml` in your project root. The fastest path is `remargin identity create`, which prints a ready-to-use YAML block to stdout:
 
 ```bash
 remargin identity create --identity your-name --type human > .remargin.yaml
@@ -80,121 +213,149 @@ remargin identity create --identity your-name --type human > .remargin.yaml
 remargin identity create --identity your-name --type human --key ~/.ssh/remargin_key > .remargin.yaml
 ```
 
-Under the hood the file looks like:
+The generated file looks like:
 
 ```yaml
 identity: your-name
 type: human
 ```
 
-`mode:` is a tree property — set it at the realm level, not inside
-the identity block. Enforcement modes and the registry file are
-covered in [Configuration](#configuration).
+`mode:` is a tree-level property — set it in `.remargin.yaml` directly when you want to switch modes. Modes and the registry file are covered under [Configuration](#configuration).
 
-### Add a Comment to a Document
+### Comment on a document
 
 ```bash
-remargin comment docs/design.md "This section needs more detail."
-```
+# Add a top-level comment after line 42
+remargin comment docs/design.md "This section needs more detail." --after-line 42
 
-### Reply to a Comment
-
-```bash
+# Reply to an existing comment
 remargin comment docs/design.md "Good point, I'll expand this." --reply-to abc
-```
 
-### Reply and Acknowledge in One Step
-
-```bash
+# Reply and acknowledge the parent in one step
 remargin comment docs/design.md "Addressed, see updated section." --reply-to abc --auto-ack
-```
 
-### Read Comment Body from a File
-
-```bash
+# Read comment body from a file (or stdin)
 remargin comment docs/design.md -F review-notes.md
 echo "Quick note" | remargin comment docs/design.md -F -
 ```
 
-### List Comments
+### See what's pending
 
 ```bash
-remargin comments docs/design.md
-remargin comments docs/design.md --pretty
-```
-
-### Acknowledge a Comment
-
-```bash
-# Ack in a specific file
-remargin ack --file docs/design.md abc def
-
-# Folder-wide ack (finds the comment by ID across the directory tree)
-remargin ack abc
-remargin ack abc --path docs/
-```
-
-### React to a Comment
-
-```bash
-remargin react docs/design.md abc "👍"
-```
-
-### Find Pending Comments Across Documents
-
-`--pending` (the broad form) surfaces both directed comments with
-unacked recipients and broadcast comments (no `to:` field) that
-nobody has acked yet. `--pending-for-me` and `--pending-broadcast`
-scope to the caller's identity. All pending flags compose as a
-union — pass more than one for "directed-at-me OR unacked broadcast".
-
-```bash
-# Everything still open, directed or broadcast.
+# Everything still open, directed or broadcast
 remargin query docs/ --pending
 
-# Shortcut: only comments directed at the current identity.
+# Only comments directed at the current identity
 remargin query . --pending-for-me
 
-# Only broadcast (empty-`to`) comments the current identity hasn't acked.
+# Only broadcast (empty-`to`) comments not yet acked
 remargin query . --pending-broadcast
 
-# Union: directed-to-me OR unacked broadcast.
-remargin query . --pending-for-me --pending-broadcast
-
-# Explicit recipient (any identity).
-remargin query . --pending-for your-name
-remargin query docs/ --pending-for your-name --expanded
-
-remargin query . --comment-id abc
+# Pretty-printed, with full comment bodies grouped by file
+remargin query . --pending-for-me --expanded --pretty
 ```
 
-### Search for Text
+### Read, write, search
 
 ```bash
+# Read a file (with line numbers or a range)
+remargin get docs/design.md -n
+remargin get docs/design.md --start-line 10 --end-line 50
+
+# Write a file (preserves all existing comments)
+remargin write docs/design.md "Updated content..."
+remargin write docs/new-doc.md "# New Doc" --create
+
+# Full-text search
 remargin search "TODO" --path docs/
 remargin search "error|warning" --regex --ignore-case
 ```
 
-### Read and Write Documents
+### Acknowledge and react
 
 ```bash
-# Read a file
-remargin get docs/design.md
+# Ack one or more comments in a specific file
+remargin ack --file docs/design.md abc def
 
-# Read with line numbers
-remargin get docs/design.md -n
+# Or ack by ID without specifying the file (folder-wide resolution)
+remargin ack abc
 
-# Read a specific line range
-remargin get docs/design.md --start-line 10 --end-line 50
-
-# Write (preserves all existing comments)
-remargin write docs/design.md "Updated content..."
-
-# Create a new file
-remargin write docs/new-doc.md "# New Doc" --create
+# Add an emoji reaction
+remargin react docs/design.md abc "👍"
 ```
 
-## Comment Format
+## Scope: what remargin manages
+
+A **remargin realm** is any directory tree containing a `.remargin.yaml` (discovered by walking upward from the current directory, like `.git`). **Every `.md` file inside a realm is a remargin-managed document.** There is no per-file opt-in: once the config file is present, every markdown file under that tree is accessed through `remargin` (CLI or MCP), not through raw filesystem edits.
+
+This covers notes, drafts, READMEs, scratch files, and anything else ending in `.md`. A file that has never had a comment is still managed — remargin's frontmatter tracking, comment-preservation invariants, and identity/mode enforcement apply the moment any tool touches it.
+
+## Claude Code integration
+
+Remargin integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in two ways. For multi-agent setups, this is usually how you wire each agent into the protocol.
+
+### MCP server
+
+The MCP server exposes all remargin operations as tools Claude can call directly. It is the document access layer for the agent.
+
+```bash
+# Install at project scope (recommended)
+remargin mcp install
+
+# Or install at user scope (available in all projects)
+remargin mcp install --user
+
+# Verify installation
+remargin mcp test
+```
+
+Once installed, Claude Code gets these tools: `ls`, `get`, `write`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `mv`, `rm`.
+
+### Plugin
+
+The Claude Code plugin ships the remargin skill plus the `/remargin:process-file` and `/remargin:process-sandbox-group` slash commands. The skill teaches Claude *when* and *how* to use the MCP tools — trigger phrases, display format for comments, critical rules (like never using `Read`/`Edit`/`Write` for remargin-managed documents), and common workflows.
+
+```bash
+# Register the marketplace and install the plugin
+remargin claude plugin install
+
+# Verify installation
+remargin claude plugin test
+```
+
+### Permissions (optional)
+
+To avoid per-tool confirmation prompts, add this to your Claude Code `settings.local.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__remargin__*"
+    ]
+  }
+}
+```
+
+### Recommended setup
+
+For a single agent in one project:
+
+```bash
+remargin mcp install
+remargin claude plugin install
+```
+
+For a multi-agent setup (multiple Claude Code instances sharing a realm):
+
+1. Generate a signing key per agent: `remargin keygen ~/.remargin/keys/<agent-name>`.
+2. Register each agent's public key in `.remargin-registry.yaml`.
+3. Give each agent its own `.remargin.yaml` (or a `--config` override) declaring that agent's identity + key.
+4. Set `mode: strict` at the realm level so every comment must be signed by a registered participant.
+
+The agents share the realm, see each other's comments, ack each other, thread, react — all via the same MCP surface.
+
+## Comment format
 
 Comments live inside standard markdown fenced code blocks with the `remargin` language tag and a YAML header:
 
@@ -213,7 +374,7 @@ It can span multiple lines with **markdown formatting**.
 ```
 ````
 
-With threading and acknowledgment:
+With threading, addressing, and acknowledgment:
 
 ````markdown
 ```remargin
@@ -222,6 +383,7 @@ id: xyz
 author: claude
 type: agent
 ts: 2026-04-06T14:33:00-04:00
+to: [eduardo]
 reply-to: abc
 thread: abc
 checksum: sha256:e5f6g7h8...
@@ -232,30 +394,31 @@ Replying to the comment above.
 ```
 ````
 
-You don't write this format by hand -- the CLI and MCP tools produce it.
+You don't write this format by hand — the CLI and MCP tools produce it.
 
-### Header Fields
+### Header fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | Yes | Unique identifier (per-document scope, alphanumeric) |
-| `author` | Yes | Author name or identifier |
-| `type` | Yes | `human` or `agent` |
-| `ts` | Yes | ISO 8601 timestamp with timezone |
-| `checksum` | Yes | SHA-256 hash of comment content |
-| `to` | No | List of recipients whose attention is requested |
-| `reply-to` | No | ID of direct parent comment |
-| `thread` | No | ID of thread root (oldest ancestor) |
-| `attachments` | No | List of file paths relative to document directory |
-| `reactions` | No | Map of emoji to list of authors |
-| `ack` | No | List of `author@timestamp` acknowledgment entries |
-| `signature` | No | Ed25519 signature (required in strict mode) |
+| `id` | Yes | Unique identifier (per-document scope, alphanumeric). |
+| `author` | Yes | Author name or identifier. |
+| `type` | Yes | `human` or `agent`. |
+| `ts` | Yes | ISO 8601 timestamp with timezone. |
+| `checksum` | Yes | SHA-256 hash of normalized comment content. |
+| `to` | No | List of recipients whose attention is requested. Omit for broadcast. |
+| `reply-to` | No | ID of the direct parent comment. |
+| `thread` | No | ID of the thread root (oldest ancestor). |
+| `remargin_kind` | No | Free-form labels (max 15 chars each, `[a-zA-Z0-9_- ]`, no leading/trailing space, distinct within a comment). |
+| `attachments` | No | List of file paths relative to document directory. |
+| `reactions` | No | Map of emoji to list of authors. |
+| `ack` | No | List of `author@timestamp` acknowledgment entries. |
+| `signature` | No | Ed25519 signature (required in `strict` mode). |
 
 ## Configuration
 
-Remargin uses two config files, discovered by walking up from the current directory (like `.git`). The presence of `.remargin.yaml` anywhere up the tree is what defines a **remargin realm** — every markdown file under that tree is managed from that point on (see "Scope" above).
+Remargin uses two config files, discovered by walking up from the current directory (like `.git`). The presence of `.remargin.yaml` defines the realm — every markdown file under that tree is managed from that point on.
 
-### `.remargin.yaml` -- Project Settings
+### `.remargin.yaml` — project settings
 
 ```yaml
 # Default author identity
@@ -280,7 +443,7 @@ ignore:
   - "*.tmp"
 ```
 
-### `.remargin-registry.yaml` -- Participant Registry
+### `.remargin-registry.yaml` — participant registry
 
 Required for `registered` and `strict` modes. Maps participant IDs to their public keys and status:
 
@@ -290,23 +453,27 @@ participants:
     type: human
     public_key: ssh-ed25519 AAAAC3Nza...
     status: active
-  claude:
+  planner:
     type: agent
     public_key: ssh-ed25519 AAAAC3Nzb...
     status: active
+  engineer:
+    type: agent
+    public_key: ssh-ed25519 AAAAC3Nzc...
+    status: active
 ```
 
-### Enforcement Modes
+### Enforcement modes
 
 | Mode | Registry Required | Signatures Required | Description |
 |------|-------------------|---------------------|-------------|
-| `open` | No | No | Anyone can post. Default mode. |
+| `open` | No | No | Anyone can post. Default. |
 | `registered` | Yes | No | Only participants in the registry can post. |
-| `strict` | Yes | Yes | Registered + all comments must be Ed25519 signed. |
+| `strict` | Yes | Yes | Registered + every comment Ed25519-signed. |
 
-### CLI Overrides
+### CLI overrides
 
-All config values can be overridden per-invocation:
+All config values can be overridden per invocation:
 
 ```bash
 remargin --identity alice --type human --mode strict comment ...
@@ -314,9 +481,7 @@ remargin --identity alice --type human --mode strict comment ...
 
 ## Permissions and access control
 
-Remargin supports a `permissions:` block in `.remargin.yaml` that
-restricts which paths agents can mutate and which Bash commands can
-run on those paths. Two enforcement layers consume the block:
+Remargin supports a `permissions:` block in `.remargin.yaml` that restricts which paths agents can mutate and which Bash commands can run on those paths. Two enforcement layers consume the block:
 
 ```yaml
 permissions:
@@ -332,46 +497,23 @@ permissions:
   allow_dot_folders: ['.github']
 ```
 
-- **Layer 1 (remargin-core, CLI + MCP, per-op).** Every mutating op
-  parent-walks `.remargin.yaml` and refuses ops outside the
-  `trusted_roots` allow-list or matching `deny_ops`. The walk runs
-  fresh on every call — no
-  cache, no reload command, no mtime watcher. Editing
-  `.remargin.yaml` between two ops takes effect on the second op
-  without a restart.
-- **Layer 2 (Claude Code permission sync, one-shot).** Running
-  `remargin claude restrict <path>` projects the entry into
-  `.claude/settings.local.json` + `~/.claude/settings.json` so
-  Claude's NATIVE Read / Edit / Write / Bash tools respect the same
-  boundaries. Claude needs to reload its settings (typically a
-  Claude restart) before Layer 2 takes effect.
+- **Layer 1 (remargin-core, CLI + MCP, per-op).** Every mutating op parent-walks `.remargin.yaml` and refuses ops outside the `trusted_roots` allow-list or matching `deny_ops`. The walk runs fresh on every call — no cache, no reload command, no mtime watcher. Editing `.remargin.yaml` between two ops takes effect on the second op without a restart.
+- **Layer 2 (Claude Code permission sync, one-shot).** Running `remargin claude restrict <path>` projects the entry into `.claude/settings.local.json` + `~/.claude/settings.json` so Claude's NATIVE Read / Edit / Write / Bash tools respect the same boundaries. Claude needs to reload its settings (typically a Claude restart) before Layer 2 takes effect.
 
-The single exception to per-op evaluation is `trusted_roots`, which
-defines the MCP server's filesystem sandbox at boot time — the
-sandbox cannot be expanded mid-session.
+The single exception to per-op evaluation is `trusted_roots`, which defines the MCP server's filesystem sandbox at boot time — the sandbox cannot be expanded mid-session.
 
 ### Op classification: read vs write
 
-`trusted_roots` and the dot-folder default-deny only gate
-**write-side** ops. Read-side ops bypass `trusted_roots` entirely so a
-restricted path can still be inspected without unrestrict/restrict
-ceremony. To block reads on a path, declare an explicit `deny_ops`
-entry naming the read op (`deny_ops` is evaluated for both kinds).
+`trusted_roots` and the dot-folder default-deny only gate **write-side** ops. Read-side ops bypass `trusted_roots` entirely so a restricted path can still be inspected without unrestrict/restrict ceremony. To block reads on a path, declare an explicit `deny_ops` entry naming the read op (`deny_ops` is evaluated for both kinds).
 
 | Kind | Ops |
 |------|-----|
 | Read (bypass `trusted_roots`) | `comments`, `get`, `lint`, `ls`, `metadata`, `query`, `search`, `verify` |
 | Write (gated by `trusted_roots`) | `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write` |
 
-The lists are pinned by `READ_OPS` and `MUTATING_OPS` in
-`remargin_core::permissions::op_guard`. Adding a new op MUST classify
-it at PR time by adding the canonical name to one of those constants;
-unknown ops fail closed (treated as write-side under `trusted_roots`).
+The lists are pinned by `READ_OPS` and `MUTATING_OPS` in `remargin_core::permissions::op_guard`. Adding a new op MUST classify it at PR time by adding the canonical name to one of those constants; unknown ops fail closed (treated as write-side under `trusted_roots`).
 
-The user-visible denial messages are pinned by
-`denial_error_wording_matches_canonical_template` in
-`crates/remargin-core/src/permissions/op_guard/tests.rs`. The
-canonical templates are:
+The user-visible denial messages are pinned by `denial_error_wording_matches_canonical_template` in `crates/remargin-core/src/permissions/op_guard/tests.rs`. The canonical templates are:
 
 - `op '<op>' on '<target>' is denied: outside the allow-list declared by 'trusted_roots' in <yaml>`
 - `op '<op>' on '<target>' is denied by 'deny_ops' rule in <yaml>`
@@ -388,65 +530,111 @@ remargin permissions show [--json]
 remargin permissions check <PATH> [--why]
 ```
 
-`claude restrict` records the exact rule strings it added in a sidecar
-at `<.claude-anchor>/.claude/.remargin-restrictions.json` so
-`claude unrestrict` reverses cleanly without ever touching user-added
-rules. The sidecar is `.gitignore`d automatically (its absolute
-paths and per-machine timestamps don't belong in version control).
+`claude restrict` records the exact rule strings it added in a sidecar at `<.claude-anchor>/.claude/.remargin-restrictions.json` so `claude unrestrict` reverses cleanly without ever touching user-added rules. The sidecar is `.gitignore`d automatically (its absolute paths and per-machine timestamps don't belong in version control).
 
-`permissions check <path>` exits gitignore-style: 0 when the path is
-restricted, 1 when not. Pair with `--why` for the matching rule's
-kind, source file, and rule text.
+`permissions check <path>` exits gitignore-style: 0 when the path is restricted, 1 when not. Pair with `--why` for the matching rule's kind, source file, and rule text.
 
-The canonical `permissions show --json` schema (every field, per
-entry kind) is documented as the module-level rustdoc on
-`remargin_core::permissions::inspect` and pinned by a
-`#[serde(deny_unknown_fields)]` schema test in
-`crates/remargin/tests/cli_permissions.rs` — adding a field on the
-Rust types without updating the doc fails the build.
+The canonical `permissions show --json` schema (every field, per entry kind) is documented as the module-level rustdoc on `remargin_core::permissions::inspect` and pinned by a `#[serde(deny_unknown_fields)]` schema test in `crates/remargin/tests/cli_permissions.rs` — adding a field on the Rust types without updating the doc fails the build.
 
-The read-only inspection surfaces are exposed via MCP as
-`mcp__remargin__permissions_show` and `mcp__remargin__permissions_check`.
-`claude restrict` and `claude unrestrict` are intentionally CLI-only:
-they mutate permission policy and that decision belongs to the human,
-not to the agent. `mcp__remargin__plan` likewise rejects
-`op="claude_restrict"` and `op="claude_unrestrict"`.
+The read-only inspection surfaces are exposed via MCP as `mcp__remargin__permissions_show` and `mcp__remargin__permissions_check`. `claude restrict` and `claude unrestrict` are intentionally CLI-only: they mutate permission policy and that decision belongs to the human, not to the agent. `mcp__remargin__plan` likewise rejects `op="claude_restrict"` and `op="claude_unrestrict"`.
 
-## CLI Reference
+## Integrity and security
+
+### Checksums
+
+Every comment gets a SHA-256 checksum of its content (normalized whitespace). This detects any post-creation modification of comment text.
+
+```bash
+remargin verify docs/design.md
+```
+
+### Signatures
+
+In `strict` mode, comments must be signed with Ed25519 keys. Generate a key pair:
+
+```bash
+remargin keygen ~/.remargin/keys/mykey
+```
+
+This produces `mykey` (private) and `mykey.pub` (public). Add the public key to the registry and configure the private key in `.remargin.yaml`:
+
+```yaml
+key: ~/.remargin/keys/mykey
+```
+
+Signatures cover the comment content plus metadata (id, author, type, timestamp, recipients, threading, attachments, `remargin_kind`), ensuring authenticity and tamper detection.
+
+### Comment preservation
+
+Every write operation enforces a strict invariant: the set of comment IDs before and after the write must match exactly, with only the expected delta (new comments added, or specific comments deleted). Any unexpected change aborts the operation with exit code 5. This guarantees that document edits — whether by humans or agents — never accidentally destroy comments left by other participants.
+
+```bash
+$ remargin write spec.md "$(cat broken-spec.md)"
+error: comment preservation violation
+       comments dropped: [pl1, en1]
+       canonical pre-write set: 3 comments
+       post-write set: 1 comment
+exit code: 5
+```
+
+## CLI reference
 
 ```
 remargin [OPTIONS] <COMMAND>
 ```
 
-### Comment Management
+### Comment management
 
 | Command | Description |
 |---------|-------------|
-| `comment` | Create a comment (supports `--reply-to`, `--after-line`, `--after-comment`, `--to`, `--attach`, `--auto-ack`, `--comment-file`/`-F`) |
-| `comments` | List all comments in a document (supports `--pretty` for threaded tree display) |
+| `comment` | Create a comment (supports `--reply-to`, `--after-line`, `--after-comment`, `--to`, `--attach`, `--auto-ack`, `--comment-file`/`-F`, `--kind`) |
+| `comments` | List all comments in a document (supports `--pretty` for threaded tree display, `--kind` filter) |
 | `batch` | Create multiple comments atomically via `--ops` JSON (per-operation `auto_ack` support) |
 | `edit` | Edit an existing comment (cascading ack clear on children) |
 | `delete` | Delete one or more comments |
 | `ack` | Acknowledge one or more comments (supports folder-wide resolution by ID when `--file` is omitted) |
 | `react` | Add or remove an emoji reaction |
+| `sign` | Add an Ed25519 signature to one or more existing comments |
 
-### Document Access
+### Document access
 
 | Command | Description |
 |---------|-------------|
 | `get` | Read a file's contents (with optional line range and `--line-numbers`/`-n`) |
 | `ls` | List files and directories |
-| `write` | Write document contents (comment-preserving, `--create` for new files) |
+| `write` | Write document contents (comment-preserving, `--create` for new files, `--lines START-END` for partial writes) |
 | `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
+| `mv` | Move a managed `.md` file (preserves comments and frontmatter) |
+| `rm` | Remove a managed `.md` file |
 
-### Search and Quality
+### Search, query, and quality
 
 | Command | Description |
 |---------|-------------|
-| `query` | Search across documents for comments (filter by `--pending` (broad — directed OR broadcast), `--pending-for`, `--pending-for-me`, `--pending-broadcast`, `--author`, `--since`, `--comment-id`; `--expanded` for inline comment details) |
+| `query` | Search across documents for comments (filter by `--pending`, `--pending-for`, `--pending-for-me`, `--pending-broadcast`, `--author`, `--since`, `--comment-id`, `--kind`; `--expanded` for inline comment details) |
 | `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`) |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
+| `activity` | Show what changed since a cutoff (caller's last action by default) — see [Tracking change](#tracking-change) |
+
+### Sandbox and prompts
+
+| Command | Description |
+|---------|-------------|
+| `sandbox add` | Stage a file under the caller's identity (soft claim) |
+| `sandbox list` | List files currently sandboxed for the caller |
+| `sandbox remove` | Unstage a file |
+| `prompt set` | Define a folder-scoped system prompt in `.remargin.yaml` |
+| `prompt resolve` | Resolve the nearest folder-scoped prompt for a file |
+| `prompt list` | List all folder-scoped prompts in the realm |
+
+### Plan (universal dry-run)
+
+```bash
+remargin plan <op> <args>
+```
+
+Returns a projection of any mutating op (`ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`, `mv`) without touching disk. Reports `noop / would_commit / reject_reason / subset_gate / checksums / changed_line_ranges`.
 
 ### Maintenance
 
@@ -467,12 +655,14 @@ remargin [OPTIONS] <COMMAND>
 | `mcp uninstall` | Remove MCP server registration |
 | `mcp test` | Check MCP registration status |
 | `mcp run` | Start the MCP server (stdio transport) |
-| `plugin install` | Register the marketplace and install the Claude Code plugin |
-| `plugin uninstall` | Uninstall the Claude Code plugin |
-| `plugin test` | Check plugin installation status |
+| `claude plugin install` | Register the marketplace and install the Claude Code plugin |
+| `claude plugin uninstall` | Uninstall the Claude Code plugin |
+| `claude plugin test` | Check plugin installation status |
+| `claude restrict` | Add permission rules (sync to `.claude/settings.local.json` and `~/.claude/settings.json`) |
+| `claude unrestrict` | Reverse a previous `restrict` cleanly |
 | `registry show` | Display the participant registry |
 
-### Global Options
+### Global options
 
 | Flag | Description |
 |------|-------------|
@@ -487,102 +677,9 @@ remargin [OPTIONS] <COMMAND>
 
 > To preview a mutating op without writing, use `remargin plan <op>`. The per-op `--dry-run` flag was removed in favour of the uniform `plan` projection.
 
-## Claude Code Integration
-
-Remargin integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in two ways:
-
-### MCP Server
-
-The MCP server exposes all remargin operations as tools that Claude can call directly. This is the primary integration -- it makes remargin the document access layer for AI agents.
-
-```bash
-# Install at project scope (recommended)
-remargin mcp install
-
-# Or install at user scope (available in all projects)
-remargin mcp install --user
-
-# Verify installation
-remargin mcp test
-```
-
-Once installed, Claude Code will have access to these tools: `ls`, `get`, `write`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `lint`, `verify`, `migrate`, `purge`.
-
-### Plugin
-
-The Claude Code plugin ships the remargin skill plus the `/remargin:process-file` and `/remargin:process-sandbox-group` slash commands. The skill teaches Claude Code *when* and *how* to use the MCP tools -- trigger phrases, display format for comments, critical rules (like never using `Read`/`Edit`/`Write` for remargin-managed documents), and common workflows.
-
-```bash
-# Register the marketplace and install the plugin
-remargin claude plugin install
-
-# Verify installation
-remargin claude plugin test
-```
-
-### Permissions
-
-To avoid per-tool confirmation prompts, add this to your Claude Code `settings.local.json`:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "mcp__remargin__*"
-    ]
-  }
-}
-```
-
-### Recommended Setup
-
-For a project using remargin with Claude Code:
-
-```bash
-# Install both MCP server and plugin
-remargin mcp install
-remargin claude plugin install
-
-# Add permissions (optional, avoids confirmation prompts)
-# Edit .claude/settings.local.json and add mcp__remargin__* to allow list
-```
-
-## Integrity and Security
-
-### Checksums
-
-Every comment gets a SHA-256 checksum of its content (normalized whitespace). This detects any post-creation modification of comment text.
-
-```bash
-# Verify all checksums in a document
-remargin verify docs/design.md
-```
-
-### Signatures
-
-In `strict` mode, comments must be signed with Ed25519 keys. Generate a key pair:
-
-```bash
-remargin keygen ~/.remargin/keys/mykey
-```
-
-This produces `mykey` (private) and `mykey.pub` (public). Add the public key to the registry and configure the private key in `.remargin.yaml`:
-
-```yaml
-key: ~/.remargin/keys/mykey
-```
-
-Signatures cover the comment content plus metadata (id, author, type, timestamp, recipients, threading, attachments), ensuring authenticity and tamper detection.
-
-### Comment Preservation
-
-Every write operation enforces a strict invariant: the set of comment IDs before and after the write must match exactly, with only the expected delta (new comments added, or specific comments deleted). Any unexpected change aborts the operation. This guarantees that document edits -- whether by humans or agents -- never accidentally destroy comments.
-
 ## Tracking change
 
-The `remargin activity` command answers "what's new since X?" across
-managed `.md` files in the current realm. Per-file change records
-(comments, acks, sandbox-adds) are returned sorted by ts:
+The `remargin activity` command answers "what's new since X?" across managed `.md` files in the current realm. Per-file change records (comments, acks, sandbox-adds) are returned sorted by timestamp:
 
 ```bash
 # What's new since I last acted (per-file caller-last-action cutoff).
@@ -595,35 +692,47 @@ remargin activity --since 2026-04-20T00:00:00Z
 remargin activity --pretty
 ```
 
-The default JSON output is the structured `ActivityResult` shape;
-`--pretty` switches to a per-file timeline rendered to stderr (so
-stdout stays clean for piping). Each per-file block opens with a
-header line that names the cutoff that was applied — `(since
-2026-04-20 00:00)` for explicit `--since`, `(since you last
-touched this file: …)` for the caller-last-action default, and
-`(since the beginning — no prior activity by you in this file)`
-for the initial-touch fallback. When `--since` is omitted, the
-per-file cutoff is the latest of (caller's authored comments,
-caller's acks, caller's sandbox-adds) in that file — files where
-the caller has never acted return everything (the "initial-touch"
-fallback). The command also folds in comment edits (via the
-`Comment.edited_at` field) and sandbox-roster timestamp refreshes,
-neither of which `comments` / `query` surface as distinct events.
+The default JSON output is the structured `ActivityResult` shape; `--pretty` switches to a per-file timeline rendered to stderr (so stdout stays clean for piping). Each per-file block opens with a header line that names the cutoff that was applied — `(since 2026-04-20 00:00)` for explicit `--since`, `(since you last touched this file: …)` for the caller-last-action default, and `(since the beginning — no prior activity by you in this file)` for the initial-touch fallback.
+
+When `--since` is omitted, the per-file cutoff is the latest of (caller's authored comments, caller's acks, caller's sandbox-adds) in that file — files where the caller has never acted return everything (the "initial-touch" fallback). The command also folds in comment edits (via the `Comment.edited_at` field) and sandbox-roster timestamp refreshes, neither of which `comments` / `query` surface as distinct events.
 
 Same surface is exposed via MCP as `mcp__remargin__activity`.
 
-## Typical Workflows
+## Typical workflows
 
-### Document Review
+### Multi-agent collaboration
 
 ```bash
-# Find documents with pending comments directed at you.
+# Three agents working on a shared spec, each with its own identity / key
+# (configured in their respective .remargin.yaml or via --config).
+
+# Each agent reads its inbox at the start of a turn
+remargin query . --pending-for-me --pretty
+
+# Posts work as comments addressed to the relevant peer
+remargin comment spec.md "Choosing 'name' for the column key." \
+  --reply-to pl1 --to engineer --auto-ack
+
+# Or in one atomic batch
+remargin batch spec.md --ops '[
+  {"content": "Choosing name.", "reply_to": "pl1", "auto_ack": true},
+  {"content": "Tagging for QA review.", "after_comment": "pl1", "to": ["qa"]}
+]'
+
+# At any point, see the full conversation tree
+remargin comments spec.md --pretty
+
+# Or what's changed since this agent last acted, across every file
+remargin activity --pretty
+```
+
+### Document review (human + agent)
+
+```bash
+# Find documents with pending comments directed at you
 remargin query . --pending-for-me
 
-# See expanded details (matching comments grouped by file).
-remargin query . --pending-for-me --expanded
-
-# Include broadcast conversations you haven't closed.
+# Include broadcast conversations you haven't closed
 remargin query . --pending-for-me --pending-broadcast
 
 # Read the document
@@ -645,7 +754,7 @@ remargin ack abc def
 remargin purge docs/proposal.md
 ```
 
-### Batch Review
+### Batch review
 
 ```bash
 # Add multiple comments in one atomic operation
@@ -656,7 +765,7 @@ remargin batch docs/design.md --ops '[
 ]'
 ```
 
-### Migration from Old Format
+### Migration from older formats (existing users only)
 
 If you have documents using the older `user comments` / `agent comments` fenced block format:
 
@@ -668,7 +777,7 @@ remargin plan migrate docs/old-doc.md
 remargin migrate docs/old-doc.md
 ```
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -694,22 +803,22 @@ cargo build --release
 # Run tests
 cargo test
 
-# Run clippy (strict -- the project enforces deny-all clippy lints)
+# Run clippy (strict — the project enforces deny-all clippy lints)
 cargo clippy
 ```
 
 ## Contributing
 
-Contributions are welcome. Here are some guidelines:
+Contributions are welcome.
 
-1. **Fork and branch** -- create a feature branch from `master`
-2. **Keep changes focused** -- one feature or fix per PR
-3. **Follow existing patterns** -- the codebase uses strict clippy lints (all, pedantic, restriction, nursery levels). Run `cargo clippy` before submitting
-4. **Write tests** -- the project uses `assert_cmd` and `tempfile` for integration tests
-5. **Update the skill** -- if you add or change MCP tools, update `crates/remargin-core/skill/SKILL.md` accordingly
-6. **Commit messages** -- use conventional commits (`feat:`, `fix:`, `chore:`, etc.)
+1. **Fork and branch** — create a feature branch from `master`.
+2. **Keep changes focused** — one feature or fix per PR.
+3. **Follow existing patterns** — the codebase uses strict clippy lints (all, pedantic, restriction, nursery levels). Run `cargo clippy` before submitting.
+4. **Write tests** — the project uses `assert_cmd` and `tempfile` for integration tests.
+5. **Update the skill** — if you add or change MCP tools, update `crates/remargin-core/skill/SKILL.md` accordingly.
+6. **Commit messages** — conventional commits (`feat:`, `fix:`, `chore:`, etc.).
 
-### Development Setup
+### Development setup
 
 ```bash
 git clone https://github.com/tixena/remargin.git
@@ -718,8 +827,10 @@ cargo build
 cargo test
 ```
 
-The project uses Rust 2024 edition with strict clippy enforcement. If clippy complains, fix the lint -- don't suppress it unless there's a documented reason in `Cargo.toml`.
+The project uses Rust 2024 edition with strict clippy enforcement. If clippy complains, fix the lint — don't suppress it unless there's a documented reason in `Cargo.toml`.
 
 ## License
 
-MIT
+Remargin is open source under the [MIT License](LICENSE).
+
+Made by [Tixena Labs](https://tixenalabs.com/).
