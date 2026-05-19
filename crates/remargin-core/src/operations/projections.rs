@@ -56,7 +56,9 @@ pub struct ProjectBatchOp {
     /// never copies bytes — the caller supplies the basenames it expects
     /// to land in the assets directory.
     pub attachment_filenames: Vec<String>,
-    pub auto_ack: bool,
+    /// `Some(true)` always acks, `Some(false)` never acks, `None` (default)
+    /// acks iff parent.author != caller (don't ack your own replies).
+    pub auto_ack: Option<bool>,
     pub content: String,
     pub reply_to: Option<String>,
     pub to: Vec<String>,
@@ -122,10 +124,7 @@ impl ProjectBatchOp {
                         .collect()
                 })
                 .unwrap_or_default(),
-            auto_ack: obj
-                .get("auto_ack")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
+            auto_ack: obj.get("auto_ack").and_then(serde_json::Value::as_bool),
             content: String::from(content),
             reply_to: obj
                 .get("reply_to")
@@ -153,7 +152,7 @@ impl ProjectBatchOp {
             after_heading: None,
             after_line: None,
             attachment_filenames: Vec::new(),
-            auto_ack: false,
+            auto_ack: None,
             content,
             reply_to: None,
             to: Vec::new(),
@@ -171,8 +170,10 @@ pub struct ProjectCommentParams<'params> {
     /// without actually copying any bytes; the caller passes the basenames
     /// they expect to land in the assets directory.
     pub attachment_filenames: &'params [&'params str],
-    /// Auto-ack the parent comment (requires `reply_to`).
-    pub auto_ack: bool,
+    /// Acknowledge the parent comment. `Some(true)` always acks, `Some(false)`
+    /// never acks, `None` (default) acks iff parent.author != caller.
+    /// `Some(true)` requires `reply_to`.
+    pub auto_ack: Option<bool>,
     pub content: &'params str,
     pub position: &'params InsertPosition,
     /// Optional classification tags. Validated before the
@@ -195,7 +196,7 @@ impl<'params> ProjectCommentParams<'params> {
     pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
         Self {
             attachment_filenames: &[],
-            auto_ack: false,
+            auto_ack: None,
             content,
             position,
             remargin_kind: &[],
@@ -212,7 +213,7 @@ impl<'params> ProjectCommentParams<'params> {
     }
 
     #[must_use]
-    pub const fn with_auto_ack(mut self, auto_ack: bool) -> Self {
+    pub const fn with_auto_ack(mut self, auto_ack: Option<bool>) -> Self {
         self.auto_ack = auto_ack;
         self
     }
@@ -336,7 +337,7 @@ pub fn project_batch(
     // failing sub-op index without leaving half the ops applied in
     // `after` on a preventable rejection.
     for (idx, op) in operations.iter().enumerate() {
-        if op.auto_ack && op.reply_to.is_none() {
+        if matches!(op.auto_ack, Some(true)) && op.reply_to.is_none() {
             bail!("batch sub-op {idx}: auto_ack requires reply_to");
         }
     }
@@ -401,23 +402,33 @@ pub fn project_batch(
         writer::insert_comment(&mut after, comment, &position)
             .with_context(|| format!("batch sub-op {idx}: inserting comment"))?;
 
-        if op.auto_ack
-            && let Some(parent_id) = op.reply_to.as_deref()
-        {
-            let lines_before_ack = after.to_markdown()?.matches('\n').count();
-            let parent = find_comment_mut(&mut after, parent_id).with_context(|| {
-                format!("batch sub-op {idx}: auto-ack parent {parent_id:?} not found")
-            })?;
-            parent.ack.push(Acknowledgment {
-                author: String::from(identity),
-                ts: now,
-            });
-            let lines_after_ack = after.to_markdown()?.matches('\n').count();
-            let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
-            if ack_lines_added > 0
-                && let Some(parent_cm) = after.find_comment(parent_id)
-            {
-                line_shifts.push((parent_cm.line, ack_lines_added));
+        if let Some(parent_id) = op.reply_to.as_deref() {
+            let should_ack = {
+                let parent = after.find_comment(parent_id).with_context(|| {
+                    format!("batch sub-op {idx}: auto-ack parent {parent_id:?} not found")
+                })?;
+                match op.auto_ack {
+                    Some(true) => true,
+                    Some(false) => false,
+                    None => parent.author != identity,
+                }
+            };
+            if should_ack {
+                let lines_before_ack = after.to_markdown()?.matches('\n').count();
+                let parent = find_comment_mut(&mut after, parent_id).with_context(|| {
+                    format!("batch sub-op {idx}: auto-ack parent {parent_id:?} not found")
+                })?;
+                parent.ack.push(Acknowledgment {
+                    author: String::from(identity),
+                    ts: now,
+                });
+                let lines_after_ack = after.to_markdown()?.matches('\n').count();
+                let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
+                if ack_lines_added > 0
+                    && let Some(parent_cm) = after.find_comment(parent_id)
+                {
+                    line_shifts.push((parent_cm.line, ack_lines_added));
+                }
             }
         }
 
@@ -463,7 +474,7 @@ pub fn project_comment(
         .as_deref()
         .context("identity is required to create a comment")?;
 
-    if params.auto_ack && params.reply_to.is_none() {
+    if matches!(params.auto_ack, Some(true)) && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
     }
 
@@ -543,15 +554,25 @@ pub fn project_comment(
 
     writer::insert_comment(&mut after, comment, params.position)?;
 
-    if params.auto_ack
-        && let Some(parent_id) = params.reply_to
-    {
-        let parent = find_comment_mut(&mut after, parent_id)
-            .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
-        parent.ack.push(Acknowledgment {
-            author: String::from(identity),
-            ts: now,
-        });
+    if let Some(parent_id) = params.reply_to {
+        let should_ack = {
+            let parent = after
+                .find_comment(parent_id)
+                .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
+            match params.auto_ack {
+                Some(true) => true,
+                Some(false) => false,
+                None => parent.author != identity,
+            }
+        };
+        if should_ack {
+            let parent = find_comment_mut(&mut after, parent_id)
+                .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
+            parent.ack.push(Acknowledgment {
+                author: String::from(identity),
+                ts: now,
+            });
+        }
     }
 
     frontmatter::ensure_frontmatter(&mut after, config)?;

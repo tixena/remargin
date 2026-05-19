@@ -237,7 +237,7 @@ fn desc_batch() -> ToolDesc {
                             "after_line": { "type": "integer" },
                             "after_comment": { "type": "string" },
                             "after_heading": { "type": "string", "description": "ATX heading path; resolved at write time. Mutually exclusive with after_line/after_comment." },
-                            "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying", "default": false }
+                            "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." }
                         },
                         "required": ["content"]
                     },
@@ -266,7 +266,7 @@ fn desc_comment() -> ToolDesc {
                     "default": []
                 },
                 "reply_to": { "type": "string", "description": "ID of the comment to reply to" },
-                "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying", "default": false },
+                "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." },
                 "attachments": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -477,7 +477,7 @@ fn desc_plan() -> ToolDesc {
                     "items": { "type": "string" },
                     "description": "Attachment basenames to record on the projected comment. Bytes are NOT copied by plan."
                 },
-                "auto_ack": { "type": "boolean", "description": "For comment replies: auto-ack the parent", "default": false },
+                "auto_ack": { "type": "boolean", "description": "For comment replies: auto-ack the parent. If omitted, the parent is auto-acked iff its author differs from the caller. Pass true to force the ack, false to skip it." },
                 "sandbox": { "type": "boolean", "description": "For comment: atomically project a sandbox entry", "default": false },
                 "emoji": { "type": "string", "description": "Emoji for react op" },
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
@@ -993,6 +993,13 @@ fn optional_bool(params: &Map<String, Value>, field: &str) -> bool {
     params.get(field).and_then(Value::as_bool).unwrap_or(false)
 }
 
+/// Tri-state read: distinguishes "field absent" (None) from
+/// "explicitly false" (Some(false)). Used for fields whose default
+/// behavior depends on whether the caller supplied a value.
+fn optional_bool_opt(params: &Map<String, Value>, field: &str) -> Option<bool> {
+    params.get(field).and_then(Value::as_bool)
+}
+
 /// Return a copy of `params` with every path-like field expanded via
 /// [`expand_path`]. Fields not present are skipped; fields present but
 /// not strings are passed through unchanged (the downstream handler
@@ -1456,7 +1463,7 @@ fn handle_comment(
 
     let position = resolve_insert_position(params, reply_to.as_deref());
 
-    let auto_ack = optional_bool(params, "auto_ack");
+    let auto_ack = optional_bool_opt(params, "auto_ack");
 
     let sandbox = optional_bool(params, "sandbox");
     let create_params = operations::CreateCommentParams {
@@ -1745,7 +1752,7 @@ fn handle_plan(
             position = resolve_insert_position(params, reply_to_owned.as_deref());
             let project_params = projections::ProjectCommentParams::new(content, &position)
                 .with_attachment_filenames(&attach_refs)
-                .with_auto_ack(optional_bool(params, "auto_ack"))
+                .with_auto_ack(optional_bool_opt(params, "auto_ack"))
                 .with_reply_to(reply_to_owned.as_deref())
                 .with_sandbox(optional_bool(params, "sandbox"))
                 .with_to(&to_owned);

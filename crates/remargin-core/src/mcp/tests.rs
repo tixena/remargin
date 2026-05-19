@@ -1822,6 +1822,81 @@ fn mcp_comment_auto_ack() {
 }
 
 #[test]
+fn mcp_comment_auto_ack_omitted_acks_other_author() {
+    // auto_ack field absent from the MCP args. Parent `aaa` is by
+    // eduardo; caller is `tester`. Smart default must ack the parent.
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Reply with default auto_ack.",
+                    "reply_to": "aaa"
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert!(
+        parent.ack.iter().any(|a| a.author == "tester"),
+        "MCP smart default must ack when parent.author != caller; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn mcp_comment_auto_ack_omitted_skips_self_authored_parent() {
+    // auto_ack field absent. Parent is authored by the same identity as
+    // the caller (eduardo in both cases). Smart default must NOT ack.
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let mut config = test_config();
+    config.identity = Some(String::from("eduardo"));
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "comment",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Reply to my own comment.",
+                    "reply_to": "aaa"
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert!(
+        parent.ack.is_empty(),
+        "MCP smart default must NOT ack the caller's own comment; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
 fn mcp_comment_auto_ack_without_reply_to_errors() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Hello\n\nBody text.\n");

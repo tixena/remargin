@@ -208,7 +208,7 @@ fn create_simple_comment() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "This is a new comment.",
             position: &position,
             remargin_kind: &[],
@@ -240,7 +240,7 @@ fn create_comment_with_sandbox_stages_and_writes_together() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Staged with sandbox.",
             position: &position,
             remargin_kind: &[],
@@ -296,7 +296,7 @@ Body.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Second comment.",
             position: &position,
             remargin_kind: &[],
@@ -340,7 +340,7 @@ fn create_with_attachment() {
         &config,
         &CreateCommentParams {
             attachments: &[PathBuf::from("/tmp/screenshot.png")],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "See attached.",
             position: &position,
             remargin_kind: &[],
@@ -370,7 +370,7 @@ fn create_reply_auto_thread() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Replying to abc.",
             position: &position,
             remargin_kind: &[],
@@ -670,7 +670,7 @@ fn preservation_invariant() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Second comment.",
             position: &position,
             remargin_kind: &[],
@@ -716,7 +716,7 @@ More text here.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "test comment",
             position: &position,
             remargin_kind: &[],
@@ -767,7 +767,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "appended comment",
             position: &position,
             remargin_kind: &[],
@@ -816,7 +816,7 @@ Some text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "after frontmatter",
             position: &position,
             remargin_kind: &[],
@@ -865,7 +865,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "first",
             position: &InsertPosition::Append,
             remargin_kind: &[],
@@ -882,7 +882,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "second",
             position: &InsertPosition::Append,
             remargin_kind: &[],
@@ -899,7 +899,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "third",
             position: &InsertPosition::Append,
             remargin_kind: &[],
@@ -948,7 +948,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "first",
             position: &InsertPosition::Append,
             remargin_kind: &[],
@@ -965,7 +965,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "second",
             position: &InsertPosition::AfterComment(id1),
             remargin_kind: &[],
@@ -982,7 +982,7 @@ Some body text.
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "third",
             position: &InsertPosition::AfterComment(id2.clone()),
             remargin_kind: &[],
@@ -1408,7 +1408,7 @@ fn auto_ack_on_reply() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: true,
+            auto_ack: Some(true),
             content: "Reply with auto-ack.",
             position: &position,
             remargin_kind: &[],
@@ -1442,7 +1442,7 @@ fn auto_ack_reply_delete_reply_does_not_double_ack_parent() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: true,
+            auto_ack: Some(true),
             content: "first reply",
             position: &position,
             remargin_kind: &[],
@@ -1461,7 +1461,7 @@ fn auto_ack_reply_delete_reply_does_not_double_ack_parent() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: true,
+            auto_ack: Some(true),
             content: "second reply",
             position: &position,
             remargin_kind: &[],
@@ -1495,7 +1495,7 @@ fn auto_ack_preserves_reply_to() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: true,
+            auto_ack: Some(true),
             content: "Reply with auto-ack.",
             position: &position,
             remargin_kind: &[],
@@ -1525,7 +1525,7 @@ fn auto_ack_false_does_not_ack() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Reply without auto-ack.",
             position: &position,
             remargin_kind: &[],
@@ -1554,7 +1554,7 @@ fn auto_ack_without_reply_to_errors() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: true,
+            auto_ack: Some(true),
             content: "Top-level with auto-ack.",
             position: &position,
             remargin_kind: &[],
@@ -1585,7 +1585,7 @@ fn auto_ack_without_reply_to_no_file_modification() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: true,
+            auto_ack: Some(true),
             content: "Top-level with auto-ack.",
             position: &position,
             remargin_kind: &[],
@@ -1598,6 +1598,149 @@ fn auto_ack_without_reply_to_no_file_modification() {
     result.unwrap_err();
     let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(before, after, "file should not be modified on error");
+}
+
+#[test]
+fn auto_ack_none_replying_to_other_author_acks_parent() {
+    // Parent `abc` is authored by `eduardo` (per doc_with_comment); the
+    // caller is `alice`. With auto_ack omitted (None), the smart default
+    // must ack the parent because parent.author != caller.
+    let system = system_with_doc(&doc_with_comment());
+    let mut config = open_config();
+    config.identity = Some(String::from("alice"));
+    let position = InsertPosition::Append;
+
+    create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: None,
+            content: "Reply with default auto_ack.",
+            position: &position,
+            remargin_kind: &[],
+            reply_to: Some("abc"),
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert!(
+        parent.ack.iter().any(|a| a.author == "alice"),
+        "smart default must ack the parent when parent.author != caller; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn auto_ack_none_replying_to_own_comment_does_not_ack() {
+    // Parent `abc` is authored by `eduardo`, caller is `eduardo`. With
+    // auto_ack omitted, the smart default must NOT ack — don't ack your
+    // own replies.
+    let system = system_with_doc(&doc_with_comment());
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: None,
+            content: "Reply to my own comment.",
+            position: &position,
+            remargin_kind: &[],
+            reply_to: Some("abc"),
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert!(
+        parent.ack.is_empty(),
+        "smart default must NOT ack when replying to self; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn auto_ack_none_without_reply_to_is_noop() {
+    // Top-level comment (no reply_to) with auto_ack=None. No parent to
+    // ack, no error — Some(true) without reply_to is the only erroring
+    // case; None is a silent no-op.
+    let system = system_with_doc(MINIMAL_DOC);
+    let config = open_config();
+    let position = InsertPosition::Append;
+
+    let new_id = create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: None,
+            content: "Top-level with default auto_ack.",
+            position: &position,
+            remargin_kind: &[],
+            reply_to: None,
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    assert!(
+        doc.find_comment(&new_id).is_some(),
+        "comment must be created even without a parent to ack",
+    );
+}
+
+#[test]
+fn auto_ack_some_false_replying_to_other_author_skips_ack() {
+    // Explicit Some(false) must override the smart default, even when
+    // replying to someone else's comment.
+    let system = system_with_doc(&doc_with_comment());
+    let mut config = open_config();
+    config.identity = Some(String::from("alice"));
+    let position = InsertPosition::Append;
+
+    create_comment(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &CreateCommentParams {
+            attachments: &[],
+            auto_ack: Some(false),
+            content: "Force-skip ack.",
+            position: &position,
+            remargin_kind: &[],
+            reply_to: Some("abc"),
+            sandbox: false,
+            to: &[],
+        },
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    let parent = doc.find_comment("abc").unwrap();
+    assert!(
+        parent.ack.is_empty(),
+        "Some(false) must skip the ack even on others' comments; acks = {:?}",
+        parent.ack,
+    );
 }
 
 // ===========================================================================
@@ -1617,7 +1760,7 @@ fn reply_auto_populates_to() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Reply with auto-to.",
             position: &position,
             remargin_kind: &[],
@@ -1652,7 +1795,7 @@ fn reply_explicit_to_prepends_parent_author() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Reply with explicit to.",
             position: &position,
             remargin_kind: &[],
@@ -1688,7 +1831,7 @@ fn reply_dedupes_parent_when_caller_includes_it() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Reply with parent re-listed in to.",
             position: &position,
             remargin_kind: &[],
@@ -1723,7 +1866,7 @@ fn reply_with_multiple_extras_prepends_parent() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Reply with multiple extras.",
             position: &position,
             remargin_kind: &[],
@@ -1762,7 +1905,7 @@ fn root_comment_preserves_explicit_to() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Root with to.",
             position: &position,
             remargin_kind: &[],
@@ -1791,7 +1934,7 @@ fn root_comment_no_auto_to() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Root comment, no to.",
             position: &position,
             remargin_kind: &[],
@@ -1822,7 +1965,7 @@ fn reply_auto_populates_to_different_author() {
         &config,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "Reply to alice's comment.",
             position: &position,
             remargin_kind: &[],
@@ -2087,7 +2230,7 @@ fn project_comment_auto_ack_without_reply_errors() {
 
     let params = projections::ProjectCommentParams {
         attachment_filenames: &[],
-        auto_ack: true,
+        auto_ack: Some(true),
         content: "bad params",
         position: &InsertPosition::Append,
         remargin_kind: &[],
@@ -2111,7 +2254,7 @@ fn project_comment_reply_auto_acks_parent() {
 
     let params = projections::ProjectCommentParams {
         attachment_filenames: &[],
-        auto_ack: true,
+        auto_ack: Some(true),
         content: "reply body",
         position: &InsertPosition::AfterComment(String::from("abc")),
         remargin_kind: &[],
@@ -2147,7 +2290,7 @@ fn project_comment_attachments_are_not_copied() {
     let attach = ["photo.png"];
     let params = projections::ProjectCommentParams {
         attachment_filenames: &attach,
-        auto_ack: false,
+        auto_ack: Some(false),
         content: "with fake attachment",
         position: &InsertPosition::Append,
         remargin_kind: &[],
@@ -2338,7 +2481,7 @@ fn project_batch_auto_ack_without_reply_rejects_with_index() {
     let (system, config, _first) = seed_with_comment();
 
     let mut op = projections::ProjectBatchOp::new(String::from("Missing reply_to."));
-    op.auto_ack = true;
+    op.auto_ack = Some(true);
     let err = projections::project_batch(&system, Path::new("/docs/test.md"), &config, &[op])
         .unwrap_err();
     let msg = format!("{err:#}");
@@ -2364,7 +2507,7 @@ fn project_batch_op_from_json_happy_path_picks_up_every_field() {
     assert_eq!(op.content, "body");
     assert_eq!(op.reply_to.as_deref(), Some("parent"));
     assert_eq!(op.after_line, Some(7_usize));
-    assert!(op.auto_ack);
+    assert_eq!(op.auto_ack, Some(true));
     assert_eq!(op.to, vec![String::from("alice"), String::from("bob")]);
     assert_eq!(op.attachment_filenames, vec![String::from("img.png")]);
 }
@@ -2405,7 +2548,7 @@ fn project_batch_reply_auto_acks_parent() {
 
     let mut reply = projections::ProjectBatchOp::new(String::from("Reply."));
     reply.reply_to = Some(first.clone());
-    reply.auto_ack = true;
+    reply.auto_ack = Some(true);
     let (_before, after) =
         projections::project_batch(&system, Path::new("/docs/test.md"), &config, &[reply]).unwrap();
 
@@ -2882,7 +3025,7 @@ fn batch_refuses_forbidden_targets() {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: Some(false),
             content: String::from("one"),
             reply_to: None,
             to: Vec::new(),
@@ -3049,7 +3192,7 @@ fn comment_refused_when_target_under_restrict() {
     let position = InsertPosition::Append;
     let params = CreateCommentParams {
         attachments: &[],
-        auto_ack: false,
+        auto_ack: Some(false),
         content: "hi",
         position: &position,
         remargin_kind: &[],
@@ -3069,7 +3212,7 @@ fn comment_refused_when_deny_ops_lists_comment() {
     let position = InsertPosition::Append;
     let params = CreateCommentParams {
         attachments: &[],
-        auto_ack: false,
+        auto_ack: Some(false),
         content: "hi",
         position: &position,
         remargin_kind: &[],
@@ -3211,7 +3354,7 @@ fn batch_refused_when_target_under_restrict() {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: Some(false),
             content: String::from("a"),
             reply_to: None,
             to: Vec::new(),
@@ -3221,7 +3364,7 @@ fn batch_refused_when_target_under_restrict() {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: Some(false),
             content: String::from("b"),
             reply_to: None,
             to: Vec::new(),
@@ -3242,7 +3385,7 @@ fn batch_refused_when_deny_ops_lists_batch() {
         after_heading: None,
         after_line: None,
         attachments: Vec::new(),
-        auto_ack: false,
+        auto_ack: Some(false),
         content: String::from("solo"),
         reply_to: None,
         to: Vec::new(),
@@ -3267,7 +3410,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: Some(false),
             content: String::from("first"),
             reply_to: None,
             to: Vec::new(),
@@ -3277,7 +3420,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: Some(false),
             content: String::from("second"),
             reply_to: None,
             to: Vec::new(),
@@ -3287,7 +3430,7 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: Some(false),
             content: String::from("third"),
             reply_to: None,
             to: Vec::new(),

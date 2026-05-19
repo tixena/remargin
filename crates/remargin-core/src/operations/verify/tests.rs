@@ -628,7 +628,7 @@ fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "reply",
             position: &pos,
             remargin_kind: &[],
@@ -669,7 +669,7 @@ fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
         &bad_cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "sneaky",
             position: &pos,
             remargin_kind: &[],
@@ -779,7 +779,7 @@ fn create_comment_strict_registered_active_no_key_file_byte_identical() {
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "unsigned attempt",
             position: &pos,
             remargin_kind: &[],
@@ -821,7 +821,7 @@ fn create_comment_strict_unregistered_author_file_byte_identical() {
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "uninvited",
             position: &pos,
             remargin_kind: &[],
@@ -851,7 +851,7 @@ fn create_comment_open_mode_no_key_still_writes_unsigned() {
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "open mode reply",
             position: &pos,
             remargin_kind: &[],
@@ -1091,7 +1091,7 @@ title: T
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "hello",
             position: &pos,
             remargin_kind: &[],
@@ -1165,7 +1165,7 @@ title: T
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "hello",
             position: &pos,
             remargin_kind: &[],
@@ -1239,7 +1239,7 @@ title: T
         &cfg,
         &CreateCommentParams {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: Some(false),
             content: "hello",
             position: &pos,
             remargin_kind: &[],

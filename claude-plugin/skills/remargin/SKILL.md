@@ -103,7 +103,7 @@ stop at the first match:
 5. **Don't return pending comments to the user as their to-do** when the action is yours.
 6. **Line numbers shift on every mutation.** Re-resolve immediately before any line-anchored op, or use `batch` for multi-step. Bottom-up ordering is not a substitute for `batch` — it's the same anti-pattern in disguise. If you find yourself ordering inserts bottom-up to dodge line shifts, you forgot `batch` exists.
 7. **`--config` XOR `(--identity + --type + --key)`.** Three branches: `--config FILE` alone, full triplet, or filter on the walked candidate. Mixing those two halves in one call is rejected at parse time — the CLI errors before the op runs.
-8. **`auto_ack: true` is allowed only when** (a) the parent comment is addressed to you via `to:` AND (b) your reply fully resolves the ask. `auto_ack` without `reply_to` is rejected.
+8. **`auto_ack` defaults to a smart `Option<bool>`.** If you omit `auto_ack` on a reply (the common case), the parent is auto-acked iff its author differs from your identity — replies to your own comments don't ack. Set `auto_ack: true` to force the ack (legal only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask). Set `auto_ack: false` to force-skip even when replying to someone else. `auto_ack: true` without `reply_to` is rejected; `auto_ack: false` and the default (omitted) are no-ops without a `reply_to`.
 9. **Never declare a different identity per call** unless the user explicitly asked. Per-call `identity` / `type` / `config_path` to declare someone else = impersonation.
 10. **Never delete other participants' comments** to unblock your own op. Find another path or ask the user.
 11. **Always run `remargin activity` (or `/remargin:activity`) BEFORE processing comments — pending comments are only one signal.** Activity surfaces the full delta since you last acted on each file: comments addressed to you, comments addressed to others, broadcast comments, new acks on threads you participate in, reactions added/removed, comment edits, signatures landed on previously-unsigned comments, sandbox-adds by other identities. Replying to your pending queue without checking activity means you miss context that may change what your reply should say — e.g. someone else already answered, a thread you're in just got new participants, an edit invalidated the assumption behind your draft. Do not hand-roll timestamps from `comments` / `query` for this purpose; those tools don't compute the per-file caller-last-action cutoff and don't fold edits / reactions / sandbox refreshes into a single change list.
@@ -143,8 +143,8 @@ This is the most common multi-comment workflow. Use `batch`. **Do not** bundle i
 
    Or via `mcp__remargin__batch` with the same shape (no JSON-string encoding).
 
-4. `auto_ack: true` per op only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask.
-5. For broadcasts (`to: []`) or comments addressed to others, leave `auto_ack` off and ack separately via `remargin ack` if appropriate.
+4. `auto_ack` defaults to the smart shape per Critical rule 8: omit it on most replies; set `true` only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask; set `false` to force-skip the ack.
+5. For broadcasts (`to: []`) or comments addressed to others, the smart default still applies (parent.author != caller → ack). Override with explicit `auto_ack: false` if the broadcast nature means an ack would be premature; ack separately via `remargin ack` if appropriate.
 
 ❌ **Never:** post one comment that summarizes answers to N other comments. Forces the user to re-thread mentally or reply with their own consolidation. Defeats threading. This was a real failure pattern — don't repeat it.
 

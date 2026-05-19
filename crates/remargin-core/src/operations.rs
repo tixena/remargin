@@ -41,8 +41,10 @@ use crate::writer::{self, InsertPosition};
 #[non_exhaustive]
 pub struct CreateCommentParams<'params> {
     pub attachments: &'params [PathBuf],
-    /// Automatically acknowledge the parent comment when replying.
-    pub auto_ack: bool,
+    /// Acknowledge the parent comment when replying. `Some(true)` always acks,
+    /// `Some(false)` never acks, `None` (default) acks iff the parent's author
+    /// differs from the caller — replies to your own comment don't auto-ack.
+    pub auto_ack: Option<bool>,
     pub content: &'params str,
     pub position: &'params InsertPosition,
     /// Optional classification tags for the new comment. Validated
@@ -64,7 +66,7 @@ impl<'params> CreateCommentParams<'params> {
     pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
         Self {
             attachments: &[],
-            auto_ack: false,
+            auto_ack: None,
             content,
             position,
             remargin_kind: &[],
@@ -105,7 +107,7 @@ pub fn create_comment(
         .context("identity is required to create a comment")?;
     let signing_key = cfg.resolve_signing_key(identity);
 
-    if params.auto_ack && params.reply_to.is_none() {
+    if matches!(params.auto_ack, Some(true)) && params.reply_to.is_none() {
         bail!("--auto-ack requires --reply-to");
     }
 
@@ -153,10 +155,8 @@ pub fn create_comment(
 
     writer::insert_comment(&mut doc, comment, params.position)?;
 
-    if params.auto_ack
-        && let Some(parent_id) = params.reply_to
-    {
-        apply_auto_ack_to_parent(&mut doc, parent_id, identity, now)?;
+    if let Some(parent_id) = params.reply_to {
+        apply_auto_ack_to_parent(&mut doc, parent_id, identity, params.auto_ack, now)?;
     }
 
     frontmatter::ensure_frontmatter(&mut doc, cfg)?;
@@ -221,20 +221,30 @@ fn build_effective_to(
     result
 }
 
-/// Append the current identity's ack to the parent comment in the same
-/// write cycle as the reply. Errors when the parent ID does not resolve.
+/// Append the current identity's ack to the parent comment when warranted.
+/// `auto_ack` resolution: `Some(true)` always acks, `Some(false)` never acks,
+/// `None` acks iff parent.author differs from the caller. Errors when the
+/// parent ID does not resolve.
 fn apply_auto_ack_to_parent(
     doc: &mut ParsedDocument,
     parent_id: &str,
     identity: &str,
+    auto_ack: Option<bool>,
     now: chrono::DateTime<chrono::FixedOffset>,
 ) -> Result<()> {
     let parent = find_comment_mut(doc, parent_id)
         .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
-    parent.ack.push(Acknowledgment {
-        author: String::from(identity),
-        ts: now,
-    });
+    let should_ack = match auto_ack {
+        Some(true) => true,
+        Some(false) => false,
+        None => parent.author != identity,
+    };
+    if should_ack {
+        parent.ack.push(Acknowledgment {
+            author: String::from(identity),
+            ts: now,
+        });
+    }
     Ok(())
 }
 

@@ -283,9 +283,15 @@ enum Commands {
         /// Attachments to include.
         #[arg(long)]
         attach: Vec<PathBuf>,
-        /// Automatically acknowledge the parent comment when replying.
-        #[arg(long)]
+        /// Acknowledge the parent comment when replying. Default (omitted):
+        /// auto-ack iff parent.author differs from the caller — replies to
+        /// your own comment don't auto-ack. Pass --no-auto-ack to force skip.
+        #[arg(long, conflicts_with = "no_auto_ack")]
         auto_ack: bool,
+        /// Force-skip the auto-ack of the parent comment. Mutually exclusive
+        /// with --auto-ack.
+        #[arg(long = "no-auto-ack", conflicts_with = "auto_ack")]
+        no_auto_ack: bool,
         /// Read comment body from a file (use - for stdin).
         #[arg(long, short = 'F', conflicts_with = "content")]
         comment_file: Option<PathBuf>,
@@ -947,9 +953,15 @@ enum PlanAction {
         /// when the mutating `comment` op runs.
         #[arg(long = "attach-name")]
         attach_names: Vec<String>,
-        /// Automatically acknowledge the parent comment when replying.
-        #[arg(long)]
+        /// Acknowledge the parent comment when replying. Default (omitted):
+        /// auto-ack iff parent.author differs from the caller. Pass
+        /// --no-auto-ack to force skip.
+        #[arg(long, conflicts_with = "no_auto_ack")]
         auto_ack: bool,
+        /// Force-skip the auto-ack of the parent comment. Mutually exclusive
+        /// with --auto-ack.
+        #[arg(long = "no-auto-ack", conflicts_with = "auto_ack")]
+        no_auto_ack: bool,
         /// ID of the comment to reply to.
         #[arg(long)]
         reply_to: Option<String>,
@@ -1364,7 +1376,7 @@ struct CommentParams<'cmd> {
     after_heading: Option<&'cmd str>,
     after_line: Option<usize>,
     attachments: &'cmd [PathBuf],
-    auto_ack: bool,
+    auto_ack: Option<bool>,
     content: &'cmd str,
     file: &'cmd str,
     json_mode: bool,
@@ -2701,6 +2713,7 @@ fn handle_comment(
         after_line,
         attach,
         auto_ack,
+        no_auto_ack,
         comment_file,
         remargin_kind,
         reply_to,
@@ -2719,7 +2732,7 @@ fn handle_comment(
         after_heading: after_heading.as_deref(),
         after_line: *after_line,
         attachments: attach,
-        auto_ack: *auto_ack,
+        auto_ack: tri_state_flag(*auto_ack, *no_auto_ack),
         content: &resolved_content,
         file,
         json_mode: output_args.json,
@@ -2729,6 +2742,19 @@ fn handle_comment(
         to,
     };
     cmd_comment(sinks, system, cwd, config, &cp)
+}
+
+/// Map paired clap booleans to `Option<bool>`: `--flag` → Some(true),
+/// `--no-flag` → Some(false), neither → None. The `conflicts_with` clap
+/// attributes guarantee only one can be true at a time.
+const fn tri_state_flag(yes: bool, no: bool) -> Option<bool> {
+    if yes {
+        Some(true)
+    } else if no {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn handle_comments(
@@ -4617,6 +4643,7 @@ fn build_plan_comment<'cmd>(
         after_line,
         attach_names,
         auto_ack,
+        no_auto_ack,
         reply_to,
         sandbox,
         to,
@@ -4639,7 +4666,7 @@ fn build_plan_comment<'cmd>(
     *attach_refs = attach_names.iter().map(String::as_str).collect();
     let params = projections::ProjectCommentParams::new(comment_body, position)
         .with_attachment_filenames(attach_refs)
-        .with_auto_ack(*auto_ack)
+        .with_auto_ack(tri_state_flag(*auto_ack, *no_auto_ack))
         .with_reply_to(reply_to.as_deref())
         .with_sandbox(*sandbox)
         .with_to(to);

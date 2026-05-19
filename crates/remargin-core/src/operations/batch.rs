@@ -42,8 +42,10 @@ pub struct BatchCommentOp {
     pub after_line: Option<usize>,
     /// Attachment file paths.
     pub attachments: Vec<PathBuf>,
-    /// Automatically acknowledge the parent comment when replying.
-    pub auto_ack: bool,
+    /// Acknowledge the parent comment when replying. `Some(true)` always acks,
+    /// `Some(false)` never acks, `None` (default) acks iff the parent's author
+    /// differs from the caller.
+    pub auto_ack: Option<bool>,
     /// Comment body text.
     pub content: String,
     /// ID of the comment this replies to.
@@ -113,10 +115,7 @@ impl BatchCommentOp {
                         .collect()
                 })
                 .unwrap_or_default(),
-            auto_ack: obj
-                .get("auto_ack")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            auto_ack: obj.get("auto_ack").and_then(Value::as_bool),
             content: String::from(content),
             reply_to: obj
                 .get("reply_to")
@@ -143,7 +142,7 @@ impl BatchCommentOp {
             after_heading: None,
             after_line: None,
             attachments: Vec::new(),
-            auto_ack: false,
+            auto_ack: None,
             content,
             reply_to: None,
             to: Vec::new(),
@@ -198,9 +197,9 @@ pub fn batch_comment(
     linter::lint_or_fail(&markdown_before)
         .context("document has structural issues before write")?;
 
-    // Validate auto_ack requires reply_to before any modifications.
+    // Validate auto_ack=Some(true) requires reply_to before any modifications.
     for (idx, op) in operations.iter().enumerate() {
-        if op.auto_ack && op.reply_to.is_none() {
+        if matches!(op.auto_ack, Some(true)) && op.reply_to.is_none() {
             bail!("batch operation {idx}: auto_ack requires reply_to");
         }
     }
@@ -280,31 +279,17 @@ pub fn batch_comment(
         writer::insert_comment(&mut doc, comment, &position)
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
 
-        // Auto-ack the parent comment in the same document write cycle.
-        if op.auto_ack
-            && let Some(parent_id) = &op.reply_to
-        {
-            let lines_before_ack = doc.to_markdown()?.matches('\n').count();
-
-            let parent = find_comment_mut(&mut doc, parent_id).with_context(|| {
-                format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
-            })?;
-            parent.ack.push(Acknowledgment {
-                author: String::from(identity),
-                ts: now,
-            });
-
-            // Track ack-induced line shift for subsequent AfterLine targets.
-            let lines_after_ack = doc.to_markdown()?.matches('\n').count();
-            let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
-            if ack_lines_added > 0
-                && let Some(parent_cm) = doc.find_comment(parent_id)
-            {
-                // Use the parent's original line as the shift anchor.
-                // The ack metadata is added to the parent's fence, so any
-                // AfterLine target at or after the parent's position shifts.
-                line_shifts.push((parent_cm.line, ack_lines_added));
-            }
+        // Auto-ack the parent (if any) and track any induced line shift.
+        if let Some(parent_id) = op.reply_to.as_deref() {
+            apply_batch_auto_ack(
+                &mut doc,
+                parent_id,
+                identity,
+                op.auto_ack,
+                now,
+                idx,
+                &mut line_shifts,
+            )?;
         }
 
         // Record the line shift if this was an AfterLine insertion.
@@ -330,6 +315,51 @@ pub fn batch_comment(
 
 /// Write the batch result with preservation check + post-mutation verify gate.
 ///
+/// Auto-ack resolution + line-shift tracking for a single batch sub-op.
+/// `auto_ack`: Some(true)=always, Some(false)=never, None=ack iff
+/// parent.author != caller. Records the parent's line + ack-induced
+/// line count into `line_shifts` so subsequent `AfterLine` targets see
+/// the shift.
+fn apply_batch_auto_ack(
+    doc: &mut ParsedDocument,
+    parent_id: &str,
+    identity: &str,
+    auto_ack: Option<bool>,
+    now: chrono::DateTime<chrono::FixedOffset>,
+    idx: usize,
+    line_shifts: &mut Vec<(usize, usize)>,
+) -> Result<()> {
+    let should_ack = {
+        let parent = doc.find_comment(parent_id).with_context(|| {
+            format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
+        })?;
+        match auto_ack {
+            Some(true) => true,
+            Some(false) => false,
+            None => parent.author != identity,
+        }
+    };
+    if !should_ack {
+        return Ok(());
+    }
+    let lines_before_ack = doc.to_markdown()?.matches('\n').count();
+    let parent = find_comment_mut(doc, parent_id).with_context(|| {
+        format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
+    })?;
+    parent.ack.push(Acknowledgment {
+        author: String::from(identity),
+        ts: now,
+    });
+    let lines_after_ack = doc.to_markdown()?.matches('\n').count();
+    let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
+    if ack_lines_added > 0
+        && let Some(parent_cm) = doc.find_comment(parent_id)
+    {
+        line_shifts.push((parent_cm.line, ack_lines_added));
+    }
+    Ok(())
+}
+
 /// Per the "verify runs once after all ops complete in-memory" rule in
 /// — batch is atomic end-to-end.
 fn write_batch_result(
