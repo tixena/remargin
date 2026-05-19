@@ -1,0 +1,16 @@
+---
+interface Props {
+  /** Numeric/text eyebrow tag e.g. "01 / Problem". */
+  eyebrow: string;
+  /** H2 title text. */
+  title: string;
+}
+const { eyebrow, title } = Astro.props;
+---
+<div class="section-header">
+  <span class="eyebrow">{eyebrow}</span>
+  <h2>{title}</h2>
+  {Astro.slots.has('lede') && (
+    <p class="section-header__lede"><slot name="lede" /></p>
+  )}
+</div>

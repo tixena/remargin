@@ -1,0 +1,54 @@
+---
+/**
+ * <Callout title="~ /src/project">…terminal lines (each as <span class="row">…)…</Callout>
+ *
+ * Terminal-style block used for the comment-preservation demo. Pure black
+ * background, green prompt, white text, red error/exit code.
+ */
+interface Props {
+  /** Optional title shown in the terminal's window chrome. */
+  title?: string;
+  /** Aria label for screen readers. */
+  label?: string;
+}
+const { title = '~ /src/project', label = 'terminal output' } = Astro.props;
+---
+<div class="terminal" role="img" aria-label={label}>
+  <div class="terminal__chrome">
+    <span class="lt"></span><span class="lt"></span><span class="lt"></span>
+    <span class="title">{title}</span>
+  </div>
+  <div class="terminal__body">
+    <slot />
+  </div>
+</div>
+
+<style>
+.terminal {
+  background: #000;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.terminal__chrome {
+  height: 32px; background: #0a0a10;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex; align-items: center; gap: 6px; padding: 0 12px;
+}
+.terminal__chrome .lt { width: 10px; height: 10px; border-radius: 50%; background: #2a2939; }
+.terminal__chrome .title {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-dim);
+}
+.terminal__body { padding: 20px 22px; color: #fff; }
+.terminal__body :global(.row) { display: block; white-space: pre-wrap; }
+.terminal__body :global(.prompt) { color: var(--color-success); }
+.terminal__body :global(.cmd)    { color: #fff; }
+.terminal__body :global(.err)    { color: var(--color-danger); }
+.terminal__body :global(.muted)  { color: var(--color-text-muted); }
+.terminal__body :global(.exit)   { color: var(--color-danger); font-weight: 600; }
+.terminal__body :global(.indent) { display: inline-block; width: 7ch; }
+</style>

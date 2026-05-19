@@ -1,0 +1,84 @@
+---
+import CodeBlock from '../CodeBlock.astro';
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="install" aria-labelledby="install-title">
+  <div class="container">
+    <SectionHeader eyebrow="07 / Quick start" title="Three steps. No daemon. MIT-licensed." />
+
+    <div class="install">
+      <div class="install__step">
+        <div class="install__head">
+          <span class="install__num">1</span>
+          <span class="install__label">Install</span>
+          <span class="dim mono install__sub-inline">— Rust 1.85+</span>
+        </div>
+        <CodeBlock lang="bash">
+          <Fragment set:html={`<span class="tk-com"># Requires Rust 1.85+</span>
+<span class="tk-prompt">$</span> cargo install <span class="tk-kw">--git</span> https://github.com/tixena/remargin
+<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> version`} />
+        </CodeBlock>
+      </div>
+
+      <div class="install__step">
+        <div class="install__head">
+          <span class="install__num">2</span>
+          <span class="install__label">Initialize</span>
+          <span class="dim mono install__sub-inline">— identity + realm config</span>
+        </div>
+        <CodeBlock lang="bash">
+          <Fragment set:html={`<span class="tk-com"># Create an identity (prints YAML to stdout)</span>
+<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> identity create \\
+    <span class="tk-kw">--identity</span> your-name <span class="tk-kw">--type</span> human \\
+    <span class="tk-op">&gt;</span> .remargin.yaml
+
+<span class="tk-com"># Verify</span>
+<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> identity`} />
+        </CodeBlock>
+      </div>
+
+      <div class="install__step">
+        <div class="install__head">
+          <span class="install__num">3</span>
+          <span class="install__label">Comment, query, integrate</span>
+        </div>
+        <CodeBlock lang="bash">
+          <Fragment set:html={`<span class="tk-com"># Add a comment</span>
+<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> comment docs/spec.md <span class="tk-str">"Needs source."</span> <span class="tk-kw">--after-line</span> <span class="tk-num">42</span>
+
+<span class="tk-com"># List pending comments addressed to you across the project</span>
+<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> query . <span class="tk-kw">--pending-for-me</span> <span class="tk-kw">--pretty</span>
+
+<span class="tk-com"># Install the MCP server (Claude Code integration)</span>
+<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> mcp install`} />
+        </CodeBlock>
+      </div>
+    </div>
+
+    <p class="caption">That's the entire surface area. Full reference: <a href="https://github.com/tixena/remargin#readme" target="_blank" rel="noopener noreferrer"><code>README.md</code></a>. Strict mode (Ed25519 signatures, registered participants only) and the Obsidian plugin are documented there.</p>
+  </div>
+</section>
+
+<style>
+.install { display: flex; flex-direction: column; gap: 28px; }
+.install__step { display: flex; flex-direction: column; gap: 12px; }
+.install__head {
+  display: flex; align-items: baseline; gap: 14px;
+  font-family: var(--font-mono);
+  flex-wrap: wrap;
+}
+.install__num {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-brand-bg);
+  color: var(--color-brand-soft);
+  border: 1px solid rgba(127,109,242,0.35);
+  border-radius: 6px;
+  font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.install__label {
+  font-size: 15px; font-weight: 600; color: var(--color-text);
+}
+.install__sub-inline { font-size: 13px; }
+</style>

@@ -1,0 +1,122 @@
+---
+import { asset } from '../lib/url';
+---
+<section class="hero" id="top" aria-labelledby="hero-title">
+  <div class="container">
+    <div class="eyebrow">
+      <span>OPEN SOURCE</span><span class="dot">·</span><span>MIT</span><span class="dot">·</span><span>v0.1.12</span>
+    </div>
+    <h1 id="hero-title">
+      A communication protocol for humans and agents —
+      <span class="accent">and between agents themselves.</span>
+    </h1>
+    <p class="hero__lede">
+      Remargin turns any markdown file into a multi-player surface where humans and AI agents leave threaded, addressable, signed, integrity-checked comments. Mutating operations are gated to preserve the conversation. That makes it a credible substrate for multi-agent orchestration — agents coordinate by leaving comments on shared documents, not by sharing memory or a bespoke message bus.
+    </p>
+    <div class="hero__cta">
+      <a class="btn btn--primary" href="#install">Install <span aria-hidden="true">→</span></a>
+      <a class="btn btn--secondary" href="https://github.com/tixena/remargin" target="_blank" rel="noopener noreferrer">
+        View on GitHub
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 17 17 7"/><path d="M7 7h10v10"/>
+        </svg>
+      </a>
+    </div>
+
+    <div class="cast" role="img" aria-label="asciinema cast placeholder: multi-agent thread">
+      <div class="cast__chrome">
+        <span class="lt"></span><span class="lt"></span><span class="lt"></span>
+        <span class="title">~ remargin demo</span>
+      </div>
+      <div class="cast__body">
+        <span class="play">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><polygon points="2,1 11,6 2,11"/></svg>
+          <span>play cast</span>
+        </span>
+      </div>
+      <div class="cast__caption">asciinema cast · multi-agent-thread.cast</div>
+    </div>
+    <!--
+      When the real cast is recorded, replace the placeholder above with:
+
+      <asciinema-player src={asset('casts/multi-agent-thread.cast')} preload></asciinema-player>
+
+      and load the player module + stylesheet from `asciinema-player` (lazy).
+      See README.md for the wiring snippet.
+    -->
+  </div>
+</section>
+
+<style>
+.hero {
+  padding: 80px 0 96px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.hero h1 {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: clamp(2rem, 5.2vw, 3.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin: 24px 0 24px;
+  max-width: 22ch;
+  color: var(--color-text);
+  text-wrap: balance;
+}
+.hero h1 .accent { color: var(--color-brand-soft); }
+.hero__lede {
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  max-width: 64ch;
+  margin: 0 0 32px;
+}
+.hero__cta {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 48px;
+}
+
+.cast {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cast__chrome {
+  height: 28px; background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex; align-items: center; gap: 6px; padding: 0 12px;
+}
+.cast__chrome .lt { width: 10px; height: 10px; border-radius: 50%; background: var(--color-border-strong); }
+.cast__chrome .lt:nth-child(1) { background: #5a4a5a; }
+.cast__chrome .lt:nth-child(2) { background: #5a554a; }
+.cast__chrome .lt:nth-child(3) { background: #4a5a55; }
+.cast__chrome .title {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-dim);
+}
+.cast__body {
+  position: absolute; inset: 28px 0 0 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 13px; color: var(--color-text-dim);
+  background:
+    radial-gradient(1200px 400px at 50% 50%, rgba(127,109,242,0.06), transparent 60%),
+    #000;
+}
+.cast__body .play {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+}
+.cast__body .play svg { width: 12px; height: 12px; fill: var(--color-brand); }
+.cast__caption {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-dim);
+  letter-spacing: 0.04em;
+}
+</style>

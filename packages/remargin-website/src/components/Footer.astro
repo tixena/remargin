@@ -1,0 +1,35 @@
+---
+const year = new Date().getFullYear();
+---
+<footer id="footer">
+  <div class="container">
+    <div class="row row--brand">
+      Remargin is open source under the MIT License. Made by
+      <a href="https://tixenalabs.com/" target="_blank" rel="noopener noreferrer">Tixena Labs</a>.
+    </div>
+    <div class="row">
+      <a href="https://github.com/tixena/remargin" target="_blank" rel="noopener noreferrer">github.com/tixena/remargin</a>
+      <span class="dim"> · </span>
+      <span class="dim">v0.1.12</span>
+      <span class="dim"> · </span>
+      <a href="https://github.com/tixena/remargin/edit/master/packages/remargin-website/src/pages/index.astro" target="_blank" rel="noopener noreferrer">Edit this page on GitHub</a>
+    </div>
+    <div class="footer__copy">© {year} Tixena Labs</div>
+  </div>
+</footer>
+
+<style>
+footer {
+  padding: 48px 0 64px;
+  border-top: 1px solid var(--color-border-subtle);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+footer .row { padding: 6px 0; }
+footer .row + .row { margin-top: 4px; }
+footer :global(a) { color: var(--color-text-muted); }
+footer :global(a:hover) { color: var(--color-text); }
+footer .dim { color: var(--color-text-dim); }
+footer .row--brand { color: var(--color-text); }
+.footer__copy { color: var(--color-text-dim); font-size: 13px; margin-top: 16px; }
+</style>

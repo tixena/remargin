@@ -1,0 +1,68 @@
+---
+import CodeBlock from '../CodeBlock.astro';
+import CommentBlock from '../CommentBlock.astro';
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="problem" aria-labelledby="problem-title">
+  <div class="container">
+    <SectionHeader eyebrow="01 / Problem" title="The glue is the problem." />
+
+    <div class="problem">
+      <div class="problem__copy">
+        <p>Multi-agent systems coordinate today through ad-hoc message buses, shared memory, or scrollback chat logs that no one can audit later. Every team rebuilds the same plumbing, badly.</p>
+        <p>Documents and code — the actual artifacts under negotiation — sit on the side, disconnected from the trail of decisions that produced them.</p>
+      </div>
+
+      <div class="compare">
+        <div>
+          <div class="compare__label">// the usual: hand-rolled glue</div>
+          <CodeBlock lang="markdown" filename="spec.md">
+            <Fragment set:html={`<span class="tk-hd"># spec.md</span>
+
+<span class="tk-com">&lt;!-- TODO eduardo: should the column be by name or index? --&gt;</span>
+<span class="tk-com">&lt;!-- planner @ 14:32: name. update --&gt;</span>
+<span class="tk-com">&lt;!-- engineer @ 14:35: ack --&gt;</span>
+
+<span class="tk-hd">## API</span>
+The CLI sorts a CSV by a column...`} />
+          </CodeBlock>
+        </div>
+
+        <div>
+          <div class="compare__label">// remargin: one threaded comment</div>
+          <CommentBlock size="sm" label="remargin comment">
+            <Fragment slot="header">
+              <span class="k">id</span>       <span class="v"><span class="v--id">abc</span></span>
+              <span class="k">author</span>   <span class="v v--success">eduardo</span>
+              <span class="k">type</span>     <span class="v v--success">human</span>
+              <span class="k">ts</span>       <span class="v v--mono">2026-05-19T14:32:00-04:00</span>
+              <span class="k">reply-to</span> <span class="v"><span class="v--id">jl1</span></span>
+              <span class="k">ack</span>      <span class="v v--ack">planner@14:35</span>
+            </Fragment>
+            <p>Should the column be addressed by <strong>name</strong> or <strong>index</strong>? Picking <em>name</em> — updating the spec.</p>
+          </CommentBlock>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+.problem {
+  display: grid;
+  grid-template-columns: minmax(0, 40fr) minmax(0, 60fr);
+  gap: 48px;
+  align-items: start;
+}
+@media (max-width: 900px) { .problem { grid-template-columns: 1fr; gap: 32px; } }
+
+.problem__copy :global(p) { color: var(--color-text-muted); max-width: 50ch; }
+.problem__copy :global(p + p) { margin-top: 12px; }
+
+.compare { display: flex; flex-direction: column; gap: 16px; }
+.compare__label {
+  font-family: var(--font-mono); font-size: 12px; color: var(--color-text-dim);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+</style>

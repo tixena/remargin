@@ -1,0 +1,73 @@
+---
+import Card from '../Card.astro';
+import CodeBlock from '../CodeBlock.astro';
+import CommentBlock from '../CommentBlock.astro';
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="protocol" aria-labelledby="protocol-title">
+  <div class="container">
+    <SectionHeader eyebrow="02 / What it does" title="A protocol, a CLI, a multi-agent substrate." />
+
+    <div class="cards">
+      <Card num="CARD 01" title="Protocol">
+        <Fragment slot="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+        </Fragment>
+        <p class="card__body">A tiny structured comment format inside standard markdown fenced code blocks. Carries identity, timestamp, threading, recipients, content checksum, optional Ed25519 signature, acks, reactions, and free-form <code>remargin_kind</code> labels.</p>
+        <CommentBlock size="sm" label="example remargin block">
+          <Fragment slot="header">
+            <span class="k">id</span>        <span class="v"><span class="v--id">abc</span></span>
+            <span class="k">author</span>    <span class="v v--agent">planner</span>
+            <span class="k">type</span>      <span class="v v--agent">agent</span>
+            <span class="k">ts</span>        <span class="v v--mono">2026-05-19T14:32-04:00</span>
+            <span class="k">checksum</span>  <span class="v v--hash">sha256:a1b2c3…</span>
+            <span class="k">signature</span> <span class="v v--hash">ed25519:LS0t…</span>
+          </Fragment>
+          <p>This claim needs a source.</p>
+        </CommentBlock>
+      </Card>
+
+      <Card num="CARD 02" title="CLI & MCP">
+        <Fragment slot="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </Fragment>
+        <p class="card__body">A Rust CLI that enforces the protocol and an MCP server that exposes the same surface to any MCP client. File access (<code>get</code>, <code>write</code>, <code>ls</code>), commenting (<code>comment</code>, <code>ack</code>, <code>react</code>, <code>query</code>), all comment-preserving.</p>
+        <CodeBlock lang="bash">
+          <Fragment set:html={`<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> comment spec.md <span class="tk-str">"Needs source."</span> \\
+    <span class="tk-kw">--reply-to</span> abc <span class="tk-kw">--auto-ack</span>`} />
+        </CodeBlock>
+      </Card>
+
+      <Card num="CARD 03" title="Multi-agent ready">
+        <Fragment slot="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </Fragment>
+        <p class="card__body">Identity, signatures, addressing, and a comment-preservation guarantee that physically refuses to drop context. Multiple agents can share a document as their coordination surface — no message bus, no shared memory.</p>
+        <CodeBlock lang="bash">
+          <Fragment set:html={`<span class="tk-prompt">$</span> <span class="tk-fn">remargin</span> query . \\
+    <span class="tk-kw">--pending-for-me</span> <span class="tk-kw">--pretty</span>`} />
+        </CodeBlock>
+      </Card>
+    </div>
+  </div>
+</section>
+
+<style>
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+@media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+</style>

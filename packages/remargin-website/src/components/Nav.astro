@@ -1,0 +1,87 @@
+---
+import { asset } from '../lib/url';
+---
+<header class="nav" id="nav">
+  <div class="container nav__inner">
+    <a class="nav__brand" href="#top">
+      <img class="nav__logo" src={asset('remargin-logo.svg')} alt="" width="32" height="32" />
+      <span>remargin</span>
+    </a>
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#protocol" class="hide-mobile">Protocol</a>
+      <a href="#multi-agent" class="hide-mobile">Multi-agent</a>
+      <a href="#install">Install</a>
+      <a href="#roadmap" class="hide-mobile">Roadmap</a>
+      <a class="nav__gh" href="https://github.com/tixena/remargin" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.94c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.3-.52-1.48.11-3.08 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.6.23 2.78.11 3.08.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.25 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/>
+        </svg>
+        <span class="hide-mobile">GitHub</span>
+      </a>
+      <span class="nav__version" aria-label="version">v0.1.12</span>
+    </nav>
+  </div>
+</header>
+
+<style>
+.nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(14,13,20,0);
+  border-bottom: 1px solid transparent;
+  transition: background 200ms ease, border-color 200ms ease, backdrop-filter 200ms ease;
+}
+.nav.is-solid {
+  background: rgba(14,13,20,0.85);
+  backdrop-filter: saturate(140%) blur(10px);
+  -webkit-backdrop-filter: saturate(140%) blur(10px);
+  border-bottom-color: var(--color-border-subtle);
+}
+.nav__inner {
+  display: flex; align-items: center; gap: 24px;
+  height: 64px;
+}
+.nav__brand {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--font-mono); font-weight: 600; font-size: 16px;
+  color: var(--color-text);
+}
+.nav__brand:hover { text-decoration: none; }
+.nav__logo { width: 32px; height: 32px; display: block; }
+.nav__links {
+  display: flex; align-items: center; gap: 24px;
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--color-text-muted);
+}
+.nav__links :global(a) { color: var(--color-text-muted); }
+.nav__links :global(a:hover) { color: var(--color-text); text-decoration: none; }
+.nav__gh {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--color-text-muted);
+}
+.nav__gh svg { width: 18px; height: 18px; }
+.nav__version {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-dim);
+  letter-spacing: 0.02em;
+}
+@media (max-width: 760px) {
+  .nav__links :global(.hide-mobile) { display: none; }
+}
+</style>
+
+<script is:inline>
+  (function () {
+    var nav = document.getElementById('nav');
+    if (!nav) return;
+    function onScroll() {
+      if (window.scrollY > 8) nav.classList.add('is-solid');
+      else nav.classList.remove('is-solid');
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>

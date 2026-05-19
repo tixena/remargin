@@ -1,0 +1,20 @@
+---
+import Callout from '../Callout.astro';
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="preservation" aria-labelledby="preservation-title">
+  <div class="container">
+    <SectionHeader eyebrow="05 / Preservation" title="The protocol refuses to lose context." />
+
+    <Callout label="terminal: comment-preservation violation">
+      <span class="row"><span class="prompt">$</span> <span class="cmd">remargin write spec.md "$(cat broken-spec.md)"</span></span>
+      <span class="row"><span class="err">error</span>: comment preservation violation</span>
+      <span class="row"><span class="indent"></span><span class="muted">comments dropped:</span> <span class="err">[pl1, en1]</span></span>
+      <span class="row"><span class="indent"></span><span class="muted">canonical pre-write set:</span> 3 comments</span>
+      <span class="row"><span class="indent"></span><span class="muted">post-write set:</span> 1 comment</span>
+      <span class="row"><span class="muted">exit code:</span> <span class="exit">5</span></span>
+    </Callout>
+
+    <p class="caption">“Every mutating operation runs a comment-preservation check before commit. If an agent's write would silently drop a comment another participant left behind, the write is rejected with exit code 5.”</p>
+  </div>
+</section>

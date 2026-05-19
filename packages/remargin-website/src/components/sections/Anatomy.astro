@@ -1,0 +1,59 @@
+---
+import Annotation from '../Annotation.astro';
+import CommentBlock from '../CommentBlock.astro';
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="anatomy" aria-labelledby="anatomy-title">
+  <div class="container">
+    <SectionHeader eyebrow="03 / Anatomy" title="A real comment, annotated.">
+      <Fragment slot="lede">
+        Every field is load-bearing. Standard markdown renderers ignore the <code>remargin</code> fenced block; the CLI and MCP server parse and verify it.
+      </Fragment>
+    </SectionHeader>
+
+    <div class="anatomy">
+      <CommentBlock label="annotated remargin comment">
+        <Fragment slot="header">
+          <span class="k"><span class="marker">1</span>id</span>             <span class="v"><span class="v--id">k3h</span></span>
+          <span class="k"><span class="marker">2</span>author</span>         <span class="v v--success">eduardo</span>
+          <span class="k"><span class="marker">2</span>type</span>           <span class="v v--success">human</span>
+          <span class="k"><span class="marker">3</span>ts</span>             <span class="v v--mono">2026-05-19T14:32:00-04:00</span>
+          <span class="k"><span class="marker">4</span>to</span>             <span class="v"><span class="v--mono">[</span>planner<span class="v--mono">,</span> engineer<span class="v--mono">]</span></span>
+          <span class="k"><span class="marker">5</span>reply-to</span>       <span class="v"><span class="v--id">jl1</span></span>
+          <span class="k"><span class="marker">5</span>thread</span>         <span class="v"><span class="v--id">jl1</span></span>
+          <span class="k"><span class="marker">6</span>remargin_kind</span>  <span class="v"><span class="v--chip">urgent</span><span class="v--chip">design-question</span></span>
+          <span class="k"><span class="marker">7</span>checksum</span>       <span class="v v--hash">sha256:a1b2c3d4e5f6…</span>
+          <span class="k"><span class="marker">8</span>signature</span>      <span class="v v--hash">ed25519:LS0tLS1CRUdJTiBTU0gg…</span>
+          <span class="k"><span class="marker">9</span>ack</span>            <span class="v v--ack">planner @ 2026-05-19T14:35:00-04:00</span>
+          <span class="k"><span class="marker">10</span>reactions</span>     <span class="v v--reaction">👀 <span class="v--mono">[</span>planner<span class="v--mono">]</span></span>
+        </Fragment>
+        <p>Should the column be addressed by <strong>name</strong> or <strong>index</strong>? Name is friendlier but breaks on headerless CSVs. Index is brittle to reordering. Pick one and stay consistent across the spec and the implementation.</p>
+      </CommentBlock>
+
+      <aside class="legend" aria-label="Field reference">
+        <Annotation num="1"><code>id</code> — Per-document unique identifier. Stable across mutations; line numbers are not.</Annotation>
+        <Annotation num="2"><code>author</code> + <code>type</code> — Identity and kind. <code>human</code> or <code>agent</code>. In strict mode, must match a registered participant.</Annotation>
+        <Annotation num="3"><code>ts</code> — ISO-8601 with timezone. Defines ordering.</Annotation>
+        <Annotation num="4"><code>to</code> — Recipients whose attention is requested. Optional. Omit for broadcast.</Annotation>
+        <Annotation num="5"><code>reply-to</code> + <code>thread</code> — Reply-to is the parent; thread is the root ancestor.</Annotation>
+        <Annotation num="6"><code>remargin_kind</code> — Free-form labels (max 15 chars, <code>[a-zA-Z0-9_- ]</code>). Triage filters.</Annotation>
+        <Annotation num="7"><code>checksum</code> — SHA-256 of normalized content. Detects post-creation tampering.</Annotation>
+        <Annotation num="8"><code>signature</code> — Ed25519 signature over content + metadata. Required in strict mode.</Annotation>
+        <Annotation num="9"><code>ack</code> — Recipients who have acknowledged the comment, with timestamp.</Annotation>
+        <Annotation num="10"><code>reactions</code> — Emoji map: emoji → list of authors.</Annotation>
+      </aside>
+    </div>
+
+    <p class="caption">“This is the entire protocol. Standard markdown renderers ignore the <code>remargin</code> fenced block; the CLI and MCP server parse and verify it.”</p>
+  </div>
+</section>
+
+<style>
+.anatomy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 40px;
+  align-items: start;
+}
+@media (max-width: 1000px) { .anatomy { grid-template-columns: 1fr; } }
+</style>

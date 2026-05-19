@@ -1,0 +1,44 @@
+---
+import CodeBlock from '../CodeBlock.astro';
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="permissions" aria-labelledby="permissions-title">
+  <div class="container">
+    <SectionHeader eyebrow="06 / Permissions" title="Boundaries that hold." />
+
+    <div class="split">
+      <div class="split__copy">
+        <p>A <code>permissions:</code> block in <code>.remargin.yaml</code> declares which paths agents can mutate and which Bash commands can run on those paths.</p>
+        <p>Two enforcement layers consume it: remargin's CLI/MCP rejects ops outside the allow-list per-op, and <code>remargin claude restrict &lt;path&gt;</code> projects the same rules into Claude Code's native tool permissions.</p>
+        <p><strong>One source of truth. Two layers of enforcement.</strong></p>
+      </div>
+
+      <CodeBlock lang="yaml" filename=".remargin.yaml">
+        <Fragment set:html={`<span class="tk-kw">permissions</span><span class="tk-op">:</span>
+  <span class="tk-kw">trusted_roots</span><span class="tk-op">:</span>
+    <span class="tk-op">-</span> ~/src/myproject
+    <span class="tk-op">-</span> <span class="tk-kw">path</span><span class="tk-op">:</span> ~/src/myproject/secure
+      <span class="tk-kw">also_deny_bash</span><span class="tk-op">:</span> <span class="tk-op">[</span><span class="tk-str">curl</span><span class="tk-op">,</span> <span class="tk-str">wget</span><span class="tk-op">]</span>
+  <span class="tk-kw">deny_ops</span><span class="tk-op">:</span>
+    <span class="tk-op">-</span> <span class="tk-kw">path</span><span class="tk-op">:</span> ~/src/myproject/signed_archive
+      <span class="tk-kw">ops</span><span class="tk-op">:</span> <span class="tk-op">[</span><span class="tk-str">purge</span><span class="tk-op">,</span> <span class="tk-str">delete</span><span class="tk-op">]</span>
+  <span class="tk-kw">allow_dot_folders</span><span class="tk-op">:</span> <span class="tk-op">[</span><span class="tk-str">'.github'</span><span class="tk-op">]</span>`} />
+      </CodeBlock>
+    </div>
+  </div>
+</section>
+
+<style>
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: start;
+}
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; gap: 32px; } }
+.split__copy :global(p) { color: var(--color-text-muted); max-width: 56ch; }
+.split__copy :global(p + p) { margin-top: 14px; }
+.split__copy :global(strong) {
+  color: var(--color-text); font-family: var(--font-mono); font-weight: 600;
+}
+</style>

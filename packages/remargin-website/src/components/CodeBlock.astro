@@ -1,0 +1,88 @@
+---
+/**
+ * <CodeBlock lang="bash" filename="bash">…</CodeBlock>
+ *
+ * The default slot is rendered inside <pre><code>. For now we expect the
+ * consumer to pass pre-tokenized HTML (using the .tk-* spans below). When the
+ * Shiki pipeline lands, swap this with `<Code lang={lang} code={code} theme={theme} />`
+ * and drop the manual spans.
+ */
+interface Props {
+  lang?: string;
+  filename?: string;
+  /** Label shown on the top-left of the block. Defaults to `lang` or `filename`. */
+  label?: string;
+}
+const { lang = 'text', filename, label } = Astro.props;
+const headerLabel = label ?? filename ?? lang;
+---
+<div class="codeblock" data-lang={lang}>
+  <div class="codeblock__header">
+    <span class="codeblock__lang">{headerLabel}</span>
+    <button class="codeblock__copy" type="button" aria-label="Copy to clipboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="9" width="13" height="13" rx="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+      <span>copy</span>
+    </button>
+  </div>
+  <pre><code><slot /></code></pre>
+</div>
+
+<style>
+.codeblock {
+  position: relative;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.codeblock__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: rgba(0,0,0,0.15);
+}
+.codeblock__lang {
+  font-size: 11px; font-weight: 500;
+  color: var(--color-text-dim);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.codeblock__copy {
+  background: transparent; color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 6px; padding: 4px 8px;
+  font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.codeblock__copy:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-strong);
+}
+.codeblock__copy.is-copied { color: var(--color-success); border-color: var(--color-success); }
+.codeblock__copy svg { width: 12px; height: 12px; }
+.codeblock pre { margin: 0; padding: 20px; overflow-x: auto; }
+.codeblock code { font-family: inherit; color: var(--color-text); }
+
+/* Token classes — derived from the violet Shiki palette (src/lib/shiki-theme.json) */
+.codeblock :global(.tk-com)    { color: var(--color-text-dim); font-style: italic; }
+.codeblock :global(.tk-kw)     { color: var(--color-brand-soft); }
+.codeblock :global(.tk-str)    { color: var(--color-success); }
+.codeblock :global(.tk-num)    { color: var(--color-accent-amber); }
+.codeblock :global(.tk-fn)     { color: var(--color-brand); }
+.codeblock :global(.tk-op)     { color: var(--color-text-muted); }
+.codeblock :global(.tk-hd)     { color: var(--color-brand); font-weight: 700; }
+.codeblock :global(.tk-b)      { color: var(--color-text); font-weight: 700; }
+.codeblock :global(.tk-it)     { color: var(--color-text); font-style: italic; }
+.codeblock :global(.tk-bad)    { color: var(--color-danger); }
+.codeblock :global(.tk-prompt) { color: var(--color-success); }
+.codeblock :global(.tk-cmd)    { color: #fff; }
+.codeblock :global(.tk-err)    { color: var(--color-danger); }
+</style>

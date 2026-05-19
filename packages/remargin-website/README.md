@@ -4,7 +4,7 @@ Public landing page for [Remargin](https://github.com/tixena/remargin), deployed
 
 ## Status
 
-Scaffold only. The current `src/pages/index.astro` is a placeholder used to verify the build & deploy pipeline. The real design is produced via Claude Design — see the brief at `personal/remargin/demo/05-claude-design-prompt.md` in the `eburgos_notes` vault.
+Live. `src/pages/index.astro` composes the full landing page from the components in `src/components/`. Update copy and tokens in place — there is no separate placeholder. The original Claude Design brief is preserved at `personal/remargin/demo/05-claude-design-prompt.md` in the `eburgos_notes` vault for reference.
 
 ## Local development
 

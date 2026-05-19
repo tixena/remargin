@@ -1,0 +1,75 @@
+---
+/**
+ * <ThreadCard>
+ *   <!-- default slot: vertical stack of <CommentBlock>s with indent classes -->
+ *   <Fragment slot="notes">…right-margin annotations…</Fragment>
+ * </ThreadCard>
+ */
+---
+<div class="thread">
+  <div class="thread__stack">
+    <slot />
+  </div>
+  <aside class="thread__notes" aria-label="Thread annotations">
+    <slot name="notes" />
+  </aside>
+</div>
+
+<style>
+.thread {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 40px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .thread { grid-template-columns: 1fr; }
+}
+.thread__stack {
+  position: relative;
+  display: flex; flex-direction: column;
+  gap: 20px;
+}
+.thread__stack :global(.thread__node) { position: relative; }
+.thread__stack :global(.thread__node--indent-1) { margin-left: 40px; }
+.thread__stack :global(.thread__node--indent-2) { margin-left: 80px; }
+.thread__stack :global(.thread__node--indent-1)::before,
+.thread__stack :global(.thread__node--indent-2)::before {
+  content: "";
+  position: absolute;
+  left: -22px; top: -20px; bottom: 50%;
+  width: 1px; background: var(--color-border);
+}
+.thread__stack :global(.thread__node--indent-1)::after,
+.thread__stack :global(.thread__node--indent-2)::after {
+  content: "";
+  position: absolute;
+  left: -22px; top: 30px;
+  width: 18px; height: 1px;
+  background: var(--color-border);
+}
+
+.thread__notes {
+  display: flex; flex-direction: column; gap: 24px;
+  position: sticky; top: 88px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.thread__notes :global(.thread__note) { line-height: 1.5; }
+.thread__notes :global(.tag) {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  color: var(--color-brand-soft);
+  background: var(--color-brand-bg);
+  border: 1px solid rgba(127,109,242,0.35);
+  padding: 2px 6px; border-radius: 4px;
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+.thread__notes :global(code) {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--color-text);
+  background: var(--color-surface); padding: 1px 5px; border-radius: 3px;
+  border: 1px solid var(--color-border-subtle);
+}
+</style>

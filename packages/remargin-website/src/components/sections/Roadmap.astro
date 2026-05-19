@@ -1,0 +1,51 @@
+---
+import SectionHeader from '../SectionHeader.astro';
+---
+<section id="roadmap" aria-labelledby="roadmap-title">
+  <div class="container">
+    <SectionHeader eyebrow="08 / Roadmap" title="Open source, shipping weekly." />
+
+    <div class="roadmap">
+      <span class="roadmap__tag">v0.1.12 · 2026</span>
+      <p>Remargin is open source and shipping. The protocol and CLI are stable enough for daily use; ergonomics and UI affordances are landing each week.</p>
+      <p><strong>Shipped:</strong> protocol spec, comment-preservation guarantee, threaded comments, identity &amp; signatures (open / registered / strict), permissions layer, MCP server, Obsidian plugin, activity feed, sandbox staging, plan-based dry-run.</p>
+      <p><strong>In flight:</strong> editor widget rendering for comments inside Obsidian, comment-kind filters in the UI, an update-check mechanism for the plugin, pretty-print of comments in the editor view.</p>
+      <p><strong>Open invitations:</strong> protocol critique, alternative client implementations (we have CLI, MCP, Obsidian — VS Code or a web UI would be welcome PRs), integration patterns for multi-agent frameworks.</p>
+      <div class="roadmap__cta">
+        <a class="btn btn--secondary" href="https://github.com/tixena/remargin/issues/new" target="_blank" rel="noopener noreferrer">
+          Open an issue
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M7 17 17 7"/><path d="M7 7h10v10"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+.roadmap {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 32px;
+  position: relative;
+}
+.roadmap__tag {
+  position: absolute; top: 20px; right: 20px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  color: var(--color-text-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.roadmap :global(p) { color: var(--color-text-muted); max-width: 70ch; }
+.roadmap :global(p + p) { margin-top: 12px; }
+.roadmap :global(strong) {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.roadmap__cta { margin-top: 24px; }
+</style>

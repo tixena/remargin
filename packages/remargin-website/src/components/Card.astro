@@ -1,0 +1,47 @@
+---
+/**
+ * <Card num="CARD 01" title="Protocol">
+ *   <Fragment slot="icon">…</Fragment>
+ *   <p class="card__body">…</p>
+ *   …
+ * </Card>
+ */
+interface Props {
+  num: string;
+  title: string;
+}
+const { num, title } = Astro.props;
+---
+<article class="card">
+  <span class="card__num">{num}</span>
+  <h3 class="card__title">
+    {Astro.slots.has('icon') && <span class="card__icon"><slot name="icon" /></span>}
+    {title}
+  </h3>
+  <slot />
+</article>
+
+<style>
+.card {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.card__num {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  color: var(--color-text-dim); letter-spacing: 0.08em;
+}
+.card__title {
+  font-family: var(--font-mono); font-size: 1.125rem; font-weight: 600;
+  margin: 0; line-height: 1.4; color: var(--color-text);
+}
+.card__icon :global(svg) {
+  width: 16px; height: 16px; display: inline-block; vertical-align: -2px;
+  margin-right: 8px; color: var(--color-brand); stroke: currentColor;
+}
+.card :global(.card__body) {
+  color: var(--color-text-muted); font-size: 15px; margin: 0;
+}
+</style>

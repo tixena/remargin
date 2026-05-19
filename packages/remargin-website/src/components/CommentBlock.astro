@@ -1,0 +1,138 @@
+---
+/**
+ * <CommentBlock size="md" verified>
+ *   <Fragment slot="header"> header rows (use grid k/v pairs) </Fragment>
+ *   <Fragment> body markdown </Fragment>
+ * </CommentBlock>
+ *
+ * The header slot receives a grid context: emit pairs of
+ *   <span class="k">field</span><span class="v">value</span>
+ * inside it. See sections/Anatomy.astro for the canonical usage.
+ */
+interface Props {
+  size?: 'sm' | 'md';
+  verified?: boolean;
+  /** Aria label for the comment group. */
+  label?: string;
+}
+const { size = 'md', verified = true, label = 'remargin comment' } = Astro.props;
+---
+<div class:list={['cmt', size === 'sm' && 'cmt--sm']} role="group" aria-label={label}>
+  {verified && (
+    <span class="cmt__verified" aria-label="verified">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <span class="cmt__verified-text">verified</span>
+    </span>
+  )}
+  <div class="cmt__header">
+    <slot name="header" />
+  </div>
+  <div class="cmt__divider"></div>
+  <div class="cmt__body">
+    <slot />
+  </div>
+</div>
+
+<style>
+.cmt {
+  position: relative;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-brand);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.cmt__verified {
+  position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid rgba(52,211,153,0.25);
+  border-radius: 999px;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.cmt__verified svg { width: 10px; height: 10px; }
+.cmt__header {
+  padding: 16px 20px 12px;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.cmt__header :global(.k) {
+  color: var(--color-text-muted);
+  font-size: 12px; font-weight: 400;
+  white-space: nowrap;
+}
+.cmt__header :global(.v)            { color: var(--color-text); font-size: 13px; }
+.cmt__header :global(.v--success)   { color: var(--color-success); }
+.cmt__header :global(.v--agent)     { color: var(--color-brand-soft); }
+.cmt__header :global(.v--id) {
+  color: var(--color-accent-amber);
+  background: var(--color-accent-amber-bg);
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 12px; font-weight: 500;
+  border: 1px solid rgba(212,160,23,0.2);
+  display: inline-block;
+}
+.cmt__header :global(.v--chip) {
+  display: inline-block;
+  background: var(--color-accent-amber-bg);
+  color: var(--color-accent-amber);
+  border: 1px solid rgba(212,160,23,0.2);
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; font-weight: 500;
+  margin-right: 6px;
+}
+.cmt__header :global(.v--mono)     { color: var(--color-text-muted); }
+.cmt__header :global(.v--hash)     { color: var(--color-text-muted); word-break: break-all; }
+.cmt__header :global(.v--ack)      { color: var(--color-success); }
+.cmt__header :global(.v--reaction) { color: var(--color-text); }
+.cmt__header :global(.marker) {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--color-brand-bg);
+  color: var(--color-brand-soft);
+  border: 1px solid rgba(127,109,242,0.35);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  margin-right: 8px;
+  vertical-align: -4px;
+  font-variant-numeric: tabular-nums;
+}
+.cmt__divider {
+  height: 1px; background: var(--color-border-subtle);
+  margin: 4px 20px 0;
+}
+.cmt__body {
+  padding: 18px 20px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+.cmt__body :global(p)         { margin: 0; }
+.cmt__body :global(p + p)     { margin-top: 12px; }
+.cmt__body :global(strong)    { font-weight: 600; }
+.cmt__body :global(code) {
+  font-family: var(--font-mono); font-size: 13px;
+  background: var(--color-surface); padding: 1px 5px; border-radius: 4px;
+  border: 1px solid var(--color-border-subtle);
+}
+
+/* Small variant — used inside Cards and dense comparisons. */
+.cmt--sm .cmt__header { padding: 12px 14px 8px; font-size: 12px; column-gap: 12px; }
+.cmt--sm .cmt__header :global(.k) { font-size: 11px; }
+.cmt--sm .cmt__header :global(.v) { font-size: 12px; }
+.cmt--sm .cmt__divider { margin: 4px 14px 0; }
+.cmt--sm .cmt__body    { padding: 12px 14px; font-size: 13.5px; }
+.cmt--sm .cmt__verified { top: 10px; right: 10px; font-size: 10px; padding: 2px 6px; }
+.cmt--sm .cmt__verified-text { display: none; }
+</style>
