@@ -12,14 +12,16 @@ Given a system-prompt name, process every sandboxed file in this vault that reso
 
 2. **Filter by resolved prompt.** For each file, call `mcp__remargin__prompt_resolve` and keep files whose resolved prompt name equals `<prompt-name>`. If the filtered list is empty, return a summary indicating no files matched and exit.
 
-3. **Frame the work.** Look up the prompt body via `mcp__remargin__prompt_resolve` once (any matching file's resolution will do; they all resolve to the same prompt by construction). Treat the body as the current task definition.
+3. **Check activity across the filtered set.** Call `mcp__remargin__activity` once with `pretty: true` against the common ancestor directory of the filtered files (or each file individually if they're scattered). Read the full delta since your last action — reactions, acks on threads you're in, comments addressed to others, edits, signatures landed since you last looked. This is the broader context your per-file replies will need to account for. See remargin skill Critical rule 11.
 
-4. **Process each file, sequentially.** For each file in the filtered list:
-   1. Apply the per-file processing flow described in `/remargin:process-file` (read, surface pending comments, reply, edit body — all under the framed prompt).
+4. **Frame the work.** Look up the prompt body via `mcp__remargin__prompt_resolve` once (any matching file's resolution will do; they all resolve to the same prompt by construction). Treat the body as the current task definition.
+
+5. **Process each file, sequentially.** For each file in the filtered list:
+   1. Apply the per-file processing flow described in `/remargin:process-file` (read, surface pending comments, reply, edit body — all under the framed prompt). Take activity into account when drafting replies — don't repeat an answer someone else already posted, adjust for edits that have moved the conversation.
    2. On success: call `mcp__remargin__sandbox_remove` with the file path.
    3. On failure: leave the sandbox marker in place. Record the failure. Carry on to the next file.
 
-5. **Return a structured summary.** Files attempted, files successfully processed, files left sandboxed due to failure, per-file outcomes.
+6. **Return a structured summary.** Files attempted, files successfully processed, files left sandboxed due to failure, per-file outcomes.
 
 ## Constraints
 

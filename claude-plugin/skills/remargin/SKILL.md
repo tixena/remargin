@@ -106,7 +106,7 @@ stop at the first match:
 8. **`auto_ack: true` is allowed only when** (a) the parent comment is addressed to you via `to:` AND (b) your reply fully resolves the ask. `auto_ack` without `reply_to` is rejected.
 9. **Never declare a different identity per call** unless the user explicitly asked. Per-call `identity` / `type` / `config_path` to declare someone else = impersonation.
 10. **Never delete other participants' comments** to unblock your own op. Find another path or ask the user.
-11. **Use `remargin activity` to find what's new in managed `.md` since you last acted.** Do not hand-roll timestamps from `comments` / `query` for this purpose — those tools don't compute the per-file caller-last-action cutoff and don't fold edits / re-sandboxes into a single change list.
+11. **Always run `remargin activity` (or `/remargin:activity`) BEFORE processing comments — pending comments are only one signal.** Activity surfaces the full delta since you last acted on each file: comments addressed to you, comments addressed to others, broadcast comments, new acks on threads you participate in, reactions added/removed, comment edits, signatures landed on previously-unsigned comments, sandbox-adds by other identities. Replying to your pending queue without checking activity means you miss context that may change what your reply should say — e.g. someone else already answered, a thread you're in just got new participants, an edit invalidated the assumption behind your draft. Do not hand-roll timestamps from `comments` / `query` for this purpose; those tools don't compute the per-file caller-last-action cutoff and don't fold edits / reactions / sandbox refreshes into a single change list.
 12. **Each participant owns their own ack queue.** Don't ack on someone else's behalf, and never advise them to leave a comment unacked — their queue is their decision. You may deliberately leave your own reply unacked to keep it visible in your own pending queue.
 
 ---
@@ -119,8 +119,10 @@ Each section starts with the question an agent is actually asking.
 
 This is the most common multi-comment workflow. Use `batch`. **Do not** bundle into one comment, **do not** post N sequential `comment` calls.
 
-1. List them: `remargin query --pending --pretty <folder>` (CLI) or `mcp__remargin__query` with `pending: true`.
-2. For each comment, complete the action it asks (file the bd task, update the doc, run the verification, etc.).
+**Before the steps below: run activity first.** `remargin activity --pretty <folder>` or `/remargin:activity <folder>`. Read the full timeline before opening the pending queue — reactions, acks on threads you're in, comments addressed to others, edits, and signatures since your last visit all live there and may change what your reply should say. Pending-for-me is only one slice of the picture; activity is the full delta. See Critical rule 11.
+
+1. List the pending ones: `remargin query --pending --pretty <folder>` (CLI) or `mcp__remargin__query` with `pending: true`.
+2. For each comment, complete the action it asks (file the bd task, update the doc, run the verification, etc.). Adjust your reply for anything activity surfaced — e.g. don't repeat an answer someone else already posted on the same thread.
 3. Reply to all N via ONE `batch` call:
 
    ```
