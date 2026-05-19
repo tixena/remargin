@@ -1,0 +1,21 @@
+{
+  "name": "remargin-website",
+  "version": "0.1.12",
+  "private": true,
+  "type": "module",
+  "description": "Public landing page for Remargin — https://tixena.github.io/remargin/",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "lint": "pnpm exec biome check --write --diagnostic-level=error"
+  },
+  "dependencies": {
+    "astro": "^5.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,154 @@
+---
+// Placeholder landing page — to be replaced by the design produced via Claude Design.
+// See `personal/remargin/demo/05-claude-design-prompt.md` in eburgos_notes for the brief.
+const title = 'Remargin — a communication protocol for humans and agents';
+const description =
+  'Remargin turns any markdown file into a multi-player surface with threaded, signed, integrity-checked comments. A credible substrate for multi-agent orchestration.';
+const base = import.meta.env.BASE_URL;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href={`${base}/remargin-logo.svg`} />
+    <title>{title}</title>
+    <style>
+      :root {
+        --color-brand: #7f6df2;
+        --color-bg: #0e0d14;
+        --color-surface: #16151f;
+        --color-border: #38374a;
+        --color-text: #e6e4f1;
+        --color-text-muted: #a5a2ba;
+        --color-text-dim: #6f6c85;
+        --color-success: #34d399;
+        --color-accent-amber: #d4a017;
+        --font-mono:
+          'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo,
+          Consolas, monospace;
+        --font-sans:
+          'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
+          sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--color-bg);
+        color: var(--color-text);
+        font-family: var(--font-sans);
+        line-height: 1.65;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      main {
+        flex: 1;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 96px 32px;
+      }
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        color: var(--color-text-dim);
+        text-transform: uppercase;
+        margin-bottom: 24px;
+      }
+      h1 {
+        font-family: var(--font-mono);
+        font-size: clamp(36px, 6vw, 56px);
+        line-height: 1.05;
+        font-weight: 700;
+        margin: 0 0 24px;
+        color: var(--color-text);
+      }
+      h1 .brand {
+        color: var(--color-brand);
+      }
+      .lede {
+        font-size: 18px;
+        max-width: 70ch;
+        color: var(--color-text-muted);
+        margin: 0 0 48px;
+      }
+      .scaffold {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-brand);
+        border-radius: 12px;
+        padding: 24px 28px;
+        margin: 32px 0;
+      }
+      .scaffold h2 {
+        font-family: var(--font-mono);
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 12px;
+        color: var(--color-text);
+      }
+      .scaffold ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--color-text-muted);
+      }
+      .scaffold code {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        color: var(--color-accent-amber);
+        background: rgba(212, 160, 23, 0.08);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      footer {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px;
+        color: var(--color-text-dim);
+        font-size: 14px;
+        border-top: 1px solid var(--color-border);
+      }
+      footer a {
+        color: var(--color-brand);
+        text-decoration: none;
+      }
+      footer a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">Open Source · MIT · v0.1.12</div>
+      <h1>
+        A communication protocol for humans and agents — and
+        <span class="brand">between agents themselves.</span>
+      </h1>
+      <p class="lede">{description}</p>
+
+      <div class="scaffold">
+        <h2>Placeholder scaffold</h2>
+        <ul>
+          <li>This page is a deploy smoke-test for the Astro + GitHub Pages pipeline.</li>
+          <li>The real content lands here once <code>05-claude-design-prompt.md</code> runs through Claude Design.</li>
+          <li>Base path: <code>{base}</code></li>
+          <li>Repo: <a href="https://github.com/tixena/remargin" style="color:var(--color-brand);text-decoration:none">github.com/tixena/remargin</a></li>
+        </ul>
+      </div>
+    </main>
+    <footer>
+      Made by <a href="https://tixenalabs.com/">Tixena Labs</a> · MIT License ·
+      <a href="https://github.com/tixena/remargin">github.com/tixena/remargin</a>
+    </footer>
+  </body>
+</html>
