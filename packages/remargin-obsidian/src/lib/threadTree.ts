@@ -2,9 +2,7 @@ import type { Comment } from "@/generated/types";
 
 /**
  * One node in a comment thread tree: the comment itself plus its direct
- * replies (each a thread node, recursively). Replies appear in the
- * order they showed up in the source list — `buildThreadTree` does
- * not re-sort.
+ * replies, sorted oldest-first by `ts`. Roots stay in source order.
  */
 export interface ThreadNode {
   comment: Comment;
@@ -16,7 +14,9 @@ export interface ThreadNode {
  *
  * Roots are comments whose `reply_to` is unset OR points to an id that
  * is not in `comments` (orphan replies — they float up to root so the
- * widget still renders them).
+ * widget still renders them). Roots stay in source order; replies are
+ * sorted oldest-first by `ts` so a reader sees the conversation in the
+ * order it happened. Stable on equal `ts` — first occurrence wins.
  */
 export function buildThreadTree(comments: Comment[]): ThreadNode[] {
   const byId = new Map<string, ThreadNode>();
@@ -37,7 +37,15 @@ export function buildThreadTree(comments: Comment[]): ThreadNode[] {
     }
   }
 
+  sortRepliesAsc(roots);
   return roots;
+}
+
+function sortRepliesAsc(nodes: ThreadNode[]): void {
+  for (const node of nodes) {
+    node.replies.sort((a, b) => (a.comment.ts ?? "").localeCompare(b.comment.ts ?? ""));
+    sortRepliesAsc(node.replies);
+  }
 }
 
 /**
