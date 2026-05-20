@@ -26,12 +26,6 @@ interface CommentCardProps {
   /** Current identity name; used by ReactionPills to mark "mine" pills. */
   me?: string | null;
   /**
-   * Author of the comment this one replies to. Used as a fallback target
-   * for the "to:" chip when `comment.to` is empty — a reply without an
-   * explicit `to` field is implicitly addressed to the parent's author.
-   */
-  parentAuthor?: string;
-  /**
    * Toggle the current identity's ack on this comment. Invoked from two
    * places on the card: the inline AckButton (when the viewer hasn't
    * acked yet, `remove: false`) and the ellipsis-menu `Unack` item (when
@@ -63,7 +57,6 @@ export function CommentCard({
   depth,
   isOnline,
   me,
-  parentAuthor,
   onAck,
   onDelete,
   onReply,
@@ -78,15 +71,7 @@ export function CommentCard({
   // Rules are documented on the helper; the card is a pure render of
   // its output.
   const affordance = ackAffordanceFor(comment.author, ackAuthors, me);
-  // Resolve the "to:" chip targets. Prefer the explicit `to` field; fall
-  // back to the parent comment's author for replies that did not set `to`.
-  // Root comments with neither stay bare (no chip).
-  const toTargets: string[] =
-    comment.to && comment.to.length > 0
-      ? comment.to
-      : comment.reply_to && parentAuthor
-        ? [parentAuthor]
-        : [];
+  const toTargets: readonly string[] = comment.to ?? [];
 
   return (
     <div

@@ -271,7 +271,6 @@ export function ThreadedComments({
               file={file}
               depth={0}
               me={me}
-              parentAuthor={undefined}
               onAck={handleAck}
               onDelete={handleDelete}
               onReply={onReply}
@@ -326,8 +325,6 @@ interface CommentThreadProps {
   file: string;
   depth: number;
   me: string | null;
-  /** Author of this node's parent comment, for the implicit "to:" chip. */
-  parentAuthor?: string;
   onAck: (id: string, remove: boolean) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
@@ -348,7 +345,6 @@ function CommentThread({
   file,
   depth,
   me,
-  parentAuthor,
   onAck,
   onDelete,
   onReply,
@@ -366,7 +362,6 @@ function CommentThread({
         depth={depth}
         isOnline={false}
         me={me}
-        parentAuthor={parentAuthor}
         onAck={onAck}
         onDelete={onDelete}
         onReply={onReply}
@@ -381,7 +376,6 @@ function CommentThread({
           file={file}
           depth={depth + 1}
           me={me}
-          parentAuthor={node.comment.author}
           onAck={onAck}
           onDelete={onDelete}
           onReply={onReply}
