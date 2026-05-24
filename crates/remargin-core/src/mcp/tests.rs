@@ -263,6 +263,7 @@ fn tools_list_returns_all_tools() {
         "purge",
         "query",
         "react",
+        "reply",
         "rm",
         "sandbox_add",
         "sandbox_list",
@@ -3270,6 +3271,10 @@ fn every_mcp_tool_rejects_identity_flags() {
             "react",
             json!({"file": "doc.md", "id": "abc", "emoji": "+1"}),
         ),
+        (
+            "reply",
+            json!({"file": "doc.md", "parent_id": "abc", "content": "x"}),
+        ),
         ("rm", json!({"path": "doc.md"})),
         ("sandbox_add", json!({"files": ["doc.md"]})),
         ("sandbox_list", json!({})),
@@ -4670,4 +4675,407 @@ fn prompt_resolve_absolute_and_relative_paths_match() {
     let abs = extract_tool_text(&response_abs);
     assert_eq!(rel["name"], abs["name"]);
     assert_eq!(rel["prompt"], abs["prompt"]);
+}
+
+#[test]
+fn mcp_reply_acks_parent_when_authors_differ() {
+    // Parent `aaa` authored by `eduardo`; caller is `tester`. Smart
+    // default (auto_ack omitted) must ack the parent.
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "parent_id": "aaa",
+                    "content": "Reply via reply tool."
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert!(
+        parent.ack.iter().any(|a| a.author == "tester"),
+        "reply smart default must ack when parent.author != caller; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn mcp_reply_skips_ack_for_self_authored_parent() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let mut config = test_config();
+    config.identity = Some(String::from("eduardo"));
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "parent_id": "aaa",
+                    "content": "Self-reply."
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert!(
+        parent.ack.is_empty(),
+        "reply must NOT ack caller's own comment; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn mcp_reply_auto_ack_true_forces_ack_on_self_authored() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let mut config = test_config();
+    config.identity = Some(String::from("eduardo"));
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "parent_id": "aaa",
+                    "content": "Force ack via explicit auto_ack.",
+                    "auto_ack": true
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert!(
+        parent.ack.iter().any(|a| a.author == "eduardo"),
+        "auto_ack=true must force the ack; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn mcp_reply_auto_ack_false_skips_other_author() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "parent_id": "aaa",
+                    "content": "Skip the ack.",
+                    "auto_ack": false
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc = parser::parse(&doc_content).unwrap();
+    let parent = doc.find_comment("aaa").unwrap();
+    assert!(
+        parent.ack.is_empty(),
+        "auto_ack=false must skip the ack; acks = {:?}",
+        parent.ack,
+    );
+}
+
+#[test]
+fn mcp_reply_missing_parent_id_errors() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "content": "Missing parent."
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+#[test]
+fn mcp_reply_unknown_parent_errors() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "parent_id": "nope",
+                    "content": "Unknown parent."
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+#[test]
+fn mcp_reply_sandbox_flag_stages_file() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "reply",
+                "arguments": {
+                    "file": "doc.md",
+                    "parent_id": "aaa",
+                    "content": "Stage via sandbox.",
+                    "sandbox": true
+                }
+            }
+        }),
+    );
+
+    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    assert!(
+        doc_content.contains("sandbox:") && doc_content.contains("tester"),
+        "expected sandbox marker for caller in frontmatter; doc = {doc_content}",
+    );
+}
+
+#[test]
+fn mcp_plan_reply_op_projects_like_comment_with_reply_to() {
+    let base = Path::new("/docs");
+    let (system, config, parent_id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "reply",
+                    "file": "doc.md",
+                    "parent_id": parent_id,
+                    "content": "Plan reply.",
+                    "auto_ack": true
+                }
+            }
+        }),
+    );
+
+    let report = extract_tool_text(&response);
+    assert_eq!(report["op"], "comment");
+    assert_eq!(report["comments"]["added"].as_array().unwrap().len(), 1);
+    let preserved_has_parent = report["comments"]["preserved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str() == Some(parent_id.as_str()));
+    assert!(preserved_has_parent, "expected parent in preserved set");
+}
+
+#[test]
+fn mcp_plan_reply_op_missing_parent_id_errors() {
+    let base = Path::new("/docs");
+    let (system, config, _id) = seed_real_comment(base, "doc.md");
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "plan",
+                "arguments": {
+                    "op": "reply",
+                    "file": "doc.md",
+                    "content": "Plan reply with no parent."
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+}
+
+#[test]
+fn mcp_tools_list_includes_reply_alphabetically_between_react_and_rm() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+
+    let tools = response["result"]["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let react_idx = names.iter().position(|n| *n == "react").unwrap();
+    let reply_idx = names.iter().position(|n| *n == "reply").unwrap();
+    let rm_idx = names.iter().position(|n| *n == "rm").unwrap();
+    assert!(
+        react_idx < reply_idx && reply_idx < rm_idx,
+        "expected react < reply < rm in tools/list; got order = {names:?}",
+    );
+}
+
+#[test]
+fn mcp_tools_list_descriptor_text_matches_spec() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+
+    let tools = response["result"]["tools"].as_array().unwrap();
+    let descriptors: Vec<(&str, &str)> = tools
+        .iter()
+        .map(|t| {
+            (
+                t["name"].as_str().unwrap(),
+                t["description"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    let lookup = |needle: &str| -> &str {
+        descriptors
+            .iter()
+            .find(|(name, _)| *name == needle)
+            .map(|(_, desc)| *desc)
+            .unwrap()
+    };
+
+    let comment_desc = lookup("comment");
+    assert!(
+        comment_desc.contains("For two or more comments on the same file")
+            && comment_desc.contains("use `batch`"),
+        "comment descriptor must steer multi-comment loops to batch; got: {comment_desc}",
+    );
+    assert!(
+        comment_desc.contains("Use `reply` (not this tool)"),
+        "comment descriptor must point at reply for thread replies; got: {comment_desc}",
+    );
+
+    let batch_desc = lookup("batch");
+    assert!(
+        batch_desc.contains("PREFERRED for any time you'll post more than one comment"),
+        "batch descriptor must be marked PREFERRED; got: {batch_desc}",
+    );
+
+    let write_desc = lookup("write");
+    assert!(
+        write_desc.contains("start_line/end_line"),
+        "write descriptor must surface partial writes; got: {write_desc}",
+    );
+
+    let activity_desc = lookup("activity");
+    assert!(
+        activity_desc.starts_with("Call this BEFORE processing pending comments"),
+        "activity descriptor must lead with the BEFORE guidance; got: {activity_desc}",
+    );
+
+    let reply_desc = lookup("reply");
+    assert!(
+        reply_desc.contains("PREFERRED way to respond to a comment"),
+        "reply descriptor must be marked PREFERRED; got: {reply_desc}",
+    );
+    assert!(
+        reply_desc.contains("Smart auto-ack default"),
+        "reply descriptor must surface the smart auto-ack default; got: {reply_desc}",
+    );
 }

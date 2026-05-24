@@ -179,11 +179,13 @@ fn reject_identity_flags(
 fn desc_activity() -> ToolDesc {
     ToolDesc {
         name: "activity",
-        description: "Show what's new since X across managed .md files. Walks <path> (file or \
-             directory; defaults to the MCP server's working directory) and returns per-file \
-             change records (comments, acks, sandbox-adds) sorted by ts. With `since` omitted, \
-             the per-file cutoff is the caller's last action in that file; files where the \
-             caller has never acted return everything.",
+        description: "Call this BEFORE processing pending comments on a file or workspace you \
+             haven't acted on recently - it surfaces new comments, reactions, acks, and sandbox \
+             adds you'd otherwise miss. Walks <path> (file or directory; defaults to the MCP \
+             server's working directory) and returns per-file change records (comments, acks, \
+             sandbox-adds) sorted by ts. With `since` omitted, the per-file cutoff is the \
+             caller's last action in that file; files where the caller has never acted return \
+             everything.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -220,7 +222,10 @@ fn desc_ack() -> ToolDesc {
 fn desc_batch() -> ToolDesc {
     ToolDesc {
         name: "batch",
-        description: "Create multiple comments atomically",
+        description: "PREFERRED for any time you'll post more than one comment on a file. Atomic \
+             across the set; correctly tracks line shifts between insertions. Each sub-op has \
+             the same fields as a single `comment`. Comments are rendered as markdown; record \
+             observed state, not future-tense announcements.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -230,8 +235,8 @@ fn desc_batch() -> ToolDesc {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "content": { "type": "string" },
-                            "to": { "type": "array", "items": { "type": "string" }, "default": [] },
+                            "content": { "type": "string", "description": "Comment body text in markdown (bold/italic/links/code-blocks/lists render). Record observed or completed state - not future-tense announcements (\"I'll do X\"). Write it the way you'd want to re-read it in three months." },
+                            "to": { "type": "array", "items": { "type": "string" }, "description": "Names from the registry who must see this in their pending queue. Omit for a non-actionable note. Use a parent author's name only when your reply requires their response - replies do NOT auto-include the parent's author.", "default": [] },
                             "reply_to": { "type": "string" },
                             "attachments": { "type": "array", "items": { "type": "string" }, "default": [] },
                             "after_line": { "type": "integer" },
@@ -253,16 +258,21 @@ fn desc_batch() -> ToolDesc {
 fn desc_comment() -> ToolDesc {
     ToolDesc {
         name: "comment",
-        description: "Create a comment in a document",
+        description: "Create a single comment in a document. For two or more comments on the \
+             same file in one turn, use `batch` - `comment` doesn't track line shifts between \
+             insertions, so a loop of `comment` calls will misplace later entries. Use `reply` \
+             (not this tool) when responding to an existing comment. Comments record observed/\
+             done state and are rendered as markdown; do not post future-tense announcements \
+             (\"I'll do X\").",
         schema: json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
-                "content": { "type": "string", "description": "Comment body text" },
+                "content": { "type": "string", "description": "Comment body text in markdown (bold/italic/links/code-blocks/lists render). Record observed or completed state - not future-tense announcements (\"I'll do X\"). Write it the way you'd want to re-read it in three months." },
                 "to": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Addressees of the comment",
+                    "description": "Names from the registry who must see this in their pending queue. Omit for a non-actionable note. Use a parent author's name only when your reply requires their response - replies do NOT auto-include the parent's author.",
                     "default": []
                 },
                 "reply_to": { "type": "string", "description": "ID of the comment to reply to" },
@@ -446,11 +456,11 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/subset_gate/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. The subset_gate field mirrors SubsetGateFailure when the projected op would introduce a new anomaly not present in the on-disk pre-state - the same shape commit_with_verify would return. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
+        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/subset_gate/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, reply, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. `reply` is a synonym for `comment` with required `parent_id` (translated to `reply_to`). The subset_gate field mirrors SubsetGateFailure when the projected op would introduce a new anomaly not present in the on-disk pre-state - the same shape commit_with_verify would return. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
         schema: json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | comment | delete | edit | react | batch | mv | purge | sandbox-add | sandbox-remove | sign | write" },
+                "op": { "type": "string", "description": "Op to project: ack | batch | comment | reply | delete | edit | react | mv | purge | sandbox-add | sandbox-remove | sign | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
                 "src": { "type": "string", "description": "For mv: source path." },
                 "dst": { "type": "string", "description": "For mv: destination path." },
@@ -675,6 +685,55 @@ fn desc_react() -> ToolDesc {
     }
 }
 
+/// Build the reply tool descriptor.
+fn desc_reply() -> ToolDesc {
+    ToolDesc {
+        name: "reply",
+        description: "PREFERRED way to respond to a comment. Wraps `comment` with required \
+             `parent_id`; the parent must live in the named `file`. Smart auto-ack default: if \
+             `auto_ack` is omitted, the parent is acked iff its author differs from the caller \
+             (replies to your own comments don't ack). Set `auto_ack: true` to force the ack, \
+             `auto_ack: false` to skip it. Comments render as markdown; record observed state, \
+             not future-tense announcements.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "Path to the document containing the parent comment" },
+                "parent_id": { "type": "string", "description": "ID of the comment you're replying to. Must exist in `file`." },
+                "content": { "type": "string", "description": "Reply body text in markdown. Past-tense / observed-state only - no future-tense promises." },
+                "to": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Additional recipients beyond the parent's author. NOT auto-populated with the parent's author - be explicit if you want them paged.",
+                    "default": []
+                },
+                "auto_ack": {
+                    "type": "boolean",
+                    "description": "Force the smart default off. true = always ack the parent; false = never ack. Omit for the smart default: ack iff parent.author differs from caller."
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "File paths to attach",
+                    "default": []
+                },
+                "sandbox": {
+                    "type": "boolean",
+                    "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)",
+                    "default": false
+                },
+                "remargin_kind": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+                    "default": []
+                }
+            },
+            "required": ["file", "parent_id", "content"]
+        }),
+    }
+}
+
 /// Build the rm tool descriptor.
 fn desc_rm() -> ToolDesc {
     ToolDesc {
@@ -861,7 +920,11 @@ fn desc_sandbox_list() -> ToolDesc {
 fn desc_write() -> ToolDesc {
     ToolDesc {
         name: "write",
-        description: "Write document contents (comment-preserving)",
+        description: "Replace whole file OR a contiguous line range (via start_line/end_line - \
+             1-indexed inclusive). For markdown files, existing remargin comment blocks are \
+             preserved automatically - do not pre-strip them, and do not regenerate the whole \
+             file when only a section changed. Pass start_line and end_line together for \
+             surgical edits.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -904,6 +967,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_purge(),
         desc_query(),
         desc_react(),
+        desc_reply(),
         desc_rm(),
         desc_sandbox_add(),
         desc_sandbox_list(),
@@ -1280,6 +1344,7 @@ fn dispatch_tool(
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
+        "reply" => handle_reply(system, base_dir, config, p),
         "claude_restrict" => {
             return tool_result_error(
                 "tool 'claude_restrict' is not available via MCP - use the CLI: 'remargin claude \
@@ -1742,11 +1807,18 @@ fn handle_plan(
             ids: string_array(params, "ids"),
             remove: optional_bool(params, "remove"),
         },
-        "comment" => {
+        "comment" | "reply" => {
             let file = required_str(params, "file")?;
             let content = required_str(params, "content")?;
             to_owned = string_array(params, "to");
-            reply_to_owned = optional_str(params, "reply_to").map(String::from);
+            // `reply` requires `parent_id` (or accepts a `reply_to` alias).
+            // `comment` accepts `reply_to` for an optional thread parent.
+            let parent =
+                optional_str(params, "parent_id").or_else(|| optional_str(params, "reply_to"));
+            if op == "reply" && parent.is_none() {
+                bail!("plan reply: `parent_id` is required");
+            }
+            reply_to_owned = parent.map(String::from);
             attach_names = string_array(params, "attach_names");
             attach_refs = attach_names.iter().map(String::as_str).collect();
             position = resolve_insert_position(params, reply_to_owned.as_deref());
@@ -2068,6 +2140,21 @@ fn handle_react(
     let path = base_dir.join(file);
     operations::react(system, &path, cfg, comment_id, emoji, remove)?;
     Ok(responses::react(emoji, comment_id, remove))
+}
+
+/// Handle the `reply` tool: translate `parent_id` into `reply_to` and
+/// delegate to [`handle_comment`].
+fn handle_reply(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let parent_id = required_str(params, "parent_id")?.to_owned();
+    let mut translated = params.clone();
+    translated.remove("parent_id");
+    translated.insert("reply_to".into(), Value::String(parent_id));
+    handle_comment(system, base_dir, config, &translated)
 }
 
 /// Handle the `rm` tool: remove a file from the managed document tree.

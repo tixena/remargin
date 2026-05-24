@@ -1,5 +1,5 @@
 ---
-description: Process all sandboxed files in the caller's vault that resolve to a given system prompt name. Removes the sandbox marker on success, leaves the file sandboxed on failure. Continue-on-failure across files within the group.
+description: Process every currently-sandboxed file in the vault that resolves to a given system prompt name. Removes the sandbox marker on success, leaves the file sandboxed on failure. Continue-on-failure across files within the group.
 ---
 
 # /remargin:process-sandbox-group <prompt-name>
@@ -8,20 +8,22 @@ Given a system-prompt name, process every sandboxed file in this vault that reso
 
 ## Steps
 
-1. **Enumerate the caller's sandboxed files.** Call `mcp__remargin__sandbox_list`. The result is a list of file paths.
+1. **Enumerate currently-sandboxed files via activity.** Call `mcp__remargin__activity` with `path` = the vault scope (or the directory you're processing) and `pretty: true`. The result is a timestamp-sorted stream of events (comments, acks, edits, sandbox-adds, sandbox-removes) across **all identities**. Extract:
+   - **Sandboxed set:** files whose most recent sandbox event is a `sandbox-add` with no later `sandbox-remove` by the same identity. This is the set to process.
+   - **Recent context:** reactions on threads you're in, acks on your comments, comments addressed to others, edits, and signatures landed since your last action. Hold this for step 4 (per-file processing) — it's what your replies need to take into account. See remargin skill Critical rule 12.
 
-2. **Filter by resolved prompt.** For each file, call `mcp__remargin__prompt_resolve` and keep files whose resolved prompt name equals `<prompt-name>`. If the filtered list is empty, return a summary indicating no files matched and exit.
+   **Do not use `sandbox_list` for enumeration here.** It is caller-scoped and returns only the caller's own sandbox. In the typical agent-processing workflow the human user stages files for the agent — those won't appear in the agent's `sandbox_list`. `activity` sees stages by every identity, which is what this skill needs.
 
-3. **Check activity across the filtered set.** Call `mcp__remargin__activity` once with `pretty: true` against the common ancestor directory of the filtered files (or each file individually if they're scattered). Read the full delta since your last action — reactions, acks on threads you're in, comments addressed to others, edits, signatures landed since you last looked. This is the broader context your per-file replies will need to account for. See remargin skill Critical rule 11.
+2. **Filter by resolved prompt.** For each file in the sandboxed set, call `mcp__remargin__prompt_resolve` and keep files whose resolved prompt name equals `<prompt-name>`. If the filtered list is empty, return a summary indicating no files matched and exit.
 
-4. **Frame the work.** Look up the prompt body via `mcp__remargin__prompt_resolve` once (any matching file's resolution will do; they all resolve to the same prompt by construction). Treat the body as the current task definition.
+3. **Frame the work.** Look up the prompt body via `mcp__remargin__prompt_resolve` once (any matching file's resolution will do; they all resolve to the same prompt by construction). Treat the body as the current task definition.
 
-5. **Process each file, sequentially.** For each file in the filtered list:
-   1. Apply the per-file processing flow described in `/remargin:process-file` (read, surface pending comments, reply, edit body — all under the framed prompt). Take activity into account when drafting replies — don't repeat an answer someone else already posted, adjust for edits that have moved the conversation.
+4. **Process each file, sequentially.** For each file in the filtered list:
+   1. Apply the per-file processing flow described in `/remargin:process-file` (read, surface pending comments, reply, edit body — all under the framed prompt). Take the activity context from step 1 into account when drafting replies — don't repeat an answer someone else already posted, adjust for edits that have moved the conversation.
    2. On success: call `mcp__remargin__sandbox_remove` with the file path.
    3. On failure: leave the sandbox marker in place. Record the failure. Carry on to the next file.
 
-6. **Return a structured summary.** Files attempted, files successfully processed, files left sandboxed due to failure, per-file outcomes.
+5. **Return a structured summary.** Files attempted, files successfully processed, files left sandboxed due to failure, per-file outcomes.
 
 ## Constraints
 

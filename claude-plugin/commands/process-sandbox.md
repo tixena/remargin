@@ -1,5 +1,5 @@
 ---
-description: Process every sandboxed file in the vault. Groups by resolved system prompt and spawns one subagent per group so each group runs in its own fresh context — no system-prompt mixing across groups.
+description: Process every currently-sandboxed file in the vault. Groups by resolved system prompt and spawns one subagent per group so each group runs in its own fresh context — no system-prompt mixing across groups.
 ---
 
 # /remargin:process-sandbox
@@ -8,7 +8,9 @@ Vault-wide sandbox processing. Each prompt group runs in an isolated subagent co
 
 ## Steps
 
-1. **Enumerate.** Call `mcp__remargin__sandbox_list`. Result is the caller's currently-sandboxed file paths.
+1. **Enumerate currently-sandboxed files via activity.** Call `mcp__remargin__activity` with `path` = the vault root and `pretty: true`. The result is a timestamp-sorted stream of events across **all identities**. A file is currently sandboxed iff its most recent sandbox event is a `sandbox-add` with no later `sandbox-remove` by the same identity. Collect that set.
+
+   **Do not use `sandbox_list` for enumeration here.** It is caller-scoped and returns only the caller's own sandbox. In the typical agent-processing workflow the human user stages files for the agent — those won't appear in the agent's `sandbox_list`. `activity` sees stages by every identity.
 
 2. **Group by prompt.** For each file, call `mcp__remargin__prompt_resolve` and bucket by the resolved prompt name. If no files are sandboxed, return a summary saying so and exit.
 

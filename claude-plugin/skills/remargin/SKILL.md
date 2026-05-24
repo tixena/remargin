@@ -101,14 +101,16 @@ stop at the first match:
 3. **At least one reply per comment, threaded via `reply_to`.** Use `batch` for N replies in one turn. If a comment raises two distinct subjects, post two replies (each its own thread under the same parent) — that's cleaner than one reply that mixes them. What's NEVER ok is bundling answers to multiple **separate** comments into one consolidated reply.
 4. **Acks AND comments both signal completion.** Don't post either before the work is done. No promissory comments like "rewriting now" / "I'll do X next" — the user can't tell from the comment whether the work happened. Ack is not a read-receipt either: pending comments are work items, not background context.
 5. **Don't return pending comments to the user as their to-do** when the action is yours.
-6. **Line numbers shift on every mutation.** Re-resolve immediately before any line-anchored op, or use `batch` for multi-step. Bottom-up ordering is not a substitute for `batch` — it's the same anti-pattern in disguise. If you find yourself ordering inserts bottom-up to dodge line shifts, you forgot `batch` exists.
-7. **`--config` XOR `(--identity + --type + --key)`.** Three branches: `--config FILE` alone, full triplet, or filter on the walked candidate. Mixing those two halves in one call is rejected at parse time — the CLI errors before the op runs.
-8. **`auto_ack` defaults to a smart `Option<bool>`.** If you omit `auto_ack` on a reply (the common case), the parent is auto-acked iff its author differs from your identity — replies to your own comments don't ack. Set `auto_ack: true` to force the ack (legal only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask). Set `auto_ack: false` to force-skip even when replying to someone else. `auto_ack: true` without `reply_to` is rejected; `auto_ack: false` and the default (omitted) are no-ops without a `reply_to`.
-9. **Never declare a different identity per call** unless the user explicitly asked. Per-call `identity` / `type` / `config_path` to declare someone else = impersonation.
-10. **Never delete other participants' comments** to unblock your own op. Find another path or ask the user.
-11. **Always run `remargin activity` (or `/remargin:activity`) BEFORE processing comments — pending comments are only one signal.** Activity surfaces the full delta since you last acted on each file: comments addressed to you, comments addressed to others, broadcast comments, new acks on threads you participate in, reactions added/removed, comment edits, signatures landed on previously-unsigned comments, sandbox-adds by other identities. Replying to your pending queue without checking activity means you miss context that may change what your reply should say — e.g. someone else already answered, a thread you're in just got new participants, an edit invalidated the assumption behind your draft. Do not hand-roll timestamps from `comments` / `query` for this purpose; those tools don't compute the per-file caller-last-action cutoff and don't fold edits / reactions / sandbox refreshes into a single change list.
-12. **Each participant owns their own ack queue.** Don't ack on someone else's behalf, and never advise them to leave a comment unacked — their queue is their decision. You may deliberately leave your own reply unacked to keep it visible in your own pending queue.
-13. **Comments are markdown — write them as markdown.** Every comment body (new comments, replies, edits) renders as markdown for human readers. Use markdown formatting where it helps readability:
+6. **Line numbers shift on every mutation.** Re-resolve immediately before any line-anchored op, or use `batch` for multi-step. Bottom-up ordering is not a substitute for `batch` — it's the same anti-pattern in disguise. If you find yourself ordering inserts bottom-up to dodge line shifts, you forgot `batch` exists. When responding to a comment, use `reply` (not `comment` with `reply_to`).
+7. **`reply` is the preferred surface for thread responses.** Wraps `comment` with a required `parent_id` and surfaces the smart `auto_ack` default as headline behavior. The smart default acks the parent iff its author differs from yours — explicit `auto_ack: true|false` overrides. Do NOT auto-include the parent's author in `to:`; be explicit.
+8. **`--config` XOR `(--identity + --type + --key)`.** Three branches: `--config FILE` alone, full triplet, or filter on the walked candidate. Mixing those two halves in one call is rejected at parse time — the CLI errors before the op runs.
+9. **`auto_ack` defaults to a smart `Option<bool>`.** If you omit `auto_ack` on a reply (the common case), the parent is auto-acked iff its author differs from your identity — replies to your own comments don't ack. Set `auto_ack: true` to force the ack (legal only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask). Set `auto_ack: false` to force-skip even when replying to someone else. `auto_ack: true` without `reply_to` is rejected; `auto_ack: false` and the default (omitted) are no-ops without a `reply_to`.
+10. **Never declare a different identity per call** unless the user explicitly asked. Per-call `identity` / `type` / `config_path` to declare someone else = impersonation.
+11. **Never delete other participants' comments** to unblock your own op. Find another path or ask the user.
+12. **Always run `remargin activity` (or `/remargin:activity`) BEFORE processing comments — pending comments are only one signal.** Activity surfaces the full delta since you last acted on each file: comments addressed to you, comments addressed to others, broadcast comments, new acks on threads you participate in, reactions added/removed, comment edits, signatures landed on previously-unsigned comments, sandbox-adds by other identities. Replying to your pending queue without checking activity means you miss context that may change what your reply should say — e.g. someone else already answered, a thread you're in just got new participants, an edit invalidated the assumption behind your draft. Do not hand-roll timestamps from `comments` / `query` for this purpose; those tools don't compute the per-file caller-last-action cutoff and don't fold edits / reactions / sandbox refreshes into a single change list.
+13. **Use `pending=true` to find what you owe — `pending_for_me=true` is narrow and silently skips broadcasts.** `pending=true` is the canonical filter for "what work do I have on this file" — it returns the union of directed-pending and unacked broadcasts. `pending_for_me=true` returns only comments directed to your identity via `to:` plus replies whose parent author is you; it omits unacked broadcasts (`to: []`, no `reply_to`) that you may effectively own, and any pending owned by `<unassigned>`. Reaching for `pending_for_me=true` to answer "what do I need to act on" is a known footgun — broadcasts disappear from your queue and the user has to remind you. Default to `pending=true`; reach for the narrow filters only to disambiguate after the broad list.
+14. **Each participant owns their own ack queue.** Don't ack on someone else's behalf, and never advise them to leave a comment unacked — their queue is their decision. You may deliberately leave your own reply unacked to keep it visible in your own pending queue.
+15. **Comments are markdown — write them as markdown.** Every comment body (new comments, replies, edits) renders as markdown for human readers. Use markdown formatting where it helps readability:
     - Inline `` `code` `` for paths, identifiers, op names, commands.
     - Fenced code blocks for multi-line code, YAML, JSON, command output.
     - Bullet or numbered lists for enumerations.
@@ -116,7 +118,7 @@ stop at the first match:
     - Markdown links (`[label](url)`) when pointing at external references.
 
     Don't over-decorate plain prose — a one-line answer stays a one-line answer. The bar is readability for a human scanning a thread, not styling for its own sake.
-14. **Prefer partial writes over rewriting the whole file.** `write` accepts `start_line` / `end_line` (1-indexed, inclusive) to replace just a line range while leaving the rest of the file untouched. Use this whenever you're changing a few lines, fixing a section, or updating one paragraph in a large doc. Rewriting the whole file forces you to carry the entire body in your context (slow, expensive, and one typo can corrupt the rest). Comment preservation, frontmatter handling, and the verify gate all run identically on partial writes. Reserve whole-file `write` for new files (`create=true`) or genuine wholesale rewrites.
+16. **Prefer partial writes over rewriting the whole file.** `write` accepts `start_line` / `end_line` (1-indexed, inclusive) to replace just a line range while leaving the rest of the file untouched. Use this whenever you're changing a few lines, fixing a section, or updating one paragraph in a large doc. Rewriting the whole file forces you to carry the entire body in your context (slow, expensive, and one typo can corrupt the rest). Comment preservation, frontmatter handling, and the verify gate all run identically on partial writes. Reserve whole-file `write` for new files (`create=true`) or genuine wholesale rewrites.
 
 ---
 
@@ -128,7 +130,7 @@ Each section starts with the question an agent is actually asking.
 
 This is the most common multi-comment workflow. Use `batch`. **Do not** bundle into one comment, **do not** post N sequential `comment` calls.
 
-**Before the steps below: run activity first.** `remargin activity --pretty <folder>` or `/remargin:activity <folder>`. Read the full timeline before opening the pending queue — reactions, acks on threads you're in, comments addressed to others, edits, and signatures since your last visit all live there and may change what your reply should say. Pending-for-me is only one slice of the picture; activity is the full delta. See Critical rule 11.
+**Before the steps below: run activity first.** `remargin activity --pretty <folder>` or `/remargin:activity <folder>`. Read the full timeline before opening the pending queue — reactions, acks on threads you're in, comments addressed to others, edits, and signatures since your last visit all live there and may change what your reply should say. Pending-for-me is only one slice of the picture; activity is the full delta. See Critical rule 12.
 
 1. List the pending ones: `remargin query --pending --pretty <folder>` (CLI) or `mcp__remargin__query` with `pending: true`.
 2. For each comment, complete the action it asks (file the bd task, update the doc, run the verification, etc.). Adjust your reply for anything activity surfaced — e.g. don't repeat an answer someone else already posted on the same thread.
@@ -144,7 +146,7 @@ This is the most common multi-comment workflow. Use `batch`. **Do not** bundle i
 
    Or via `mcp__remargin__batch` with the same shape (no JSON-string encoding).
 
-4. `auto_ack` defaults to the smart shape per Critical rule 8: omit it on most replies; set `true` only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask; set `false` to force-skip the ack.
+4. `auto_ack` defaults to the smart shape per Critical rule 9: omit it on most replies; set `true` only when (a) the parent is addressed to you via `to:` AND (b) your reply fully resolves the ask; set `false` to force-skip the ack.
 5. For broadcasts (`to: []`) or comments addressed to others, the smart default still applies (parent.author != caller → ack). Override with explicit `auto_ack: false` if the broadcast nature means an ack would be premature; ack separately via `remargin ack` if appropriate.
 
 ❌ **Never:** post one comment that summarizes answers to N other comments. Forces the user to re-thread mentally or reply with their own consolidation. Defeats threading. This was a real failure pattern — don't repeat it.
@@ -377,13 +379,23 @@ remargin --config ~/.remargin.yaml comment file.md "..."
 remargin get path=docs/design.md start_line=200 end_line=260 line_numbers=true
 ```
 
-### Find pending stuff directed at me
+### Find everything I owe a response on (canonical)
+
+```
+remargin query path=. pending=true expanded=true
+```
+
+Returns the union of directed-pending and unacked broadcasts. **This is the default for "what work do I have on this file."** See Critical rule 13.
+
+### Find ONLY pending directed at me (narrow — skips broadcasts)
 
 ```
 remargin query path=. pending_for_me=true expanded=true
 ```
 
-### Find broadcasts (no `to:`) the caller hasn't closed
+Returns only comments with your identity in `to:` plus replies whose parent is yours. Use this to disambiguate *after* the broad list — never as the starting query.
+
+### Find ONLY broadcasts (no `to:`) the caller hasn't acked
 
 ```
 remargin query path=. pending_broadcast=true
@@ -417,7 +429,8 @@ Each op exists at both surfaces: MCP `mcp__remargin__<op>`; CLI `remargin <op>`.
 
 | Op | Purpose |
 |----|---------|
-| `comment` | Add one comment. `reply_to`, `after_line`, `after_comment`, `auto_ack`, `attachments`, `to`, `sandbox`. |
+| `comment` | Add one top-level comment. `after_line`, `after_comment`, `attachments`, `to`, `sandbox`. For thread replies use `reply`. |
+| `reply` | **PREFERRED** for thread responses. `parent_id` (required), `content`, `auto_ack` (smart default: ack iff parent.author != caller), `to`, `attachments`, `sandbox`, `remargin_kind`. |
 | `comments` | List comments in a file. `pretty=true` for human-readable threaded display. |
 | `batch` | Add multiple comments atomically (single write, single verify). Each sub-op supports its own `auto_ack`, `reply_to`, etc. **Use this for N>1 comments on the same file.** |
 | `edit` | Edit an existing comment. Cascades ack-clear to children. |
@@ -457,7 +470,7 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 | Op | Purpose |
 |----|---------|
-| `plan` | Projection for any mutating op. Takes `op` + the same args as the underlying call. Returns predicted outcome without touching disk. Covers `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`. |
+| `plan` | Projection for any mutating op. Takes `op` + the same args as the underlying call. Returns predicted outcome without touching disk. Covers `ack`, `batch`, `comment`, `reply`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`. `op: "reply"` is a synonym for `op: "comment"` with a required `parent_id`. |
 
 ### Admin (CLI-only — user-facing setup)
 
