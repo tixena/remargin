@@ -35,9 +35,19 @@
   --rmg-success: #34d399;
   --rmg-danger: #f87171;
 
-  /* Type stacks */
-  --rmg-mono: "IBM Plex Mono", "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --rmg-sans: "Inter", var(--font-interface), system-ui, sans-serif;
+  /* Type stacks — prefer Obsidian's theme fonts so the panel inherits
+   * whatever the user's vault is set to; our preferred faces are
+   * fallbacks for environments that don't define them. */
+  --rmg-mono: var(
+    --font-monospace,
+    "IBM Plex Mono",
+    "Geist Mono",
+    ui-monospace,
+    "SFMono-Regular",
+    Menlo,
+    monospace
+  );
+  --rmg-sans: var(--font-interface, "Inter", system-ui, sans-serif);
 
   /* Layout */
   display: flex;
@@ -469,8 +479,9 @@
   background: var(--background-modifier-hover);
 }
 .remargin-container .rmg-sandbox-row__name {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  display: block !important; /* defeat Obsidian's inline-flex on <button> */
   font-family: var(--rmg-mono) !important;
   font-size: 12px !important;
   font-weight: 400 !important;
@@ -481,6 +492,7 @@
   margin: 0 !important;
   box-shadow: none !important;
   text-align: left !important;
+  justify-content: flex-start !important; /* in case Obsidian forces inline-flex anyway */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -552,4 +564,140 @@
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
+}
+
+/* ========================================================================
+ * Tree children — guide rail. Each level of nesting gets a single thin
+ * vertical line on its left, so siblings under a folder feel grouped.
+ * Wraps the children of a folder row in <SandboxTreeNode>.
+ * ====================================================================== */
+.remargin-container .rmg-tree-children {
+  position: relative;
+  padding-left: 12px;
+  margin-left: 8px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+/* ========================================================================
+ * Checkbox override — scoped to the Sandbox only, so we don't ripple
+ * into other places that use the shared <Checkbox>. The shared component
+ * uses --primary as its checked color; we want our brand purple and a
+ * slightly larger hit target than the 12px default.
+ * ====================================================================== */
+.remargin-container .remargin-sandbox button[role="checkbox"] {
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  max-width: 14px !important;
+  max-height: 14px !important;
+  border-radius: 3px !important;
+  border: 1px solid var(--text-faint) !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+  flex-shrink: 0;
+}
+.remargin-container .remargin-sandbox button[role="checkbox"]:hover:not([data-state="checked"]) {
+  border-color: var(--rmg-brand-soft) !important;
+}
+.remargin-container .remargin-sandbox button[role="checkbox"][data-state="checked"] {
+  background: var(--rmg-brand) !important;
+  border-color: var(--rmg-brand) !important;
+  color: #0e0d14 !important;
+}
+.remargin-container .remargin-sandbox button[role="checkbox"] svg {
+  width: 10px !important;
+  height: 10px !important;
+  color: inherit;
+}
+
+/* ========================================================================
+ * L1 head — Sandbox section header (variant of SectionHeader). Tinted
+ * brand-purple wash, mono-uppercase tracked title, tray icon retained.
+ * This is the visual root of the protocol surface.
+ * ====================================================================== */
+.remargin-container button.rmg-l1-head,
+.remargin-container .rmg-l1-head {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px 11px 14px !important;
+  background: linear-gradient(to right, var(--rmg-brand-bg) 0, transparent 75%) !important;
+  border: 0 !important;
+  border-top: 1px solid var(--background-modifier-border) !important;
+  border-bottom: 1px solid var(--background-modifier-border) !important;
+  cursor: pointer !important;
+  text-align: left !important;
+  overflow: hidden;
+  color: var(--text-normal) !important;
+  box-shadow: none !important;
+  font: inherit !important;
+}
+.remargin-container button.rmg-l1-head:hover,
+.remargin-container .rmg-l1-head:hover {
+  background: linear-gradient(
+    to right,
+    rgba(127, 109, 242, 0.18) 0,
+    var(--background-modifier-hover) 70%
+  ) !important;
+}
+.remargin-container .rmg-l1-head__chev {
+  width: 12px;
+  height: 12px;
+  color: var(--rmg-brand-soft);
+  flex-shrink: 0;
+  transition: transform 150ms ease;
+}
+.remargin-container .rmg-l1-head[data-open="false"] .rmg-l1-head__chev,
+.remargin-container button.rmg-l1-head[data-open="false"] .rmg-l1-head__chev {
+  transform: rotate(-90deg);
+}
+.remargin-container .rmg-l1-head__icon {
+  width: 14px;
+  height: 14px;
+  color: var(--rmg-brand-soft);
+  flex-shrink: 0;
+}
+.remargin-container .rmg-l1-head__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--rmg-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.remargin-container .rmg-l1-head__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 6px;
+  font-family: var(--rmg-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--rmg-brand-soft);
+  background: var(--rmg-brand-bg);
+  border: 1px solid var(--rmg-brand-border);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.remargin-container .rmg-l1-head__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
 }

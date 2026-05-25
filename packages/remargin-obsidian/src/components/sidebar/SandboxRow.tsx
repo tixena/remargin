@@ -37,16 +37,11 @@ export function SandboxRow({
   onOpenFile,
   onRemoveFile,
 }: SandboxRowProps) {
-  const paddingLeft = `${4 + depth * 16}px`;
   const name = path.split("/").pop() ?? path;
 
   return (
-    <div className="rmg-sandbox-row group" style={{ paddingLeft }}>
-      <Checkbox
-        checked={selected}
-        onCheckedChange={() => onToggleSelected(path)}
-        className="!w-3 !h-3 shrink-0"
-      />
+    <div className="rmg-sandbox-row group">
+      <Checkbox checked={selected} onCheckedChange={() => onToggleSelected(path)} />
       <button
         type="button"
         className="rmg-sandbox-row__name"

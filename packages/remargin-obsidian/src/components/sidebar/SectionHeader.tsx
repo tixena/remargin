@@ -10,6 +10,13 @@ interface SectionHeaderProps {
   badgeVariant?: "default" | "warning";
   open: boolean;
   actions?: React.ReactNode;
+  /**
+   * Visual treatment. `sandbox` renders the L1 protocol-surface chrome
+   * defined in sandbox-hierarchy.css — brand-purple tinted wash,
+   * mono-uppercase tracked title. `default` keeps the original tonality
+   * for sibling sections (Inbox, Thread, etc).
+   */
+  variant?: "default" | "sandbox";
 }
 
 export function SectionHeader({
@@ -19,8 +26,26 @@ export function SectionHeader({
   badgeVariant = "default",
   open,
   actions,
+  variant = "default",
 }: SectionHeaderProps) {
   const Chevron = open ? ChevronDown : ChevronRight;
+
+  if (variant === "sandbox") {
+    return (
+      <CollapsibleTrigger className="rmg-l1-head" data-open={open ? "true" : "false"}>
+        <Chevron className="rmg-l1-head__chev" />
+        <Icon className="rmg-l1-head__icon" />
+        <span className="rmg-l1-head__title">{title}</span>
+        {badge != null && <span className="rmg-l1-head__badge">{badge}</span>}
+        {actions && (
+          <span className="rmg-l1-head__actions" onClick={(e) => e.stopPropagation()}>
+            {actions}
+          </span>
+        )}
+      </CollapsibleTrigger>
+    );
+  }
+
   return (
     <CollapsibleTrigger className="flex items-center justify-start w-full min-w-0 px-4 py-2 gap-2 bg-bg-border hover:bg-bg-hover overflow-hidden text-left">
       <div className="flex items-center gap-1.5 flex-1 min-w-0 text-left">

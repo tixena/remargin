@@ -892,7 +892,6 @@ function SandboxTreeNode({
     <>
       <div
         className="rmg-sandbox-folder"
-        style={{ paddingLeft: `${4 + depth * 16}px` }}
         role="button"
         tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
@@ -907,19 +906,22 @@ function SandboxTreeNode({
         <Folder />
         <span className="rmg-sandbox-folder__name">{node.name}</span>
       </div>
-      {expanded &&
-        node.children.map((child) => (
-          <SandboxTreeNode
-            key={child.fullPath}
-            node={child}
-            depth={depth + 1}
-            variant={variant}
-            selected={selected}
-            onToggleSelected={onToggleSelected}
-            onOpenFile={onOpenFile}
-            onRemoveFile={onRemoveFile}
-          />
-        ))}
+      {expanded && node.children.length > 0 && (
+        <div className="rmg-tree-children">
+          {node.children.map((child) => (
+            <SandboxTreeNode
+              key={child.fullPath}
+              node={child}
+              depth={depth + 1}
+              variant={variant}
+              selected={selected}
+              onToggleSelected={onToggleSelected}
+              onOpenFile={onOpenFile}
+              onRemoveFile={onRemoveFile}
+            />
+          ))}
+        </div>
+      )}
     </>
   );
 }
