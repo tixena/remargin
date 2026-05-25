@@ -18,7 +18,9 @@ Given a file path, process the file under its resolved system prompt.
 
 5. **Do NOT remove the sandbox marker.** Sandbox cleanup is the responsibility of the per-group command, not this one. Manual per-file invocation is non-destructive on sandbox state.
 
-6. **Return a structured summary.** Files touched, comments replied to, comments acked, ops performed.
+6. **Verify no inbound pendings remain.** Call `mcp__remargin__query` with `path` = the file and `pending: true`. Inspect every pending entry: pending replies you just posted (where `author` == your identity from `mcp__remargin__whoami`) are expected and OK — they're awaiting the other party's ack. Any **inbound** pending (a comment whose `author` is someone else) means you skipped its reply. Go back to step 4 and address it. **Do not move to step 7 with inbound pendings outstanding.**
+
+7. **Return a structured summary.** Files touched, comments replied to, comments acked, ops performed. Explicitly confirm "0 inbound pendings remaining."
 
 ## Constraints
 

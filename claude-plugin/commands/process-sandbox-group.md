@@ -18,12 +18,14 @@ Given a system-prompt name, process every sandboxed file in this vault that reso
 
 3. **Frame the work.** Look up the prompt body via `mcp__remargin__prompt_resolve` once (any matching file's resolution will do; they all resolve to the same prompt by construction). Treat the body as the current task definition.
 
-4. **Process each file, sequentially.** For each file in the filtered list:
-   1. Apply the per-file processing flow described in `/remargin:process-file` (read, surface pending comments, reply, edit body — all under the framed prompt). Take the activity context from step 1 into account when drafting replies — don't repeat an answer someone else already posted, adjust for edits that have moved the conversation.
-   2. On success: call `mcp__remargin__sandbox_remove` with the file path.
-   3. On failure: leave the sandbox marker in place. Record the failure. Carry on to the next file.
+4. **Process each file, sequentially — by invoking `/remargin:process-file`.** For each file in the filtered list:
+   1. Invoke `/remargin:process-file <path>` via the Skill tool. That skill owns the per-file flow (activity check, prompt resolution, comment processing, body edits, inbound-pending verification, and per-file summary) — do not inline or duplicate its rules here. When relaying activity context from this group's step 1, hand the relevant slice to the agent before invoking the skill.
+   2. On the per-file skill returning success (which now guarantees no inbound pendings remain on that file): call `mcp__remargin__sandbox_remove` with the file path.
+   3. On the per-file skill returning failure or leaving inbound pendings: leave the sandbox marker in place. Record the failure. Carry on to the next file.
 
-5. **Return a structured summary.** Files attempted, files successfully processed, files left sandboxed due to failure, per-file outcomes.
+5. **Verify no inbound pendings remain across the group (defense-in-depth).** Call `mcp__remargin__query` with `pending: true` against the common ancestor directory of the processed files. The only pending entries should be replies you (the caller) posted, awaiting the other party's ack. Any **inbound** pending — a comment by an author other than you on a file you marked as successfully processed — is a contract violation by the per-file skill. Surface it loudly in the summary and reopen the affected file(s) before declaring done.
+
+6. **Return a structured summary.** Files attempted, files successfully processed, files left sandboxed due to failure, per-file outcomes, and an explicit "0 inbound pendings across the group" confirmation (or the list of leaks).
 
 ## Constraints
 
