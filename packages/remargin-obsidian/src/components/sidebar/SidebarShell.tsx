@@ -127,6 +127,42 @@ export function SidebarShell({
     };
   }, [plugin, onFocusFile]);
 
+  // Restore native select + copy on text inside the sidebar. Obsidian's
+  // hotkey scope intercepts Ctrl+C/Cmd+C before the browser's clipboard
+  // pipeline sees it, so a capture-phase listener writes the current
+  // selection to the system clipboard ourselves and stops propagation.
+  // Bound on the document at capture phase so we beat Obsidian's hotkey
+  // dispatcher; scoped by checking the live selection lives inside the
+  // sidebar root, so this never interferes with selections elsewhere.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const doc = root.ownerDocument ?? document;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isCopy =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "c" || event.key === "C");
+      if (!isCopy) return;
+      const selection = doc.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const anchorNode = selection.anchorNode;
+      if (!anchorNode || !root.contains(anchorNode)) return;
+      const text = selection.toString();
+      if (!text) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void navigator.clipboard.writeText(text).catch((err) => {
+        console.error("Remargin sidebar copy failed:", err);
+      });
+    };
+    doc.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      doc.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
+
   return (
     <div ref={rootRef} className="flex flex-col h-full min-w-0 bg-bg-primary">
       <div className="flex items-center justify-between px-4 py-3 gap-2 bg-bg-secondary border-b border-bg-border overflow-hidden">
