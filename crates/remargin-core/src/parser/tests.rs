@@ -693,3 +693,109 @@ hi
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T11:00:00-04:00");
 }
+
+#[test]
+fn nested_three_backtick_remargin_truncates_outer_body_at_inner_close() {
+    let doc = "\
+```remargin
+---
+id: outer3
+author: alice
+type: human
+ts: 2026-05-25T00:00:00-04:00
+checksum: sha256:outer3
+---
+quoting an inner comment below:
+```remargin
+---
+id: inner3
+author: bob
+type: human
+ts: 2026-05-25T01:00:00-04:00
+checksum: sha256:inner3
+---
+inner body text
+```
+trailing outer body text
+```
+";
+    let parsed = parse(doc).unwrap();
+    let comments = parsed.comments();
+    assert_eq!(comments.len(), 1, "3+3-backtick: no stray sibling comment");
+    let outer = comments[0];
+    assert_eq!(outer.id, "outer3");
+    assert!(
+        outer.content.starts_with("quoting an inner comment below:"),
+        "outer content begins with the prose before the inner fence",
+    );
+    assert!(
+        outer.content.contains("id: inner3"),
+        "outer content swallows the inner fence + YAML verbatim",
+    );
+    assert!(
+        outer.content.ends_with("inner body text"),
+        "outer content ends at the inner's closing fence -- trailing outer body is lost from the comment",
+    );
+    let trailing_body: Vec<_> = parsed
+        .segments
+        .iter()
+        .filter_map(|seg| match seg {
+            Segment::Body(text) => Some(text.as_str()),
+            Segment::Comment(_) => None,
+        })
+        .collect();
+    assert!(
+        trailing_body
+            .iter()
+            .any(|b| b.contains("trailing outer body text")),
+        "the text after the inner's closing fence becomes a Body segment, not part of any comment",
+    );
+}
+
+#[test]
+fn nested_four_backtick_outer_three_backtick_inner_preserves_inner_verbatim() {
+    let doc = "\
+````remargin
+---
+id: outer4
+author: alice
+type: human
+ts: 2026-05-25T00:00:00-04:00
+checksum: sha256:outer4
+---
+quoting an inner comment below:
+```remargin
+---
+id: inner3
+author: bob
+type: human
+ts: 2026-05-25T01:00:00-04:00
+checksum: sha256:inner3
+---
+inner body text
+```
+trailing outer body text
+````
+";
+    let parsed = parse(doc).unwrap();
+    let comments = parsed.comments();
+    assert_eq!(
+        comments.len(),
+        1,
+        "4+3-backtick: clean nesting, one comment"
+    );
+    let outer = comments[0];
+    assert_eq!(outer.id, "outer4");
+    assert!(
+        outer.content.contains("```remargin\n---\nid: inner3"),
+        "outer content preserves the inner fence + YAML verbatim",
+    );
+    assert!(
+        outer.content.contains("inner body text\n```"),
+        "outer content preserves the inner's closing fence verbatim",
+    );
+    assert!(
+        outer.content.ends_with("trailing outer body text"),
+        "outer content extends through the trailing outer prose, ending at the outer's 4-backtick close",
+    );
+}
