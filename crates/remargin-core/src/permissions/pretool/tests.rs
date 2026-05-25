@@ -309,3 +309,131 @@ fn bash_verb_extractor_skips_env_var_prefix() {
     );
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
+
+#[test]
+fn bash_bare_mutator_on_restricted_path_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "sed /r/secret/foo.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+#[test]
+fn bash_rtk_wrapped_mutator_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "rtk sed /r/secret/foo.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+#[test]
+fn bash_rtk_proxy_wrapped_mutator_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "rtk proxy sed /r/secret/foo.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+#[test]
+fn bash_rtk_git_status_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rtk git status" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+#[test]
+fn bash_rtk_ls_non_mutator_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rtk ls /tmp" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+#[test]
+fn bash_rtk_ls_non_mutator_restricted_path_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rtk ls /r/secret/" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+#[test]
+fn bash_env_prefix_then_rtk_wrapper_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "FOO=bar rtk sed /r/secret/foo.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+#[test]
+fn bash_rtk_alone_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rtk" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+#[test]
+fn bash_rtk_proxy_alone_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rtk proxy" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+#[test]
+fn bash_rtk_rtk_degenerate_nesting_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "rtk rtk sed /r/secret/foo.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+#[test]
+fn bash_rtk_gain_meta_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rtk gain" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+#[test]
+fn bash_rtk_wrapped_with_per_realm_extra_denies() {
+    let system = mock_with(&[(
+        "/r/.remargin.yaml",
+        &restrict_with_extra_bash("secret", "sed"),
+    )]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "rtk sed /r/secret/foo.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+#[test]
+fn bash_bare_proxy_not_peeled() {
+    // Without `rtk` in front, `proxy` is treated as the verb itself; it
+    // is not in BASH_MUTATORS so the gate silent-allows even though the
+    // restricted path is present.
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "proxy sed /r/secret/foo.md" }),
+    );
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}

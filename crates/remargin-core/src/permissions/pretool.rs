@@ -26,6 +26,16 @@ use crate::config::permissions::resolve::{
 use crate::permissions::claude_sync::BASH_MUTATORS;
 use crate::permissions::op_guard::target_is_sanctioned;
 
+const WRAPPER_PREFIXES: &[WrapperPrefix] = &[WrapperPrefix {
+    has_proxy_subcommand: true,
+    name: "rtk",
+}];
+
+struct WrapperPrefix {
+    has_proxy_subcommand: bool,
+    name: &'static str,
+}
+
 /// Decision JSON shape Claude Code expects on stdout.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -213,12 +223,34 @@ fn bash_decision(resolved: &ResolvedPermissions, command: &str) -> PretoolOutcom
     PretoolOutcome::SilentAllow
 }
 
-/// Pull the verb token from a Bash command. Skips leading whitespace
-/// and `KEY=value` env-var prefixes (`FOO=bar cat /x` → `cat`).
+/// Pull the verb token from a Bash command. Skips leading whitespace,
+/// `KEY=value` env-var prefixes (`FOO=bar cat /x` → `cat`), and known
+/// command-wrapper prefixes (`rtk sed file` → `sed`,
+/// `rtk proxy sed file` → `sed`).
 fn first_verb(command: &str) -> Option<&str> {
-    command
+    let mut iter = command
         .split_whitespace()
-        .find(|tok| !is_env_assignment(tok))
+        .skip_while(|tok| is_env_assignment(tok));
+
+    loop {
+        let candidate = iter.next()?;
+        let mut matched: Option<&WrapperPrefix> = None;
+        for wrapper in WRAPPER_PREFIXES {
+            if candidate == wrapper.name {
+                matched = Some(wrapper);
+                break;
+            }
+        }
+        let Some(wrapper) = matched else {
+            return Some(candidate);
+        };
+        if wrapper.has_proxy_subcommand {
+            let mut peek = iter.clone();
+            if peek.next() == Some("proxy") {
+                iter = peek;
+            }
+        }
+    }
 }
 
 fn is_env_assignment(token: &str) -> bool {
