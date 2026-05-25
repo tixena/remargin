@@ -217,7 +217,7 @@ fn bash_decision(resolved: &ResolvedPermissions, command: &str) -> PretoolOutcom
     }
 
     if let Some(matched) = first_restricted_substring_match(command, &resolved.trusted_roots) {
-        return PretoolOutcome::Deny(build_bash_decision(&matched));
+        return PretoolOutcome::Deny(build_bash_decision(&matched, Some(verb)));
     }
 
     PretoolOutcome::SilentAllow
@@ -307,18 +307,61 @@ fn build_decision(tool: &str, path: &Path) -> Decision {
     }
 }
 
-fn build_bash_decision(matched_path: &str) -> Decision {
+fn build_bash_decision(matched_path: &str, verb: Option<&str>) -> Decision {
+    let suffix = verb.and_then(verb_guidance).unwrap_or(
+        "There is no direct shell substitute -- use the appropriate remargin MCP tool for the \
+         underlying operation, or do not access this path through shell.",
+    );
     Decision {
         hook_specific_output: DecisionInner {
             hook_event_name: "PreToolUse",
             permission_decision: PermissionDecision::Deny,
             permission_decision_reason: format!(
-                "This shell command would touch the remargin-managed path {matched_path}. There \
-                 is no direct shell substitute — use the appropriate remargin MCP tool for the \
-                 underlying operation, or do not access this path through shell."
+                "This shell command would touch the remargin-managed path {matched_path}. \
+                 {suffix}"
             ),
         },
     }
+}
+
+fn verb_guidance(verb: &str) -> Option<&'static str> {
+    Some(match verb {
+        "sed" | "awk" => {
+            "Use `mcp__remargin__get` with `start_line`/`end_line` for reads, or \
+             `mcp__remargin__write` partial for in-place edits."
+        }
+        "cat" | "less" | "more" => "Use `mcp__remargin__get` (text mode by default).",
+        "head" | "tail" => {
+            "Use `mcp__remargin__get` with bounded `start_line`/`end_line` (consult \
+             `mcp__remargin__metadata` first)."
+        }
+        "grep" | "rg" | "ag" => {
+            "Use `mcp__remargin__search` (file-scoped; respects comment / body distinction)."
+        }
+        "find" => {
+            "Use `mcp__remargin__query` for comment/file enumeration, or `mcp__remargin__ls` for \
+             listings."
+        }
+        "mv" => "Use `mcp__remargin__mv` -- preserves comment IDs + thread state.",
+        "rm" => {
+            "Use `mcp__remargin__rm` (sandbox-aware) or `mcp__remargin__purge` when you mean drop \
+             comments only."
+        }
+        "cp" => {
+            "Use `mcp__remargin__get` + `mcp__remargin__write {create: true}` -- `cp` bypasses \
+             frontmatter injection on markdown."
+        }
+        "tee" | "dd" => "Use `mcp__remargin__write` instead of redirecting output to the file.",
+        "vim" | "nvim" | "nano" | "code" => {
+            "Use `mcp__remargin__write` or `mcp__remargin__edit` for managed paths -- your editor \
+             would bypass the comment-preservation guarantees."
+        }
+        "git" => {
+            "If the managed path is being staged or moved by git, run the matching \
+             `mcp__remargin__*` op first (mv / rm / write), then let git track the result."
+        }
+        _ => return None,
+    })
 }
 
 fn message_for(tool: &str, path: &Path) -> String {

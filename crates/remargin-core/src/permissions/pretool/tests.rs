@@ -437,3 +437,165 @@ fn bash_bare_proxy_not_peeled() {
     let outcome = pretool(&system, &stdin);
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
+
+fn assert_bash_deny_contains(command: &str, needles: &[&str]) {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": command }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    for needle in needles {
+        assert!(
+            reason.contains(needle),
+            "expected `{needle}` in deny reason for `{command}`, got: {reason}",
+        );
+    }
+}
+
+fn assert_bash_deny_lacks(command: &str, needle: &str) {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": command }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    assert!(
+        !reason.contains(needle),
+        "expected `{needle}` NOT in deny reason for `{command}`, got: {reason}",
+    );
+}
+
+#[test]
+fn bash_sed_verb_guidance() {
+    assert_bash_deny_contains(
+        "sed /r/secret/foo.md",
+        &["mcp__remargin__get", "mcp__remargin__write"],
+    );
+    assert_bash_deny_lacks("sed /r/secret/foo.md", "no direct shell substitute");
+}
+
+#[test]
+fn bash_awk_verb_guidance() {
+    assert_bash_deny_contains("awk '{print}' /r/secret/foo.md", &["mcp__remargin__get"]);
+}
+
+fn assert_bash_deny_with_extra_contains(command: &str, extra_verb: &str, needles: &[&str]) {
+    let system = mock_with(&[(
+        "/r/.remargin.yaml",
+        &restrict_with_extra_bash("secret", extra_verb),
+    )]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": command }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    for needle in needles {
+        assert!(
+            reason.contains(needle),
+            "expected `{needle}` in deny reason for `{command}`, got: {reason}",
+        );
+    }
+}
+
+#[test]
+fn bash_cat_verb_guidance() {
+    assert_bash_deny_with_extra_contains("cat /r/secret/foo.md", "cat", &["mcp__remargin__get"]);
+}
+
+#[test]
+fn bash_head_verb_guidance() {
+    assert_bash_deny_with_extra_contains(
+        "head /r/secret/foo.md",
+        "head",
+        &["mcp__remargin__get", "start_line"],
+    );
+}
+
+#[test]
+fn bash_tail_verb_guidance() {
+    assert_bash_deny_with_extra_contains("tail /r/secret/foo.md", "tail", &["mcp__remargin__get"]);
+}
+
+#[test]
+fn bash_grep_verb_guidance() {
+    assert_bash_deny_with_extra_contains(
+        "grep foo /r/secret/foo.md",
+        "grep",
+        &["mcp__remargin__search"],
+    );
+}
+
+#[test]
+fn bash_find_verb_guidance() {
+    assert_bash_deny_contains("find /r/secret/", &["mcp__remargin__query"]);
+}
+
+#[test]
+fn bash_mv_verb_guidance() {
+    assert_bash_deny_contains("mv /r/secret/foo.md /tmp/x", &["mcp__remargin__mv"]);
+}
+
+#[test]
+fn bash_rm_verb_guidance() {
+    assert_bash_deny_contains(
+        "rm /r/secret/foo.md",
+        &["mcp__remargin__rm", "mcp__remargin__purge"],
+    );
+}
+
+#[test]
+fn bash_cp_verb_guidance() {
+    assert_bash_deny_contains(
+        "cp /r/secret/foo.md /tmp/x",
+        &["mcp__remargin__get", "mcp__remargin__write"],
+    );
+}
+
+#[test]
+fn bash_tee_verb_guidance() {
+    assert_bash_deny_contains("tee /r/secret/foo.md", &["mcp__remargin__write"]);
+}
+
+#[test]
+fn bash_vim_verb_guidance() {
+    assert_bash_deny_contains(
+        "vim /r/secret/foo.md",
+        &["mcp__remargin__write", "mcp__remargin__edit"],
+    );
+}
+
+#[test]
+fn bash_git_verb_guidance() {
+    let system = mock_with(&[(
+        "/r/.remargin.yaml",
+        &restrict_with_extra_bash("secret", "git"),
+    )]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "git add /r/secret/foo.md" }),
+    );
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    assert!(reason.contains("mcp__remargin__"));
+    assert!(reason.contains("git"));
+}
+
+#[test]
+fn bash_unknown_mutator_falls_back_to_generic_message() {
+    let system = mock_with(&[(
+        "/r/.remargin.yaml",
+        &restrict_with_extra_bash("secret", "weirdtool"),
+    )]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "weirdtool /r/secret/foo.md" }),
+    );
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    assert!(reason.contains("no direct shell substitute"));
+}
+
+#[test]
+fn bash_rtk_wrapped_sed_shows_sed_guidance() {
+    assert_bash_deny_contains(
+        "rtk sed /r/secret/foo.md",
+        &["mcp__remargin__get", "mcp__remargin__write"],
+    );
+}
