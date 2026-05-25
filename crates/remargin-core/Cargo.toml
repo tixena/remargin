@@ -43,6 +43,9 @@ thiserror.workspace = true
 tempfile.workspace = true
 ignore.workspace = true
 
+# Image sampling / cropping for binary attachments
+image.workspace = true
+
 # Date/time
 chrono.workspace = true
 

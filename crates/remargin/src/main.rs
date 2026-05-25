@@ -23,6 +23,7 @@ use remargin_core::config::identity::{IdentityFlags, IdentityReport, resolve_ide
 use remargin_core::config::{self, ResolvedConfig};
 use remargin_core::display;
 use remargin_core::document;
+use remargin_core::document::sample as sample_ops;
 use remargin_core::kind::matches_kind_filter;
 use remargin_core::linter;
 use remargin_core::mcp;
@@ -671,6 +672,39 @@ enum Commands {
         file: String,
         #[command(flatten)]
         identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
+    },
+    /// Return a downscaled / cropped raster image sized to fit a
+    /// caller-specified byte budget. Use when `get --binary` would
+    /// exceed an inline limit. Accepts PNG / JPEG / GIF / WebP.
+    Sample {
+        /// Path to the image attachment.
+        path: String,
+        /// Optional pixel crop applied before scaling, formatted
+        /// `X,Y,W,H` (origin top-left). Clamped to the image bounds.
+        #[arg(long)]
+        crop: Option<String>,
+        /// Output format: `jpeg`, `jpg`, or `png`. Defaults to `jpeg`
+        /// for photographic source formats (JPEG / WebP) and `png`
+        /// for lossless source formats (PNG / GIF).
+        #[arg(long)]
+        format: Option<String>,
+        /// Target ceiling on the encoded output size in bytes. JPEG
+        /// quality is stepped down (and then the dimension cap halved)
+        /// until this fits. Defaults to 262144 (256 KiB).
+        #[arg(long)]
+        max_bytes: Option<u64>,
+        /// Upper bound (in pixels) on the longer edge of the output.
+        /// Defaults to 1024.
+        #[arg(long)]
+        max_dimension: Option<u32>,
+        /// Write the encoded bytes to this path. Stdout gets a summary
+        /// instead of the bytes.
+        #[arg(long)]
+        out: Option<PathBuf>,
         #[command(flatten)]
         output_args: OutputArgs,
         #[command(flatten)]
@@ -1521,6 +1555,16 @@ struct MvParams<'cmd> {
     src: &'cmd str,
 }
 
+struct SampleParams<'cli> {
+    crop: Option<&'cli str>,
+    format: Option<&'cli str>,
+    json_mode: bool,
+    max_bytes: Option<u64>,
+    max_dimension: Option<u32>,
+    out: Option<&'cli Path>,
+    path: &'cli str,
+}
+
 /// Bundle of writers for the CLI's stdout / stderr streams.
 ///
 /// Allows the `cmd_*` functions and `run()` to be exercised in-process by
@@ -1758,6 +1802,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Registry { output_args, .. }
         | Commands::ResolveMode { output_args, .. }
         | Commands::Rm { output_args, .. }
+        | Commands::Sample { output_args, .. }
         | Commands::Sandbox { output_args, .. }
         | Commands::Search { output_args, .. }
         | Commands::Sign { output_args, .. }
@@ -1973,6 +2018,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::React { .. }
         | Commands::Registry { .. }
         | Commands::Rm { .. }
+        | Commands::Sample { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
@@ -2018,6 +2064,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Permissions { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
+        | Commands::Sample { .. }
         | Commands::Search { .. }
         | Commands::Version => None,
         #[cfg(feature = "obsidian")]
@@ -2054,6 +2101,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
         | Commands::Rm { .. }
+        | Commands::Sample { .. }
         | Commands::Sandbox { .. }
         | Commands::Search { .. }
         | Commands::Sign { .. }
@@ -2079,6 +2127,9 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
             unrestricted_args, ..
         }
         | Commands::Rm {
+            unrestricted_args, ..
+        }
+        | Commands::Sample {
             unrestricted_args, ..
         }
         | Commands::Write {
@@ -2633,6 +2684,7 @@ fn dispatch_with_config(
         Commands::React { .. } => handle_react(&cli.command, sinks, system, cwd, config),
         Commands::Registry { .. } => handle_registry(&cli.command, sinks, system, cwd),
         Commands::Rm { .. } => handle_rm(&cli.command, sinks, system, cwd, config),
+        Commands::Sample { .. } => handle_sample(&cli.command, sinks, system, cwd, config),
         Commands::Sandbox { .. } => handle_sandbox(&cli.command, sinks, system, cwd, config),
         Commands::Search { .. } => handle_search(&cli.command, sinks, system, cwd),
         Commands::Sign { .. } => handle_sign(&cli.command, sinks, system, cwd, config),
@@ -3121,6 +3173,38 @@ fn handle_sandbox(
         bail!("internal: handle_sandbox called with wrong subcommand");
     };
     cmd_sandbox(sinks, system, cwd, config, action, output_args.json)
+}
+
+fn handle_sample(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Sample {
+        path,
+        crop,
+        format,
+        max_bytes,
+        max_dimension,
+        out,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_sample called with wrong subcommand");
+    };
+    let sp = SampleParams {
+        crop: crop.as_deref(),
+        format: format.as_deref(),
+        json_mode: output_args.json,
+        max_bytes: *max_bytes,
+        max_dimension: *max_dimension,
+        out: out.as_deref(),
+        path,
+    };
+    cmd_sample(sinks, system, cwd, config, &sp)
 }
 
 fn handle_search(
@@ -5686,6 +5770,59 @@ fn cmd_rm(
     } else {
         out(sinks, &format!("already absent: {file}"))
     }
+}
+
+fn cmd_sample(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    sp: &SampleParams<'_>,
+) -> Result<()> {
+    let target_buf = expand_cli_path(system, sp.path)?;
+    let options = sample_ops::SampleOptions::from_optionals(
+        sp.crop,
+        sp.format,
+        sp.max_bytes,
+        sp.max_dimension,
+    )?;
+    let result = sample_ops::sample_image(
+        system,
+        cwd,
+        target_buf.as_path(),
+        config.unrestricted,
+        &config.trusted_roots,
+        &options,
+    )?;
+    render_sample_result(sinks, system, &result, sp.out, sp.json_mode)
+}
+
+fn render_sample_result(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    result: &sample_ops::SampleResult,
+    out_path: Option<&Path>,
+    json_mode: bool,
+) -> Result<()> {
+    if let Some(dest) = out_path {
+        system
+            .write(dest, &result.bytes)
+            .with_context(|| format!("writing {}", dest.display()))?;
+        let mut summary = result.to_json_without_content();
+        summary["out"] = json!(dest);
+        return print_output(sinks, json_mode, &summary);
+    }
+    if json_mode {
+        let mut payload = result.to_json_without_content();
+        payload["binary"] = Value::Bool(true);
+        payload["content"] = Value::String(BASE64_STANDARD.encode(&result.bytes));
+        payload["path"] = json!(result.source_path);
+        return print_output(sinks, true, &payload);
+    }
+    sinks
+        .stdout
+        .write_all(&result.bytes)
+        .context("writing sampled bytes to stdout")
 }
 
 /// Expand an optional `--vault-path` for the obsidian subcommand.

@@ -23,6 +23,7 @@ use crate::config::system_prompt::resolve_system_prompt;
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::display;
 use crate::document;
+use crate::document::sample as sample_ops;
 use crate::kind::matches_kind_filter;
 use crate::linter;
 use crate::operations;
@@ -749,6 +750,49 @@ fn desc_rm() -> ToolDesc {
     }
 }
 
+/// Build the sample tool descriptor.
+fn desc_sample() -> ToolDesc {
+    ToolDesc {
+        name: "sample",
+        description: "Return a downscaled / cropped raster image sized to fit \
+             the MCP token budget. Use this when `get --binary` would exceed \
+             the inline limit. Accepts PNG / JPEG / GIF / WebP; rejects SVG, \
+             PDF, audio, video. Returns `{binary, content (base64), mime, \
+             format, width, height, size_bytes, source}` where `source` echoes \
+             the original mime / dimensions / size. Defaults: max_dimension=1024, \
+             max_bytes=262144 (256 KiB), format=jpeg for photographic source \
+             formats / png for lossless ones.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Path to the image attachment." },
+                "crop": {
+                    "type": "string",
+                    "description": "Optional pixel crop applied before scaling, formatted X,Y,W,H (origin top-left). Clamped to the image bounds; an origin outside the image is rejected."
+                },
+                "max_dimension": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Upper bound (in pixels) on the longer edge of the output. Defaults to 1024.",
+                    "default": 1024
+                },
+                "max_bytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "description": "Target ceiling on the encoded output size in bytes. JPEG quality is stepped down (and then the dimension cap halved) until this fits. Defaults to 256 KiB.",
+                    "default": 256 * 1024
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["jpeg", "jpg", "png"],
+                    "description": "Output format. Defaults to jpeg for photographic source images (JPEG / WebP) and png for lossless source images (PNG / GIF)."
+                }
+            },
+            "required": ["path"]
+        }),
+    }
+}
+
 /// Build the search tool descriptor.
 fn desc_search() -> ToolDesc {
     ToolDesc {
@@ -969,6 +1013,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_react(),
         desc_reply(),
         desc_rm(),
+        desc_sample(),
         desc_sandbox_add(),
         desc_sandbox_list(),
         desc_sandbox_remove(),
@@ -1358,6 +1403,7 @@ fn dispatch_tool(
             );
         }
         "rm" => handle_rm(system, base_dir, config, p),
+        "sample" => handle_sample(system, base_dir, config, p),
         "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
         "sandbox_list" => handle_sandbox_list(system, base_dir, config, p),
         "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, p),
@@ -2184,6 +2230,42 @@ fn handle_mv(
     let args = mv_op::MvArgs::new(PathBuf::from(src), PathBuf::from(dst)).with_force(force);
     let outcome = mv_op::mv(system, base_dir, config, &args)?;
     Ok(outcome.to_json())
+}
+
+/// Handle the `sample` tool: return a downscaled / cropped image inline.
+fn handle_sample(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let path_str = required_str(params, "path")?;
+    let target = Path::new(path_str);
+
+    let crop = optional_str(params, "crop");
+    let format = optional_str(params, "format");
+    let max_bytes = params.get("max_bytes").and_then(Value::as_u64);
+    let max_dimension = params
+        .get("max_dimension")
+        .and_then(Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX));
+    let options =
+        sample_ops::SampleOptions::from_optionals(crop, format, max_bytes, max_dimension)?;
+
+    let result = sample_ops::sample_image(
+        system,
+        base_dir,
+        target,
+        config.unrestricted,
+        &config.trusted_roots,
+        &options,
+    )?;
+
+    let mut envelope = result.to_json_without_content();
+    envelope["binary"] = Value::Bool(true);
+    envelope["content"] = Value::String(BASE64_STANDARD.encode(&result.bytes));
+    envelope["path"] = json!(result.source_path);
+    Ok(envelope)
 }
 
 /// Handle the `sandbox_add` tool: stage files in the caller's sandbox.

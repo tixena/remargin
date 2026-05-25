@@ -265,6 +265,7 @@ fn tools_list_returns_all_tools() {
         "react",
         "reply",
         "rm",
+        "sample",
         "sandbox_add",
         "sandbox_list",
         "sandbox_remove",

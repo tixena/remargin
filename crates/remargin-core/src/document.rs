@@ -5,6 +5,7 @@
 
 pub mod allowlist;
 pub mod mime;
+pub mod sample;
 
 #[cfg(test)]
 mod tests;
