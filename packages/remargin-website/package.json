@@ -3,7 +3,7 @@
   "version": "0.1.12",
   "private": true,
   "type": "module",
-  "description": "Public landing page for Remargin — https://tixena.github.io/remargin/",
+  "description": "Public landing page for Remargin — https://remargin.io/",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
