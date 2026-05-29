@@ -269,6 +269,19 @@ pub fn query(
     base_dir: &Path,
     filter: &QueryFilter,
 ) -> Result<Vec<QueryResult>> {
+    // File-path branch: the user named one file explicitly, so honor it
+    // and skip the `.md`-extension and visibility gates the walk applies.
+    // The relative path is the file name, matching how a directory query
+    // of the parent would render this file.
+    if system.is_file(base_dir).unwrap_or(false) {
+        let relative = base_dir
+            .file_name()
+            .map_or_else(|| base_dir.to_path_buf(), PathBuf::from);
+        return Ok(process_document(system, base_dir, &relative, filter)
+            .into_iter()
+            .collect());
+    }
+
     let entries = system
         .walk_dir(base_dir, false, false)
         .with_context(|| format!("walking directory {}", base_dir.display()))?;
@@ -289,89 +302,101 @@ pub fn query(
             continue;
         }
 
-        let Ok(content) = system.read_to_string(&entry.path) else {
-            continue;
-        };
-
-        let Ok(doc) = parser::parse(&content) else {
-            continue;
-        };
-
-        let comments = doc.comments();
-        if comments.is_empty() {
-            continue;
-        }
-
-        // Filter by comment ID if specified.
-        if let Some(target_id) = &filter.comment_id
-            && !comments.iter().any(|cm| cm.id == *target_id)
-        {
-            continue;
-        }
-
-        let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
-        let pending: Vec<&&parser::Comment> = comments.iter().filter(|cm| is_pending(cm)).collect();
-        let pending_count = u32::try_from(pending.len()).unwrap_or(u32::MAX);
-        let pending_for = collect_pending_recipients(&pending);
-
-        let last_activity = comments.iter().map(|cm| cm.ts).max();
-
-        // Apply the pending-flavor union filter at the file level: when
-        // any of `pending`, `pending_for`, `pending_for_me`, or
-        // `pending_broadcast` is set, the document must have at least
-        // one comment that matches the union.
-        if filter.any_pending_active()
-            && !comments.iter().any(|cm| filter.matches_pending_union(cm))
-        {
-            continue;
-        }
-
-        if let Some(target_author) = &filter.author {
-            let has_author = comments.iter().any(|cm| cm.author == *target_author);
-            if !has_author {
-                continue;
-            }
-        }
-
-        if let Some(since) = &filter.since {
-            let has_recent = last_activity.is_some_and(|ts| ts >= *since);
-            if !has_recent {
-                continue;
-            }
-        }
-
         let relative = entry
             .path
             .strip_prefix(base_dir)
             .unwrap_or(&entry.path)
             .to_path_buf();
 
-        // Collect expanded comments unless summary-only mode is requested.
-        // When `expanded` is true OR `summary` is false, include comment data.
-        let include_comments = !filter.summary || filter.expanded;
-        let expanded_comments = include_comments.then(|| {
-            comments
-                .iter()
-                .filter(|cm| comment_matches_filters(cm, filter))
-                .map(|cm| expanded_from_comment(cm, &relative))
-                .collect::<Vec<ExpandedComment>>()
-        });
-        // Empty match list means no matches — skip the file entirely.
-        if matches!(&expanded_comments, Some(v) if v.is_empty()) {
-            continue;
+        if let Some(result) = process_document(system, &entry.path, &relative, filter) {
+            results.push(result);
         }
-
-        results.push(QueryResult {
-            comment_count,
-            comments: expanded_comments,
-            last_activity,
-            path: relative,
-            pending_count,
-            pending_for: (!pending_for.is_empty()).then_some(pending_for),
-        });
     }
 
     Ok(results)
+}
+
+/// Read, parse, and filter a single document, producing a [`QueryResult`]
+/// when it survives every active filter.
+///
+/// Shared by both `query` call paths (the directory walk and the
+/// explicit file-path branch) so filter semantics stay identical.
+/// Returns `None` when the file cannot be read or parsed, has no
+/// comments, or is excluded by a filter — these are not errors.
+fn process_document(
+    system: &dyn System,
+    file_path: &Path,
+    relative: &Path,
+    filter: &QueryFilter,
+) -> Option<QueryResult> {
+    let content = system.read_to_string(file_path).ok()?;
+
+    let doc = parser::parse(&content).ok()?;
+
+    let comments = doc.comments();
+    if comments.is_empty() {
+        return None;
+    }
+
+    // Filter by comment ID if specified.
+    if let Some(target_id) = &filter.comment_id
+        && !comments.iter().any(|cm| cm.id == *target_id)
+    {
+        return None;
+    }
+
+    let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
+    let pending: Vec<&&parser::Comment> = comments.iter().filter(|cm| is_pending(cm)).collect();
+    let pending_count = u32::try_from(pending.len()).unwrap_or(u32::MAX);
+    let pending_for = collect_pending_recipients(&pending);
+
+    let last_activity = comments.iter().map(|cm| cm.ts).max();
+
+    // Apply the pending-flavor union filter at the file level: when
+    // any of `pending`, `pending_for`, `pending_for_me`, or
+    // `pending_broadcast` is set, the document must have at least
+    // one comment that matches the union.
+    if filter.any_pending_active() && !comments.iter().any(|cm| filter.matches_pending_union(cm)) {
+        return None;
+    }
+
+    if let Some(target_author) = &filter.author {
+        let has_author = comments.iter().any(|cm| cm.author == *target_author);
+        if !has_author {
+            return None;
+        }
+    }
+
+    if let Some(since) = &filter.since {
+        let has_recent = last_activity.is_some_and(|ts| ts >= *since);
+        if !has_recent {
+            return None;
+        }
+    }
+
+    // Collect expanded comments unless summary-only mode is requested.
+    // When `expanded` is true OR `summary` is false, include comment data.
+    let include_comments = !filter.summary || filter.expanded;
+    let expanded_comments = include_comments.then(|| {
+        comments
+            .iter()
+            .filter(|cm| comment_matches_filters(cm, filter))
+            .map(|cm| expanded_from_comment(cm, relative))
+            .collect::<Vec<ExpandedComment>>()
+    });
+    // Empty match list means no matches — skip the file entirely.
+    if matches!(&expanded_comments, Some(v) if v.is_empty()) {
+        return None;
+    }
+
+    Some(QueryResult {
+        comment_count,
+        comments: expanded_comments,
+        last_activity,
+        path: relative.to_path_buf(),
+        pending_count,
+        pending_for: (!pending_for.is_empty()).then_some(pending_for),
+    })
 }
 
 /// Test whether a single comment matches all active filters.

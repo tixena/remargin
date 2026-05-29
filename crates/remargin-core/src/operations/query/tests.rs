@@ -1712,3 +1712,132 @@ fn query_kind_filter_excludes_unmatched_comments() {
     // drops the document entirely (no matching comments to include).
     assert!(results.is_empty());
 }
+
+#[test]
+fn query_file_path_pending_returns_one_result() {
+    let system = setup_system();
+    let filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/project/docs/pending.md"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].pending_count, 1);
+    assert_eq!(results[0].path.to_str().unwrap(), "pending.md");
+}
+
+#[test]
+fn query_file_path_all_acked_is_empty() {
+    let system = setup_system();
+    let filter = QueryFilter {
+        pending: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/project/docs/done.md"), &filter).unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn query_file_path_matches_directory_scoped_result() {
+    let system = setup_system();
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let file = query(&system, Path::new("/project/docs/pending.md"), &filter).unwrap();
+    let dir = query(&system, Path::new("/project"), &filter).unwrap();
+    let dir_pending = dir
+        .iter()
+        .find(|r| r.path.to_str().unwrap().contains("pending.md"))
+        .unwrap();
+
+    let file_ids: Vec<&str> = file[0]
+        .comments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
+    let dir_ids: Vec<&str> = dir_pending
+        .comments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
+    assert_eq!(file_ids, dir_ids);
+}
+
+#[test]
+fn query_file_path_expanded_returns_all_comments() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp/review.md"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    let comments = results[0].comments.as_ref().unwrap();
+    let ids: Vec<&str> = comments.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, vec!["c1", "c2", "c3"]);
+}
+
+#[test]
+fn query_file_path_author_filter() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        author: Some(String::from("bob")),
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp/review.md"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    let comments = results[0].comments.as_ref().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0].id, "c2");
+}
+
+#[test]
+fn query_file_path_no_comments_is_empty() {
+    let system = setup_system();
+    let filter = QueryFilter::default();
+
+    let results = query(&system, Path::new("/project/plain.md"), &filter).unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn query_file_path_comment_id_filter() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        comment_id: Some(String::from("c3")),
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp/review.md"), &filter).unwrap();
+    assert_eq!(results.len(), 1);
+    let comments = results[0].comments.as_ref().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0].id, "c3");
+}
+
+#[test]
+fn query_file_path_relative_is_file_name() {
+    let system = setup_expanded_system();
+    let filter = QueryFilter {
+        expanded: true,
+        ..QueryFilter::default()
+    };
+
+    let results = query(&system, Path::new("/exp/review.md"), &filter).unwrap();
+    assert_eq!(results[0].path.to_str().unwrap(), "review.md");
+    for cm in results[0].comments.as_ref().unwrap() {
+        assert_eq!(cm.file.to_str().unwrap(), "review.md");
+    }
+}
