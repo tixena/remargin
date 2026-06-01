@@ -135,6 +135,21 @@ fn allowlist_is_text_png_still_false() {
 }
 
 #[test]
+fn allowlist_is_text_base() {
+    assert!(allowlist::is_text(Path::new("projects.base")));
+}
+
+#[test]
+fn allowlist_is_text_base_uppercase() {
+    assert!(allowlist::is_text(Path::new("projects.BASE")));
+}
+
+#[test]
+fn allowlist_is_visible_base() {
+    assert!(allowlist::is_visible(Path::new("projects.base"), false));
+}
+
+#[test]
 fn allowlist_source_code_extensions_visible_and_text() {
     // One representative extension per added language family.
     let cases = &[

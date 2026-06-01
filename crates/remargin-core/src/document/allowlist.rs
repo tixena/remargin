@@ -11,7 +11,7 @@ use os_shim::System;
 /// File extensions visible through remargin.
 const ALLOWED_EXTENSIONS: &[&str] = &[
     // Prose / data
-    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf",
+    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base",
     // Design
     "pen", // Web markup / styles
     "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
@@ -39,7 +39,7 @@ const ALLOWED_EXTENSIONS: &[&str] = &[
 /// Every non-binary entry in `ALLOWED_EXTENSIONS` also appears here.
 const TEXT_EXTENSIONS: &[&str] = &[
     // Prose / data
-    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf",
+    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base",
     // Design
     "pen", // Web markup / styles
     "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
