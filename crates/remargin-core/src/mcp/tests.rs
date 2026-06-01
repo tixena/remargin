@@ -264,6 +264,7 @@ fn tools_list_returns_all_tools() {
         "purge",
         "query",
         "react",
+        "replace",
         "reply",
         "rm",
         "sandbox_add",
@@ -524,6 +525,75 @@ fn search_finds_text_in_document() {
             .unwrap()
             .contains("notification")
     );
+}
+
+#[test]
+fn replace_rewrites_body_via_mcp() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nThe foo system.\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "replace",
+                "arguments": {
+                    "pattern": "foo",
+                    "replacement": "bar",
+                    "path": "doc.md"
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    assert_eq!(result["total_replacements"], 1_i32);
+    assert_eq!(result["files_changed"], 1_i32);
+    assert_eq!(result["files_failed"], 0_i32);
+    assert_eq!(result["dry_run"], false);
+
+    let after = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
+    assert!(after.contains("The bar system."));
+}
+
+#[test]
+fn replace_requires_explicit_path() {
+    // The replace tool is deliberately absent from
+    // `PATH_DEFAULTS_TO_CWD_TOOLS`: a mutating folder op must not
+    // silently fan out over cwd. Omitting `path` is a hard error, not a
+    // default-to-cwd.
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "foo\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "replace",
+                "arguments": {
+                    "pattern": "foo",
+                    "replacement": "bar"
+                }
+            }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    // Disk untouched (no silent cwd fan-out).
+    let after = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
+    assert_eq!(after, "foo\n");
 }
 
 #[test]

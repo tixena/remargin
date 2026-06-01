@@ -34,6 +34,7 @@ use crate::operations::projections;
 use crate::operations::prompt as prompt_ops;
 use crate::operations::purge;
 use crate::operations::query::{self, QueryFilter};
+use crate::operations::replace;
 use crate::operations::sandbox as sandbox_ops;
 use crate::operations::search;
 use crate::parser;
@@ -812,6 +813,31 @@ fn desc_search() -> ToolDesc {
     }
 }
 
+/// Build the replace tool descriptor.
+fn desc_replace() -> ToolDesc {
+    ToolDesc {
+        name: "replace",
+        description: "Find/replace across document BODY text only (never inside comments), over a \
+             file or folder. Integrity-gated: each file flows through comment-preservation plus \
+             the post-verify subset gate, so a comment can never be corrupted. A pattern that \
+             occurs only inside comments is a no-op. In a folder, every visible `.md` file is \
+             rewritten; a file the gate refuses is skipped, recorded, and the run continues. \
+             `path` is required (no silent cwd fan-out). To preview without writing, use the CLI \
+             `remargin replace --dry-run`.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "pattern": { "type": "string", "description": "Text or regex to find" },
+                "replacement": { "type": "string", "description": "Replacement text ($1/${name} in regex mode; literal otherwise)" },
+                "path": { "type": "string", "description": "Target file or directory (required)" },
+                "regex": { "type": "boolean", "description": "Treat pattern as a regex", "default": false },
+                "ignore_case": { "type": "boolean", "description": "Case-insensitive matching", "default": false }
+            },
+            "required": ["pattern", "replacement", "path"]
+        }),
+    }
+}
+
 /// Build the sign tool descriptor.
 fn desc_sign() -> ToolDesc {
     ToolDesc {
@@ -1011,6 +1037,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_purge(),
         desc_query(),
         desc_react(),
+        desc_replace(),
         desc_reply(),
         desc_rm(),
         desc_sandbox_add(),
@@ -1389,6 +1416,7 @@ fn dispatch_tool(
         "purge" => handle_purge(system, base_dir, config, p),
         "query" => handle_query(system, base_dir, config, p),
         "react" => handle_react(system, base_dir, config, p),
+        "replace" => handle_replace(system, base_dir, config, p),
         "reply" => handle_reply(system, base_dir, config, p),
         "claude_restrict" => {
             return tool_result_error(
@@ -2394,6 +2422,31 @@ fn handle_search(
         .collect();
 
     Ok(json!({ "matches": matches }))
+}
+
+/// Handle the `replace` tool: body-only find/replace over a file or
+/// folder. `path` is required — there is no silent cwd fan-out for a
+/// mutating folder op.
+fn handle_replace(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let pattern = required_str(params, "pattern")?;
+    let replacement = required_str(params, "replacement")?;
+    let path_str = required_str(params, "path")?;
+    let target = base_dir.join(path_str);
+
+    // `dry_run` is deliberately not exposed on the MCP surface — preview
+    // migrated to `plan` for every tool (see
+    // `no_mode_or_dry_run_in_any_schema`); the CLI keeps `--dry-run`.
+    let options = replace::ReplaceOptions::new(String::from(pattern), String::from(replacement))
+        .regex(optional_bool(params, "regex"))
+        .ignore_case(optional_bool(params, "ignore_case"));
+
+    let report = replace::replace(system, base_dir, &target, &options, config)?;
+    serde_json::to_value(&report).context("serializing replace report")
 }
 
 /// Resolve the `ids` / `all_mine` selection shared by `sign` and

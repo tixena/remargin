@@ -34,6 +34,7 @@ use remargin_core::operations::plan as plan_ops;
 use remargin_core::operations::projections;
 use remargin_core::operations::purge;
 use remargin_core::operations::query;
+use remargin_core::operations::replace;
 use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
 use remargin_core::parser;
@@ -681,6 +682,43 @@ enum Commands {
         action: RegistryAction,
         #[command(flatten)]
         output_args: OutputArgs,
+    },
+    /// Find/replace across document body text (never inside comments).
+    ///
+    /// Substitutes `PATTERN` with `REPLACEMENT` in document body text
+    /// only, over a single file or a whole directory tree. Comment
+    /// blocks are never in scope — a pattern that occurs only inside a
+    /// comment is a no-op, and a comment is left byte-identical even
+    /// when the body around it changes. Each per-file write flows
+    /// through the same comment-preservation and post-verify subset gate
+    /// `write` uses, so a replace can never corrupt a comment or
+    /// introduce an integrity anomaly. In folder mode, a file the gate
+    /// refuses is skipped and recorded; the run finishes the rest.
+    Replace {
+        /// Text or regex to find.
+        pattern: String,
+        /// Replacement text. In `--regex` mode, `$1` / `${name}` expand
+        /// to capture groups; otherwise the text is inserted verbatim.
+        replacement: String,
+        /// Target file or directory.
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Treat pattern as a regex (default: literal).
+        #[arg(long)]
+        regex: bool,
+        /// Case-insensitive matching.
+        #[arg(long, short = 'i')]
+        ignore_case: bool,
+        /// Report per-file replacement counts and the subset-gate
+        /// verdict; write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// Resolve the effective enforcement mode for a directory.
     ///
@@ -1540,6 +1578,12 @@ struct ReactParams<'cmd> {
     remove: bool,
 }
 
+struct ReplaceParams<'cmd> {
+    json_mode: bool,
+    options: replace::ReplaceOptions,
+    path: &'cmd str,
+}
+
 struct WriteParams<'cmd> {
     content: Option<&'cmd str>,
     json_mode: bool,
@@ -1799,6 +1843,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Purge { output_args, .. }
         | Commands::Query { output_args, .. }
         | Commands::React { output_args, .. }
+        | Commands::Replace { output_args, .. }
         | Commands::Registry { output_args, .. }
         | Commands::ResolveMode { output_args, .. }
         | Commands::Rm { output_args, .. }
@@ -2016,6 +2061,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Purge { .. }
         | Commands::Query { .. }
         | Commands::React { .. }
+        | Commands::Replace { .. }
         | Commands::Registry { .. }
         | Commands::Rm { .. }
         | Commands::GetImage { .. }
@@ -2049,6 +2095,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Purge { identity_args, .. }
         | Commands::Query { identity_args, .. }
         | Commands::React { identity_args, .. }
+        | Commands::Replace { identity_args, .. }
         | Commands::Rm { identity_args, .. }
         | Commands::Sandbox { identity_args, .. }
         | Commands::Sign { identity_args, .. }
@@ -2098,6 +2145,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Purge { .. }
         | Commands::Query { .. }
         | Commands::React { .. }
+        | Commands::Replace { .. }
         | Commands::Registry { .. }
         | Commands::ResolveMode { .. }
         | Commands::Rm { .. }
@@ -2130,6 +2178,9 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
             unrestricted_args, ..
         }
         | Commands::GetImage {
+            unrestricted_args, ..
+        }
+        | Commands::Replace {
             unrestricted_args, ..
         }
         | Commands::Write {
@@ -2682,6 +2733,7 @@ fn dispatch_with_config(
         Commands::Purge { .. } => handle_purge(&cli.command, sinks, system, cwd, config),
         Commands::Query { .. } => handle_query(&cli.command, sinks, system, cwd, config),
         Commands::React { .. } => handle_react(&cli.command, sinks, system, cwd, config),
+        Commands::Replace { .. } => handle_replace(&cli.command, sinks, system, cwd, config),
         Commands::Registry { .. } => handle_registry(&cli.command, sinks, system, cwd),
         Commands::Rm { .. } => handle_rm(&cli.command, sinks, system, cwd, config),
         Commands::GetImage { .. } => handle_get_image(&cli.command, sinks, system, cwd, config),
@@ -3123,6 +3175,41 @@ fn handle_react(
         remove: *remove,
     };
     cmd_react(sinks, system, cwd, config, &r)
+}
+
+fn handle_replace(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Replace {
+        pattern,
+        replacement,
+        path,
+        regex,
+        ignore_case,
+        dry_run,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_replace called with wrong subcommand");
+    };
+    let options = replace::ReplaceOptions::new(
+        String::from(pattern.as_str()),
+        String::from(replacement.as_str()),
+    )
+    .regex(*regex)
+    .ignore_case(*ignore_case)
+    .dry_run(*dry_run);
+    let r = ReplaceParams {
+        json_mode: output_args.json,
+        options,
+        path: path.as_str(),
+    };
+    cmd_replace(sinks, system, cwd, config, &r)
 }
 
 fn handle_registry(
@@ -5462,6 +5549,61 @@ fn cmd_search(
         }
         Ok(())
     }
+}
+
+fn cmd_replace(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    params: &ReplaceParams<'_>,
+) -> Result<()> {
+    let target = cwd.join(expand_cli_path(system, params.path)?);
+
+    let report = replace::replace(system, cwd, &target, &params.options, config)?;
+
+    if params.json_mode {
+        return print_output(sinks, true, &serde_json::to_value(&report)?);
+    }
+
+    for file in &report.files {
+        let line = match &file.error {
+            Some(err) => format!("{}: skipped ({err})", file.path.display()),
+            None if file.changed => {
+                let verb = if report.dry_run {
+                    "would change"
+                } else {
+                    "changed"
+                };
+                format!(
+                    "{}: {verb} ({} replacement{})",
+                    file.path.display(),
+                    file.replacements,
+                    plural_suffix(file.replacements),
+                )
+            }
+            None => continue,
+        };
+        out(sinks, &line)?;
+    }
+    let header = if report.dry_run { "dry-run: " } else { "" };
+    out(
+        sinks,
+        &format!(
+            "{header}{} replacement{} across {} file{} ({} failed)",
+            report.total_replacements,
+            plural_suffix(report.total_replacements),
+            report.files_changed,
+            plural_suffix(report.files_changed),
+            report.files_failed,
+        ),
+    )
+}
+
+/// `""` for exactly one, `"s"` otherwise — for human-readable count
+/// messages.
+const fn plural_suffix(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }
 
 fn cmd_react(

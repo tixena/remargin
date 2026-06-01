@@ -48,6 +48,8 @@ pub enum OpName {
     Query,
     /// Write: react to a comment.
     React,
+    /// Write: find/replace across document body text.
+    Replace,
     /// Write: stage a doc into a sandbox.
     SandboxAdd,
     /// Write: remove a doc from a sandbox.
@@ -80,6 +82,7 @@ impl OpName {
         Self::Purge,
         Self::Query,
         Self::React,
+        Self::Replace,
         Self::SandboxAdd,
         Self::SandboxRemove,
         Self::Search,
@@ -112,6 +115,7 @@ impl OpName {
         Self::Mv,
         Self::Purge,
         Self::React,
+        Self::Replace,
         Self::SandboxAdd,
         Self::SandboxRemove,
         Self::Sign,
@@ -136,6 +140,7 @@ impl OpName {
             Self::Purge => "purge",
             Self::Query => "query",
             Self::React => "react",
+            Self::Replace => "replace",
             Self::SandboxAdd => "sandbox-add",
             Self::SandboxRemove => "sandbox-remove",
             Self::Search => "search",

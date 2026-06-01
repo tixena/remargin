@@ -269,6 +269,13 @@ remargin write docs/new-doc.md "# New Doc" --create
 # Full-text search
 remargin search "TODO" --path docs/
 remargin search "error|warning" --regex --ignore-case
+
+# Find/replace across document BODY text only (never inside comments).
+# Integrity-gated like write: a comment is never corrupted, and a pattern
+# that occurs only inside a comment is a no-op. Works on a file or a folder.
+remargin replace "old name" "new name" --path docs/
+remargin replace "id=(\d+)" "id=[$1]" --regex --path docs/design.md
+remargin replace "foo" "bar" --path docs/ --dry-run   # preview; writes nothing
 ```
 
 ### Acknowledge and react
@@ -309,7 +316,7 @@ remargin mcp install --user
 remargin mcp test
 ```
 
-Once installed, Claude Code gets these tools: `ls`, `get`, `write`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `mv`, `rm`.
+Once installed, Claude Code gets these tools: `ls`, `get`, `write`, `replace`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `mv`, `rm`.
 
 ### Plugin
 
@@ -509,7 +516,7 @@ The single exception to per-op evaluation is `trusted_roots`, which defines the 
 | Kind | Ops |
 |------|-----|
 | Read (bypass `trusted_roots`) | `comments`, `get`, `lint`, `ls`, `metadata`, `query`, `search`, `verify` |
-| Write (gated by `trusted_roots`) | `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write` |
+| Write (gated by `trusted_roots`) | `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `replace`, `sandbox-add`, `sandbox-remove`, `sign`, `write` |
 
 The lists are pinned by `READ_OPS` and `MUTATING_OPS` in `remargin_core::permissions::op_guard`. Adding a new op MUST classify it at PR time by adding the canonical name to one of those constants; unknown ops fail closed (treated as write-side under `trusted_roots`).
 

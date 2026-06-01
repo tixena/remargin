@@ -635,12 +635,39 @@ pub fn write(
         String::from(content)
     };
 
-    let new_doc = parser::parse(&content_to_parse).context("parsing incoming content")?;
+    commit_markdown(system, config, &resolved, &content_to_parse, opts.create)
+}
+
+/// Shared markdown-commit tail for whole-document mutations.
+///
+/// Runs the exact integrity pipeline `write` uses on its markdown path:
+/// parse the candidate content, enforce comment preservation against the
+/// on-disk document (skipped when `create`), normalize frontmatter,
+/// short-circuit byte-identical no-ops, then commit through the
+/// post-verify subset gate ([`commit_with_verify`]). `resolved` must be a
+/// path that has already passed sandbox resolution, the forbidden-target
+/// check, and the visibility check; the op-guard (`pre_mutate_check_*`)
+/// must already have run under the caller's own op name. This factoring
+/// lets `replace` reuse the identical commit semantics without inheriting
+/// `write`'s op name (so `deny write / allow replace` policies stay
+/// independent).
+///
+/// # Errors
+///
+/// Surfaces parse failures, comment-preservation violations, frontmatter
+/// errors, and the subset-gate refusal — the same diagnostics `write`
+/// raises on its markdown path.
+pub(crate) fn commit_markdown(
+    system: &dyn System,
+    config: &ResolvedConfig,
+    resolved: &Path,
+    content_to_parse: &str,
+    create: bool,
+) -> Result<WriteOutcome> {
+    let new_doc = parser::parse(content_to_parse).context("parsing incoming content")?;
 
     // Comment preservation: only check when overwriting an existing file.
-    if !opts.create
-        && let Ok(old_content) = system.read_to_string(&resolved)
-    {
+    if !create && let Ok(old_content) = system.read_to_string(resolved) {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
         check_comment_preservation(&old_doc, &new_doc)?;
     }
@@ -655,18 +682,64 @@ pub fn write(
     // this payload would produce. `create` never no-ops (the path is
     // guaranteed not to exist, ruled out above).
     let final_content = final_doc.to_markdown()?;
-    if !opts.create && is_byte_identical(system, &resolved, final_content.as_bytes()) {
+    if !create && is_byte_identical(system, resolved, final_content.as_bytes()) {
         return Ok(WriteOutcome { noop: true });
     }
 
-    commit_with_verify(system, &final_doc, config, &resolved, |verified_doc| {
+    commit_with_verify(system, &final_doc, config, resolved, |verified_doc| {
         let serialized = verified_doc.to_markdown()?;
         system
-            .write(&resolved, serialized.as_bytes())
+            .write(resolved, serialized.as_bytes())
             .with_context(|| format!("writing {}", resolved.display()))
     })?;
 
     Ok(WriteOutcome { noop: false })
+}
+
+/// No-write projection of [`commit_markdown`].
+///
+/// Runs the identical integrity pipeline — parse, comment-preservation,
+/// frontmatter normalization, byte-identical no-op detection, and the
+/// post-verify subset gate — against an **existing** file, but never
+/// touches disk. Returns `true` when the candidate content would change
+/// the on-disk bytes, `false` when it is a no-op. Powers `replace
+/// --dry-run`: a gate refusal surfaces as an `Err` exactly as it would on
+/// a real commit, but no byte is written. `resolved` must already have
+/// passed sandbox resolution, the forbidden-target check, and the
+/// visibility check.
+///
+/// # Errors
+///
+/// Surfaces the same diagnostics [`commit_markdown`] raises on its
+/// pre-write path: parse failures, comment-preservation violations,
+/// frontmatter errors, and the subset-gate refusal.
+pub(crate) fn project_commit_markdown(
+    system: &dyn System,
+    config: &ResolvedConfig,
+    resolved: &Path,
+    content_to_parse: &str,
+) -> Result<bool> {
+    let new_doc = parser::parse(content_to_parse).context("parsing incoming content")?;
+
+    if let Ok(old_content) = system.read_to_string(resolved) {
+        let old_doc = parser::parse(&old_content).context("parsing existing document")?;
+        check_comment_preservation(&old_doc, &new_doc)?;
+    }
+
+    let mut final_doc = new_doc;
+    frontmatter::ensure_frontmatter(&mut final_doc, config)?;
+
+    let final_content = final_doc.to_markdown()?;
+    if is_byte_identical(system, resolved, final_content.as_bytes()) {
+        return Ok(false);
+    }
+
+    // Run the subset gate without writing: the no-op closure proves the
+    // candidate passes `Q ⊆ P`, so a damaging dry-run reports the same
+    // refusal a real commit would.
+    commit_with_verify(system, &final_doc, config, resolved, |_verified_doc| Ok(()))?;
+
+    Ok(true)
 }
 
 /// Pure projection of a `write` op: runs the same pipeline [`write`]

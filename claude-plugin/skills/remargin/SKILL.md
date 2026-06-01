@@ -199,6 +199,7 @@ remargin batch --ops '[
 | Read with line numbers | `get path=... line_numbers=true` |
 | Read binary (non-md) | `get binary=true` (run `metadata` first to check `size_bytes`) |
 | Search text | `search pattern=... [scope=all|body|comments] [regex=true]` |
+| Find/replace across body (file or folder) | `replace pattern=... replacement=... path=... [regex=true] [ignore_case=true]` (body-only; never touches comments; `path` required) |
 | Replace a line range (preferred for edits) | `write path=... start_line=N end_line=M content=...` |
 | Replace whole file (rare — usually wrong for edits) | `write path=... content=...` (comment-preserving) |
 | Create a new file | `write path=... content=... create=true` |

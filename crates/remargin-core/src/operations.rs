@@ -7,6 +7,7 @@ pub mod projections;
 pub mod prompt;
 pub mod purge;
 pub mod query;
+pub mod replace;
 pub mod sandbox;
 pub mod search;
 pub mod sign;
