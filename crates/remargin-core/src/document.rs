@@ -176,7 +176,7 @@ impl DocumentMetadata {
 pub struct WriteOptions {
     /// Base64-encoded binary data; implies `raw`.
     pub binary: bool,
-    /// Parent dir must exist, file must not.
+    /// Missing parent dirs are created; the file itself must not already exist.
     pub create: bool,
     /// When set, replace only lines `[start..=end]` (1-indexed, inclusive)
     /// with the provided content and leave the rest of the file
@@ -521,8 +521,9 @@ pub fn rm(
 /// The payload must include all existing comment blocks with their original
 /// IDs, checksums, and signatures intact.
 ///
-/// When `create` is true, the file is expected to be new: the parent directory
-/// must exist, but the file itself must not. Comment preservation checks are
+/// When `create` is true, the file is expected to be new: missing parent
+/// directories are created automatically (subject to the sandbox check), and
+/// the file itself must not already exist. Comment preservation checks are
 /// skipped since there is no existing file to compare against.
 ///
 /// # Errors
@@ -531,7 +532,7 @@ pub fn rm(
 /// - The path escapes the sandbox
 /// - Comments were added, removed, or modified (when `create` is false)
 /// - `create` is true but the file already exists
-/// - `create` is true but the parent directory does not exist
+/// - `create` is true and creating the parent directories would escape the sandbox
 /// - The file cannot be written
 pub fn write(
     system: &dyn System,

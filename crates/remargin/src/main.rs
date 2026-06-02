@@ -842,7 +842,7 @@ enum Commands {
         /// Not supported for markdown (.md) files.
         #[arg(long)]
         binary: bool,
-        /// Create a new file (parent directory must exist, file must not).
+        /// Create a new file, creating any missing parent directories; the file itself must not already exist.
         #[arg(long)]
         create: bool,
         /// Replace only lines `START-END` (1-indexed, inclusive) and leave
@@ -1151,7 +1151,7 @@ enum PlanAction {
         /// a structured plan — the report will carry a `reject_reason`.
         #[arg(long)]
         binary: bool,
-        /// Create a new file (parent directory must exist, file must not).
+        /// Create a new file, creating any missing parent directories; the file itself must not already exist.
         #[arg(long)]
         create: bool,
         /// Replace only lines `START-END` (1-indexed, inclusive) and

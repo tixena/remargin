@@ -1000,7 +1000,7 @@ fn desc_write() -> ToolDesc {
                 "path": { "type": "string", "description": "Path to the file" },
                 "content": { "type": "string", "description": "File content to write (base64-encoded when binary=true)" },
                 "binary": { "type": "boolean", "description": "Content is base64-encoded binary data. Implies raw mode. Not supported for markdown (.md) files.", "default": false },
-                "create": { "type": "boolean", "description": "Create a new file (parent directory must exist, file must not)", "default": false },
+                "create": { "type": "boolean", "description": "Create a new file, creating any missing parent directories (within the sandbox); the file itself must not already exist", "default": false },
                 "start_line": { "type": "integer", "minimum": 1, "description": "Partial write: first line of the range to replace (1-indexed, inclusive). Must be paired with end_line. Incompatible with create/raw/binary." },
                 "end_line": { "type": "integer", "minimum": 1, "description": "Partial write: last line of the range to replace (1-indexed, inclusive). Must be paired with start_line. Incompatible with create/raw/binary." },
                 "raw": { "type": "boolean", "description": "Write content exactly as provided, skipping frontmatter injection and comment preservation. Not supported for markdown (.md) files.", "default": false }
