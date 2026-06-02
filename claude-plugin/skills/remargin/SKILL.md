@@ -120,7 +120,8 @@ stop at the first match:
     Don't over-decorate plain prose — a one-line answer stays a one-line answer. The bar is readability for a human scanning a thread, not styling for its own sake.
 16. **Prefer partial writes over rewriting the whole file.** `write` accepts `start_line` / `end_line` (1-indexed, inclusive) to replace just a line range while leaving the rest of the file untouched. Use this whenever you're changing a few lines, fixing a section, or updating one paragraph in a large doc. Rewriting the whole file forces you to carry the entire body in your context (slow, expensive, and one typo can corrupt the rest). Comment preservation, frontmatter handling, and the verify gate all run identically on partial writes. Reserve whole-file `write` for new files (`create=true`) or genuine wholesale rewrites.
 17. **Comments must be self-contained.** Write every comment so it stands on its own to a human scanning the thread later. Spell names and terms out in full — no acronyms or invented shorthand (write "Module 1", not "M1"; write the person's full name, not an initial). Never refer to another comment by its ID (e.g. "see 3pd", "as in ow6") — IDs are opaque to a reader and meaningless out of context. Instead quote or paraphrase what that comment said, and point at the relevant file or section if needed. A reader should never have to expand an acronym or go look up a comment ID to understand what you wrote.
-18. **Surface open questions as comments, not prose.** When you author or edit a managed document and hit a decision you can't make, a question only the owner can answer, or a tradeoff that needs a human call, post it as a `comment` / `reply` addressed to the owner via `to:` so it lands in their pending queue — never leave it as an "open question" / "TBD" / "for discussion" paragraph in the body. The body holds decided content; unresolved items live in the thread, where the owner is actually notified. One comment per separable question (`batch` for several). A reader scanning the body should see decisions, not your deliberation.
+18. **Surface open questions as comments, not prose.** When you author or edit a managed document and hit a decision you can't make, a question only the owner can answer, or a tradeoff that needs a human call, post it as a `comment` / `reply` addressed to the owner via `to:` so it lands in their pending queue — never leave it as an "open question" / "TBD" / "for discussion" paragraph in the body. The body holds decided content; unresolved items live in the thread, where the owner is actually notified. One comment per separable question (`batch` for several) — and keep each one scoped to its single ask: a brief rationale is fine, but don't fold a status / progress / blocker report into a decision comment. A reader scanning the body should see decisions, not your deliberation.
+19. **Sign only what you own; never sign to make `verify` pass.** Your signature vouches that *you authored* the content — sign your own comments and nothing else (the forgery guard enforces it, but the discipline is yours). A failed `verify` (`signature_invalid` or checksum mismatch) is a diagnostic signal, not something to silence: it means a wrong signing key, the wrong identity, edited/tampered content, or an unregistered key. Fix the root cause — never reach for `sign` / `repair_checksum` to paper over a failed verify, and never re-sign another author's content.
 
 ---
 
@@ -343,6 +344,10 @@ Each is a concrete failure mode that has bitten a session.
 ❌ **Rewriting a file to "fix" a verify mismatch.** That's the symptom, not the cause. Surface to the user.
 
 ❌ **Rewriting the whole file when you only need to change a few lines.** `write` accepts `start_line` + `end_line` for partial writes that leave the rest of the file untouched. Use the partial form; reserve whole-file writes for new files (`create=true`) or genuine wholesale rewrites.
+
+❌ **Minting or moving signing keys to "fix" a signing failure.** A missing key, `signature_invalid`, or unregistered identity is an admin/setup gap — not yours to solve by generating a new key (it breaks the identity→pubkey binding in the registry, so every signature then fails) or copying keys into folders. Surface to the user.
+
+❌ **Trying to build code inside a realm.** A restricted realm blocks shell writes to *every* file under it, not just `.md` — you can't `cargo new` / `npm init` / scaffold / compile there, because the build writes non-markdown files the hook refuses. Realms are for *using* remargin, not building software. If a task needs to build code, it belongs outside the realm — say so and stop.
 
 ---
 
@@ -625,6 +630,8 @@ Three modes resolved by walking up for `.remargin.yaml`:
 - `strict` — registered identities only, every comment carries a valid Ed25519 signature.
 
 In strict mode, the verify gate runs before every write; unsigned/unregistered posts are rejected.
+
+**Signing keys and the registry are admin setup — not self-serve.** Signing uses your identity's private key (`key:` in `.remargin.yaml`); verification checks your signature against your registered public key in the participant registry `.remargin-registry.yaml` (resolved by walking up the tree). If you cannot sign — missing key file, `signature_invalid`, or your identity isn't registered — STOP and surface it to the user. Do **not** generate a new key for an already-registered identity (it breaks the identity→pubkey binding and every signature then fails verification), do **not** guess where keys or trust live, and do **not** write keys into arbitrary folders. Provisioning keys and editing the registry are the human's job.
 
 ---
 
