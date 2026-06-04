@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use os_shim::mock::MockSystem;
 use serde_json::json;
 
-use crate::permissions::doctor::{DoctorReport, FindingKind, Severity, run_doctor};
+use crate::permissions::doctor::{
+    DoctorFinding, DoctorReport, FindingKind, Severity, render_doctor_text, run_doctor,
+};
 use crate::permissions::pretool_install::{HOOK_COMMAND, HOOK_MATCHER};
 
 fn hook_settings_json() -> String {
@@ -179,5 +181,76 @@ fn report_includes_correct_settings_file_paths() {
     assert_eq!(
         report.user_settings_file,
         PathBuf::from("/home/u/.claude/settings.json")
+    );
+}
+
+// --- render_doctor_text unit tests ---
+
+fn clean_report() -> DoctorReport {
+    DoctorReport {
+        findings: vec![],
+        hook_installed: true,
+        project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
+        user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
+    }
+}
+
+fn findings_report() -> DoctorReport {
+    DoctorReport {
+        findings: vec![DoctorFinding {
+            kind: FindingKind::HookMissing,
+            message: String::from("hook is missing"),
+            remedy: String::from("run install"),
+            severity: Severity::Critical,
+        }],
+        hook_installed: false,
+        project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
+        user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
+    }
+}
+
+#[test]
+fn render_doctor_clean_plain() {
+    let out = render_doctor_text(&clean_report(), false);
+    assert!(out.contains("all checks passed"), "unexpected: {out}");
+    assert!(!out.contains("Checks:"), "verbose section in plain: {out}");
+}
+
+#[test]
+fn render_doctor_clean_verbose() {
+    let out = render_doctor_text(&clean_report(), true);
+    assert!(out.contains("all checks passed"), "unexpected: {out}");
+    assert!(out.contains("Checks:"), "missing Checks: in verbose: {out}");
+    assert!(
+        out.contains("hook-installed: ok"),
+        "missing hook verdict: {out}"
+    );
+    assert!(
+        out.contains("user-settings:"),
+        "missing user-settings: {out}"
+    );
+    assert!(
+        out.contains("project-settings:"),
+        "missing project-settings: {out}"
+    );
+}
+
+#[test]
+fn render_doctor_findings_plain() {
+    let out = render_doctor_text(&findings_report(), false);
+    assert!(out.contains("[CRITICAL]"), "unexpected: {out}");
+    assert!(out.contains("hook is missing"), "unexpected: {out}");
+    assert!(out.contains("Remedy: run install"), "unexpected: {out}");
+    assert!(!out.contains("Checks:"), "verbose section in plain: {out}");
+}
+
+#[test]
+fn render_doctor_findings_verbose() {
+    let out = render_doctor_text(&findings_report(), true);
+    assert!(out.contains("[CRITICAL]"), "unexpected: {out}");
+    assert!(out.contains("Checks:"), "missing Checks: in verbose: {out}");
+    assert!(
+        out.contains("hook-installed: missing"),
+        "expected missing verdict: {out}"
     );
 }

@@ -1956,5 +1956,231 @@ fn decide_commit(
     (false, Some(reason), subset_gate)
 }
 
+/// Human-readable label for a [`EntryAction`] in plan text output.
+const fn entry_action_label(action: EntryAction) -> &'static str {
+    match action {
+        EntryAction::Added => "added",
+        EntryAction::Noop => "noop",
+        EntryAction::Updated => "updated",
+    }
+}
+
+/// Human-readable label for a [`UnprotectEntryAction`] in plan text output.
+const fn unprotect_entry_action_label(action: UnprotectEntryAction) -> &'static str {
+    match action {
+        UnprotectEntryAction::Absent => "absent",
+        UnprotectEntryAction::WouldBeRemoved => "would_be_removed",
+    }
+}
+
+/// Render a `plan restrict` [`PlanReport`] as a structured text block.
+///
+/// Returns an empty string when the report has no `config_diff`.
+#[must_use]
+pub fn render_plan_restrict_text(report: &PlanReport) -> String {
+    let Some(diff) = report.config_diff.as_ref() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let _ = writeln!(out, "Plan: restrict {}", diff.absolute_path.display());
+    let _ = writeln!(out, "  Anchor: {}", diff.anchor.display());
+    let _ = writeln!(
+        out,
+        "  noop: {}   would_commit: {}",
+        report.noop, report.would_commit,
+    );
+    if let Some(reason) = &report.reject_reason {
+        let _ = writeln!(out, "  reject_reason: {reason}");
+    }
+    let _ = writeln!(
+        out,
+        "  .remargin.yaml: {}",
+        diff.remargin_yaml.path.display()
+    );
+    let _ = writeln!(
+        out,
+        "    will be created: {}",
+        diff.remargin_yaml.will_be_created,
+    );
+    let _ = writeln!(
+        out,
+        "    entry: {}",
+        entry_action_label(diff.remargin_yaml.entry_action),
+    );
+    let _ = writeln!(out, "  Settings: {} file(s)", diff.settings_files.len());
+    for sf in &diff.settings_files {
+        let _ = writeln!(out, "    {}", sf.path.display());
+        let _ = writeln!(out, "      will be created: {}", sf.will_be_created);
+        let _ = writeln!(
+            out,
+            "      deny rules: +{} to add, {} already present",
+            sf.deny_rules_to_add.len(),
+            sf.deny_rules_already_present.len(),
+        );
+        let _ = writeln!(
+            out,
+            "      allow rules: +{} to add, {} already present",
+            sf.allow_rules_to_add.len(),
+            sf.allow_rules_already_present.len(),
+        );
+    }
+    let _ = writeln!(
+        out,
+        "  Sidecar: {} ({})",
+        diff.sidecar.path.display(),
+        entry_action_label(diff.sidecar.entry_action),
+    );
+    if diff.conflicts.is_empty() {
+        let _ = writeln!(out, "  conflicts: 0");
+    } else {
+        let _ = writeln!(out, "  conflicts: {}", diff.conflicts.len());
+        for conflict in &diff.conflicts {
+            out.push_str(&render_conflict_line(conflict));
+        }
+    }
+    out
+}
+
+/// Render a single [`ConfigConflict`] as an indented text line.
+#[must_use]
+pub fn render_conflict_line(conflict: &ConfigConflict) -> String {
+    let mut out = String::new();
+    match conflict {
+        ConfigConflict::AllowDenyOverlap {
+            allow_rule,
+            overlap_kind,
+            projected_deny_rule,
+            settings_file,
+        } => {
+            let kind_label = match overlap_kind {
+                OverlapKind::AllowShadowedByBroaderDeny => {
+                    "existing allow is shadowed by broader projected deny"
+                }
+                OverlapKind::DenyShadowedByBroaderAllow => {
+                    "projected deny is shadowed by broader existing allow"
+                }
+                OverlapKind::Exact => "exact",
+            };
+            let _ = writeln!(
+                out,
+                "    allow_deny_overlap in {} ({kind_label}):",
+                settings_file.display(),
+            );
+            let _ = writeln!(out, "      existing allow:  {allow_rule}");
+            let _ = writeln!(out, "      projected deny:  {projected_deny_rule}");
+        }
+        ConfigConflict::AnchorIsAncestor { anchor, cwd } => {
+            let _ = writeln!(
+                out,
+                "    anchor_is_ancestor: cwd={} anchor={}",
+                cwd.display(),
+                anchor.display(),
+            );
+        }
+        ConfigConflict::YamlEntryWouldChange {
+            path,
+            previous,
+            projected,
+        } => {
+            use crate::display::format_string_list;
+            let _ = writeln!(out, "    yaml_entry_would_change: path={path}");
+            let _ = writeln!(
+                out,
+                "      previous: also_deny_bash={} cli_allowed={}",
+                format_string_list(&previous.also_deny_bash),
+                previous.cli_allowed,
+            );
+            let _ = writeln!(
+                out,
+                "      projected: also_deny_bash={} cli_allowed={}",
+                format_string_list(&projected.also_deny_bash),
+                projected.cli_allowed,
+            );
+        }
+    }
+    out
+}
+
+/// Render a `plan unprotect` [`PlanReport`] as a structured text block.
+///
+/// Returns an empty string when the report has no `unprotect_diff`.
+#[must_use]
+pub fn render_plan_unprotect_text(report: &PlanReport) -> String {
+    let Some(diff) = report.unprotect_diff.as_ref() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let _ = writeln!(out, "Plan: unprotect {}", diff.absolute_path.display());
+    let _ = writeln!(out, "  Anchor: {}", diff.anchor.display());
+    let _ = writeln!(
+        out,
+        "  noop: {}   would_commit: {}",
+        report.noop, report.would_commit,
+    );
+    if let Some(reason) = &report.reject_reason {
+        let _ = writeln!(out, "  reject_reason: {reason}");
+    }
+    let _ = writeln!(
+        out,
+        "  .remargin.yaml: {}",
+        diff.remargin_yaml.path.display()
+    );
+    let _ = writeln!(
+        out,
+        "    entry: {}",
+        unprotect_entry_action_label(diff.remargin_yaml.entry_action),
+    );
+    let _ = writeln!(out, "  Settings: {} file(s)", diff.settings_files.len());
+    for sf in &diff.settings_files {
+        let _ = writeln!(out, "    {}", sf.path.display());
+        let _ = writeln!(
+            out,
+            "      rules: -{} to remove, {} already absent",
+            sf.rules_to_remove.len(),
+            sf.rules_already_absent.len(),
+        );
+    }
+    let _ = writeln!(
+        out,
+        "  Sidecar: {} ({})",
+        diff.sidecar.path.display(),
+        unprotect_entry_action_label(diff.sidecar.entry_action),
+    );
+    if diff.conflicts.is_empty() {
+        let _ = writeln!(out, "  conflicts: 0");
+    } else {
+        let _ = writeln!(out, "  conflicts: {}", diff.conflicts.len());
+        for conflict in &diff.conflicts {
+            out.push_str(&render_unprotect_conflict_line(conflict));
+        }
+    }
+    out
+}
+
+/// Render a single [`UnprotectConflict`] as an indented text line.
+#[must_use]
+pub fn render_unprotect_conflict_line(conflict: &UnprotectConflict) -> String {
+    let mut out = String::new();
+    match conflict {
+        UnprotectConflict::RuleAlreadyAbsent {
+            rule,
+            settings_file,
+        } => {
+            let _ = writeln!(
+                out,
+                "    rule_already_absent in {}: {rule}",
+                settings_file.display(),
+            );
+        }
+        UnprotectConflict::SidecarEntryMissing { path } => {
+            let _ = writeln!(out, "    sidecar_entry_missing: {}", path.display());
+        }
+        UnprotectConflict::YamlEntryMissing { path } => {
+            let _ = writeln!(out, "    yaml_entry_missing: {}", path.display());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests;

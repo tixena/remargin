@@ -62,3 +62,26 @@ pub enum RegistryParticipantStatus {
 const fn default_status() -> RegistryParticipantStatus {
     RegistryParticipantStatus::Active
 }
+
+/// Render a single [`RegistryParticipant`] as a one-line human-readable
+/// string.
+///
+/// When a display name is set the prefix is `"Display Name" (id)`;
+/// otherwise it is the bare id. Example output:
+/// `"Eduardo Burgos" (eduardo-burgos) (human) [active] 2 key(s)`.
+#[must_use]
+pub fn render_registry_participant(name: &str, participant: &RegistryParticipant) -> String {
+    let status = match participant.status {
+        RegistryParticipantStatus::Active => "active",
+        RegistryParticipantStatus::Revoked => "revoked",
+    };
+    let prefix = participant.display_name.as_ref().map_or_else(
+        || String::from(name),
+        |display| format!("\"{display}\" ({name})"),
+    );
+    format!(
+        "{prefix} ({}) [{status}] {} key(s)",
+        participant.author_type,
+        participant.pubkeys.len(),
+    )
+}

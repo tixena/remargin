@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use chrono::DateTime;
 
 use crate::display::{
-    build_comment_tree, count_pending, format_comments_pretty, format_query_pretty, is_pending,
+    build_comment_tree, count_pending, format_comments_pretty, format_query_pretty,
+    format_string_list, is_pending, render_activity_cutoff_header, strip_prefix_display,
 };
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{Acknowledgment, AuthorType, Comment};
@@ -903,4 +904,83 @@ fn query_no_pretty_unchanged() {
     assert!(output.contains("\u{2502}"));
     assert!(output.contains("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
     assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
+}
+
+// --- Tests for utility functions moved from main.rs ---
+
+fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
+    chrono::DateTime::parse_from_rfc3339(s).unwrap()
+}
+
+#[test]
+fn format_string_list_empty() {
+    assert_eq!(format_string_list(&[]), "[]");
+}
+
+#[test]
+fn format_string_list_single() {
+    assert_eq!(format_string_list(&[String::from("a")]), "[a]");
+}
+
+#[test]
+fn format_string_list_multiple() {
+    let items = vec![
+        String::from("alpha"),
+        String::from("beta"),
+        String::from("gamma"),
+    ];
+    assert_eq!(format_string_list(&items), "[alpha, beta, gamma]");
+}
+
+#[test]
+fn strip_prefix_display_strips_common_prefix() {
+    let base = PathBuf::from("/home/user/vault");
+    let path = PathBuf::from("/home/user/vault/notes/foo.md");
+    assert_eq!(strip_prefix_display(&path, &base), "notes/foo.md");
+}
+
+#[test]
+fn strip_prefix_display_returns_full_when_not_under_base() {
+    let base = PathBuf::from("/other/path");
+    let path = PathBuf::from("/home/user/vault/foo.md");
+    let result = strip_prefix_display(&path, &base);
+    assert_eq!(result, "/home/user/vault/foo.md");
+}
+
+#[test]
+fn render_activity_cutoff_header_explicit_since() {
+    let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
+    assert_eq!(header, "(since 2026-04-27 02:09)");
+}
+
+#[test]
+fn render_activity_cutoff_header_implicit_with_last_action() {
+    let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
+    assert_eq!(
+        header,
+        "(since you last touched this file: 2026-04-27 02:09)"
+    );
+}
+
+#[test]
+fn render_activity_cutoff_header_implicit_initial_touch() {
+    let header = render_activity_cutoff_header(false, None);
+    assert!(
+        header.contains("since the beginning"),
+        "unexpected header: {header}"
+    );
+    assert!(
+        header.contains("no prior activity"),
+        "unexpected header: {header}"
+    );
+}
+
+#[test]
+fn render_activity_cutoff_header_explicit_missing_ts() {
+    // Defensive case: explicit=true but cutoff is None.
+    let header = render_activity_cutoff_header(true, None);
+    assert!(
+        header.contains("explicit cutoff missing"),
+        "unexpected: {header}"
+    );
 }

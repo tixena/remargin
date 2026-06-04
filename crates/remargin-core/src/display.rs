@@ -4,7 +4,10 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use core::fmt::Write as _;
+use std::path::Path;
 
+use crate::activity::{ActivityResult, Change};
+use crate::config::identity::IdentityReport;
 use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{self, Comment};
 use crate::reactions::ReactionsExt as _;
@@ -317,6 +320,155 @@ fn format_pending_label(count: usize, filter_name: Option<&str>) -> String {
         || format!("{count} pending"),
         |name| format!("{count} pending for {name}"),
     )
+}
+
+/// Bracket a list of `String` values for human-readable display.
+///
+/// Produces `[a, b, c]` — suitable wherever a compact inline list is
+/// needed without leaking `Debug` escaping rules.
+#[must_use]
+pub fn format_string_list(items: &[String]) -> String {
+    let mut out = String::from("[");
+    for (idx, item) in items.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(item);
+    }
+    out.push(']');
+    out
+}
+
+/// Strip `base` from `path` for display; if `path` is not anchored
+/// under `base`, the full path is returned.
+#[must_use]
+pub fn strip_prefix_display(path: &Path, base: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+/// Render an [`ActivityResult`] in human-readable form.
+///
+/// Each file gets a header line followed by per-change entries.
+/// A grand footer prints the `newest_ts_overall` when present.
+/// Returns an empty string (with a `"(no activity)"` note on a single
+/// line) when there are no files.
+#[must_use]
+pub fn render_activity_pretty(result: &ActivityResult) -> String {
+    let mut out = String::new();
+    if result.files.is_empty() {
+        let _ = writeln!(out, "(no activity)");
+        return out;
+    }
+    for file in &result.files {
+        let _ = writeln!(out, "{}:", file.path.display());
+        let _ = writeln!(
+            out,
+            "  {}",
+            render_activity_cutoff_header(result.cutoff_explicit, file.cutoff_applied),
+        );
+        for change in &file.changes {
+            match change {
+                Change::Comment {
+                    ts,
+                    comment_id,
+                    author,
+                    line_start,
+                    line_end,
+                    reply_to,
+                    ..
+                } => {
+                    let arrow = reply_to
+                        .as_deref()
+                        .map_or_else(String::new, |p| format!(" \u{2934} {p}"));
+                    let _ = writeln!(
+                        out,
+                        "  {} \u{00b7} comment \u{00b7} {comment_id} by {author}{arrow} (lines {line_start}-{line_end})",
+                        ts.format("%Y-%m-%d %H:%M"),
+                    );
+                }
+                Change::Ack {
+                    ts,
+                    comment_id,
+                    author,
+                    ..
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {author}",
+                        ts.format("%Y-%m-%d %H:%M"),
+                    );
+                }
+                Change::Sandbox { ts, author, .. } => {
+                    let _ = writeln!(
+                        out,
+                        "  {} \u{00b7} sandbox \u{00b7} {author}",
+                        ts.format("%Y-%m-%d %H:%M"),
+                    );
+                }
+            }
+        }
+        let _ = writeln!(out);
+    }
+    if let Some(ts) = result.newest_ts_overall {
+        let _ = writeln!(out, "(newest_ts_overall: {})", ts.to_rfc3339());
+    }
+    out
+}
+
+/// Render the per-file cutoff header line for `activity --pretty`.
+#[must_use]
+pub fn render_activity_cutoff_header(
+    cutoff_explicit: bool,
+    cutoff: Option<chrono::DateTime<chrono::FixedOffset>>,
+) -> String {
+    if cutoff_explicit {
+        cutoff.map_or_else(
+            || String::from("(since: explicit cutoff missing)"),
+            |ts| format!("(since {})", ts.format("%Y-%m-%d %H:%M")),
+        )
+    } else {
+        cutoff.map_or_else(
+            || String::from("(since the beginning \u{2014} no prior activity by you in this file)"),
+            |ts| {
+                format!(
+                    "(since you last touched this file: {})",
+                    ts.format("%Y-%m-%d %H:%M"),
+                )
+            },
+        )
+    }
+}
+
+/// Render an [`IdentityReport`] as human-readable text (stderr format).
+///
+/// Returns an empty string when `report.found` is `false` — the caller
+/// is responsible for emitting a "No identity config found." message if
+/// needed.
+#[must_use]
+pub fn render_identity_report(report: &IdentityReport) -> String {
+    if !report.found {
+        return String::new();
+    }
+    let mut out = String::new();
+    if let Some(p) = &report.path {
+        let _ = writeln!(out, "Found config: {p}");
+    }
+    if let Some(i) = &report.identity {
+        let _ = writeln!(out, "Identity:     {i}");
+    }
+    if let Some(t) = &report.author_type {
+        let _ = writeln!(out, "Type:         {t}");
+    }
+    if let Some(k) = &report.key {
+        let _ = writeln!(out, "Key:          {k}");
+    }
+    if let Some(m) = &report.mode {
+        let _ = writeln!(out, "Mode:         {m}");
+    }
+    out
 }
 
 #[cfg(test)]

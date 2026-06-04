@@ -480,3 +480,54 @@ fn upsert_remargin_yaml(
     let sim = simulate_upsert_remargin_yaml(system, anchor, path_on_disk, args)?;
     commit_upsert_remargin_yaml(system, anchor, &sim)
 }
+
+/// Render a [`RestrictOutcome`] as human-readable text for `restrict`.
+///
+/// Output is written to stderr in the CLI; the function returns a `String`
+/// so callers can route it to any sink.
+#[must_use]
+pub fn render_restrict_summary(outcome: &RestrictOutcome) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Restricted: {}", outcome.absolute_path.display());
+    let _ = writeln!(out, "  Anchor: {}", outcome.anchor.display());
+    if outcome.yaml_was_created {
+        let _ = writeln!(
+            out,
+            "  .remargin.yaml created at {}",
+            outcome.anchor.join(".remargin.yaml").display(),
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "  .remargin.yaml updated at {}",
+            outcome.anchor.join(".remargin.yaml").display(),
+        );
+    }
+    let _ = writeln!(
+        out,
+        "  Settings updated: {} file(s)",
+        outcome.claude_files_touched.len(),
+    );
+    for file in &outcome.claude_files_touched {
+        let _ = writeln!(out, "    {}", file.display());
+    }
+    let _ = writeln!(out, "  Rules written: {}", outcome.rules_applied.len());
+    let _ = writeln!(
+        out,
+        "  Sidecar updated: {}",
+        outcome
+            .anchor
+            .join(".claude/.remargin-restrictions.json")
+            .display(),
+    );
+    let _ = writeln!(
+        out,
+        "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
+    );
+    let _ = writeln!(
+        out,
+        "  Layer 1 (remargin's own ops) is enforcing immediately on the next call."
+    );
+    out
+}

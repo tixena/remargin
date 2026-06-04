@@ -320,3 +320,34 @@ fn ensure_markdown(file: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+/// Render a [`SandboxBulkResult`] as a human-readable text block.
+///
+/// Changed paths are printed one per line (relative to `cwd`).
+/// Failed paths are printed with their reason on the same line.
+/// The output is suitable for writing directly to stderr.
+///
+/// `changed_key` is unused in the text format (it is only relevant for
+/// the JSON form); the changed entries are always listed without a
+/// header label.
+#[must_use]
+pub fn render_sandbox_bulk_result(
+    result: &SandboxBulkResult,
+    cwd: &Path,
+    _changed_key: &str,
+) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    for p in &result.changed {
+        let _ = writeln!(out, "{}", strip_prefix_display(p, cwd));
+    }
+    for failure in &result.failed {
+        let _ = writeln!(
+            out,
+            "{}: {}",
+            strip_prefix_display(&failure.path, cwd),
+            failure.reason,
+        );
+    }
+    out
+}

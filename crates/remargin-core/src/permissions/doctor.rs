@@ -145,3 +145,47 @@ pub fn run_doctor(
         user_settings_file: user_settings_file.to_path_buf(),
     })
 }
+
+/// Render a [`DoctorReport`] as human-readable text.
+///
+/// When `verbose` is `true`, a `Checks:` section is appended after the
+/// findings block (or after the clean message) listing the hook-installed
+/// verdict and the paths of both settings files that were inspected.
+/// This section appears in both the clean and findings cases.
+#[must_use]
+pub fn render_doctor_text(report: &DoctorReport, verbose: bool) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    if report.is_clean() {
+        let _ = writeln!(out, "doctor: all checks passed");
+    } else {
+        for finding in &report.findings {
+            let label = match finding.severity {
+                Severity::Critical => "CRITICAL",
+                Severity::Warning => "WARNING",
+            };
+            let _ = writeln!(out, "[{label}] {}", finding.message);
+            let _ = writeln!(out, "  Remedy: {}", finding.remedy);
+        }
+    }
+    if verbose {
+        let hook_verdict = if report.hook_installed {
+            "ok"
+        } else {
+            "missing"
+        };
+        let _ = writeln!(out, "Checks:");
+        let _ = writeln!(out, "  hook-installed: {hook_verdict}");
+        let _ = writeln!(
+            out,
+            "  user-settings: {}",
+            report.user_settings_file.display()
+        );
+        let _ = writeln!(
+            out,
+            "  project-settings: {}",
+            report.project_settings_file.display(),
+        );
+    }
+    out
+}

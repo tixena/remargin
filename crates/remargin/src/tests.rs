@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use os_shim::mock::MockSystem;
 use remargin_core::config;
 use remargin_core::config::registry::Registry;
+use remargin_core::display::render_activity_cutoff_header;
 use serde_json::json;
 
 use super::{
-    format_activity_cutoff_header, parse_line_range, registry_participant_json,
-    registry_participant_pretty, resolve_comment_content,
+    parse_line_range, registry_participant_json, registry_participant_pretty,
+    resolve_comment_content,
 };
 
 fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
@@ -18,7 +19,7 @@ fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
 /// renders as "(since you last touched this file: …)".
 #[test]
 fn cutoff_header_implicit_with_last_action() {
-    let header = format_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
+    let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
     assert_eq!(
         header,
         "(since you last touched this file: 2026-04-27 02:09)"
@@ -29,7 +30,7 @@ fn cutoff_header_implicit_with_last_action() {
 /// the initial-touch fallback message.
 #[test]
 fn cutoff_header_implicit_initial_touch() {
-    let header = format_activity_cutoff_header(false, None);
+    let header = render_activity_cutoff_header(false, None);
     assert!(
         header.contains("since the beginning"),
         "unexpected header: {header}"
@@ -44,7 +45,7 @@ fn cutoff_header_implicit_initial_touch() {
 /// "(since …)" wording, matching the user's input.
 #[test]
 fn cutoff_header_explicit_since() {
-    let header = format_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
+    let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
     assert_eq!(header, "(since 2026-04-27 02:09)");
 }
 
@@ -54,8 +55,8 @@ fn cutoff_header_explicit_since() {
 fn cutoff_header_never_emits_placeholder() {
     for explicit in [true, false] {
         let with_ts =
-            format_activity_cutoff_header(explicit, Some(ts("2026-04-27T02:09:00-04:00")));
-        let without_ts = format_activity_cutoff_header(explicit, None);
+            render_activity_cutoff_header(explicit, Some(ts("2026-04-27T02:09:00-04:00")));
+        let without_ts = render_activity_cutoff_header(explicit, None);
         assert!(!with_ts.contains("YOUR-LAST-ACTION"), "{with_ts}");
         assert!(!without_ts.contains("YOUR-LAST-ACTION"), "{without_ts}");
     }

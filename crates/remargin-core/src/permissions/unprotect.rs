@@ -258,3 +258,51 @@ fn compact_permissions(root: &mut serde_yaml::Mapping) -> bool {
     }
     pruned_subkey
 }
+
+/// Render an [`UnprotectOutcome`] as human-readable text for `unprotect`.
+///
+/// Output is written to stderr in the CLI; the function returns a `String`
+/// so callers can route it to any sink.
+#[must_use]
+pub fn render_unprotect_summary(outcome: &UnprotectOutcome) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Unprotected: {}", outcome.absolute_path.display());
+    let _ = writeln!(out, "  Anchor: {}", outcome.anchor.display());
+    if outcome.yaml_entry_removed {
+        let _ = writeln!(
+            out,
+            "  .remargin.yaml updated at {}",
+            outcome.anchor.join(".remargin.yaml").display(),
+        );
+    } else {
+        let _ = writeln!(out, "  .remargin.yaml: no matching entry");
+    }
+    if outcome.claude_files_touched.is_empty() {
+        let _ = writeln!(out, "  Settings: none touched (no sidecar entry)");
+    } else {
+        let _ = writeln!(
+            out,
+            "  Settings updated: {} file(s)",
+            outcome.claude_files_touched.len(),
+        );
+        for file in &outcome.claude_files_touched {
+            let _ = writeln!(out, "    {}", file.display());
+        }
+    }
+    if !outcome.warnings.is_empty() {
+        let _ = writeln!(out, "  Warnings:");
+        for warning in &outcome.warnings {
+            let _ = writeln!(out, "    - {warning}");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
+    );
+    let _ = writeln!(
+        out,
+        "  Layer 1 (remargin's own ops) stops enforcing immediately on the next call."
+    );
+    out
+}

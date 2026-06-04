@@ -355,3 +355,33 @@ fn is_markdown_extension(path: &Path) -> bool {
             lower == "md" || lower == "mdx"
         })
 }
+
+/// Render a [`CpOutcome`] as a human-readable one-line summary.
+///
+/// `src` and `dst` are the display forms of the paths (caller-supplied
+/// strings, not the resolved canonicals).
+#[must_use]
+pub fn render_cp_outcome(src: &str, dst: &str, outcome: &CpOutcome) -> String {
+    let overwrite_suffix = if outcome.overwritten {
+        ", overwrote destination"
+    } else {
+        ""
+    };
+    match outcome.kind {
+        CpKind::Noop => format!("no-op: {src} (same canonical path)"),
+        CpKind::Verbatim => format!(
+            "copied: {src} -> {dst} ({} bytes{overwrite_suffix})",
+            outcome.bytes_copied,
+        ),
+        CpKind::BodyOnly => format!(
+            "copied: {src} -> {dst} ({} bytes, dropped {} comment{}{overwrite_suffix})",
+            outcome.bytes_copied,
+            outcome.comments_dropped,
+            if outcome.comments_dropped == 1 {
+                ""
+            } else {
+                "s"
+            },
+        ),
+    }
+}

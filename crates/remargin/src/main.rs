@@ -20,6 +20,8 @@ use serde_json::{Value, json};
 
 use remargin_core::activity;
 use remargin_core::config::identity::{IdentityFlags, IdentityReport, resolve_identity_report};
+use remargin_core::config::registry;
+use remargin_core::config::system_prompt;
 use remargin_core::config::{self, ResolvedConfig};
 use remargin_core::display;
 use remargin_core::document;
@@ -40,7 +42,6 @@ use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
 use remargin_core::parser;
 use remargin_core::path::expand_path;
-use remargin_core::permissions::claude_sync::rule_shape::OverlapKind;
 use remargin_core::permissions::doctor as permissions_doctor;
 use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::permissions::pretool::{PretoolOutcome, pretool};
@@ -3940,22 +3941,8 @@ fn render_identity_report(
         );
     }
 
-    if let Some(p) = &report.path {
-        writeln!(sinks.stderr, "Found config: {p}").context("writing to stderr")?;
-    }
-    if let Some(i) = &report.identity {
-        writeln!(sinks.stderr, "Identity:     {i}").context("writing to stderr")?;
-    }
-    if let Some(t) = &report.author_type {
-        writeln!(sinks.stderr, "Type:         {t}").context("writing to stderr")?;
-    }
-    if let Some(k) = &report.key {
-        writeln!(sinks.stderr, "Key:          {k}").context("writing to stderr")?;
-    }
-    if let Some(m) = &report.mode {
-        writeln!(sinks.stderr, "Mode:         {m}").context("writing to stderr")?;
-    }
-    Ok(())
+    write!(sinks.stderr, "{}", display::render_identity_report(report))
+        .context("writing identity report to stderr")
 }
 
 /// Dispatch `remargin permissions <show|check>`.
@@ -4025,110 +4012,8 @@ fn cmd_activity(
 }
 
 fn emit_activity_pretty(sinks: &mut IoSinks<'_>, result: &activity::ActivityResult) -> Result<()> {
-    if result.files.is_empty() {
-        writeln!(sinks.stderr, "(no activity)").context("writing to stderr")?;
-        return Ok(());
-    }
-    for file in &result.files {
-        writeln!(sinks.stderr, "{}:", file.path.display()).context("writing to stderr")?;
-        writeln!(
-            sinks.stderr,
-            "  {}",
-            format_activity_cutoff_header(result.cutoff_explicit, file.cutoff_applied)
-        )
-        .context("writing to stderr")?;
-        for change in &file.changes {
-            match change {
-                activity::Change::Comment {
-                    ts,
-                    comment_id,
-                    author,
-                    line_start,
-                    line_end,
-                    reply_to,
-                    ..
-                } => {
-                    let arrow = reply_to
-                        .as_deref()
-                        .map_or_else(String::new, |p| format!(" \u{2934} {p}"));
-                    writeln!(
-                        sinks.stderr,
-                        "  {} \u{00b7} comment \u{00b7} {comment_id} by {author}{arrow} (lines {line_start}-{line_end})",
-                        ts.format("%Y-%m-%d %H:%M")
-                    )
-                    .context("writing to stderr")?;
-                }
-                activity::Change::Ack {
-                    ts,
-                    comment_id,
-                    author,
-                    ..
-                } => {
-                    writeln!(
-                        sinks.stderr,
-                        "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {author}",
-                        ts.format("%Y-%m-%d %H:%M")
-                    )
-                    .context("writing to stderr")?;
-                }
-                activity::Change::Sandbox { ts, author, .. } => {
-                    writeln!(
-                        sinks.stderr,
-                        "  {} \u{00b7} sandbox \u{00b7} {author}",
-                        ts.format("%Y-%m-%d %H:%M")
-                    )
-                    .context("writing to stderr")?;
-                }
-                // The Change enum is `#[non_exhaustive]`; future
-                // variants surface as a generic line until the
-                // pretty-printer is taught about them.
-                _ => {}
-            }
-        }
-        writeln!(sinks.stderr).context("writing to stderr")?;
-    }
-    if let Some(ts) = result.newest_ts_overall {
-        writeln!(sinks.stderr, "(newest_ts_overall: {})", ts.to_rfc3339())
-            .context("writing to stderr")?;
-    }
-    Ok(())
-}
-
-/// Render the per-file cutoff header line for `activity --pretty`.
-/// The wording reflects which path produced the cutoff:
-///
-/// - explicit `--since`: `(since 2026-04-27 02:09)` so the header
-///   echoes the user's input.
-/// - implicit, with a caller-last-action timestamp: `(since you
-///   last touched this file: 2026-04-27 02:09)` to make it clear
-///   the cutoff came from the caller's own prior activity.
-/// - implicit, no prior activity (initial-touch fallback): `(since
-///   the beginning — no prior activity by you in this file)` so
-///   the reader knows the full timeline is being shown rather than
-///   silently inferring it from the absence of a header.
-fn format_activity_cutoff_header(
-    cutoff_explicit: bool,
-    cutoff: Option<chrono::DateTime<chrono::FixedOffset>>,
-) -> String {
-    if cutoff_explicit {
-        // Explicit `--since` is always `Some(_)`; the `None` arm is
-        // defensive against a future caller path that forgets to
-        // pre-validate.
-        cutoff.map_or_else(
-            || String::from("(since: explicit cutoff missing)"),
-            |ts| format!("(since {})", ts.format("%Y-%m-%d %H:%M")),
-        )
-    } else {
-        cutoff.map_or_else(
-            || String::from("(since the beginning \u{2014} no prior activity by you in this file)"),
-            |ts| {
-                format!(
-                    "(since you last touched this file: {})",
-                    ts.format("%Y-%m-%d %H:%M")
-                )
-            },
-        )
-    }
+    write!(sinks.stderr, "{}", display::render_activity_pretty(result))
+        .context("writing activity to stderr")
 }
 
 fn cmd_doctor(
@@ -4168,44 +4053,12 @@ fn emit_doctor_text(
     report: &permissions_doctor::DoctorReport,
     verbose: bool,
 ) -> Result<()> {
-    if report.is_clean() {
-        writeln!(sinks.stdout, "doctor: all checks passed").context("writing doctor output")?;
-    } else {
-        for finding in &report.findings {
-            let label = match finding.severity {
-                permissions_doctor::Severity::Critical => "CRITICAL",
-                permissions_doctor::Severity::Warning => "WARNING",
-                _ => "UNKNOWN",
-            };
-            writeln!(sinks.stdout, "[{label}] {}", finding.message)
-                .context("writing doctor finding")?;
-            writeln!(sinks.stdout, "  Remedy: {}", finding.remedy)
-                .context("writing doctor remedy")?;
-        }
-    }
-    if verbose {
-        let hook_verdict = if report.hook_installed {
-            "ok"
-        } else {
-            "missing"
-        };
-        writeln!(sinks.stdout, "Checks:").context("writing doctor verbose header")?;
-        writeln!(sinks.stdout, "  hook-installed: {hook_verdict}")
-            .context("writing doctor verbose hook")?;
-        writeln!(
-            sinks.stdout,
-            "  user-settings: {}",
-            report.user_settings_file.display()
-        )
-        .context("writing doctor verbose user-settings")?;
-        writeln!(
-            sinks.stdout,
-            "  project-settings: {}",
-            report.project_settings_file.display()
-        )
-        .context("writing doctor verbose project-settings")?;
-    }
-    Ok(())
+    write!(
+        sinks.stdout,
+        "{}",
+        permissions_doctor::render_doctor_text(report, verbose)
+    )
+    .context("writing doctor output")
 }
 
 fn cmd_permissions(
@@ -4259,99 +4112,17 @@ fn cmd_permissions(
     }
 }
 
-/// Bracket a list of `String` values using `Display` formatting so the
-/// output can be read by humans without leaking `Debug`'s escape rules
-/// (clippy denies `use_debug` workspace-wide).
-fn format_string_list(items: &[String]) -> String {
-    let mut out = String::from("[");
-    for (idx, item) in items.iter().enumerate() {
-        if idx > 0 {
-            out.push_str(", ");
-        }
-        out.push_str(item);
-    }
-    out.push(']');
-    out
-}
-
 fn emit_permissions_show_text(
     sinks: &mut IoSinks<'_>,
     cwd: &Path,
     report: &permissions_inspect::ShowOutput,
 ) -> Result<()> {
-    let stderr = &mut sinks.stderr;
-    writeln!(stderr, "Permissions resolved at {}:", cwd.display()).context("writing to stderr")?;
-    writeln!(stderr).context("writing to stderr")?;
-
-    writeln!(stderr, "  trusted_roots:").context("writing to stderr")?;
-    if report.trusted_roots.is_empty() {
-        writeln!(stderr, "    (none)").context("writing to stderr")?;
-    } else {
-        for entry in &report.trusted_roots {
-            writeln!(
-                stderr,
-                "    {}  (source: {})",
-                entry.path_text,
-                entry.source_file.display()
-            )
-            .context("writing to stderr")?;
-            if let Some(realm) = entry.realm_root.as_deref() {
-                writeln!(stderr, "      realm_root: {}", realm.display())
-                    .context("writing to stderr")?;
-            }
-            if !entry.also_deny_bash.is_empty() {
-                writeln!(
-                    stderr,
-                    "      also_deny_bash: {}",
-                    format_string_list(&entry.also_deny_bash)
-                )
-                .context("writing to stderr")?;
-            }
-            writeln!(stderr, "      cli_allowed: {}", entry.cli_allowed)
-                .context("writing to stderr")?;
-        }
-    }
-    writeln!(stderr).context("writing to stderr")?;
-
-    writeln!(stderr, "  deny_ops:").context("writing to stderr")?;
-    if report.deny_ops.is_empty() {
-        writeln!(stderr, "    (none)").context("writing to stderr")?;
-    } else {
-        for entry in &report.deny_ops {
-            writeln!(
-                stderr,
-                "    {}  (source: {})",
-                entry.path.display(),
-                entry.source_file.display()
-            )
-            .context("writing to stderr")?;
-            for item in &entry.ops {
-                if item.exceptions.is_empty() {
-                    writeln!(stderr, "      - {}", item.name).context("writing to stderr")?;
-                } else {
-                    writeln!(
-                        stderr,
-                        "      - {} (exceptions: {})",
-                        item.name,
-                        format_string_list(&item.exceptions),
-                    )
-                    .context("writing to stderr")?;
-                }
-            }
-        }
-    }
-    writeln!(stderr).context("writing to stderr")?;
-
-    writeln!(stderr, "  allow_dot_folders:").context("writing to stderr")?;
-    if report.allow_dot_folders.is_empty() {
-        writeln!(stderr, "    (none)").context("writing to stderr")?;
-    } else {
-        for entry in &report.allow_dot_folders {
-            writeln!(stderr, "    {}", format_string_list(&entry.names))
-                .context("writing to stderr")?;
-        }
-    }
-    Ok(())
+    write!(
+        sinks.stderr,
+        "{}",
+        permissions_inspect::render_show_text(cwd, report)
+    )
+    .context("writing permissions show to stderr")
 }
 
 fn emit_permissions_check_text(
@@ -4359,14 +4130,12 @@ fn emit_permissions_check_text(
     report: &permissions_inspect::CheckOutput,
     why: bool,
 ) -> Result<()> {
-    writeln!(sinks.stderr, "restricted: {}", report.restricted).context("writing to stderr")?;
-    if why && let Some(rule) = &report.matching_rule {
-        writeln!(sinks.stderr, "  matched: {}", rule.rule_text).context("writing to stderr")?;
-        writeln!(sinks.stderr, "  kind:    {}", rule.kind).context("writing to stderr")?;
-        writeln!(sinks.stderr, "  source:  {}", rule.source_file.display())
-            .context("writing to stderr")?;
-    }
-    Ok(())
+    write!(
+        sinks.stderr,
+        "{}",
+        permissions_inspect::render_check_text(report, why)
+    )
+    .context("writing permissions check to stderr")
 }
 
 /// Wire the CLI `restrict` subcommand to the
@@ -4419,56 +4188,12 @@ fn emit_restrict_summary(
     sinks: &mut IoSinks<'_>,
     outcome: &permissions_restrict::RestrictOutcome,
 ) -> Result<()> {
-    let stderr = &mut sinks.stderr;
-    writeln!(stderr, "Restricted: {}", outcome.absolute_path.display())
-        .context("writing to stderr")?;
-    writeln!(stderr, "  Anchor: {}", outcome.anchor.display()).context("writing to stderr")?;
-    if outcome.yaml_was_created {
-        writeln!(
-            stderr,
-            "  .remargin.yaml created at {}",
-            outcome.anchor.join(".remargin.yaml").display()
-        )
-        .context("writing to stderr")?;
-    } else {
-        writeln!(
-            stderr,
-            "  .remargin.yaml updated at {}",
-            outcome.anchor.join(".remargin.yaml").display()
-        )
-        .context("writing to stderr")?;
-    }
-    writeln!(
-        stderr,
-        "  Settings updated: {} file(s)",
-        outcome.claude_files_touched.len()
+    write!(
+        sinks.stderr,
+        "{}",
+        permissions_restrict::render_restrict_summary(outcome)
     )
-    .context("writing to stderr")?;
-    for file in &outcome.claude_files_touched {
-        writeln!(stderr, "    {}", file.display()).context("writing to stderr")?;
-    }
-    writeln!(stderr, "  Rules written: {}", outcome.rules_applied.len())
-        .context("writing to stderr")?;
-    writeln!(
-        stderr,
-        "  Sidecar updated: {}",
-        outcome
-            .anchor
-            .join(".claude/.remargin-restrictions.json")
-            .display()
-    )
-    .context("writing to stderr")?;
-    writeln!(
-        stderr,
-        "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
-    )
-    .context("writing to stderr")?;
-    writeln!(
-        stderr,
-        "  Layer 1 (remargin's own ops) is enforcing immediately on the next call."
-    )
-    .context("writing to stderr")?;
-    Ok(())
+    .context("writing restrict summary to stderr")
 }
 
 /// Wire the CLI `unprotect` subcommand to the
@@ -4515,51 +4240,12 @@ fn emit_unprotect_summary(
     sinks: &mut IoSinks<'_>,
     outcome: &permissions_unprotect::UnprotectOutcome,
 ) -> Result<()> {
-    let stderr = &mut sinks.stderr;
-    writeln!(stderr, "Unprotected: {}", outcome.absolute_path.display())
-        .context("writing to stderr")?;
-    writeln!(stderr, "  Anchor: {}", outcome.anchor.display()).context("writing to stderr")?;
-    if outcome.yaml_entry_removed {
-        writeln!(
-            stderr,
-            "  .remargin.yaml updated at {}",
-            outcome.anchor.join(".remargin.yaml").display()
-        )
-        .context("writing to stderr")?;
-    } else {
-        writeln!(stderr, "  .remargin.yaml: no matching entry").context("writing to stderr")?;
-    }
-    if outcome.claude_files_touched.is_empty() {
-        writeln!(stderr, "  Settings: none touched (no sidecar entry)")
-            .context("writing to stderr")?;
-    } else {
-        writeln!(
-            stderr,
-            "  Settings updated: {} file(s)",
-            outcome.claude_files_touched.len()
-        )
-        .context("writing to stderr")?;
-        for file in &outcome.claude_files_touched {
-            writeln!(stderr, "    {}", file.display()).context("writing to stderr")?;
-        }
-    }
-    if !outcome.warnings.is_empty() {
-        writeln!(stderr, "  Warnings:").context("writing to stderr")?;
-        for warning in &outcome.warnings {
-            writeln!(stderr, "    - {warning}").context("writing to stderr")?;
-        }
-    }
-    writeln!(
-        stderr,
-        "  Note: Claude must reload its settings for Layer 2 (NATIVE tool denials) to take effect."
+    write!(
+        sinks.stderr,
+        "{}",
+        permissions_unprotect::render_unprotect_summary(outcome)
     )
-    .context("writing to stderr")?;
-    writeln!(
-        stderr,
-        "  Layer 1 (remargin's own ops) stops enforcing immediately on the next call."
-    )
-    .context("writing to stderr")?;
-    Ok(())
+    .context("writing unprotect summary to stderr")
 }
 
 fn cmd_prompt_resolve(
@@ -4588,34 +4274,12 @@ fn write_prompt_resolve_text(
     target: &Path,
     resolved: &config::system_prompt::ResolvedSystemPrompt,
 ) -> Result<()> {
-    writeln!(sinks.stderr, "Resolved prompt for: {}", target.display())
-        .context("writing to stderr")?;
-    writeln!(sinks.stderr, "  Name:    {}", resolved.name).context("writing to stderr")?;
-    match &resolved.source {
-        Some(path) => writeln!(sinks.stderr, "  Source:  {}", path.display()),
-        None => writeln!(sinks.stderr, "  Source:  (walk exhausted)"),
-    }
-    .context("writing to stderr")?;
-    writeln!(
+    write!(
         sinks.stderr,
-        "  Default: {}",
-        if resolved.is_default { "yes" } else { "no" },
+        "{}",
+        system_prompt::render_resolved_prompt(target, resolved)
     )
-    .context("writing to stderr")?;
-    writeln!(
-        sinks.stderr,
-        "  Body ({} chars):",
-        resolved.prompt.chars().count(),
-    )
-    .context("writing to stderr")?;
-    if resolved.prompt.is_empty() {
-        writeln!(sinks.stderr, "    (empty)").context("writing to stderr")?;
-    } else {
-        for line in resolved.prompt.lines() {
-            writeln!(sinks.stderr, "    {line}").context("writing to stderr")?;
-        }
-    }
-    Ok(())
+    .context("writing prompt resolve to stderr")
 }
 
 fn cmd_prompt_set(
@@ -5278,284 +4942,11 @@ fn build_plan_write<'cmd>(
 /// the standard `out` helper so existing pipe-friendly behaviour is
 /// preserved.
 fn emit_plan_restrict_text(sinks: &mut IoSinks<'_>, report: &plan_ops::PlanReport) -> Result<()> {
-    let Some(diff) = report.config_diff.as_ref() else {
-        return Ok(());
-    };
-    out(
-        sinks,
-        &format!("Plan: restrict {}", diff.absolute_path.display()),
-    )?;
-    out(sinks, &format!("  Anchor: {}", diff.anchor.display()))?;
-    out(
-        sinks,
-        &format!(
-            "  noop: {}   would_commit: {}",
-            report.noop, report.would_commit,
-        ),
-    )?;
-    if let Some(reason) = &report.reject_reason {
-        out(sinks, &format!("  reject_reason: {reason}"))?;
-    }
-    out(
-        sinks,
-        &format!("  .remargin.yaml: {}", diff.remargin_yaml.path.display()),
-    )?;
-    out(
-        sinks,
-        &format!(
-            "    will be created: {}",
-            diff.remargin_yaml.will_be_created
-        ),
-    )?;
-    out(
-        sinks,
-        &format!(
-            "    entry: {}",
-            entry_action_label(diff.remargin_yaml.entry_action),
-        ),
-    )?;
-    out(
-        sinks,
-        &format!("  Settings: {} file(s)", diff.settings_files.len()),
-    )?;
-    for sf in &diff.settings_files {
-        out(sinks, &format!("    {}", sf.path.display()))?;
-        out(
-            sinks,
-            &format!("      will be created: {}", sf.will_be_created),
-        )?;
-        out(
-            sinks,
-            &format!(
-                "      deny rules: +{} to add, {} already present",
-                sf.deny_rules_to_add.len(),
-                sf.deny_rules_already_present.len(),
-            ),
-        )?;
-        out(
-            sinks,
-            &format!(
-                "      allow rules: +{} to add, {} already present",
-                sf.allow_rules_to_add.len(),
-                sf.allow_rules_already_present.len(),
-            ),
-        )?;
-    }
-    out(
-        sinks,
-        &format!(
-            "  Sidecar: {} ({})",
-            diff.sidecar.path.display(),
-            entry_action_label(diff.sidecar.entry_action),
-        ),
-    )?;
-    if diff.conflicts.is_empty() {
-        out(sinks, "  conflicts: 0")?;
-    } else {
-        out(sinks, &format!("  conflicts: {}", diff.conflicts.len()))?;
-        for conflict in &diff.conflicts {
-            emit_conflict_line(sinks, conflict)?;
-        }
-    }
-    Ok(())
+    out_raw(sinks, &plan_ops::render_plan_restrict_text(report))
 }
 
-const fn entry_action_label(action: plan_ops::EntryAction) -> &'static str {
-    match action {
-        plan_ops::EntryAction::Added => "added",
-        plan_ops::EntryAction::Noop => "noop",
-        plan_ops::EntryAction::Updated => "updated",
-        // EntryAction is `#[non_exhaustive]`; cover future variants
-        // gracefully without breaking the build.
-        _ => "<unknown>",
-    }
-}
-
-fn emit_conflict_line(sinks: &mut IoSinks<'_>, conflict: &plan_ops::ConfigConflict) -> Result<()> {
-    match conflict {
-        plan_ops::ConfigConflict::AllowDenyOverlap {
-            allow_rule,
-            overlap_kind,
-            projected_deny_rule,
-            settings_file,
-        } => {
-            let kind_label = match overlap_kind {
-                OverlapKind::AllowShadowedByBroaderDeny => {
-                    "existing allow is shadowed by broader projected deny"
-                }
-                OverlapKind::DenyShadowedByBroaderAllow => {
-                    "projected deny is shadowed by broader existing allow"
-                }
-                OverlapKind::Exact => "exact",
-                _ => "unknown overlap kind",
-            };
-            out(
-                sinks,
-                &format!(
-                    "    allow_deny_overlap in {} ({kind_label}):",
-                    settings_file.display()
-                ),
-            )?;
-            out(sinks, &format!("      existing allow:  {allow_rule}"))?;
-            out(
-                sinks,
-                &format!("      projected deny:  {projected_deny_rule}"),
-            )?;
-        }
-        plan_ops::ConfigConflict::AnchorIsAncestor { anchor, cwd } => {
-            out(
-                sinks,
-                &format!(
-                    "    anchor_is_ancestor: cwd={} anchor={}",
-                    cwd.display(),
-                    anchor.display(),
-                ),
-            )?;
-        }
-        plan_ops::ConfigConflict::YamlEntryWouldChange {
-            path,
-            previous,
-            projected,
-        } => {
-            out(sinks, &format!("    yaml_entry_would_change: path={path}"))?;
-            out(
-                sinks,
-                &format!(
-                    "      previous: also_deny_bash={:?} cli_allowed={}",
-                    previous.also_deny_bash, previous.cli_allowed,
-                ),
-            )?;
-            out(
-                sinks,
-                &format!(
-                    "      projected: also_deny_bash={:?} cli_allowed={}",
-                    projected.also_deny_bash, projected.cli_allowed,
-                ),
-            )?;
-        }
-        // ConfigConflict is `#[non_exhaustive]`; cover future variants
-        // gracefully without breaking the build.
-        _ => {
-            out(sinks, "    <unknown conflict variant>")?;
-        }
-    }
-    Ok(())
-}
-
-/// Render a `plan unprotect` [`PlanReport`] as a structured text block.
-/// Symmetric mirror of [`emit_plan_restrict_text`] for the reverse
-/// direction: anchor + `would_commit`/`noop` header, one section per
-/// touched file, then drift conflicts.
 fn emit_plan_unprotect_text(sinks: &mut IoSinks<'_>, report: &plan_ops::PlanReport) -> Result<()> {
-    let Some(diff) = report.unprotect_diff.as_ref() else {
-        return Ok(());
-    };
-    out(
-        sinks,
-        &format!("Plan: unprotect {}", diff.absolute_path.display()),
-    )?;
-    out(sinks, &format!("  Anchor: {}", diff.anchor.display()))?;
-    out(
-        sinks,
-        &format!(
-            "  noop: {}   would_commit: {}",
-            report.noop, report.would_commit,
-        ),
-    )?;
-    if let Some(reason) = &report.reject_reason {
-        out(sinks, &format!("  reject_reason: {reason}"))?;
-    }
-    out(
-        sinks,
-        &format!("  .remargin.yaml: {}", diff.remargin_yaml.path.display()),
-    )?;
-    out(
-        sinks,
-        &format!(
-            "    entry: {}",
-            unprotect_entry_action_label(diff.remargin_yaml.entry_action),
-        ),
-    )?;
-    out(
-        sinks,
-        &format!("  Settings: {} file(s)", diff.settings_files.len()),
-    )?;
-    for sf in &diff.settings_files {
-        out(sinks, &format!("    {}", sf.path.display()))?;
-        out(
-            sinks,
-            &format!(
-                "      rules: -{} to remove, {} already absent",
-                sf.rules_to_remove.len(),
-                sf.rules_already_absent.len(),
-            ),
-        )?;
-    }
-    out(
-        sinks,
-        &format!(
-            "  Sidecar: {} ({})",
-            diff.sidecar.path.display(),
-            unprotect_entry_action_label(diff.sidecar.entry_action),
-        ),
-    )?;
-    if diff.conflicts.is_empty() {
-        out(sinks, "  conflicts: 0")?;
-    } else {
-        out(sinks, &format!("  conflicts: {}", diff.conflicts.len()))?;
-        for conflict in &diff.conflicts {
-            emit_unprotect_conflict_line(sinks, conflict)?;
-        }
-    }
-    Ok(())
-}
-
-const fn unprotect_entry_action_label(action: plan_ops::UnprotectEntryAction) -> &'static str {
-    match action {
-        plan_ops::UnprotectEntryAction::Absent => "absent",
-        plan_ops::UnprotectEntryAction::WouldBeRemoved => "would_be_removed",
-        // UnprotectEntryAction is `#[non_exhaustive]`; cover future
-        // variants gracefully without breaking the build.
-        _ => "<unknown>",
-    }
-}
-
-fn emit_unprotect_conflict_line(
-    sinks: &mut IoSinks<'_>,
-    conflict: &plan_ops::UnprotectConflict,
-) -> Result<()> {
-    match conflict {
-        plan_ops::UnprotectConflict::RuleAlreadyAbsent {
-            rule,
-            settings_file,
-        } => {
-            out(
-                sinks,
-                &format!(
-                    "    rule_already_absent in {}: {rule}",
-                    settings_file.display()
-                ),
-            )?;
-        }
-        plan_ops::UnprotectConflict::SidecarEntryMissing { path } => {
-            out(
-                sinks,
-                &format!("    sidecar_entry_missing: {}", path.display()),
-            )?;
-        }
-        plan_ops::UnprotectConflict::YamlEntryMissing { path } => {
-            out(
-                sinks,
-                &format!("    yaml_entry_missing: {}", path.display()),
-            )?;
-        }
-        // UnprotectConflict is `#[non_exhaustive]`; cover future
-        // variants gracefully without breaking the build.
-        _ => {
-            out(sinks, "    <unknown conflict variant>")?;
-        }
-    }
-    Ok(())
+    out_raw(sinks, &plan_ops::render_plan_unprotect_text(report))
 }
 
 /// Read a JSON file (or stdin when `path == "-"`) into a vector of
@@ -5679,36 +5070,7 @@ fn render_query_output(
         }
         QueryOutputMode::Plain | QueryOutputMode::Summary => {}
     }
-    for r in results {
-        out(
-            sinks,
-            &format!(
-                "{} ({} comments, {} pending)",
-                r.path.display(),
-                r.comment_count,
-                r.pending_count,
-            ),
-        )?;
-        for cm in r.comments.as_deref().unwrap_or(&[]) {
-            let status = if cm.ack.is_empty() {
-                "pending"
-            } else {
-                "acked"
-            };
-            out(
-                sinks,
-                &format!(
-                    "  {} {} ({}) [{}] {}",
-                    cm.id,
-                    cm.author,
-                    cm.author_type.as_str(),
-                    status,
-                    cm.content,
-                ),
-            )?;
-        }
-    }
-    Ok(())
+    out_raw(sinks, &query::render_query_plain(results))
 }
 
 fn cmd_search(
@@ -5868,20 +5230,7 @@ fn registry_participant_pretty(
     name: &str,
     participant: &config::registry::RegistryParticipant,
 ) -> String {
-    let status = match participant.status {
-        config::registry::RegistryParticipantStatus::Active => "active",
-        config::registry::RegistryParticipantStatus::Revoked => "revoked",
-        _ => "unknown",
-    };
-    let prefix = participant.display_name.as_ref().map_or_else(
-        || String::from(name),
-        |display| format!("\"{display}\" ({name})"),
-    );
-    format!(
-        "{prefix} ({}) [{status}] {} key(s)",
-        participant.author_type,
-        participant.pubkeys.len(),
-    )
+    registry::render_registry_participant(name, participant)
 }
 
 fn cmd_registry(
@@ -6022,26 +5371,15 @@ fn emit_sandbox_bulk_result(
     if json_mode {
         out_json(sinks, &result.to_json(cwd, changed_key))?;
     } else {
-        for p in &result.changed {
-            out(sinks, &strip_prefix_display(p, cwd))?;
-        }
-        for failure in &result.failed {
-            let _ = writeln!(
-                sinks.stderr,
-                "{}: {}",
-                strip_prefix_display(&failure.path, cwd),
-                failure.reason,
-            );
-        }
+        // Text output: write to stderr (changed + failed paths).
+        write!(
+            sinks.stderr,
+            "{}",
+            sandbox_ops::render_sandbox_bulk_result(result, cwd, changed_key)
+        )
+        .context("writing sandbox result to stderr")?;
     }
     Ok(())
-}
-
-fn strip_prefix_display(path: &Path, base: &Path) -> String {
-    path.strip_prefix(base)
-        .unwrap_or(path)
-        .display()
-        .to_string()
 }
 
 fn cmd_cp(
@@ -6065,30 +5403,7 @@ fn cmd_cp(
 }
 
 fn cp_outcome_pretty(src: &str, dst: &str, outcome: &cp_op::CpOutcome) -> String {
-    use cp_op::CpKind;
-    let overwrite_suffix = if outcome.overwritten {
-        ", overwrote destination"
-    } else {
-        ""
-    };
-    match outcome.kind {
-        CpKind::Noop => format!("no-op: {src} (same canonical path)"),
-        CpKind::Verbatim => format!(
-            "copied: {src} -> {dst} ({} bytes{overwrite_suffix})",
-            outcome.bytes_copied,
-        ),
-        CpKind::BodyOnly => format!(
-            "copied: {src} -> {dst} ({} bytes, dropped {} comment{}{overwrite_suffix})",
-            outcome.bytes_copied,
-            outcome.comments_dropped,
-            if outcome.comments_dropped == 1 {
-                ""
-            } else {
-                "s"
-            },
-        ),
-        _ => format!("copied: {src} -> {dst}"),
-    }
+    cp_op::render_cp_outcome(src, dst, outcome)
 }
 
 fn cmd_mv(
@@ -6112,39 +5427,7 @@ fn cmd_mv(
 }
 
 fn mv_outcome_pretty(src: &str, dst: &str, outcome: &mv_op::MvOutcome) -> String {
-    let suffix_overwrite = if outcome.action.overwritten {
-        ", overwrote destination"
-    } else {
-        ""
-    };
-    let suffix_fallback = if outcome.action.fallback_copy {
-        ", cross-filesystem copy"
-    } else {
-        ""
-    };
-    if outcome.topology.noop_same_path {
-        format!("no-op: {src} (same canonical path)")
-    } else if outcome.topology.is_directory {
-        format!(
-            "renamed directory: {src} -> {dst} ({} nested file{}{suffix_overwrite}{suffix_fallback})",
-            outcome.nested_files_moved,
-            if outcome.nested_files_moved == 1 {
-                ""
-            } else {
-                "s"
-            },
-        )
-    } else if outcome.bytes_moved == 0 {
-        format!(
-            "already moved: {src} -> {dst} ({} bytes)",
-            outcome.bytes_moved
-        )
-    } else {
-        format!(
-            "moved: {src} -> {dst} ({} bytes{suffix_overwrite}{suffix_fallback})",
-            outcome.bytes_moved,
-        )
-    }
+    mv_op::render_mv_outcome(src, dst, outcome)
 }
 
 fn cmd_rm(
@@ -6343,25 +5626,7 @@ fn render_sign_result_text(
     sinks: &mut IoSinks<'_>,
     result: &operations::sign::SignResult,
 ) -> Result<()> {
-    for entry in &result.repaired {
-        out(
-            sinks,
-            &format!(
-                "repaired checksum: {} ({} -> {})",
-                entry.id, entry.old_checksum, entry.new_checksum
-            ),
-        )?;
-    }
-    for entry in &result.signed {
-        out(sinks, &format!("signed: {} (ts={})", entry.id, entry.ts))?;
-    }
-    for entry in &result.skipped {
-        out(sinks, &format!("skipped: {} ({})", entry.id, entry.reason))?;
-    }
-    if result.signed.is_empty() && result.skipped.is_empty() && result.repaired.is_empty() {
-        out(sinks, "no candidates")?;
-    }
-    Ok(())
+    out_raw(sinks, &operations::sign::render_sign_result_text(result))
 }
 
 fn plugin_is_installed() -> Result<bool> {

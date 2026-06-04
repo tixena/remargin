@@ -372,3 +372,30 @@ pub(crate) fn classify_candidates(
         }
     }
 }
+
+/// Render a [`SignResult`] as human-readable text.
+///
+/// One line per repaired/signed/skipped entry; when all lists are empty
+/// the output is a single `"no candidates"` line.
+#[must_use]
+pub fn render_sign_result_text(result: &SignResult) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    for entry in &result.repaired {
+        let _ = writeln!(
+            out,
+            "repaired checksum: {} ({} -> {})",
+            entry.id, entry.old_checksum, entry.new_checksum
+        );
+    }
+    for entry in &result.signed {
+        let _ = writeln!(out, "signed: {} (ts={})", entry.id, entry.ts);
+    }
+    for entry in &result.skipped {
+        let _ = writeln!(out, "skipped: {} ({})", entry.id, entry.reason);
+    }
+    if result.signed.is_empty() && result.skipped.is_empty() && result.repaired.is_empty() {
+        out.push_str("no candidates\n");
+    }
+    out
+}

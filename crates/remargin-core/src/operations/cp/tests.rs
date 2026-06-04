@@ -14,7 +14,7 @@ use os_shim::mock::MockSystem;
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
-use crate::operations::cp::{CpArgs, CpKind, cp};
+use crate::operations::cp::{CpArgs, CpKind, CpOutcome, cp, render_cp_outcome};
 use crate::parser::{self, AuthorType};
 
 // ---- Key pair (from sign/tests.rs) ----------------------------------------
@@ -304,4 +304,58 @@ fn outcome_serializes_to_snake_case_json() {
     }
     // CpKind::Verbatim serialises as "verbatim".
     assert_eq!(json["kind"].as_str().unwrap(), "verbatim");
+}
+
+// --- render_cp_outcome unit tests ---
+
+fn outcome(kind: CpKind, bytes: u64, dropped: usize, overwritten: bool) -> CpOutcome {
+    CpOutcome {
+        bytes_copied: bytes,
+        comments_dropped: dropped,
+        dst_absolute: PathBuf::from("/dst/file.md"),
+        kind,
+        overwritten,
+        src_absolute: PathBuf::from("/src/file.md"),
+    }
+}
+
+#[test]
+fn render_cp_noop() {
+    let o = outcome(CpKind::Noop, 0, 0, false);
+    let s = render_cp_outcome("src.md", "dst.md", &o);
+    assert_eq!(s, "no-op: src.md (same canonical path)");
+}
+
+#[test]
+fn render_cp_verbatim() {
+    let o = outcome(CpKind::Verbatim, 1024, 0, false);
+    let s = render_cp_outcome("src.md", "dst.md", &o);
+    assert_eq!(s, "copied: src.md -> dst.md (1024 bytes)");
+}
+
+#[test]
+fn render_cp_verbatim_overwrite() {
+    let o = outcome(CpKind::Verbatim, 1024, 0, true);
+    let s = render_cp_outcome("src.md", "dst.md", &o);
+    assert_eq!(
+        s,
+        "copied: src.md -> dst.md (1024 bytes, overwrote destination)"
+    );
+}
+
+#[test]
+fn render_cp_body_only_single_comment() {
+    let o = outcome(CpKind::BodyOnly, 512, 1, false);
+    let s = render_cp_outcome("src.md", "dst.md", &o);
+    assert_eq!(s, "copied: src.md -> dst.md (512 bytes, dropped 1 comment)");
+}
+
+#[test]
+fn render_cp_body_only_multiple_comments() {
+    let o = outcome(CpKind::BodyOnly, 512, 3, false);
+    let s = render_cp_outcome("src.md", "dst.md", &o);
+    assert_eq!(
+        s,
+        "copied: src.md -> dst.md (512 bytes, dropped 3 comments)"
+    );
 }

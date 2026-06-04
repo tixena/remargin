@@ -248,3 +248,90 @@ fn group_trusted_roots(resolved: &ResolvedPermissions) -> Vec<TrustedRootView> {
         })
         .collect()
 }
+
+/// Render a [`ShowOutput`] as human-readable text for `permissions show`.
+///
+/// Output is written to stderr in the CLI; the function returns a `String`
+/// so callers can route it to any sink.
+#[must_use]
+pub fn render_show_text(cwd: &Path, report: &ShowOutput) -> String {
+    use crate::display::format_string_list;
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Permissions resolved at {}:", cwd.display());
+    let _ = writeln!(out);
+    let _ = writeln!(out, "  trusted_roots:");
+    if report.trusted_roots.is_empty() {
+        let _ = writeln!(out, "    (none)");
+    } else {
+        for entry in &report.trusted_roots {
+            let _ = writeln!(
+                out,
+                "    {}  (source: {})",
+                entry.path_text,
+                entry.source_file.display(),
+            );
+            if let Some(realm) = entry.realm_root.as_deref() {
+                let _ = writeln!(out, "      realm_root: {}", realm.display());
+            }
+            if !entry.also_deny_bash.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "      also_deny_bash: {}",
+                    format_string_list(&entry.also_deny_bash),
+                );
+            }
+            let _ = writeln!(out, "      cli_allowed: {}", entry.cli_allowed);
+        }
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "  deny_ops:");
+    if report.deny_ops.is_empty() {
+        let _ = writeln!(out, "    (none)");
+    } else {
+        for entry in &report.deny_ops {
+            let _ = writeln!(
+                out,
+                "    {}  (source: {})",
+                entry.path.display(),
+                entry.source_file.display(),
+            );
+            for item in &entry.ops {
+                if item.exceptions.is_empty() {
+                    let _ = writeln!(out, "      - {}", item.name);
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "      - {} (exceptions: {})",
+                        item.name,
+                        format_string_list(&item.exceptions),
+                    );
+                }
+            }
+        }
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "  allow_dot_folders:");
+    if report.allow_dot_folders.is_empty() {
+        let _ = writeln!(out, "    (none)");
+    } else {
+        for entry in &report.allow_dot_folders {
+            let _ = writeln!(out, "    {}", format_string_list(&entry.names));
+        }
+    }
+    out
+}
+
+/// Render a [`CheckOutput`] as human-readable text for `permissions check`.
+#[must_use]
+pub fn render_check_text(report: &CheckOutput, why: bool) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "restricted: {}", report.restricted);
+    if why && let Some(rule) = &report.matching_rule {
+        let _ = writeln!(out, "  matched: {}", rule.rule_text);
+        let _ = writeln!(out, "  kind:    {}", rule.kind);
+        let _ = writeln!(out, "  source:  {}", rule.source_file.display());
+    }
+    out
+}

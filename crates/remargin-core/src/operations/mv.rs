@@ -555,3 +555,44 @@ fn is_cross_filesystem(err: &io::Error) -> bool {
         || msg.contains("Cross-device")
         || msg.contains("crosses devices")
 }
+
+/// Render a [`MvOutcome`] as a human-readable one-line summary.
+///
+/// `src` and `dst` are the display forms of the paths (caller-supplied
+/// strings, not the resolved canonicals).
+#[must_use]
+pub fn render_mv_outcome(src: &str, dst: &str, outcome: &MvOutcome) -> String {
+    let suffix_overwrite = if outcome.action.overwritten {
+        ", overwrote destination"
+    } else {
+        ""
+    };
+    let suffix_fallback = if outcome.action.fallback_copy {
+        ", cross-filesystem copy"
+    } else {
+        ""
+    };
+    if outcome.topology.noop_same_path {
+        format!("no-op: {src} (same canonical path)")
+    } else if outcome.topology.is_directory {
+        format!(
+            "renamed directory: {src} -> {dst} ({} nested file{}{suffix_overwrite}{suffix_fallback})",
+            outcome.nested_files_moved,
+            if outcome.nested_files_moved == 1 {
+                ""
+            } else {
+                "s"
+            },
+        )
+    } else if outcome.bytes_moved == 0 {
+        format!(
+            "already moved: {src} -> {dst} ({} bytes)",
+            outcome.bytes_moved
+        )
+    } else {
+        format!(
+            "moved: {src} -> {dst} ({} bytes{suffix_overwrite}{suffix_fallback})",
+            outcome.bytes_moved,
+        )
+    }
+}

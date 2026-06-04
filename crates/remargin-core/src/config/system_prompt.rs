@@ -120,5 +120,40 @@ fn folder_name_for(dir: &Path) -> String {
         .map_or_else(|| "prompt".to_owned(), str::to_owned)
 }
 
+/// Render a [`ResolvedSystemPrompt`] as human-readable text.
+///
+/// Output goes to stderr in the CLI; the function returns a `String`
+/// so callers can route it to any sink. `target` is the file path
+/// the resolution was run for (for the header line).
+#[must_use]
+pub fn render_resolved_prompt(target: &Path, resolved: &ResolvedSystemPrompt) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "Resolved prompt for: {}", target.display());
+    let _ = writeln!(out, "  Name:    {}", resolved.name);
+    match &resolved.source {
+        Some(path) => {
+            let _ = writeln!(out, "  Source:  {}", path.display());
+        }
+        None => {
+            let _ = writeln!(out, "  Source:  (walk exhausted)");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "  Default: {}",
+        if resolved.is_default { "yes" } else { "no" },
+    );
+    let _ = writeln!(out, "  Body ({} chars):", resolved.prompt.chars().count());
+    if resolved.prompt.is_empty() {
+        let _ = writeln!(out, "    (empty)");
+    } else {
+        for line in resolved.prompt.lines() {
+            let _ = writeln!(out, "    {line}");
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests;
