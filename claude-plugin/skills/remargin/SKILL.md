@@ -205,6 +205,8 @@ remargin batch --ops '[
 | Replace whole file (rare — usually wrong for edits) | `write path=... content=...` (comment-preserving) |
 | Create a new file | `write path=... content=... create=true` |
 | Write non-markdown | `write path=... content=... raw=true` |
+| Copy a file (markdown: body-only, no comments in copy) | `cp src=... dst=...` |
+| Move/rename a file | `mv src=... dst=...` |
 | Delete a file | `rm path=...` |
 
 **Do not** use `Read` / `Edit` / `Write` / `Bash` shell tools on managed `.md` files. The realm rule has no exceptions.
@@ -348,6 +350,30 @@ Each is a concrete failure mode that has bitten a session.
 ❌ **Minting or moving signing keys to "fix" a signing failure.** A missing key, `signature_invalid`, or unregistered identity is an admin/setup gap — not yours to solve by generating a new key (it breaks the identity→pubkey binding in the registry, so every signature then fails) or copying keys into folders. Surface to the user.
 
 ❌ **Trying to build code inside a realm.** A restricted realm blocks shell writes to *every* file under it, not just `.md` — you can't `cargo new` / `npm init` / scaffold / compile there, because the build writes non-markdown files the hook refuses. Realms are for *using* remargin, not building software. If a task needs to build code, it belongs outside the realm — say so and stop.
+
+---
+
+## Working with git
+
+The Claude Code hook that enforces remargin access blocks any Bash command whose argument string contains the vault path (e.g. `/home/eduardoburgos/src/tixena/eburgos_notes`). This means these forms are **always blocked**, no matter how you spell them:
+
+```bash
+git -C /path/to/vault status           # blocked — path in argument
+git --git-dir=/path/to/vault/.git log  # blocked — path in argument
+git --work-tree=/path/to/vault status  # blocked — path in argument
+```
+
+Plain git commands with **no path argument** are **not blocked** and work normally from within the vault's shell context:
+
+```bash
+git status      # works
+git log         # works
+git push        # works
+git add <file>  # works
+git commit      # works
+```
+
+**How to apply:** always run git commands without explicit path flags. Never try `-C`, `--git-dir`, or `--work-tree` pointing at the vault — they will fail with a hook denial regardless of the specific git subcommand or flag combination. There is no workaround via path rewriting; the block is on the argument string, not the operation type.
 
 ---
 

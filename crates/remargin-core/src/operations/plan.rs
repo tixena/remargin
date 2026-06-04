@@ -240,6 +240,11 @@ pub struct PlanReport {
     /// reverse projection in [`PlanReport::unprotect_diff`] instead).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_diff: Option<ConfigPlanDiff>,
+    /// File-copy projection emitted by the `plan cp` op. `None` for
+    /// every other op. The document-level fields are vacuously empty for
+    /// `cp` — only the src/dst paths and copy kind change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cp_diff: Option<CpDiff>,
     /// Which identity the plan was computed under. `would_sign` reports
     /// whether signing would succeed without actually invoking the key.
     pub identity: PlanIdentity,
@@ -724,6 +729,28 @@ pub struct MvState {
     pub noop_same_path: bool,
 }
 
+/// Projection of the `cp` op — what a live `cp` would do.
+///
+/// Emitted in [`PlanReport::cp_diff`] when `op = cp`.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct CpDiff {
+    /// Number of comment blocks that would be dropped from a
+    /// comment-bearing source (`BodyOnly` path). `0` for the
+    /// `Verbatim` and `Noop` paths.
+    pub comments_to_drop: usize,
+    /// Canonical absolute destination path.
+    pub dst_absolute: PathBuf,
+    /// `true` when `dst` currently exists. The live op requires
+    /// `--force` to overwrite.
+    pub dst_exists: bool,
+    /// Which copy path would run.
+    pub kind: String,
+    /// Canonical absolute source path. Missing source returns the
+    /// lexical join of `base_dir` + requested path.
+    pub src_absolute: PathBuf,
+}
+
 /// A `plan` request for a single mutating op, normalized so CLI + MCP
 /// can share one dispatch path.
 ///
@@ -752,6 +779,18 @@ pub enum PlanRequest<'req> {
     Comment {
         path: PathBuf,
         params: ProjectCommentParams<'req>,
+    },
+    /// `plan cp` — projects a file copy.
+    /// Produces a [`CpDiff`] in [`PlanReport::cp_diff`] describing the
+    /// resolved src/dst paths, the copy kind, and the number of comment
+    /// blocks that would be dropped.
+    Cp {
+        /// Source path as supplied by the caller.
+        src: PathBuf,
+        /// Destination path as supplied by the caller.
+        dst: PathBuf,
+        /// `true` to project the `--force` semantics (overwrite dst).
+        force: bool,
     },
     /// `plan delete` — projects deletion of one or more comments.
     Delete { path: PathBuf, ids: Vec<String> },
@@ -857,6 +896,7 @@ impl PlanRequest<'_> {
             Self::Ack { .. } => "ack",
             Self::Batch { .. } => "batch",
             Self::Comment { .. } => "comment",
+            Self::Cp { .. } => "cp",
             Self::Delete { .. } => "delete",
             Self::Edit { .. } => "edit",
             Self::Mv { .. } => "mv",
@@ -921,6 +961,7 @@ pub fn project_report(
         checksum_before,
         comments,
         config_diff: None,
+        cp_diff: None,
         identity,
         mv_diff: None,
         noop,
@@ -984,6 +1025,7 @@ pub fn project_doc_report(
         checksum_before,
         comments,
         config_diff: None,
+        cp_diff: None,
         identity,
         mv_diff: None,
         noop,
@@ -1037,6 +1079,9 @@ pub fn dispatch(
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             let (before, after) = projections::project_delete(system, path, cfg, &id_refs)?;
             project_doc_report(system, path, label, &before, &after, cfg, identity)
+        }
+        PlanRequest::Cp { src, dst, force } => {
+            dispatch_cp(system, base_dir, cfg, identity, src, dst, *force)
         }
         PlanRequest::Edit { path, id, content } => {
             let (before, after) = projections::project_edit(system, path, cfg, id, content)?;
@@ -1150,6 +1195,188 @@ fn dispatch_unprotect(
         }
     }
     Ok(report)
+}
+
+/// Build a [`PlanReport`] for the `cp` op.
+///
+/// Pure: no disk writes, no identity load. Resolves both endpoints
+/// through the same sandbox boundary the live op uses, surfaces a
+/// `reject_reason` plus `would_commit = false` for hard preflight
+/// failures, and otherwise returns a populated [`CpDiff`] with
+/// `would_commit = true`.
+fn dispatch_cp(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    identity: PlanIdentity,
+    src: &Path,
+    dst: &Path,
+    force: bool,
+) -> Result<PlanReport> {
+    let empty = parser::parse("").context("parsing empty before-document for plan cp")?;
+    let mut report = project_report("cp", &empty, &empty, cfg, identity)?;
+
+    let projection = project_cp(system, base_dir, cfg, src, dst, force);
+
+    match projection {
+        Ok(diff) => {
+            report.noop = diff.kind == "noop";
+            report.would_commit = true;
+            report.cp_diff = Some(diff);
+        }
+        Err(err) => {
+            report.reject_reason = Some(format!("{err:#}"));
+            report.would_commit = false;
+        }
+    }
+
+    Ok(report)
+}
+
+/// Run every preflight check the live `cp` op would run and assemble a
+/// [`CpDiff`] describing the projected end state. Kept structurally
+/// parallel to the live op so plan and live `cp` stay in sync.
+fn project_cp(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    src: &Path,
+    dst: &Path,
+    force: bool,
+) -> Result<CpDiff> {
+    use crate::permissions::op_guard::pre_mutate_check_for_caller;
+
+    let (src_resolved, dst_resolved) = plan_cp_resolve_endpoints(system, base_dir, cfg, src, dst)?;
+
+    let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
+
+    if src_resolved == dst_resolved {
+        return Ok(CpDiff {
+            comments_to_drop: 0,
+            dst_absolute: dst_resolved,
+            dst_exists,
+            kind: String::from("noop"),
+            src_absolute: src_resolved,
+        });
+    }
+
+    let caller = cfg.caller_info();
+    pre_mutate_check_for_caller(system, "cp", &dst_resolved, &caller)?;
+    pre_mutate_check_for_caller(system, "cp", &src_resolved, &caller)?;
+
+    if dst_exists && !force {
+        anyhow::bail!(
+            "destination exists: {} (pass --force to overwrite)",
+            dst.display()
+        );
+    }
+
+    plan_cp_diff_kind(system, src_resolved, dst_resolved, dst_exists)
+}
+
+/// Validate source/destination shapes and resolve both endpoints through
+/// the sandbox boundary. Returns `(src_resolved, dst_resolved)`.
+fn plan_cp_resolve_endpoints(
+    system: &dyn System,
+    base_dir: &Path,
+    cfg: &ResolvedConfig,
+    src: &Path,
+    dst: &Path,
+) -> Result<(PathBuf, PathBuf)> {
+    use crate::writer::ensure_not_forbidden_target as forbid;
+
+    forbid(src)?;
+    forbid(dst)?;
+
+    let src_lexical = if src.is_absolute() {
+        src.to_path_buf()
+    } else {
+        base_dir.join(src)
+    };
+    let dst_lexical = if dst.is_absolute() {
+        dst.to_path_buf()
+    } else {
+        base_dir.join(dst)
+    };
+
+    if !system.exists(&src_lexical).unwrap_or(false) {
+        anyhow::bail!("source not found: {}", src.display());
+    }
+    if system.is_dir(&src_lexical).unwrap_or(false) {
+        anyhow::bail!(
+            "source is a directory: {} (recursive copy is not supported in v1)",
+            src.display()
+        );
+    }
+    if system.is_dir(&dst_lexical).unwrap_or(false) {
+        anyhow::bail!(
+            "destination is a directory: {} (pass an explicit destination path)",
+            dst.display()
+        );
+    }
+
+    let src_resolved =
+        allowlist::resolve_sandboxed(system, base_dir, src, cfg.unrestricted, &cfg.trusted_roots)?;
+    let dst_resolved = allowlist::resolve_sandboxed_create(
+        system,
+        base_dir,
+        dst,
+        cfg.unrestricted,
+        &cfg.trusted_roots,
+    )?;
+
+    forbid(&src_resolved)?;
+    forbid(&dst_resolved)?;
+
+    Ok((src_resolved, dst_resolved))
+}
+
+/// Determine the copy kind by inspecting the source content and return
+/// the corresponding [`CpDiff`].
+fn plan_cp_diff_kind(
+    system: &dyn System,
+    src_resolved: PathBuf,
+    dst_resolved: PathBuf,
+    dst_exists: bool,
+) -> Result<CpDiff> {
+    let is_md = src_resolved
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| {
+            let l = e.to_ascii_lowercase();
+            l == "md" || l == "mdx"
+        });
+
+    if !is_md {
+        return Ok(CpDiff {
+            comments_to_drop: 0,
+            dst_absolute: dst_resolved,
+            dst_exists,
+            kind: String::from("verbatim"),
+            src_absolute: src_resolved,
+        });
+    }
+
+    let src_content = system
+        .read_to_string(&src_resolved)
+        .with_context(|| format!("reading {}", src_resolved.display()))?;
+    let parsed = parser::parse(&src_content)
+        .with_context(|| format!("parsing {}", src_resolved.display()))?;
+    let comment_count = parsed.comments().len();
+
+    let (kind, comments_to_drop) = if comment_count == 0 {
+        (String::from("verbatim"), 0)
+    } else {
+        (String::from("body_only"), comment_count)
+    };
+
+    Ok(CpDiff {
+        comments_to_drop,
+        dst_absolute: dst_resolved,
+        dst_exists,
+        kind,
+        src_absolute: src_resolved,
+    })
 }
 
 /// Build a [`PlanReport`] for the `mv` op.

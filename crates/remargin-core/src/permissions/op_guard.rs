@@ -31,6 +31,7 @@ pub const MUTATING_OPS: &[&str] = &[
     "ack",
     "batch",
     "comment",
+    "cp",
     "delete",
     "edit",
     "mv",

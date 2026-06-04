@@ -407,6 +407,16 @@ pub fn rules_for(
     deny.push(format!("Bash(mv {glob_root}/** *)"));
     deny.push(format!("Bash(mv {glob_root}/** {glob_root}/**)"));
 
+    // 3b. Source-side `cp` coverage. The `cp *` template above
+    // emits only the destination-side pattern (`Bash(cp * /path/**)`).
+    // The remaining shapes close the source-side exfiltration hole
+    // (`cp <realm>/secret.md /tmp/`). Agents route through
+    // `mcp__remargin__cp`; humans with `cli_allowed: true` use
+    // `remargin cp`.
+    deny.push(format!("Bash(cp {glob_root}/**)"));
+    deny.push(format!("Bash(cp {glob_root}/** *)"));
+    deny.push(format!("Bash(cp {glob_root}/** {glob_root}/**)"));
+
     // 4. Caller-supplied bash extras, e.g. `also_deny_bash: [curl]`.
     for cmd in &entry.also_deny_bash {
         deny.push(format!("Bash({cmd} * {glob_root}/**)"));

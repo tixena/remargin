@@ -348,8 +348,8 @@ fn verb_guidance(verb: &str) -> Option<&'static str> {
              comments only."
         }
         "cp" => {
-            "Use `mcp__remargin__get` + `mcp__remargin__write {create: true}` -- `cp` bypasses \
-             frontmatter injection on markdown."
+            "Use `mcp__remargin__cp` -- copies the file under remargin's guards (markdown is \
+             copied body-only so the duplicate gets a clean comment history)."
         }
         "tee" | "dd" => "Use `mcp__remargin__write` instead of redirecting output to the file.",
         "vim" | "nvim" | "nano" | "code" => {

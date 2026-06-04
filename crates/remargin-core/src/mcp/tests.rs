@@ -245,6 +245,7 @@ fn tools_list_returns_all_tools() {
         "batch",
         "comment",
         "comments",
+        "cp",
         "delete",
         "edit",
         "get",

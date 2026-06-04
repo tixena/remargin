@@ -1,6 +1,7 @@
 //! Comment operations: create, ack, react, delete, edit.
 
 pub mod batch;
+pub mod cp;
 pub mod mv;
 pub mod plan;
 pub mod projections;

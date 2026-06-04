@@ -108,8 +108,8 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
     m.insert(
         "handle_plan",
         (
-            115,
-            "mirrors cmd_plan PlanAction dispatch (plan mv adds a 4-line src/dst/force unwrap)",
+            120,
+            "mirrors cmd_plan PlanAction dispatch (plan mv/cp each add a 4-line src/dst/force unwrap)",
         ),
     );
     // MCP: search handler extracts eight optional filter fields.

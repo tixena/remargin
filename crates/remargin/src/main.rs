@@ -29,6 +29,7 @@ use remargin_core::linter;
 use remargin_core::mcp;
 use remargin_core::operations;
 use remargin_core::operations::batch::BatchCommentOp;
+use remargin_core::operations::cp as cp_op;
 use remargin_core::operations::mv as mv_op;
 use remargin_core::operations::plan as plan_ops;
 use remargin_core::operations::projections;
@@ -332,6 +333,29 @@ enum Commands {
         pretty: bool,
         #[command(flatten)]
         output_args: OutputArgs,
+    },
+    /// Copy a single tracked file without touching the source.
+    ///
+    /// Non-markdown and comment-free markdown copy verbatim. A
+    /// comment-bearing markdown file is copied body-only — the duplicate
+    /// carries no comment blocks, so no cross-tree ID ambiguity and no
+    /// broken signatures. The source is always left byte-for-byte unchanged.
+    /// Both endpoints flow through the same `trusted_roots` / `deny_ops` /
+    /// sandbox guards every other mutating op uses.
+    Cp {
+        /// Source path.
+        src: String,
+        /// Destination path.
+        dst: String,
+        /// Overwrite an existing destination.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+        #[command(flatten)]
+        unrestricted_args: UnrestrictedArgs,
     },
     /// Delete one or more comments.
     Delete {
@@ -1046,6 +1070,23 @@ enum PlanAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
+    /// Project a `cp` op.
+    ///
+    /// Surfaces the canonical src/dst, whether the destination exists
+    /// (and would therefore require `--force`), the copy kind
+    /// (`verbatim`, `body_only`, or `noop`), and the number of comment
+    /// blocks that would be dropped. No bytes are written — dry-run only.
+    Cp {
+        /// Source path.
+        src: String,
+        /// Destination path.
+        dst: String,
+        /// Project the `--force` semantics.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
     /// Project a `delete` op.
     Delete {
         /// Path to the document.
@@ -1591,6 +1632,14 @@ struct WriteParams<'cmd> {
     path: &'cmd str,
 }
 
+/// Bundled CLI inputs for the [`cmd_cp`] handler.
+struct CpParams<'cmd> {
+    dst: &'cmd str,
+    force: bool,
+    json_mode: bool,
+    src: &'cmd str,
+}
+
 /// Bundled CLI inputs for the [`cmd_mv`] handler.
 struct MvParams<'cmd> {
     dst: &'cmd str,
@@ -1836,6 +1885,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Keygen { output_args, .. }
         | Commands::Lint { output_args, .. }
         | Commands::Ls { output_args, .. }
+        | Commands::Cp { output_args, .. }
         | Commands::Mcp { output_args, .. }
         | Commands::Metadata { output_args, .. }
         | Commands::Mv { output_args, .. }
@@ -1897,6 +1947,7 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
         PlanAction::Ack { output_args, .. }
         | PlanAction::Batch { output_args, .. }
         | PlanAction::Comment { output_args, .. }
+        | PlanAction::Cp { output_args, .. }
         | PlanAction::Delete { output_args, .. }
         | PlanAction::Edit { output_args, .. }
         | PlanAction::Mv { output_args, .. }
@@ -2048,6 +2099,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         | Commands::Batch { .. }
         | Commands::Comment { .. }
         | Commands::Comments { .. }
+        | Commands::Cp { .. }
         | Commands::Delete { .. }
         | Commands::Edit { .. }
         | Commands::Get { .. }
@@ -2085,6 +2137,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Activity { identity_args, .. }
         | Commands::Batch { identity_args, .. }
         | Commands::Comment { identity_args, .. }
+        | Commands::Cp { identity_args, .. }
         | Commands::Delete { identity_args, .. }
         | Commands::Edit { identity_args, .. }
         | Commands::Identity { identity_args, .. }
@@ -2130,6 +2183,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Activity { .. }
         | Commands::Claude { .. }
         | Commands::Comments { .. }
+        | Commands::Cp { .. }
         | Commands::Delete { .. }
         | Commands::Get { .. }
         | Commands::Identity { .. }
@@ -2165,7 +2219,10 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
 /// arbitrary filesystem paths.
 const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
     match cmd {
-        Commands::Get {
+        Commands::Cp {
+            unrestricted_args, ..
+        }
+        | Commands::Get {
             unrestricted_args, ..
         }
         | Commands::Ls {
@@ -2721,6 +2778,7 @@ fn dispatch_with_config(
         Commands::Batch { .. } => handle_batch(&cli.command, sinks, system, cwd, config),
         Commands::Comment { .. } => handle_comment(&cli.command, sinks, system, cwd, config),
         Commands::Comments { .. } => handle_comments(&cli.command, sinks, system, cwd),
+        Commands::Cp { .. } => handle_cp(&cli.command, sinks, system, cwd, config),
         Commands::Delete { .. } => handle_delete(&cli.command, sinks, system, cwd, config),
         Commands::Edit { .. } => handle_edit(&cli.command, sinks, system, cwd, config),
         Commands::Get { .. } => handle_get(&cli.command, sinks, system, cwd, config),
@@ -3012,6 +3070,32 @@ fn handle_metadata(
         bail!("internal: handle_metadata called with wrong subcommand");
     };
     cmd_metadata(sinks, system, cwd, config, path, output_args.json)
+}
+
+fn handle_cp(
+    command: &Commands,
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let Commands::Cp {
+        src,
+        dst,
+        force,
+        output_args,
+        ..
+    } = command
+    else {
+        bail!("internal: handle_cp called with wrong subcommand");
+    };
+    let p = CpParams {
+        dst: dst.as_str(),
+        force: *force,
+        json_mode: output_args.json,
+        src: src.as_str(),
+    };
+    cmd_cp(sinks, system, cwd, config, &p)
 }
 
 fn handle_mv(
@@ -4737,6 +4821,7 @@ fn cmd_plan(
             &mut position,
             &mut attach_refs,
         )?,
+        PlanAction::Cp { .. } => build_plan_cp(action, system)?,
         PlanAction::Delete { .. } => build_plan_delete(action, system, cwd)?,
         PlanAction::Edit { .. } => build_plan_edit(action, system, cwd)?,
         PlanAction::Mv { .. } => build_plan_mv(action, system)?,
@@ -4876,6 +4961,23 @@ fn build_plan_edit<'cmd>(
         path: resolve_doc_path(system, cwd, path)?,
         id,
         content,
+    })
+}
+
+fn build_plan_cp(
+    action: &PlanAction,
+    system: &dyn System,
+) -> Result<plan_ops::PlanRequest<'static>> {
+    let PlanAction::Cp {
+        src, dst, force, ..
+    } = action
+    else {
+        bail!("internal: helper called with wrong PlanAction variant");
+    };
+    Ok(plan_ops::PlanRequest::Cp {
+        src: expand_cli_path(system, src)?,
+        dst: expand_cli_path(system, dst)?,
+        force: *force,
     })
 }
 
@@ -5836,6 +5938,53 @@ fn strip_prefix_display(path: &Path, base: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+fn cmd_cp(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    config: &ResolvedConfig,
+    params: &CpParams<'_>,
+) -> Result<()> {
+    let src = expand_cli_path(system, params.src)?;
+    let dst = expand_cli_path(system, params.dst)?;
+
+    let args = cp_op::CpArgs::new(src, dst).with_force(params.force);
+    let outcome = cp_op::cp(system, cwd, config, &args)?;
+
+    if params.json_mode {
+        out_json(sinks, &serde_json::to_value(&outcome)?)
+    } else {
+        out(sinks, &cp_outcome_pretty(params.src, params.dst, &outcome))
+    }
+}
+
+fn cp_outcome_pretty(src: &str, dst: &str, outcome: &cp_op::CpOutcome) -> String {
+    use cp_op::CpKind;
+    let overwrite_suffix = if outcome.overwritten {
+        ", overwrote destination"
+    } else {
+        ""
+    };
+    match outcome.kind {
+        CpKind::Noop => format!("no-op: {src} (same canonical path)"),
+        CpKind::Verbatim => format!(
+            "copied: {src} -> {dst} ({} bytes{overwrite_suffix})",
+            outcome.bytes_copied,
+        ),
+        CpKind::BodyOnly => format!(
+            "copied: {src} -> {dst} ({} bytes, dropped {} comment{}{overwrite_suffix})",
+            outcome.bytes_copied,
+            outcome.comments_dropped,
+            if outcome.comments_dropped == 1 {
+                ""
+            } else {
+                "s"
+            },
+        ),
+        _ => format!("copied: {src} -> {dst}"),
+    }
 }
 
 fn cmd_mv(

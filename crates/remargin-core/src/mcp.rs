@@ -28,6 +28,7 @@ use crate::kind::matches_kind_filter;
 use crate::linter;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
+use crate::operations::cp as cp_op;
 use crate::operations::mv as mv_op;
 use crate::operations::plan as plan_ops;
 use crate::operations::projections;
@@ -256,6 +257,27 @@ fn desc_batch() -> ToolDesc {
     }
 }
 
+/// Build the cp tool descriptor.
+fn desc_cp() -> ToolDesc {
+    ToolDesc {
+        name: "cp",
+        description: "Copy a tracked file. The SOURCE is never modified. Non-markdown and \
+             comment-free markdown copy verbatim; a comment-bearing markdown file is copied \
+             BODY-ONLY (the duplicate carries no comment blocks) so it introduces no duplicate \
+             comment IDs and no broken signatures. Reports kind + comments_dropped. Use plan \
+             op=cp to preview.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "src": { "type": "string", "description": "Source path." },
+                "dst": { "type": "string", "description": "Destination path." },
+                "force": { "type": "boolean", "description": "Overwrite destination if it exists.", "default": false }
+            },
+            "required": ["src", "dst"]
+        }),
+    }
+}
+
 /// Build the comment tool descriptor.
 fn desc_comment() -> ToolDesc {
     ToolDesc {
@@ -458,11 +480,11 @@ fn desc_mv() -> ToolDesc {
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
-        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/subset_gate/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, reply, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. `reply` is a synonym for `comment` with required `parent_id` (translated to `reply_to`). The subset_gate field mirrors SubsetGateFailure when the projected op would introduce a new anomaly not present in the on-disk pre-state - the same shape commit_with_verify would return. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
+        description: "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/subset_gate/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, reply, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. `reply` is a synonym for `comment` with required `parent_id` (translated to `reply_to`). The subset_gate field mirrors SubsetGateFailure when the projected op would introduce a new anomaly not present in the on-disk pre-state - the same shape commit_with_verify would return. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. File-copy op: cp - surfaces a `cp_diff` describing canonical src/dst, dst_exists, kind (verbatim/body_only/noop), and comments_to_drop. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
         schema: json!({
             "type": "object",
             "properties": {
-                "op": { "type": "string", "description": "Op to project: ack | batch | comment | reply | delete | edit | react | mv | purge | sandbox-add | sandbox-remove | sign | write" },
+                "op": { "type": "string", "description": "Op to project: ack | batch | comment | reply | delete | edit | react | cp | mv | purge | sandbox-add | sandbox-remove | sign | write" },
                 "file": { "type": "string", "description": "Path to the document (required for wired document ops)" },
                 "src": { "type": "string", "description": "For mv: source path." },
                 "dst": { "type": "string", "description": "For mv: destination path." },
@@ -1018,6 +1040,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_batch(),
         desc_comment(),
         desc_comments(),
+        desc_cp(),
         desc_delete(),
         desc_edit(),
         desc_get(),
@@ -1397,6 +1420,7 @@ fn dispatch_tool(
         "batch" => handle_batch(system, base_dir, config, p),
         "comment" => handle_comment(system, base_dir, config, p),
         "comments" => handle_comments(system, base_dir, p),
+        "cp" => handle_cp(system, base_dir, config, p),
         "delete" => handle_delete(system, base_dir, config, p),
         "edit" => handle_edit(system, base_dir, config, p),
         "get" => handle_get(system, base_dir, config, p),
@@ -1925,11 +1949,14 @@ fn handle_plan(
             path: base_dir.join(required_str(params, "file")?),
             ops: parse_plan_batch_ops(params)?,
         },
-        "mv" => plan_ops::PlanRequest::Mv {
-            src: PathBuf::from(required_str(params, "src")?),
-            dst: PathBuf::from(required_str(params, "dst")?),
-            force: optional_bool(params, "force"),
-        },
+        "cp" => {
+            let (src, dst, force) = parse_plan_src_dst(params)?;
+            plan_ops::PlanRequest::Cp { src, dst, force }
+        }
+        "mv" => {
+            let (src, dst, force) = parse_plan_src_dst(params)?;
+            plan_ops::PlanRequest::Mv { src, dst, force }
+        }
         "purge" => plan_ops::PlanRequest::Purge {
             path: base_dir.join(required_str(params, "file")?),
             recursive: optional_bool(params, "recursive"),
@@ -1966,6 +1993,16 @@ fn handle_plan(
 
     let report = plan_ops::dispatch(system, base_dir, cfg, &request)?;
     serde_json::to_value(&report).context("serializing plan report")
+}
+
+/// Parse `src`, `dst`, and `force` from a plan-tool param map.
+/// Used by the `cp` and `mv` plan arms.
+fn parse_plan_src_dst(params: &Map<String, Value>) -> Result<(PathBuf, PathBuf, bool)> {
+    Ok((
+        PathBuf::from(required_str(params, "src")?),
+        PathBuf::from(required_str(params, "dst")?),
+        optional_bool(params, "force"),
+    ))
 }
 
 /// Parse the `ops` array from a `plan.batch` MCP request into
@@ -2257,6 +2294,22 @@ fn handle_mv(
     let args = mv_op::MvArgs::new(PathBuf::from(src), PathBuf::from(dst)).with_force(force);
     let outcome = mv_op::mv(system, base_dir, config, &args)?;
     Ok(outcome.to_json())
+}
+
+/// Handle the `cp` tool: copy a tracked file.
+fn handle_cp(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let src = required_str(params, "src")?;
+    let dst = required_str(params, "dst")?;
+    let force = optional_bool(params, "force");
+
+    let args = cp_op::CpArgs::new(PathBuf::from(src), PathBuf::from(dst)).with_force(force);
+    let outcome = cp_op::cp(system, base_dir, config, &args)?;
+    Ok(serde_json::to_value(&outcome)?)
 }
 
 fn handle_get_image(

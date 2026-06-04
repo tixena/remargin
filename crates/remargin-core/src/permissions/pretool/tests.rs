@@ -540,10 +540,7 @@ fn bash_rm_verb_guidance() {
 
 #[test]
 fn bash_cp_verb_guidance() {
-    assert_bash_deny_contains(
-        "cp /r/secret/foo.md /tmp/x",
-        &["mcp__remargin__get", "mcp__remargin__write"],
-    );
+    assert_bash_deny_contains("cp /r/secret/foo.md /tmp/x", &["mcp__remargin__cp"]);
 }
 
 #[test]

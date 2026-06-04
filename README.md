@@ -316,7 +316,7 @@ remargin mcp install --user
 remargin mcp test
 ```
 
-Once installed, Claude Code gets these tools: `ls`, `get`, `write`, `replace`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `mv`, `rm`.
+Once installed, Claude Code gets these tools: `ls`, `get`, `write`, `replace`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `cp`, `mv`, `rm`.
 
 ### Plugin
 
@@ -516,7 +516,7 @@ The single exception to per-op evaluation is `trusted_roots`, which defines the 
 | Kind | Ops |
 |------|-----|
 | Read (bypass `trusted_roots`) | `comments`, `get`, `lint`, `ls`, `metadata`, `query`, `search`, `verify` |
-| Write (gated by `trusted_roots`) | `ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `replace`, `sandbox-add`, `sandbox-remove`, `sign`, `write` |
+| Write (gated by `trusted_roots`) | `ack`, `batch`, `comment`, `cp`, `delete`, `edit`, `migrate`, `purge`, `react`, `replace`, `sandbox-add`, `sandbox-remove`, `sign`, `write` |
 
 The lists are pinned by `READ_OPS` and `MUTATING_OPS` in `remargin_core::permissions::op_guard`. Adding a new op MUST classify it at PR time by adding the canonical name to one of those constants; unknown ops fail closed (treated as write-side under `trusted_roots`).
 
@@ -611,6 +611,7 @@ remargin [OPTIONS] <COMMAND>
 | `ls` | List files and directories |
 | `write` | Write document contents (comment-preserving, `--create` for new files, `--lines START-END` for partial writes) |
 | `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
+| `cp` | Copy a managed file (markdown copied body-only — no comment blocks in the duplicate) |
 | `mv` | Move a managed `.md` file (preserves comments and frontmatter) |
 | `rm` | Remove a managed `.md` file |
 
@@ -641,7 +642,7 @@ remargin [OPTIONS] <COMMAND>
 remargin plan <op> <args>
 ```
 
-Returns a projection of any mutating op (`ack`, `batch`, `comment`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`, `mv`) without touching disk. Reports `noop / would_commit / reject_reason / subset_gate / checksums / changed_line_ranges`.
+Returns a projection of any mutating op (`ack`, `batch`, `comment`, `cp`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`, `mv`) without touching disk. Reports `noop / would_commit / reject_reason / subset_gate / checksums / changed_line_ranges`.
 
 ### Maintenance
 

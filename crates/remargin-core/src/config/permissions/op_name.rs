@@ -28,6 +28,8 @@ pub enum OpName {
     Comment,
     /// Read: list comments on a doc.
     Comments,
+    /// Write: copy a file (body-only for markdown; preserves source).
+    Cp,
     /// Write: delete a comment / block.
     Delete,
     /// Write: edit a comment / block.
@@ -72,6 +74,7 @@ impl OpName {
         Self::Batch,
         Self::Comment,
         Self::Comments,
+        Self::Cp,
         Self::Delete,
         Self::Edit,
         Self::Get,
@@ -110,6 +113,7 @@ impl OpName {
         Self::Ack,
         Self::Batch,
         Self::Comment,
+        Self::Cp,
         Self::Delete,
         Self::Edit,
         Self::Mv,
@@ -130,6 +134,7 @@ impl OpName {
             Self::Batch => "batch",
             Self::Comment => "comment",
             Self::Comments => "comments",
+            Self::Cp => "cp",
             Self::Delete => "delete",
             Self::Edit => "edit",
             Self::Get => "get",
