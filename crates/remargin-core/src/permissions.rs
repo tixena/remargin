@@ -6,6 +6,7 @@
 //! next op without a restart.
 
 pub mod claude_sync;
+pub mod doctor;
 pub mod inspect;
 pub mod op_guard;
 pub mod pretool;

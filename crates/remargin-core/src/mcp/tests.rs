@@ -247,6 +247,7 @@ fn tools_list_returns_all_tools() {
         "comments",
         "cp",
         "delete",
+        "doctor",
         "edit",
         "get",
         "get_image",

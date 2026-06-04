@@ -41,6 +41,7 @@ use remargin_core::operations::search;
 use remargin_core::parser;
 use remargin_core::path::expand_path;
 use remargin_core::permissions::claude_sync::rule_shape::OverlapKind;
+use remargin_core::permissions::doctor as permissions_doctor;
 use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::permissions::pretool::{PretoolOutcome, pretool};
 use remargin_core::permissions::pretool_install;
@@ -366,6 +367,25 @@ enum Commands {
         ids: Vec<String>,
         #[command(flatten)]
         identity_args: IdentityArgs,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
+    /// Run health checks on the remargin permission stack.
+    ///
+    /// Checks (in order):
+    ///
+    /// 1. **Hook-installed** — verifies the `PreToolUse` hook is wired into
+    ///    Claude settings. When absent from both user- and project-scope,
+    ///    no enforcement is active and subsequent checks are skipped
+    ///    (all would be moot without the hook).
+    ///
+    /// Exit code: 0 when clean, 1 when findings are present.
+    Doctor {
+        /// User-scope settings file. Defaults to `~/.claude/settings.json`.
+        /// Pass an explicit path to keep hermetic test runs out of the
+        /// user's real home.
+        #[arg(long)]
+        user_settings: Option<PathBuf>,
         #[command(flatten)]
         output_args: OutputArgs,
     },
@@ -1879,6 +1899,7 @@ const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
         | Commands::Comment { output_args, .. }
         | Commands::Comments { output_args, .. }
         | Commands::Delete { output_args, .. }
+        | Commands::Doctor { output_args, .. }
         | Commands::Edit { output_args, .. }
         | Commands::Get { output_args, .. }
         | Commands::Identity { output_args, .. }
@@ -2089,6 +2110,7 @@ const fn subcommand_is_config_free(cmd: &Commands) -> bool {
         Commands::Version
         | Commands::Activity { .. }
         | Commands::Claude { .. }
+        | Commands::Doctor { .. }
         | Commands::Identity { .. }
         | Commands::Permissions { .. }
         | Commands::ResolveMode { .. }
@@ -2156,6 +2178,7 @@ const fn subcommand_identity(cmd: &Commands) -> Option<&IdentityArgs> {
         | Commands::Write { identity_args, .. } => Some(identity_args),
         Commands::Claude { .. }
         | Commands::Comments { .. }
+        | Commands::Doctor { .. }
         | Commands::Get { .. }
         | Commands::Keygen { .. }
         | Commands::Lint { .. }
@@ -2185,6 +2208,7 @@ const fn subcommand_assets(cmd: &Commands) -> Option<&AssetsArgs> {
         | Commands::Comments { .. }
         | Commands::Cp { .. }
         | Commands::Delete { .. }
+        | Commands::Doctor { .. }
         | Commands::Get { .. }
         | Commands::Identity { .. }
         | Commands::Keygen { .. }
@@ -2250,6 +2274,7 @@ const fn subcommand_unrestricted(cmd: &Commands) -> Option<&UnrestrictedArgs> {
         | Commands::Comment { .. }
         | Commands::Comments { .. }
         | Commands::Delete { .. }
+        | Commands::Doctor { .. }
         | Commands::Edit { .. }
         | Commands::Identity { .. }
         | Commands::Keygen { .. }
@@ -2380,6 +2405,7 @@ fn try_dispatch_config_free(
         #[cfg(feature = "obsidian")]
         Commands::Obsidian { .. } => handle_obsidian(&cli.command, sinks, system, cwd).map(Some),
         Commands::Activity { .. } => handle_activity(&cli.command, sinks, system, cwd).map(Some),
+        Commands::Doctor { .. } => cmd_doctor(sinks, system, cwd, &cli.command).map(Some),
         Commands::Permissions { action } => cmd_permissions(sinks, system, cwd, action).map(Some),
         Commands::Claude { action } => handle_claude(action, sinks, system, cwd).map(Some),
         _ => {
@@ -2803,6 +2829,7 @@ fn dispatch_with_config(
         Commands::Version
         | Commands::Activity { .. }
         | Commands::Claude { .. }
+        | Commands::Doctor { .. }
         | Commands::Identity { .. }
         | Commands::Mcp { .. }
         | Commands::Keygen { .. }
@@ -4102,6 +4129,59 @@ fn format_activity_cutoff_header(
             },
         )
     }
+}
+
+fn cmd_doctor(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    command: &Commands,
+) -> Result<()> {
+    let Commands::Doctor {
+        user_settings,
+        output_args,
+    } = command
+    else {
+        bail!("internal: cmd_doctor called with wrong subcommand");
+    };
+    let user_settings_path = if let Some(p) = user_settings.as_deref() {
+        p.to_path_buf()
+    } else {
+        expand_cli_pathbuf(system, Path::new(DEFAULT_USER_SETTINGS))?
+    };
+    let report = permissions_doctor::run_doctor(system, cwd, &user_settings_path)?;
+    if output_args.json {
+        let value = serde_json::to_value(&report).context("serializing doctor report")?;
+        print_output(sinks, true, &value)?;
+    } else {
+        emit_doctor_text(sinks, &report)?;
+    }
+    // Exit non-zero when findings are present.
+    if !report.is_clean() {
+        bail!("doctor found {} finding(s)", report.findings.len());
+    }
+    Ok(())
+}
+
+fn emit_doctor_text(
+    sinks: &mut IoSinks<'_>,
+    report: &permissions_doctor::DoctorReport,
+) -> Result<()> {
+    if report.is_clean() {
+        writeln!(sinks.stdout, "doctor: all checks passed").context("writing doctor output")?;
+        return Ok(());
+    }
+    for finding in &report.findings {
+        let label = match finding.severity {
+            permissions_doctor::Severity::Critical => "CRITICAL",
+            permissions_doctor::Severity::Warning => "WARNING",
+            _ => "UNKNOWN",
+        };
+        writeln!(sinks.stdout, "[{label}] {}", finding.message)
+            .context("writing doctor finding")?;
+        writeln!(sinks.stdout, "  Remedy: {}", finding.remedy).context("writing doctor remedy")?;
+    }
+    Ok(())
 }
 
 fn cmd_permissions(

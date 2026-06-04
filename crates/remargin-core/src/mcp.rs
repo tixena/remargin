@@ -40,6 +40,7 @@ use crate::operations::sandbox as sandbox_ops;
 use crate::operations::search;
 use crate::parser;
 use crate::path::expand_path;
+use crate::permissions::doctor as permissions_doctor;
 use crate::permissions::inspect as permissions_inspect;
 use crate::permissions::op_guard::{CallerInfo, check_against_resolved_for_caller};
 use crate::responses;
@@ -87,6 +88,7 @@ const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 /// from the MCP surface: they mutate permission policy and must only
 /// be invokable by the human via the CLI.
 const NO_PATH_TOOLS: &[&str] = &[
+    "doctor",
     "identity_create",
     "permissions_check",
     "permissions_show",
@@ -361,6 +363,29 @@ fn desc_delete() -> ToolDesc {
                 }
             },
             "required": ["file", "ids"]
+        }),
+    }
+}
+
+/// Build the doctor tool descriptor.
+fn desc_doctor() -> ToolDesc {
+    ToolDesc {
+        name: "doctor",
+        description: "Run health checks on the remargin permission stack. \
+                       Checks (in order): (1) hook-installed - verifies the \
+                       PreToolUse hook is wired into Claude settings; when \
+                       absent from both scopes, all other checks are skipped. \
+                       Returns a structured DoctorReport.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "user_settings_file": {
+                    "type": "string",
+                    "description": "Path to the user-scope Claude settings file \
+                                    (default: ~/.claude/settings.json)."
+                }
+            },
+            "required": []
         }),
     }
 }
@@ -1042,6 +1067,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_comments(),
         desc_cp(),
         desc_delete(),
+        desc_doctor(),
         desc_edit(),
         desc_get(),
         desc_get_image(),
@@ -1422,6 +1448,7 @@ fn dispatch_tool(
         "comments" => handle_comments(system, base_dir, p),
         "cp" => handle_cp(system, base_dir, config, p),
         "delete" => handle_delete(system, base_dir, config, p),
+        "doctor" => handle_doctor(system, base_dir, p),
         "edit" => handle_edit(system, base_dir, config, p),
         "get" => handle_get(system, base_dir, config, p),
         "get_image" => handle_get_image(system, base_dir, config, p),
@@ -2207,6 +2234,27 @@ fn build_query_filter_from_params(
 /// Pure read-only inspection — no identity resolution, no config
 /// load. Returns the parent-walked `.remargin.yaml` permissions tree
 /// rooted at `base_dir` (the MCP server's working directory).
+/// Handle the `doctor` tool.
+fn handle_doctor(
+    system: &dyn System,
+    base_dir: &Path,
+    params: &Map<String, Value>,
+) -> Result<Value> {
+    let user_settings_file = params
+        .get("user_settings_file")
+        .and_then(Value::as_str)
+        .map_or_else(
+            || {
+                use crate::path::expand_path;
+                expand_path(system, "~/.claude/settings.json")
+                    .unwrap_or_else(|_| PathBuf::from("~/.claude/settings.json"))
+            },
+            PathBuf::from,
+        );
+    let report = permissions_doctor::run_doctor(system, base_dir, &user_settings_file)?;
+    serde_json::to_value(&report).context("serializing doctor report")
+}
+
 fn handle_permissions_show(system: &dyn System, base_dir: &Path) -> Result<Value> {
     let report = permissions_inspect::show(system, base_dir)?;
     serde_json::to_value(&report).context("serializing permissions show output")
