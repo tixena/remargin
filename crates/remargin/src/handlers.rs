@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 #[cfg(feature = "obsidian")]
 use crate::ObsidianAction;
-use crate::author_type_str;
+use crate::dispatch::{PERMISSIONS_NOT_RESTRICTED_MARKER, build_identity_flags, tri_state_flag};
 use crate::io::{
     IoSinks, expand_cli_path, expand_cli_pathbuf, out, out_json, out_raw, parse_line_range,
     print_output, read_stdin, resolve_doc_path, resolve_purge_path, truncate_content,
@@ -32,11 +32,9 @@ use crate::params::{
 use crate::render;
 use crate::{
     Commands, DEFAULT_USER_SETTINGS, IdentityAction, IdentityArgs, McpAction,
-    PERMISSIONS_NOT_RESTRICTED_MARKER, PLUGIN_MARKETPLACE_NAME, PLUGIN_MARKETPLACE_SOURCE,
-    PLUGIN_REF, PermissionsAction, PlanAction, PlanClaudeAction, PluginAction, RegistryAction,
-    SandboxAction,
+    PLUGIN_MARKETPLACE_NAME, PLUGIN_MARKETPLACE_SOURCE, PLUGIN_REF, PermissionsAction, PlanAction,
+    PlanClaudeAction, PluginAction, RegistryAction, SandboxAction,
 };
-use crate::{build_identity_flags, tri_state_flag};
 use remargin_core::activity;
 use remargin_core::config::identity::{IdentityFlags, resolve_identity_report};
 use remargin_core::config::{self, ResolvedConfig};
@@ -65,6 +63,10 @@ use remargin_core::permissions::restrict as permissions_restrict;
 use remargin_core::permissions::unprotect as permissions_unprotect;
 use remargin_core::responses;
 use remargin_core::writer::InsertPosition;
+
+const fn author_type_str(at: &parser::AuthorType) -> &'static str {
+    at.as_str()
+}
 
 fn pretool_settings_path(system: &dyn System, cwd: &Path, local: bool) -> Result<PathBuf> {
     if local {
