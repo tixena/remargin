@@ -61,6 +61,7 @@ export async function openFileAtLine(
   const isCrossFile = currentPath !== rel;
 
   await leaf.openFile(file);
+  plugin.app.workspace.revealLeaf(leaf);
 
   if (line && line > 0) {
     // 2. Wait for the editor buffer to initialise. A cross-file switch needs

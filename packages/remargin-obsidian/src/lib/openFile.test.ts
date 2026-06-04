@@ -19,10 +19,12 @@ import { openFileAtLine } from "./openFile.ts";
 function makePlugin(resolvesExact: string | undefined): {
   plugin: object;
   openFileCalls: TFile[];
+  revealLeafCalls: unknown[];
   lastLookupPath: () => string | undefined;
 } {
   const fakeFile = new TFile();
   const openFileCalls: TFile[] = [];
+  const revealLeafCalls: unknown[] = [];
   let lastLookup: string | undefined;
 
   const leaf = {
@@ -48,6 +50,9 @@ function makePlugin(resolvesExact: string | undefined): {
         getLeaf(_newLeaf: boolean) {
           return leaf;
         },
+        revealLeaf(l: unknown) {
+          revealLeafCalls.push(l);
+        },
       },
     },
     getLastMarkdownView() {
@@ -55,7 +60,7 @@ function makePlugin(resolvesExact: string | undefined): {
     },
   };
 
-  return { plugin, openFileCalls, lastLookupPath: () => lastLookup };
+  return { plugin, openFileCalls, revealLeafCalls, lastLookupPath: () => lastLookup };
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +98,22 @@ describe("openFileAtLine", () => {
     await openFileAtLine(plugin as never, "notes/doc.md");
 
     assert.strictEqual(openFileCalls.length, 1, "openFile should be called exactly once");
+  });
+
+  it("calls workspace.revealLeaf after openFile so the leaf is visible", async () => {
+    const { plugin, revealLeafCalls } = makePlugin("notes/doc.md");
+
+    await openFileAtLine(plugin as never, "notes/doc.md");
+
+    assert.strictEqual(revealLeafCalls.length, 1, "revealLeaf must be called to bring the leaf into view");
+  });
+
+  it("does not call workspace.revealLeaf when the path is unresolvable", async () => {
+    const { plugin, revealLeafCalls } = makePlugin(undefined);
+
+    await openFileAtLine(plugin as never, "vault/gone.md");
+
+    assert.strictEqual(revealLeafCalls.length, 0, "revealLeaf must not be called when file resolution fails");
   });
 
   // ── normalizePath: paths are normalised before vault lookup ──────────────
