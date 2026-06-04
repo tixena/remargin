@@ -1,4 +1,4 @@
-import { MarkdownView, TFile } from "obsidian";
+import { MarkdownView, Notice, normalizePath, TFile } from "obsidian";
 import type RemarginPlugin from "@/main";
 
 /**
@@ -23,8 +23,11 @@ function rafDelay(ms: number): Promise<void> {
  * - Detects cross-file navigation (opening a file different from the leaf's
  *   current file) and uses a longer settle delay so the new editor buffer is
  *   fully initialised before scrolling.
+ * - Normalises `filePath` with Obsidian's `normalizePath` before the vault
+ *   lookup to handle OS path separators and leading `./` that the CLI may
+ *   produce on some platforms.
  * - If the path does not resolve to a `TFile` (e.g. the file was deleted or
- *   renamed), logs an error and returns without throwing.
+ *   renamed), shows a Notice, logs an error, and returns without throwing.
  * - If the opened view is not a `MarkdownView` (e.g. PDF, image), the file is
  *   still opened but the scroll step is skipped.
  */
@@ -33,9 +36,11 @@ export async function openFileAtLine(
   filePath: string,
   line?: number
 ): Promise<void> {
-  const file = plugin.app.vault.getAbstractFileByPath(filePath);
+  const rel = normalizePath(filePath);
+  const file = plugin.app.vault.getAbstractFileByPath(rel);
   if (!(file instanceof TFile)) {
-    console.error(`remargin: file not found in vault: ${filePath}`);
+    console.error(`remargin: file not found in vault: ${rel}`);
+    new Notice(`Remargin: couldn't open ${rel} (not found in vault)`);
     return;
   }
 
@@ -53,7 +58,7 @@ export async function openFileAtLine(
   // references the new file.
   const currentPath =
     leaf.view instanceof MarkdownView ? leaf.view.file?.path : undefined;
-  const isCrossFile = currentPath !== filePath;
+  const isCrossFile = currentPath !== rel;
 
   await leaf.openFile(file);
 

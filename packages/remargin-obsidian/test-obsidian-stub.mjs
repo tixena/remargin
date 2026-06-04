@@ -131,6 +131,13 @@ export const editorLivePreviewField = {};
 // Empty stubs are safe because no static-render path consumes them.
 export const moment = (input) => ({ valueOf: () => Date.now(), input });
 
+// `normalizePath` converts OS path separators to forward slashes, strips a
+// leading `./`, and collapses repeated slashes — matching real Obsidian
+// behaviour closely enough for unit tests.
+export function normalizePath(path) {
+  return path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+}
+
 // Vault types referenced via `type` imports in component code. Tests
 // never construct these, but type-only imports are erased before
 // runtime so the named exports just need to exist.
