@@ -54,25 +54,22 @@ const SUMMARY_LINE_LIMIT: usize = 5;
 /// and carried in [`RowStatus`].
 ///
 /// `Ok` when all `to:` entries are active registry participants (or the
-/// `to:` list is empty — broadcast is always ok). `Unknown` when any
-/// entry is absent from or revoked in the registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `to:` list is empty). `Unknown` carries the names that failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RecipientStatus {
-    /// All `to:` recipients are active, or `to:` is empty.
     Ok,
-    /// At least one `to:` recipient is absent from or revoked in the
-    /// registry.
-    Unknown,
+    /// One or more `to:` recipients are absent from or revoked in the registry.
+    Unknown(Vec<String>),
 }
 
 impl RecipientStatus {
-    /// Canonical lowercase name, matching the JSON / text output.
+    /// Canonical lowercase name for JSON / text output.
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Ok => "ok",
-            Self::Unknown => "unknown",
+            Self::Unknown(_) => "unknown",
         }
     }
 }
@@ -147,10 +144,17 @@ impl VerifyReport {
             .results
             .iter()
             .map(|row| {
+                let recipients_json: Value = match &row.recipients {
+                    RecipientStatus::Ok => json!("ok"),
+                    RecipientStatus::Unknown(bad) => json!({
+                        "status": "unknown",
+                        "unresolved": bad,
+                    }),
+                };
                 json!({
                     "id": row.id,
                     "checksum_ok": row.checksum_ok,
-                    "recipients": row.recipients.as_str(),
+                    "recipients": recipients_json,
                     "signature": row.signature.as_str(),
                 })
             })
@@ -196,7 +200,7 @@ impl VerifyFailure {
                 row.checksum_ok,
                 row.signature,
                 registered_active,
-                row.recipients,
+                &row.recipients,
             ) {
                 failures.push(row.clone());
             }
@@ -253,13 +257,17 @@ impl VerifyFailure {
         let mut out = format!("verify failed (mode: {}):\n", self.mode.as_str());
         for row in &self.failures {
             let chk = if row.checksum_ok { "ok" } else { "FAIL" };
+            let recipients_str = match &row.recipients {
+                RecipientStatus::Ok => "ok".to_owned(),
+                RecipientStatus::Unknown(bad) => format!("unknown({})", bad.join(", ")),
+            };
             let _ = writeln!(
                 out,
                 "  {}: checksum={} signature={} recipients={}",
                 row.id,
                 chk,
                 row.signature.as_str(),
-                row.recipients.as_str(),
+                recipients_str,
             );
         }
         out
@@ -471,7 +479,7 @@ pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyRepo
             checksum_ok,
             signature,
             is_registered_active(cm, cfg.registry.as_ref()),
-            recipients,
+            &recipients,
         ) {
             ok = false;
         }
@@ -504,7 +512,7 @@ pub fn anomalies_for_doc(doc: &ParsedDocument, cfg: &ResolvedConfig) -> HashSet<
             row.checksum_ok,
             row.signature,
             registered_active,
-            row.recipients,
+            &row.recipients,
         ) {
             continue;
         }
@@ -539,7 +547,7 @@ pub fn anomalies_for_doc(doc: &ParsedDocument, cfg: &ResolvedConfig) -> HashSet<
             }
             SignatureStatus::Valid => {}
         }
-        if matches!(row.recipients, RecipientStatus::Unknown)
+        if matches!(row.recipients, RecipientStatus::Unknown(_))
             && matches!(cfg.mode, Mode::Registered | Mode::Strict)
         {
             out.insert(Anomaly {
@@ -663,7 +671,7 @@ fn row_is_bad(
     checksum_ok: bool,
     signature: SignatureStatus,
     registered_active: bool,
-    recipients: RecipientStatus,
+    recipients: &RecipientStatus,
 ) -> bool {
     if !checksum_ok {
         return true;
@@ -673,7 +681,7 @@ fn row_is_bad(
     }
     // Unknown recipients are bad in registered/strict, neutral in open —
     // same column as UnknownAuthor in the severity table.
-    if matches!(recipients, RecipientStatus::Unknown)
+    if matches!(recipients, RecipientStatus::Unknown(_))
         && matches!(mode, Mode::Registered | Mode::Strict)
     {
         return true;
@@ -750,15 +758,19 @@ fn resolve_recipients(cm: &Comment, registry: Option<&Registry>) -> RecipientSta
         return RecipientStatus::Ok;
     }
     let Some(reg) = registry else {
-        // Non-empty to: but no registry to check against — treat as unknown.
-        return RecipientStatus::Unknown;
+        return RecipientStatus::Unknown(cm.to.clone());
     };
-    for recipient in &cm.to {
-        if !reg.is_active(recipient) {
-            return RecipientStatus::Unknown;
-        }
+    let bad: Vec<String> = cm
+        .to
+        .iter()
+        .filter(|r| !reg.is_active(r))
+        .cloned()
+        .collect();
+    if bad.is_empty() {
+        RecipientStatus::Ok
+    } else {
+        RecipientStatus::Unknown(bad)
     }
-    RecipientStatus::Ok
 }
 
 /// True when the comment's author is in the registry with an active

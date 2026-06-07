@@ -1620,8 +1620,8 @@ fn verify_unknown_recipient_strict_row_bad() {
     );
     assert_eq!(
         report.results[0].recipients,
-        RecipientStatus::Unknown,
-        "row recipients should be Unknown"
+        RecipientStatus::Unknown(vec!["eduardo_burgos".to_owned()]),
+        "row recipients should be Unknown with the bad name"
     );
 }
 
@@ -1637,7 +1637,10 @@ fn verify_unknown_recipient_registered_row_bad() {
         !report.ok,
         "unknown recipient in registered should make ok=false"
     );
-    assert_eq!(report.results[0].recipients, RecipientStatus::Unknown);
+    assert_eq!(
+        report.results[0].recipients,
+        RecipientStatus::Unknown(vec!["eduardo_burgos".to_owned()])
+    );
 }
 
 /// Scenario 20: unknown recipient in open → row neutral (ok=true).
@@ -1653,7 +1656,7 @@ fn verify_unknown_recipient_open_row_neutral() {
     assert!(report.ok, "open mode: unknown recipient is neutral");
     assert_eq!(
         report.results[0].recipients,
-        RecipientStatus::Unknown,
+        RecipientStatus::Unknown(vec!["eduardo_burgos".to_owned()]),
         "recipient status is still Unknown even in open mode"
     );
 }
@@ -1670,7 +1673,10 @@ fn verify_revoked_recipient_strict_row_bad() {
         !report.ok,
         "revoked recipient in strict should make ok=false"
     );
-    assert_eq!(report.results[0].recipients, RecipientStatus::Unknown);
+    assert_eq!(
+        report.results[0].recipients,
+        RecipientStatus::Unknown(vec!["bob".to_owned()])
+    );
 }
 
 /// Scenario 22: empty to: in strict → row ok.
@@ -1755,7 +1761,7 @@ fn commit_with_verify_introducing_bad_recipient_blocked() {
 #[test]
 fn recipient_status_as_str() {
     assert_eq!(RecipientStatus::Ok.as_str(), "ok");
-    assert_eq!(RecipientStatus::Unknown.as_str(), "unknown");
+    assert_eq!(RecipientStatus::Unknown(vec![]).as_str(), "unknown");
 }
 
 /// `AnomalyKind::RecipientUnknown` is present in the anomaly set for a doc

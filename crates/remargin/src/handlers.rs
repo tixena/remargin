@@ -55,6 +55,7 @@ use remargin_core::operations::query;
 use remargin_core::operations::replace;
 use remargin_core::operations::sandbox as sandbox_ops;
 use remargin_core::operations::search;
+use remargin_core::operations::verify::RecipientStatus;
 use remargin_core::parser;
 use remargin_core::permissions::doctor as permissions_doctor;
 use remargin_core::permissions::inspect as permissions_inspect;
@@ -2390,6 +2391,14 @@ pub fn cmd_mcp(
     }
 }
 
+fn recipients_display(status: &RecipientStatus) -> String {
+    match status {
+        RecipientStatus::Ok => "ok".to_owned(),
+        RecipientStatus::Unknown(bad) => format!("unknown({})", bad.join(", ")),
+        _ => status.as_str().to_owned(),
+    }
+}
+
 pub fn cmd_verify(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
@@ -2406,6 +2415,7 @@ pub fn cmd_verify(
     } else {
         for row in &report.results {
             let chk = if row.checksum_ok { "ok" } else { "FAIL" };
+            let recipients_str = recipients_display(&row.recipients);
             out(
                 sinks,
                 &format!(
@@ -2413,7 +2423,7 @@ pub fn cmd_verify(
                     row.id,
                     chk,
                     row.signature.as_str(),
-                    row.recipients.as_str(),
+                    recipients_str,
                 ),
             )?;
         }
@@ -2426,7 +2436,9 @@ pub fn cmd_verify(
             .results
             .iter()
             .filter(|r| {
-                !r.checksum_ok || r.signature.as_str() != "valid" || r.recipients.as_str() != "ok"
+                !r.checksum_ok
+                    || r.signature.as_str() != "valid"
+                    || matches!(r.recipients, RecipientStatus::Unknown(_))
             })
             .map(|r| {
                 format!(
@@ -2434,7 +2446,7 @@ pub fn cmd_verify(
                     r.id,
                     if r.checksum_ok { "ok" } else { "FAIL" },
                     r.signature.as_str(),
-                    r.recipients.as_str(),
+                    recipients_display(&r.recipients),
                 )
             })
             .collect();
