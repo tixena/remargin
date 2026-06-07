@@ -2409,10 +2409,11 @@ pub fn cmd_verify(
             out(
                 sinks,
                 &format!(
-                    "{}: checksum={} signature={}",
+                    "{}: checksum={} signature={} recipients={}",
                     row.id,
                     chk,
                     row.signature.as_str(),
+                    row.recipients.as_str(),
                 ),
             )?;
         }
@@ -2421,7 +2422,23 @@ pub fn cmd_verify(
     if report.ok {
         Ok(())
     } else {
-        anyhow::bail!("integrity check failed");
+        let failures: Vec<String> = report
+            .results
+            .iter()
+            .filter(|r| {
+                !r.checksum_ok || r.signature.as_str() != "valid" || r.recipients.as_str() != "ok"
+            })
+            .map(|r| {
+                format!(
+                    "{} (checksum={} signature={} recipients={})",
+                    r.id,
+                    if r.checksum_ok { "ok" } else { "FAIL" },
+                    r.signature.as_str(),
+                    r.recipients.as_str(),
+                )
+            })
+            .collect();
+        anyhow::bail!("integrity check failed: {}", failures.join(", "));
     }
 }
 
