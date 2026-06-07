@@ -112,15 +112,11 @@ impl SignatureStatus {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RowStatus {
-    /// Whether [`Comment::checksum`] matches the recomputed SHA-256 of
-    /// [`Comment::content`].
+    pub author: String,
     pub checksum_ok: bool,
-    /// Comment ID.
     pub id: String,
-    /// Per-recipient registry resolution. `Unknown` when any `to:` entry
-    /// is absent from or revoked in the registry.
+    pub line: usize,
     pub recipients: RecipientStatus,
-    /// Per-author-identity signature resolution.
     pub signature: SignatureStatus,
 }
 
@@ -153,6 +149,8 @@ impl VerifyReport {
                 };
                 json!({
                     "id": row.id,
+                    "author": row.author,
+                    "line": row.line,
                     "checksum_ok": row.checksum_ok,
                     "recipients": recipients_json,
                     "signature": row.signature.as_str(),
@@ -485,8 +483,10 @@ pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyRepo
         }
 
         results.push(RowStatus {
-            id: cm.id.clone(),
+            author: cm.author.clone(),
             checksum_ok,
+            id: cm.id.clone(),
+            line: cm.line,
             recipients,
             signature,
         });

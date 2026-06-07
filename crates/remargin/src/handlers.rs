@@ -2419,8 +2419,10 @@ pub fn cmd_verify(
             out(
                 sinks,
                 &format!(
-                    "{}: checksum={} signature={} recipients={}",
+                    "{}: author={} line={} checksum={} signature={} recipients={}",
                     row.id,
+                    row.author,
+                    row.line,
                     chk,
                     row.signature.as_str(),
                     recipients_str,
