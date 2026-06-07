@@ -32,6 +32,11 @@ pub enum OpName {
     Cp,
     /// Write: delete a comment / block.
     Delete,
+    /// Write: fallback grant for deleting a comment the caller authored.
+    /// Consulted only when `delete` was denied and every target is the
+    /// caller's own comment. Absent from `deny_ops` (the default) = own
+    /// deletion is permitted as a rescue.
+    DeleteOwn,
     /// Write: edit a comment / block.
     Edit,
     /// Read: get the rendered body of a doc.
@@ -76,6 +81,7 @@ impl OpName {
         Self::Comments,
         Self::Cp,
         Self::Delete,
+        Self::DeleteOwn,
         Self::Edit,
         Self::Get,
         Self::Lint,
@@ -115,6 +121,7 @@ impl OpName {
         Self::Comment,
         Self::Cp,
         Self::Delete,
+        Self::DeleteOwn,
         Self::Edit,
         Self::Mv,
         Self::Purge,
@@ -136,6 +143,7 @@ impl OpName {
             Self::Comments => "comments",
             Self::Cp => "cp",
             Self::Delete => "delete",
+            Self::DeleteOwn => "delete-own",
             Self::Edit => "edit",
             Self::Get => "get",
             Self::Lint => "lint",

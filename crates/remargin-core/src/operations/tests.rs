@@ -3321,12 +3321,23 @@ fn delete_refused_when_target_under_restrict() {
 }
 
 #[test]
-fn delete_refused_when_deny_ops_lists_delete() {
-    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete]\n";
+fn delete_refused_when_deny_ops_lists_delete_and_delete_own() {
+    // Denying both ops blocks even own-comment deletion.
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete, delete-own]\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
     let config = open_config();
     let err = delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]).unwrap_err();
     assert_deny_ops_refusal(&err);
+}
+
+#[test]
+fn delete_own_fallback_allows_own_comment_when_delete_denied() {
+    // deny_ops: [delete] alone does not block own-comment deletion.
+    let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete]\n";
+    let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
+    let config = open_config(); // identity = "eduardo", comment author = "eduardo"
+    delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"])
+        .expect("own comment deletion should succeed via delete-own fallback");
 }
 
 #[test]

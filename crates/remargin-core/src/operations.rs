@@ -35,7 +35,7 @@ use crate::kind::validate_kinds;
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
-use crate::permissions::op_guard::pre_mutate_check;
+use crate::permissions::op_guard::{pre_mutate_check, pre_mutate_check_for_caller};
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::writer::{self, InsertPosition};
 
@@ -401,8 +401,23 @@ pub fn delete_comments(
     comment_ids: &[&str],
 ) -> Result<()> {
     writer::ensure_not_forbidden_target(path)?;
-    pre_mutate_check(system, "delete", path)?;
+    let caller = config.caller_info();
+    let caller_identity = caller
+        .identity_name
+        .clone()
+        .or_else(|| caller.identity_id.clone())
+        .unwrap_or_default();
     let mut doc = parser::parse_file(system, path)?;
+    if let Err(delete_denial) = pre_mutate_check_for_caller(system, "delete", path, &caller) {
+        let all_own = comment_ids
+            .iter()
+            .filter_map(|id| doc.find_comment(id))
+            .all(|cm| cm.author == caller_identity);
+        if !all_own {
+            return Err(delete_denial);
+        }
+        pre_mutate_check_for_caller(system, "delete-own", path, &caller)?;
+    }
 
     let deleted_attachments: Vec<String> = comment_ids
         .iter()

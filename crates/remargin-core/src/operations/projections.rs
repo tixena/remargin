@@ -38,6 +38,7 @@ use crate::operations::{
     collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
 };
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::writer::{self, InsertPosition};
 
@@ -604,7 +605,24 @@ pub fn project_delete(
     config: &ResolvedConfig,
     comment_ids: &[&str],
 ) -> Result<(ParsedDocument, ParsedDocument)> {
+    let caller = config.caller_info();
+    let caller_identity = caller
+        .identity_name
+        .clone()
+        .or_else(|| caller.identity_id.clone())
+        .unwrap_or_default();
     let (before, mut after) = parse_file_twice(system, path)?;
+
+    if let Err(delete_denial) = pre_mutate_check_for_caller(system, "delete", path, &caller) {
+        let all_own = comment_ids
+            .iter()
+            .filter_map(|id| after.find_comment(id))
+            .all(|cm| cm.author == caller_identity);
+        if !all_own {
+            return Err(delete_denial);
+        }
+        pre_mutate_check_for_caller(system, "delete-own", path, &caller)?;
+    }
 
     for comment_id in comment_ids {
         if after.find_comment(comment_id).is_none() {
