@@ -6,6 +6,10 @@
  * when both target the same element. */
 @import "./sandbox-hierarchy.css";
 
+.remargin-container {
+  height: 100%;
+}
+
 /* Scoped styles for markdown rendered inside sidebar comment content. */
 .remargin-markdown-content {
   font-size: 12px;

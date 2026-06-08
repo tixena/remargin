@@ -217,7 +217,7 @@ export function SidebarShell({
         </button>
       </div>
 
-      <ScrollArea className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 overflow-hidden">
         <div className="flex flex-col min-w-0">
           <Collapsible open={sandboxOpen} onOpenChange={setSandboxOpen}>
             <SectionHeader
@@ -229,9 +229,11 @@ export function SidebarShell({
               variant="sandbox"
             />
             <CollapsibleContent>
-              {sandboxContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">No staged comments.</div>
-              )}
+              <ScrollArea className="max-h-[40vh]">
+                {sandboxContent ?? (
+                  <div className="px-4 py-3 text-xs text-text-faint">No staged comments.</div>
+                )}
+              </ScrollArea>
             </CollapsibleContent>
           </Collapsible>
 
@@ -245,9 +247,11 @@ export function SidebarShell({
               actions={inboxActions}
             />
             <CollapsibleContent>
-              {inboxContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">No pending comments.</div>
-              )}
+              <ScrollArea className="max-h-[40vh]">
+                {inboxContent ?? (
+                  <div className="px-4 py-3 text-xs text-text-faint">No pending comments.</div>
+                )}
+              </ScrollArea>
             </CollapsibleContent>
           </Collapsible>
 
@@ -260,16 +264,18 @@ export function SidebarShell({
               onInitialized={onInitialized}
             />
             <CollapsibleContent>
-              {threadInlineEditor}
-              {threadContent ?? (
-                <div className="px-4 py-3 text-xs text-text-faint">
-                  Open a markdown file to see comments.
-                </div>
-              )}
+              <ScrollArea className="max-h-[40vh]">
+                {threadInlineEditor}
+                {threadContent ?? (
+                  <div className="px-4 py-3 text-xs text-text-faint">
+                    Open a markdown file to see comments.
+                  </div>
+                )}
+              </ScrollArea>
             </CollapsibleContent>
           </Collapsible>
         </div>
-      </ScrollArea>
+      </div>
 
       {footerContent && <div className="border-t border-bg-border">{footerContent}</div>}
     </div>

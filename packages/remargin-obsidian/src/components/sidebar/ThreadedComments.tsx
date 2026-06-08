@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { CommentCard } from "@/components/sidebar/CommentCard";
 import { KindFilterBar } from "@/components/sidebar/KindFilterBar";
 import { findRadixScrollViewport } from "@/components/sidebar/scrollViewport";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Comment } from "@/generated";
 import { useBackend } from "@/hooks/useBackend";
 import { collectKinds, matchesKindFilter, pruneKindFilter } from "@/lib/kindFilter";
@@ -67,10 +66,7 @@ export function ThreadedComments({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);
-  // Track the scrolling viewport so we can snapshot scrollTop before a
-  // refetch replaces the comment list and restore it afterwards. The
-  // actual scroller is the outer `SidebarShell` ScrollArea — we walk up
-  // to find its Radix viewport element on first render.
+  // Snapshot/restore scrollTop across refetches so a reply doesn't jump the list to the top.
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLElement | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
@@ -262,26 +258,24 @@ export function ThreadedComments({
         selected={kindFilter}
         onChange={setKindFilter}
       />
-      <ScrollArea className="flex-1">
-        <div className="flex flex-col">
-          {threads.map((node) => (
-            <CommentThread
-              key={node.comment.id}
-              node={node}
-              file={file}
-              depth={0}
-              me={me}
-              onAck={handleAck}
-              onDelete={handleDelete}
-              onReply={onReply}
-              onReact={handleReact}
-              onGoToLine={onGoToLine}
-              replyTarget={replyTarget ?? null}
-              replyEditor={replyEditor}
-            />
-          ))}
-        </div>
-      </ScrollArea>
+      <div className="flex flex-col">
+        {threads.map((node) => (
+          <CommentThread
+            key={node.comment.id}
+            node={node}
+            file={file}
+            depth={0}
+            me={me}
+            onAck={handleAck}
+            onDelete={handleDelete}
+            onReply={onReply}
+            onReact={handleReact}
+            onGoToLine={onGoToLine}
+            replyTarget={replyTarget ?? null}
+            replyEditor={replyEditor}
+          />
+        ))}
+      </div>
     </div>
   );
 }
