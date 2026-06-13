@@ -328,7 +328,7 @@ fn try_replace_one(
         return Ok((0, false));
     }
 
-    let new_content = ParsedDocument { segments }
+    let new_content = ParsedDocument::from_segments(segments)
         .to_markdown()
         .context("reassembling document after replace")?;
 

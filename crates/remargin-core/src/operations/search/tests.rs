@@ -4,7 +4,11 @@ use std::path::Path;
 
 use os_shim::mock::MockSystem;
 
-use super::{MatchLocation, SearchOptions, SearchScope, search};
+use crate::parser;
+
+use super::{
+    LineAttribution, MatchLocation, SearchOptions, SearchScope, build_line_attribution, search,
+};
 
 /// Build minimal search options for a literal pattern.
 fn literal_opts(pattern: &str) -> SearchOptions {
@@ -27,6 +31,25 @@ fn remargin_block(id: &str, content: &str) -> String {
          type: human\n\
          ts: 2026-04-06T14:32:00-04:00\n\
          checksum: sha256:abc123\n\
+         ---\n\
+         {content}\n\
+         ```\n"
+    )
+}
+
+/// Like [`remargin_block`] but with a YAML comment line that the parser
+/// accepts and re-serialization drops, so the stored block is 3 bytes
+/// longer than its canonical form.
+fn drifting_remargin_block(id: &str, content: &str) -> String {
+    format!(
+        "```remargin\n\
+         ---\n\
+         id: {id}\n\
+         author: testuser\n\
+         type: human\n\
+         ts: 2026-04-06T14:32:00-04:00\n\
+         checksum: sha256:abc123\n\
+         #x\n\
          ---\n\
          {content}\n\
          ```\n"
@@ -262,4 +285,80 @@ fn search_match_json_shape_matches_schema() {
         comment_obj.contains_key("comment_id"),
         "comment_id must be present for comment matches"
     );
+}
+
+#[test]
+fn multibyte_body_after_drifted_block_does_not_panic() {
+    let base = Path::new("/docs");
+    let doc = format!(
+        "# Title\n\n{}text \u{2014}\n{}",
+        drifting_remargin_block("aaa", "first"),
+        remargin_block("bbb", "second")
+    );
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc.as_bytes())
+        .unwrap();
+
+    let results = search(&system, base, base, &literal_opts("text")).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].location, MatchLocation::Body);
+    assert_eq!(results[0].comment_id, None);
+}
+
+#[test]
+fn drifted_block_keeps_following_body_attribution() {
+    let base = Path::new("/docs");
+    let doc = format!(
+        "# Title\n\n{}marker line\n{}",
+        drifting_remargin_block("aaa", "first"),
+        remargin_block("bbb", "second")
+    );
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/test.md"), doc.as_bytes())
+        .unwrap();
+
+    let all_scope = search(&system, base, base, &literal_opts("marker")).unwrap();
+    assert_eq!(all_scope.len(), 1);
+    assert_eq!(all_scope[0].location, MatchLocation::Body);
+    assert_eq!(all_scope[0].comment_id, None);
+
+    let mut opts = literal_opts("marker");
+    opts.scope = SearchScope::Body;
+    let body_scope = search(&system, base, base, &opts).unwrap();
+    assert_eq!(
+        body_scope.len(),
+        1,
+        "body-scope filter must not hide the marker line"
+    );
+}
+
+#[test]
+fn attribution_matches_stored_block_spans() {
+    let block_a = drifting_remargin_block("aaa", "first");
+    let block_b = remargin_block("bbb", "second");
+    let doc = format!("intro\n{block_a}mid \u{2014}\n{block_b}tail\n");
+
+    let parsed = parser::parse(&doc).unwrap();
+    let attribution = build_line_attribution(&doc, &parsed);
+
+    let a_lines = block_a.matches('\n').count();
+    let b_lines = block_b.matches('\n').count();
+    let mid_idx = 1 + a_lines;
+    let b_start = mid_idx + 1;
+
+    for (idx, attr) in attribution.iter().enumerate() {
+        let expected = if (1..mid_idx).contains(&idx) {
+            Some("aaa")
+        } else if (b_start..b_start + b_lines).contains(&idx) {
+            Some("bbb")
+        } else {
+            None
+        };
+        let ok = match (expected, attr) {
+            (None, LineAttribution::Body) => true,
+            (Some(want), LineAttribution::Comment(got)) => got.as_str() == want,
+            _ => false,
+        };
+        assert!(ok, "line {idx}: expected {expected:?}, got {attr:?}");
+    }
 }

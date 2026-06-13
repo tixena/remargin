@@ -799,3 +799,60 @@ trailing outer body text
         "outer content extends through the trailing outer prose, ending at the outer's 4-backtick close",
     );
 }
+
+#[test]
+fn comment_spans_track_exact_block_lines() {
+    // A block whose header carries a YAML comment (`#x`) the parser keeps
+    // but re-serialization drops — the case line attribution used to drift on.
+    let drifting = "```remargin\n\
+         ---\n\
+         id: aaa\n\
+         author: testuser\n\
+         type: human\n\
+         ts: 2026-04-06T14:32:00-04:00\n\
+         checksum: sha256:abc123\n\
+         #x\n\
+         ---\n\
+         first\n\
+         ```\n";
+    let plain = block_with_content("bbb", "second");
+    // Multi-byte chars (em dash) before, between, and after the blocks.
+    let doc = format!("intro \u{2014}\n{drifting}mid \u{2014}\n{plain}tail \u{2014}\n");
+
+    let parsed = parse(&doc).unwrap();
+    let spans = &parsed.comment_spans;
+    assert_eq!(spans.len(), 2);
+
+    let drift_lines = drifting.matches('\n').count();
+    let plain_lines = plain.matches('\n').count();
+    let drift_start = 2;
+    let drift_end = drift_start + drift_lines - 1;
+    let plain_start = drift_end + 2;
+    let plain_end = plain_start + plain_lines - 1;
+    assert_eq!(spans[0], (drift_start, drift_end), "drifting block span");
+    assert_eq!(spans[1], (plain_start, plain_end), "plain block span");
+
+    let total = doc.lines().count();
+    for &(sl, el) in spans {
+        assert!(
+            sl <= el && el <= total,
+            "span {sl}..={el} within {total} lines"
+        );
+    }
+}
+
+#[test]
+fn comment_span_handles_block_at_eof_without_trailing_newline() {
+    let block = block_with_content("aaa", "body");
+    let doc = format!("intro\n{}", block.trim_end_matches('\n'));
+
+    let parsed = parse(&doc).unwrap();
+    let spans = &parsed.comment_spans;
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].0, 2, "block starts on line 2");
+    assert_eq!(
+        spans[0].1,
+        doc.lines().count(),
+        "block ends on the last line"
+    );
+}

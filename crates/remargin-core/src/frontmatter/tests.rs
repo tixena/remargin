@@ -60,7 +60,7 @@ fn make_doc(body: &str, comments: Vec<Comment>) -> ParsedDocument {
         segments.push(Segment::Comment(Box::new(cm)));
         segments.push(Segment::Body(String::from("\n")));
     }
-    ParsedDocument { segments }
+    ParsedDocument::from_segments(segments)
 }
 
 /// Helper to get a value from a `Mapping` by string key.

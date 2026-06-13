@@ -432,6 +432,25 @@ pub fn delete_comments(
     }
 
     let id_set: HashSet<&str> = comment_ids.iter().copied().collect();
+
+    // Refuse to orphan replies: a comment whose `reply_to` points at a
+    // deleted comment but is not itself in the deletion set would dangle.
+    for cm in doc.comments() {
+        if id_set.contains(cm.id.as_str()) {
+            continue;
+        }
+        let Some(parent) = cm.reply_to.as_deref() else {
+            continue;
+        };
+        if id_set.contains(parent) {
+            bail!(
+                "refusing to delete comment {parent:?}: comment {:?} replies to it. \
+                 Delete the reply first, or include the whole thread in the deletion set.",
+                cm.id
+            );
+        }
+    }
+
     doc.segments
         .retain(|seg| !matches!(seg, Segment::Comment(cm) if id_set.contains(cm.id.as_str())));
 

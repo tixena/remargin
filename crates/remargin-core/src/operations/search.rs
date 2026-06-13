@@ -7,8 +7,6 @@
 #[cfg(test)]
 mod tests;
 
-use core::fmt::Write as _;
-use core::iter::repeat_n;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
@@ -19,8 +17,7 @@ use serde::Serialize;
 use tixschema::model_schema;
 
 use crate::document::allowlist;
-use crate::parser::{self, Segment, required_fence_depth};
-use crate::reactions::{ReactionsExt as _, format_reaction_entry_block, quote_emoji_key};
+use crate::parser;
 
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]
@@ -224,34 +221,22 @@ fn build_matcher(options: &SearchOptions) -> Result<Matcher> {
 
 /// Build a per-line attribution map from a parsed document.
 ///
-/// For each line in the raw content, determine whether it is body text
-/// or inside a specific comment. We achieve this by re-serializing
-/// segments and tracking line counts.
+/// Each comment's source line span (`sl`, `el`) is recorded at parse time
+/// from the exact block bytes ([`parser::ParsedDocument::comment_spans`]),
+/// so this works purely in line space — no byte slicing, no
+/// re-serialization, no drift.
 fn build_line_attribution(content: &str, doc: &parser::ParsedDocument) -> Vec<LineAttribution> {
     let total_lines = content.lines().count() + usize::from(content.ends_with('\n'));
     let mut attribution = vec![LineAttribution::Body; total_lines];
 
-    // Walk through segments, tracking byte position to compute line offsets.
-    let mut byte_pos: usize = 0;
-
-    for seg in &doc.segments {
-        match seg {
-            Segment::Body(text) => {
-                byte_pos += text.len();
-            }
-            Segment::Comment(cm) => {
-                let start_line = content[..byte_pos].matches('\n').count();
-                let mut comment_text = String::new();
-                serialize_comment_block(cm, &mut comment_text);
-                let comment_lines = comment_text.matches('\n').count();
-                for i in 0..comment_lines {
-                    let idx = start_line + i;
-                    if idx < attribution.len() {
-                        attribution[idx] = LineAttribution::Comment(cm.id.clone());
-                    }
-                }
-                byte_pos += comment_text.len();
-            }
+    let comments = doc.comments();
+    for (cm, &(sl, el)) in comments.iter().zip(&doc.comment_spans) {
+        if sl == 0 {
+            continue; // in-memory comment with no source position
+        }
+        let end = el.min(attribution.len());
+        for slot in attribution.iter_mut().take(end).skip(sl - 1) {
+            *slot = LineAttribution::Comment(cm.id.clone());
         }
     }
 
@@ -326,60 +311,4 @@ fn search_file(
             text: String::from(*line),
         });
     }
-}
-
-/// Reconstruct a comment block's text representation for line counting.
-fn serialize_comment_block(cm: &parser::Comment, out: &mut String) {
-    let fence_depth = required_fence_depth(&cm.content);
-    let fence: String = repeat_n('`', fence_depth).collect();
-    let _ = writeln!(out, "{fence}remargin");
-    out.push_str("---\n");
-    let _ = writeln!(out, "id: {}", cm.id);
-    let _ = writeln!(out, "author: {}", cm.author);
-    let _ = writeln!(out, "type: {}", cm.author_type.as_str());
-    let _ = writeln!(out, "ts: {}", cm.ts.to_rfc3339());
-    let _ = writeln!(out, "checksum: {}", cm.checksum);
-    if !cm.to.is_empty() {
-        let _ = writeln!(out, "to: [{}]", cm.to.join(", "));
-    }
-    if let Some(reply_to) = &cm.reply_to {
-        let _ = writeln!(out, "reply-to: {reply_to}");
-    }
-    if let Some(thread) = &cm.thread {
-        let _ = writeln!(out, "thread: {thread}");
-    }
-    if !cm.attachments.is_empty() {
-        let _ = writeln!(out, "attachments: [{}]", cm.attachments.join(", "));
-    }
-    if !cm.reactions.is_empty() {
-        out.push_str("reactions:\n");
-        for (emoji, entries) in cm.reactions.entries_by_emoji() {
-            let _ = writeln!(out, "  {}:", quote_emoji_key(&emoji));
-            for entry in &entries {
-                out.push_str(&format_reaction_entry_block("    ", entry));
-            }
-        }
-    }
-    if !cm.ack.is_empty() {
-        out.push_str("ack:\n");
-        for ack_entry in &cm.ack {
-            let _ = writeln!(
-                out,
-                "  - {}@{}",
-                ack_entry.author,
-                ack_entry.ts.to_rfc3339()
-            );
-        }
-    }
-    if let Some(sig) = &cm.signature {
-        let _ = writeln!(out, "signature: {sig}");
-    }
-    out.push_str("---\n");
-    if !cm.content.is_empty() {
-        out.push_str(&cm.content);
-        if !cm.content.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-    let _ = writeln!(out, "{fence}");
 }

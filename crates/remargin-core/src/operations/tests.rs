@@ -511,6 +511,69 @@ fn delete_simple_comment() {
 }
 
 #[test]
+fn delete_comment_with_children_is_refused() {
+    let system = system_with_doc(&doc_with_thread());
+    let config = open_config();
+
+    // `grandchild` replies to `child1`; deleting `child1` alone orphans it.
+    let result = delete_comments(&system, Path::new("/docs/test.md"), &config, &["child1"]);
+    assert!(
+        result.is_err(),
+        "deleting a comment that has children must be refused"
+    );
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    assert!(
+        doc.find_comment("child1").is_some(),
+        "parent must survive a refused delete"
+    );
+    assert!(
+        doc.find_comment("grandchild").is_some(),
+        "child must survive a refused delete"
+    );
+}
+
+#[test]
+fn delete_leaf_comment_with_no_children_is_allowed() {
+    let system = system_with_doc(&doc_with_thread());
+    let config = open_config();
+
+    // `grandchild` is a leaf — nothing replies to it, so deleting it is safe.
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["grandchild"],
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    assert!(doc.find_comment("grandchild").is_none());
+    assert!(doc.find_comment("child1").is_some());
+}
+
+#[test]
+fn delete_whole_thread_at_once_is_allowed() {
+    let system = system_with_doc(&doc_with_thread());
+    let config = open_config();
+
+    // A parent plus all its descendants in one call orphans nothing.
+    delete_comments(
+        &system,
+        Path::new("/docs/test.md"),
+        &config,
+        &["root", "child1", "grandchild"],
+    )
+    .unwrap();
+
+    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let doc = parser::parse(&content).unwrap();
+    assert!(doc.comments().is_empty());
+}
+
+#[test]
 fn edit_content_recomputes_checksum() {
     let doc_content = "\
 ---
@@ -1039,14 +1102,12 @@ Some body text.
 fn delete_collapses_adjacent_body_segments() {
     use crate::parser::{ParsedDocument, Segment};
 
-    let mut doc = ParsedDocument {
-        segments: vec![
-            Segment::Body(String::from("Text before.\n")),
-            Segment::Body(String::from("\n")),
-            Segment::Body(String::from("\n")),
-            Segment::Body(String::from("Text after.\n")),
-        ],
-    };
+    let mut doc = ParsedDocument::from_segments(vec![
+        Segment::Body(String::from("Text before.\n")),
+        Segment::Body(String::from("\n")),
+        Segment::Body(String::from("\n")),
+        Segment::Body(String::from("Text after.\n")),
+    ]);
 
     super::collapse_body_segments(&mut doc.segments);
 

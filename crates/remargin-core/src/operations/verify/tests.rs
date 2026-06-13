@@ -126,9 +126,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
 }
 
 fn doc_with(comments: Vec<Comment>) -> ParsedDocument {
-    let mut doc = ParsedDocument {
-        segments: Vec::new(),
-    };
+    let mut doc = ParsedDocument::from_segments(Vec::new());
     doc.segments.push(Segment::Body(String::new()));
     for cm in comments {
         doc.segments.push(Segment::Comment(Box::new(cm)));

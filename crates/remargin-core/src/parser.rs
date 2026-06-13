@@ -170,6 +170,9 @@ impl Comment {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ParsedDocument {
+    /// Source line span `(sl, el)`, 1-indexed, per comment in
+    /// `comments()` order. Empty for documents built in memory.
+    pub comment_spans: Vec<(usize, usize)>,
     pub segments: Vec<Segment>,
 }
 
@@ -213,6 +216,17 @@ impl ParsedDocument {
     #[must_use]
     pub fn find_comment(&self, id: &str) -> Option<&Comment> {
         self.comments().into_iter().find(|cm| cm.id == id)
+    }
+
+    /// Build a document from segments with no source spans — for
+    /// in-memory construction (writer, projections, tests). Only
+    /// [`parse`] records spans.
+    #[must_use]
+    pub const fn from_segments(segments: Vec<Segment>) -> Self {
+        Self {
+            comment_spans: Vec::new(),
+            segments,
+        }
     }
 
     /// Round-trip: parse -> modify -> serialize back to a markdown string.
@@ -281,6 +295,7 @@ pub fn is_pending_broadcast_for(to: &[String], ack: &[Acknowledgment], me: &str)
 pub fn parse(content: &str) -> Result<ParsedDocument> {
     let blocks = scan_fences(content);
     let mut segments = Vec::new();
+    let mut comment_spans: Vec<(usize, usize)> = Vec::new();
     let mut last_end: usize = 0;
 
     for block in &blocks {
@@ -293,6 +308,12 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
         if block.tag == "remargin" {
             let comment = parse_remargin_block(&block.inner, line)
                 .with_context(|| format!("in remargin block starting at byte {}", block.start))?;
+            // Exact source line span from the block's byte range — never
+            // re-serialized, so it cannot drift.
+            let block_text = &content[block.start..block.end];
+            let block_lines =
+                block_text.matches('\n').count() + usize::from(!block_text.ends_with('\n'));
+            comment_spans.push((line, line + block_lines - 1));
             segments.push(Segment::Comment(Box::new(comment)));
         } else {
             segments.push(Segment::Body(content[block.start..block.end].to_owned()));
@@ -305,7 +326,10 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
         segments.push(Segment::Body(content[last_end..].to_owned()));
     }
 
-    Ok(ParsedDocument { segments })
+    Ok(ParsedDocument {
+        comment_spans,
+        segments,
+    })
 }
 
 /// # Errors
