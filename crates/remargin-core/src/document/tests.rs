@@ -1995,6 +1995,93 @@ fn rm_rejects_directory() {
     );
 }
 
+#[test]
+fn rm_deletes_non_markdown_binary_file() {
+    // Real PNG signature — invalid UTF-8 (starts with 0x89), the file
+    // class that reproduced rem-q0he live.
+    let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xd8];
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/assets/probe.png"), png)
+        .unwrap();
+    let config = open_config();
+
+    // The read layer sees it (same bytes get_image would return).
+    let payload = document::read_binary(
+        &system,
+        Path::new("/project"),
+        Path::new("assets/probe.png"),
+        false,
+        &config.trusted_roots,
+    )
+    .unwrap();
+    assert_eq!(
+        payload.bytes.as_slice(),
+        png,
+        "read layer must see the binary file"
+    );
+
+    // rm must really delete it and report it as removed.
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("assets/probe.png"),
+        &config,
+    )
+    .unwrap();
+    assert!(
+        result.existed,
+        "existed must be true for a file that is present on disk"
+    );
+    assert!(
+        !system
+            .exists(Path::new("/project/assets/probe.png"))
+            .unwrap(),
+        "the file must be gone from disk after rm"
+    );
+}
+
+#[test]
+fn rm_can_delete_anything_the_read_layer_sees() {
+    // A visible non-markdown file (binary, non-UTF-8 bytes) in an allowed
+    // root — seen by a *different* read tool (metadata) than test 1.
+    let bytes: &[u8] = &[0x00, 0x01, 0xfe, 0xff, 0x80, 0x90];
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/assets/figure.png"), bytes)
+        .unwrap();
+    let config = open_config();
+
+    // If the read layer reports it (metadata returns its real size)...
+    let meta = document::metadata(
+        &system,
+        Path::new("/project"),
+        Path::new("assets/figure.png"),
+        false,
+        &config.trusted_roots,
+    )
+    .unwrap();
+    assert_eq!(meta.size_bytes, bytes.len() as u64);
+
+    // ...then rm must be able to delete it (read/delete scope parity).
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("assets/figure.png"),
+        &config,
+    )
+    .unwrap();
+    assert!(result.existed);
+    assert!(
+        !system
+            .exists(Path::new("/project/assets/figure.png"))
+            .unwrap(),
+        "read-visible file must be deletable"
+    );
+}
+
 // ---------------------------------------------------------------------
 // Partial writes: `--lines START-END` replaces a range of
 // lines in place, leaving every other byte identical. Comment blocks

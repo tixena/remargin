@@ -502,7 +502,10 @@ pub fn rm(
         bail!("file not visible: {}", path.display());
     }
 
-    let existed = system.read_to_string(&resolved).is_ok();
+    // Existence is a filesystem fact — NOT "are the bytes valid UTF-8".
+    // `read_to_string` fails on binary files (e.g. PNGs), which made `rm`
+    // report `existed: false` and skip the unlink for any non-text file.
+    let existed = system.exists(&resolved).unwrap_or(false);
 
     if existed {
         system
