@@ -17,8 +17,9 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
 use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::operations::verify::{
-    Anomaly, AnomalyKind, RecipientStatus, RowStatus, SignatureStatus, SubsetGateFailure,
-    VerifyFailure, anomalies_for_doc, commit_with_verify, verify_and_refresh, verify_document,
+    Anomaly, AnomalyKind, FileVerifyOutcome, FolderVerifyReport, RecipientStatus, RowStatus,
+    SignatureStatus, SubsetGateFailure, VerifyFailure, anomalies_for_doc, commit_with_verify,
+    verify_and_refresh, verify_document, verify_path,
 };
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, react,
@@ -101,6 +102,40 @@ participants:
     type: human
     status: active
     pubkeys: []
+";
+
+/// A document whose stored checksum does NOT match its content, so it
+/// fails the checksum check (bad in every mode). Used by the
+/// `verify_path` folder-sweep tests.
+const TAMPERED_DOC: &str = "\
+---
+title: Test
+---
+
+# Hello
+
+```remargin
+---
+id: bad
+author: alice
+type: human
+ts: 2026-04-06T12:00:00-04:00
+checksum: sha256:deadbeef
+---
+hello
+```
+";
+
+/// A document with a complete remargin fence whose body has no YAML
+/// header, so `parse_remargin_block` errors ("missing YAML header") and
+/// `verify_and_refresh` returns `Err`. Used to exercise the
+/// `verify_path` continue-on-failure path.
+const MALFORMED_DOC: &str = "\
+# Hello
+
+```remargin
+no yaml header here
+```
 ";
 
 fn make_comment(id: &str, author: &str, content: &str) -> Comment {
@@ -598,6 +633,16 @@ fn open_cfg_as(author: &str) -> ResolvedConfig {
 fn mock_with_doc(content: &str) -> MockSystem {
     MockSystem::new()
         .with_file(Path::new("/d/a.md"), content.as_bytes())
+        .unwrap()
+}
+
+/// Pull the named file's outcome out of a folder report by its relative
+/// path string.
+fn outcome_for<'rep>(report: &'rep FolderVerifyReport, path: &str) -> &'rep FileVerifyOutcome {
+    report
+        .files
+        .iter()
+        .find(|f| f.path.to_string_lossy() == path)
         .unwrap()
 }
 
@@ -1780,4 +1825,179 @@ fn anomaly_kind_recipient_unknown_in_anomaly_set() {
         }),
         "anomaly set should include RecipientUnknown: {anomalies:?}"
     );
+}
+
+// ===========================================================================
+// verify_path: folder / recursive sweep around verify_and_refresh.
+// ===========================================================================
+
+#[test]
+fn verify_path_single_file_all_valid_one_outcome_ok() {
+    let system = mock_with_doc(SIMPLE_DOC);
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d/a.md"), &cfg).unwrap();
+
+    assert!(report.ok, "valid single file must aggregate ok");
+    assert_eq!(report.files.len(), 1, "single file -> one outcome");
+    let outcome = &report.files[0];
+    assert!(outcome.error.is_none());
+    assert!(outcome.report.as_ref().unwrap().ok);
+}
+
+#[test]
+fn verify_path_single_file_serializes_to_today_shape() {
+    // A single-file target's outcome report must serialize through
+    // VerifyReport::to_json (no `files` wrapper) so existing callers are
+    // unaffected. Each surface runs on a fresh mock so the self-healing
+    // frontmatter rewrite does not perturb one read's line numbers
+    // relative to the other.
+    let cfg = open_cfg_as("alice");
+
+    let direct_sys = mock_with_doc(SIMPLE_DOC);
+    let direct = verify_and_refresh(&direct_sys, Path::new("/d/a.md"), &cfg)
+        .unwrap()
+        .to_json();
+
+    let path_sys = mock_with_doc(SIMPLE_DOC);
+    let via_path = verify_path(&path_sys, Path::new("/d"), Path::new("/d/a.md"), &cfg).unwrap();
+    let single = via_path.files[0].report.as_ref().unwrap().to_json();
+
+    assert_eq!(single, direct, "single-file report JSON must be unchanged");
+    assert!(
+        single.get("files").is_none(),
+        "single-file report must not carry a `files` wrapper"
+    );
+}
+
+#[test]
+fn verify_path_single_file_tampered_checksum_not_ok() {
+    let system = mock_with_doc(TAMPERED_DOC);
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d/a.md"), &cfg).unwrap();
+
+    assert!(!report.ok, "bad checksum must aggregate not-ok");
+    assert!(!report.files[0].report.as_ref().unwrap().ok);
+}
+
+#[test]
+fn verify_path_directory_all_clean_aggregates_ok() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/d"))
+        .unwrap()
+        .with_dir(Path::new("/d/sub"))
+        .unwrap()
+        .with_file(Path::new("/d/a.md"), SIMPLE_DOC.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/d/sub/b.md"), SIMPLE_DOC.as_bytes())
+        .unwrap();
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d"), &cfg).unwrap();
+
+    assert!(report.ok, "all-clean directory must aggregate ok");
+    assert_eq!(report.files.len(), 2, "both .md files verified");
+    assert!(report.files.iter().all(|f| f.error.is_none()));
+    assert!(report.files.iter().all(|f| f.report.as_ref().unwrap().ok));
+}
+
+#[test]
+fn verify_path_directory_one_damaged_others_still_verified() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/d"))
+        .unwrap()
+        .with_file(Path::new("/d/good.md"), SIMPLE_DOC.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/d/bad.md"), TAMPERED_DOC.as_bytes())
+        .unwrap();
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d"), &cfg).unwrap();
+
+    assert!(!report.ok, "one damaged file flips aggregate to not-ok");
+    let good = outcome_for(&report, "good.md");
+    let bad = outcome_for(&report, "bad.md");
+    assert!(good.report.as_ref().unwrap().ok, "clean file stays ok");
+    assert!(!bad.report.as_ref().unwrap().ok, "damaged file is not-ok");
+}
+
+#[test]
+fn verify_path_directory_unreadable_file_recorded_continues() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/d"))
+        .unwrap()
+        .with_file(Path::new("/d/good.md"), SIMPLE_DOC.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/d/broken.md"), MALFORMED_DOC.as_bytes())
+        .unwrap();
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d"), &cfg).unwrap();
+
+    assert!(!report.ok, "an unreadable file flips aggregate to not-ok");
+    let good = outcome_for(&report, "good.md");
+    let broken = outcome_for(&report, "broken.md");
+    assert!(
+        good.report.as_ref().unwrap().ok,
+        "sweep continued past the bad file"
+    );
+    assert!(broken.error.is_some(), "malformed file recorded with error");
+    assert!(broken.report.is_none(), "malformed file has no report");
+}
+
+#[test]
+fn verify_path_directory_non_md_and_hidden_skipped() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/d"))
+        .unwrap()
+        .with_file(Path::new("/d/a.md"), SIMPLE_DOC.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/d/notes.txt"), b"plain text")
+        .unwrap()
+        .with_file(Path::new("/d/.hidden.md"), SIMPLE_DOC.as_bytes())
+        .unwrap();
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d"), &cfg).unwrap();
+
+    assert_eq!(report.files.len(), 1, "only visible .md is verified");
+    assert_eq!(report.files[0].path.to_string_lossy(), "a.md");
+}
+
+#[test]
+fn verify_path_empty_directory_is_ok_with_no_files() {
+    let system = MockSystem::new().with_dir(Path::new("/d")).unwrap();
+    let cfg = open_cfg_as("alice");
+
+    let report = verify_path(&system, Path::new("/d"), Path::new("/d"), &cfg).unwrap();
+
+    assert!(report.files.is_empty(), "no .md files -> empty report");
+    assert!(report.ok, "vacuously ok with no files");
+}
+
+#[test]
+fn verify_path_folder_json_carries_per_file_detail() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/d"))
+        .unwrap()
+        .with_file(Path::new("/d/good.md"), SIMPLE_DOC.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/d/bad.md"), TAMPERED_DOC.as_bytes())
+        .unwrap();
+    let cfg = open_cfg_as("alice");
+
+    let json = verify_path(&system, Path::new("/d"), Path::new("/d"), &cfg)
+        .unwrap()
+        .to_json();
+
+    assert_eq!(json["ok"], serde_json::Value::Bool(false));
+    let files = json["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    // Every file carries a `path`, an `ok`, and `results` rows.
+    for file in files {
+        assert!(file["path"].is_string());
+        assert!(file["ok"].is_boolean());
+        assert!(file["results"].is_array());
+    }
 }

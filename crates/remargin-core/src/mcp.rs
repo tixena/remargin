@@ -924,13 +924,16 @@ fn desc_verify() -> ToolDesc {
     ToolDesc {
         name: "verify",
         description: "Verify comment integrity (checksums and signatures) against the participant registry. \
-             Per-comment status plus an aggregate `ok` flag driven by the active mode.",
+             Accepts a file or a directory: a directory walks every visible `.md` file recursively \
+             (honoring `.gitignore`) and returns per-file results keyed by path plus an aggregate `ok`. \
+             A file returns per-comment status plus an aggregate `ok` flag driven by the active mode.",
         schema: json!({
             "type": "object",
             "properties": {
-                "file": { "type": "string", "description": "Path to the document" }
+                "path": { "type": "string", "description": "Path to a document or a directory to verify recursively." },
+                "file": { "type": "string", "description": "Backward-compatible alias for `path` (single document). Prefer `path`." }
             },
-            "required": ["file"]
+            "required": ["path"]
         }),
     }
 }
@@ -2550,10 +2553,21 @@ fn handle_verify(
     config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Value> {
-    let file = required_str(params, "file")?;
+    // `path` is canonical (matches `search`/`replace`); `file` is a
+    // backward-compatible alias. Prefer `path`, fall back to `file`.
+    let path_str = optional_str(params, "path")
+        .or_else(|| optional_str(params, "file"))
+        .with_context(|| String::from("missing required field: path"))?;
+    let target = base_dir.join(path_str);
 
-    let path = base_dir.join(file);
-    let report = operations::verify::verify_and_refresh(system, &path, config)?;
+    // A directory target sweeps the tree and returns the folder report;
+    // a single file keeps today's `VerifyReport::to_json` shape so
+    // existing callers are unaffected.
+    if system.is_dir(&target).unwrap_or(false) {
+        let report = operations::verify::verify_path(system, base_dir, &target, config)?;
+        return Ok(report.to_json());
+    }
+    let report = operations::verify::verify_and_refresh(system, &target, config)?;
     Ok(report.to_json())
 }
 

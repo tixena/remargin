@@ -46,6 +46,7 @@ use tixschema::model_schema;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
+use crate::document::allowlist;
 use crate::frontmatter;
 use crate::parser::{self, Comment, ParsedDocument};
 use crate::writer;
@@ -161,28 +162,82 @@ struct VerifyReportJson {
 impl VerifyReport {
     #[must_use]
     pub fn to_json(&self) -> Value {
-        let results = self
-            .results
-            .iter()
-            .map(|row| VerifyRowJson {
-                author: row.author.clone(),
-                checksum_ok: row.checksum_ok,
-                id: row.id.clone(),
-                line: row.line,
-                recipients: match &row.recipients {
-                    RecipientStatus::Ok => RecipientsJson::Ok,
-                    RecipientStatus::Unknown(bad) => RecipientsJson::Unknown {
-                        unresolved: bad.clone(),
-                    },
-                },
-                signature: row.signature.as_str(),
-            })
-            .collect();
         serde_json::to_value(VerifyReportJson {
             ok: self.ok,
-            results,
+            results: verify_rows_json(self),
         })
         .unwrap_or(Value::Null)
+    }
+}
+
+/// Per-file outcome of a folder-wide verify sweep.
+///
+/// Exactly one of `report` / `error` is populated: `report` when the
+/// file was read, parsed, and verified; `error` when the file could not
+/// be read or parsed (recorded, non-fatal — the sweep continues with the
+/// remaining files).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct FileVerifyOutcome {
+    /// Per-file read/parse failure. `Some` when the file could not be
+    /// verified; the sweep records it and continues.
+    pub error: Option<String>,
+    /// Relative file path (against the sweep's `base_dir`).
+    pub path: PathBuf,
+    /// The single-file verify report. `Some` when the file verified.
+    pub report: Option<VerifyReport>,
+}
+
+/// Aggregate report for a [`verify_path`] sweep over a file or folder.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct FolderVerifyReport {
+    /// Per-file outcomes, in walk order.
+    pub files: Vec<FileVerifyOutcome>,
+    /// `false` when any file failed to read/parse, or any file's report
+    /// is `ok == false` under the active mode.
+    pub ok: bool,
+}
+
+#[derive(Serialize)]
+struct FolderFileJson {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    ok: bool,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    results: Option<Vec<VerifyRowJson>>,
+}
+
+#[derive(Serialize)]
+struct FolderVerifyReportJson {
+    files: Vec<FolderFileJson>,
+    ok: bool,
+}
+
+impl FolderVerifyReport {
+    /// JSON projection of the folder sweep: `{ ok, files: [ { path, ok,
+    /// results | error } ] }`. Each file's `results` rows match the
+    /// single-file [`VerifyReport::to_json`] row shape; a file that
+    /// failed to read/parse carries `error` instead.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let files = self
+            .files
+            .iter()
+            .map(|f| {
+                let (ok, results) = f.report.as_ref().map_or((false, None), |report| {
+                    (report.ok, Some(verify_rows_json(report)))
+                });
+                FolderFileJson {
+                    error: f.error.clone(),
+                    ok,
+                    path: f.path.display().to_string(),
+                    results,
+                }
+            })
+            .collect();
+        serde_json::to_value(FolderVerifyReportJson { files, ok: self.ok }).unwrap_or(Value::Null)
     }
 }
 
@@ -522,6 +577,127 @@ impl SubsetGateFailure {
             path: self.path.display().to_string(),
         })
         .unwrap_or(Value::Null)
+    }
+}
+
+/// Project a [`VerifyReport`]'s rows to their JSON row shape, shared by
+/// [`VerifyReport::to_json`] and [`FolderVerifyReport::to_json`].
+fn verify_rows_json(report: &VerifyReport) -> Vec<VerifyRowJson> {
+    report
+        .results
+        .iter()
+        .map(|row| VerifyRowJson {
+            author: row.author.clone(),
+            checksum_ok: row.checksum_ok,
+            id: row.id.clone(),
+            line: row.line,
+            recipients: match &row.recipients {
+                RecipientStatus::Ok => RecipientsJson::Ok,
+                RecipientStatus::Unknown(bad) => RecipientsJson::Unknown {
+                    unresolved: bad.clone(),
+                },
+            },
+            signature: row.signature.as_str(),
+        })
+        .collect()
+}
+
+/// Verify a file or a directory, mirroring [`replace`]'s folder walk.
+///
+/// `target` is a file or a directory. A directory walks the tree (the
+/// same walk [`replace`]/[`search`] use, honoring `.gitignore` via
+/// [`os_shim::System::walk_dir`]) and verifies every visible `.md` file;
+/// a per-file read/parse failure is captured in that file's
+/// [`FileVerifyOutcome::error`] and the sweep continues. A file target
+/// runs [`verify_and_refresh`] once, producing a single outcome that
+/// serializes back through the same row shape as the single-file
+/// [`VerifyReport::to_json`].
+///
+/// The aggregate `ok` is `false` if any file failed to read/parse OR any
+/// file's report is `ok == false` under the active mode.
+///
+/// [`replace`]: crate::operations::replace::replace
+/// [`search`]: crate::operations::search
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be walked or a single-file
+/// target cannot be resolved within the sandbox. Per-file verify
+/// failures in folder mode do **not** abort the sweep — they are
+/// recorded in the report.
+pub fn verify_path(
+    system: &dyn System,
+    base_dir: &Path,
+    target: &Path,
+    config: &ResolvedConfig,
+) -> Result<FolderVerifyReport> {
+    let resolved_target = allowlist::resolve_sandboxed(
+        system,
+        base_dir,
+        target,
+        config.unrestricted,
+        &config.trusted_roots,
+    )?;
+
+    let mut files: Vec<FileVerifyOutcome> = Vec::new();
+
+    if system.is_dir(&resolved_target).unwrap_or(false) {
+        let entries = system
+            .walk_dir(&resolved_target, false, false)
+            .with_context(|| format!("walking directory {}", resolved_target.display()))?;
+        for entry in &entries {
+            if !entry.is_file {
+                continue;
+            }
+            let has_md_ext = entry
+                .path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
+            if !has_md_ext || !allowlist::is_visible(&entry.path, false) {
+                continue;
+            }
+            let relative = entry
+                .path
+                .strip_prefix(base_dir)
+                .unwrap_or(&entry.path)
+                .to_path_buf();
+            files.push(verify_one(system, &entry.path, &relative, config));
+        }
+    } else {
+        let relative = resolved_target
+            .strip_prefix(base_dir)
+            .unwrap_or(target)
+            .to_path_buf();
+        files.push(verify_one(system, &resolved_target, &relative, config));
+    }
+
+    let ok = files
+        .iter()
+        .all(|f| f.error.is_none() && f.report.as_ref().is_some_and(|r| r.ok));
+
+    Ok(FolderVerifyReport { files, ok })
+}
+
+/// Run [`verify_and_refresh`] for one file, capturing any read/parse
+/// failure into the returned outcome's `error` field so folder-mode
+/// sweeps continue.
+fn verify_one(
+    system: &dyn System,
+    resolved: &Path,
+    relative: &Path,
+    config: &ResolvedConfig,
+) -> FileVerifyOutcome {
+    match verify_and_refresh(system, resolved, config) {
+        Ok(report) => FileVerifyOutcome {
+            error: None,
+            path: relative.to_path_buf(),
+            report: Some(report),
+        },
+        Err(err) => FileVerifyOutcome {
+            error: Some(format!("{err:#}")),
+            path: relative.to_path_buf(),
+            report: None,
+        },
     }
 }
 

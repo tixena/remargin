@@ -2386,6 +2386,16 @@ pub fn cmd_verify(
     config: &ResolvedConfig,
     json_mode: bool,
 ) -> Result<()> {
+    // A directory target sweeps the tree (same walk as `replace`/
+    // `search`); `-` (stdin) and plain files keep today's single-file
+    // path byte-for-byte.
+    if file != "-" {
+        let target = cwd.join(expand_cli_path(system, file)?);
+        if system.is_dir(&target).unwrap_or(false) {
+            return cmd_verify_folder(sinks, system, cwd, &target, config, json_mode);
+        }
+    }
+
     let path = resolve_doc_path(system, cwd, file)?;
     let report = operations::verify::verify_and_refresh(system, &path, config)?;
 
@@ -2432,6 +2442,93 @@ pub fn cmd_verify(
             })
             .collect();
         anyhow::bail!("integrity check failed: {}", failures.join(", "));
+    }
+}
+
+/// Verify every visible `.md` file under a directory. Default text lists
+/// only the damaged/failed files (plus a clean-summary line when none
+/// fail); `--json` emits the full [`FolderVerifyReport`]. Exits non-zero
+/// (via `bail`) when the aggregate is not ok, mirroring the single-file
+/// path's failure semantics.
+fn cmd_verify_folder(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    target: &Path,
+    config: &ResolvedConfig,
+    json_mode: bool,
+) -> Result<()> {
+    let report = operations::verify::verify_path(system, cwd, target, config)?;
+
+    if json_mode {
+        print_output(sinks, true, &report.to_json())?;
+        return if report.ok {
+            Ok(())
+        } else {
+            let damaged = report
+                .files
+                .iter()
+                .filter(|f| f.error.is_some() || f.report.as_ref().is_none_or(|r| !r.ok))
+                .count();
+            anyhow::bail!(
+                "integrity check failed in {damaged} of {} file(s)",
+                report.files.len()
+            );
+        };
+    }
+
+    let mut damaged: usize = 0;
+    for file in &report.files {
+        if let Some(err) = &file.error {
+            damaged += 1;
+            out(sinks, &format!("{}: skipped ({err})", file.path.display()))?;
+            continue;
+        }
+        let Some(file_report) = &file.report else {
+            continue;
+        };
+        if file_report.ok {
+            continue;
+        }
+        damaged += 1;
+        let failures: Vec<String> = file_report
+            .results
+            .iter()
+            .filter(|r| {
+                !r.checksum_ok
+                    || r.signature.as_str() != "valid"
+                    || matches!(r.recipients, RecipientStatus::Unknown(_))
+            })
+            .map(|r| {
+                format!(
+                    "{} (checksum={} signature={} recipients={})",
+                    r.id,
+                    if r.checksum_ok { "ok" } else { "FAIL" },
+                    r.signature.as_str(),
+                    recipients_display(&r.recipients),
+                )
+            })
+            .collect();
+        out(
+            sinks,
+            &format!("{}: {}", file.path.display(), failures.join(", ")),
+        )?;
+    }
+
+    if report.ok {
+        out(
+            sinks,
+            &format!(
+                "verified {} file(s); no integrity problems",
+                report.files.len()
+            ),
+        )?;
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "integrity check failed in {damaged} of {} file(s)",
+            report.files.len()
+        );
     }
 }
 
