@@ -21,7 +21,6 @@ use crate::config::identity::{IdentityFlags, resolve_identity_report};
 use crate::config::permissions::resolve::{ResolvedPermissions, resolve_permissions};
 use crate::config::system_prompt::resolve_system_prompt;
 use crate::config::{ResolvedConfig, parse_author_type};
-use crate::display;
 use crate::document;
 use crate::document::get_image as image_ops;
 use crate::kind::matches_kind_filter;
@@ -334,7 +333,6 @@ fn desc_comments() -> ToolDesc {
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
-                "pretty": { "type": "boolean", "description": "Return human-readable threaded display instead of JSON", "default": false },
                 "remargin_kind": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -700,7 +698,6 @@ fn desc_query() -> ToolDesc {
                 "pending_broadcast": { "type": "boolean", "description": "Only surface broadcast (no-`to`) comments the server identity has not acked yet.", "default": false },
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "pending_for_me": { "type": "boolean", "description": "Sugar for pending_for=<server identity>. Surfaces directed comments addressed to the caller and not yet acked.", "default": false },
-                "pretty": { "type": "boolean", "description": "Pretty-print results grouped by file with structured display", "default": false },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
                 "remargin_kind": {
                     "type": "array",
@@ -1127,20 +1124,6 @@ fn tool_result_success(content: &Value) -> Value {
         "content": [{
             "type": "text",
             "text": serde_json::to_string_pretty(content).unwrap_or_default()
-        }]
-    })
-}
-
-/// Build an MCP tool result (success) with raw text content.
-///
-/// Unlike [`tool_result_success`], this puts the string directly into the
-/// `text` field without JSON-encoding it. Use this for pre-formatted,
-/// human-readable output.
-fn tool_result_text(text: &str) -> Value {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": text
         }]
     })
 }
@@ -1678,7 +1661,6 @@ fn handle_comments(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    let pretty = optional_bool(params, "pretty");
     // shared kind filter with the CLI path. Accepts either
     // `remargin_kind` or `kind` as the MCP key.
     let kind_filter = {
@@ -1698,18 +1680,11 @@ fn handle_comments(
         .filter(|cm| matches_kind_filter(cm.kinds(), &kind_filter))
         .collect();
 
-    if pretty {
-        let formatted = display::format_comments_pretty(file, &comments);
-        Ok(tool_result_text(&formatted))
-    } else {
-        // The source line span (`sl`/`el`) is a typed field on Comment, so
-        // it serializes with the rest — no hand-inserted keys.
-        let items = comments
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<Result<Vec<Value>, _>>()?;
-        Ok(json!({ "comments": items }))
-    }
+    let items = comments
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<Value>, _>>()?;
+    Ok(json!({ "comments": items }))
 }
 
 /// Handle the `delete` tool: delete one or more comments.
@@ -2182,15 +2157,10 @@ fn handle_query(
     let filter = build_query_filter_from_params(params, config.identity.clone())?;
     let results = query::query(system, &base_dir.join(path_str), &filter)?;
 
-    if optional_bool(params, "pretty") {
-        let output = display::format_query_pretty(&results, filter.pending_label());
-        Ok(json!({ "text": output }))
-    } else {
-        Ok(json!({
-            "base_path": format!("{}/", path_str.trim_end_matches('/')),
-            "results": results,
-        }))
-    }
+    Ok(json!({
+        "base_path": format!("{}/", path_str.trim_end_matches('/')),
+        "results": results,
+    }))
 }
 
 /// Translate `query` tool params into a [`QueryFilter`]. Pulled out so

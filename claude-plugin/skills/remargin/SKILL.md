@@ -238,10 +238,10 @@ Three exclusive branches — pick exactly one:
 
 ### Q: A user asked to "show comments" / "what's pending" — what do I return?
 
-Use `pretty=true` on `comments` or `query`, then **paste the full output verbatim into your text response.** MCP results are not visible to the user; calling the tool alone is not enough. Do not paraphrase or summarize.
+Run the CLI with `--pretty` on `comments` or `query`, then **paste the full output verbatim into your text response.** The pretty threaded display is CLI-only — the MCP `comments`/`query` tools return JSON. MCP results are not visible to the user; calling the tool alone is not enough. Do not paraphrase or summarize.
 
 ```
-remargin comments file=... pretty=true
+remargin comments <file> --pretty
 ```
 
 After showing pretty output, **stop**. Do not add summaries, reformatted lists, or restatements — they will be wrong (memory/state mismatch) and noisy.
@@ -438,7 +438,7 @@ remargin query path=. pending_broadcast=true
 ### Pretty-print all comments on a doc for the user
 
 ```
-remargin comments file=src/discussions/roadmap.md pretty=true
+remargin comments src/discussions/roadmap.md --pretty
 ```
 
 (Then paste the output verbatim into your text response.)
@@ -465,7 +465,7 @@ Each op exists at both surfaces: MCP `mcp__remargin__<op>`; CLI `remargin <op>`.
 |----|---------|
 | `comment` | Add one top-level comment. `after_line`, `after_comment`, `attachments`, `to`, `sandbox`. For thread replies use `reply`. |
 | `reply` | **PREFERRED** for thread responses. `parent_id` (required), `content`, `auto_ack` (smart default: ack iff parent.author != caller), `to`, `attachments`, `sandbox`, `remargin_kind`. |
-| `comments` | List comments in a file. `pretty=true` for human-readable threaded display. |
+| `comments` | List comments in a file. MCP returns JSON; CLI `--pretty` gives the human-readable threaded display. |
 | `batch` | Add multiple comments atomically (single write, single verify). Each sub-op supports its own `auto_ack`, `reply_to`, etc. **Use this for N>1 comments on the same file.** |
 | `edit` | Edit an existing comment. Cascades ack-clear to children. |
 | `delete` | Delete one or more comments. Cleans up attachments. |
@@ -576,7 +576,7 @@ Replying to the comment above.
 
 ---
 
-## Pretty display format (produced by `pretty=true`, do not write manually)
+## Pretty display format (produced by CLI `--pretty`, do not write manually)
 
 ### Single comment
 

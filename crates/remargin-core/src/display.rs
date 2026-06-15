@@ -12,8 +12,6 @@ use crate::operations::query::{ExpandedComment, QueryResult};
 use crate::parser::{self, Comment};
 use crate::reactions::ReactionsExt as _;
 
-const MAX_CONTENT_LINES: usize = 5;
-
 /// A node in the comment tree: a comment plus its direct replies.
 pub(crate) struct CommentNode<'cm> {
     /// Direct replies, sorted by timestamp ascending.
@@ -152,19 +150,8 @@ fn render_node(
         let _ = writeln!(out, "{indent}\u{2502} to: {}", cm.to.join(", "));
     }
 
-    let content_lines: Vec<&str> = cm.content.lines().collect();
-    let truncate = content_lines.len() > MAX_CONTENT_LINES;
-    let display_lines = if truncate {
-        MAX_CONTENT_LINES - 1
-    } else {
-        content_lines.len()
-    };
-
-    for line in content_lines.iter().take(display_lines) {
+    for line in cm.content.lines() {
         let _ = writeln!(out, "{indent}\u{2502} {line}");
-    }
-    if truncate {
-        let _ = writeln!(out, "{indent}\u{2502} ...");
     }
 
     for (emoji, entries) in cm.reactions.entries_by_emoji() {
@@ -273,19 +260,8 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
         let _ = writeln!(out, "  \u{2502} to: {}", cm.to.join(", "));
     }
 
-    let content_lines: Vec<&str> = cm.content.lines().collect();
-    let truncate = content_lines.len() > MAX_CONTENT_LINES;
-    let display_lines = if truncate {
-        MAX_CONTENT_LINES - 1
-    } else {
-        content_lines.len()
-    };
-
-    for line in content_lines.iter().take(display_lines) {
+    for line in cm.content.lines() {
         let _ = writeln!(out, "  \u{2502} {line}");
-    }
-    if truncate {
-        let _ = writeln!(out, "  \u{2502} ...");
     }
 
     for (emoji, entries) in cm.reactions.entries_by_emoji() {

@@ -342,7 +342,7 @@ fn render_reactions() {
 }
 
 #[test]
-fn render_content_truncation() {
+fn render_content_full_no_truncation() {
     let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7";
     let cm = build_comment(TestComment {
         id: "abc",
@@ -352,15 +352,10 @@ fn render_content_truncation() {
     let comments: Vec<&Comment> = vec![&cm];
     let output = format_comments_pretty("file.md", &comments);
 
-    assert!(output.contains("\u{2502} Line 1"));
-    assert!(output.contains("\u{2502} Line 2"));
-    assert!(output.contains("\u{2502} Line 3"));
-    assert!(output.contains("\u{2502} Line 4"));
-    assert!(output.contains("\u{2502} ..."));
-    // Lines 5, 6, 7 should NOT appear.
-    assert!(!output.contains("\u{2502} Line 5"));
-    assert!(!output.contains("\u{2502} Line 6"));
-    assert!(!output.contains("\u{2502} Line 7"));
+    for n in 1_u32..=7 {
+        assert!(output.contains(&format!("\u{2502} Line {n}")));
+    }
+    assert!(!output.contains("\u{2502} ..."));
 }
 
 #[test]
@@ -737,7 +732,7 @@ fn query_pretty_flat_not_threaded() {
 }
 
 #[test]
-fn query_pretty_content_truncation() {
+fn query_pretty_content_full_no_truncation() {
     let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7";
     let cm = make_expanded(
         "abc",
@@ -751,12 +746,10 @@ fn query_pretty_content_truncation() {
     let result = make_query_result("file.md", vec![cm]);
     let output = format_query_pretty(&[result], None);
 
-    assert!(output.contains("\u{2502} Line 1"));
-    assert!(output.contains("\u{2502} Line 4"));
-    assert!(output.contains("\u{2502} ..."));
-    // Lines beyond truncation should not appear.
-    assert!(!output.contains("\u{2502} Line 5"));
-    assert!(!output.contains("\u{2502} Line 7"));
+    for n in 1_u32..=7 {
+        assert!(output.contains(&format!("\u{2502} Line {n}")));
+    }
+    assert!(!output.contains("\u{2502} ..."));
 }
 
 #[test]
