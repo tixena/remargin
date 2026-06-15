@@ -1692,30 +1692,22 @@ fn handle_comments(
 
     let path = base_dir.join(file);
     let doc = parser::parse_file(system, &path)?;
-    // Zip spans BEFORE filtering — `comment_spans` aligns with the full
-    // `comments()` order, so filtering must keep the pairs together.
-    let pairs: Vec<(&parser::Comment, (usize, usize))> = doc
+    let comments: Vec<&parser::Comment> = doc
         .comments()
         .into_iter()
-        .zip(doc.comment_spans.iter().copied())
-        .filter(|(cm, _)| matches_kind_filter(cm.kinds(), &kind_filter))
+        .filter(|cm| matches_kind_filter(cm.kinds(), &kind_filter))
         .collect();
 
     if pretty {
-        let comments: Vec<&parser::Comment> = pairs.iter().map(|&(cm, _)| cm).collect();
         let formatted = display::format_comments_pretty(file, &comments);
         Ok(tool_result_text(&formatted))
     } else {
-        // Additive: each comment's own fields plus its source line span.
-        let mut items: Vec<Value> = Vec::with_capacity(pairs.len());
-        for &(cm, (sl, el)) in &pairs {
-            let mut v = serde_json::to_value(cm)?;
-            if let Value::Object(map) = &mut v {
-                map.insert(String::from("el"), Value::from(el));
-                map.insert(String::from("sl"), Value::from(sl));
-            }
-            items.push(v);
-        }
+        // The source line span (`sl`/`el`) is a typed field on Comment, so
+        // it serializes with the rest — no hand-inserted keys.
+        let items = comments
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<Value>, _>>()?;
         Ok(json!({ "comments": items }))
     }
 }

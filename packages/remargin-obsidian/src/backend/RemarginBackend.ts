@@ -43,24 +43,29 @@ import type {
 // constructor the test runner's strip-only loader cannot parse.
 
 /**
- * The CLI wraps its payload in an object that also contains timing metadata
- * (`elapsed_ms`), so the top-level envelopes are parsed with loose objects
- * that only care about the specific payload fields.
+ * Every CLI/MCP response carries `elapsed_ms` timing metadata alongside its
+ * payload. Envelopes are strict so a stray, un-modeled key (the class of bug
+ * that shipped `sl`/`el` grafted onto comments) fails loudly instead of being
+ * silently swallowed; `elapsed_ms` is the one acknowledged envelope field.
  */
-const CommentsEnvelope$Schema = z.looseObject({
+const CommentsEnvelope$Schema = z.strictObject({
   comments: z.array(Comment$Schema),
+  elapsed_ms: z.number().optional(),
 });
 
-const QueryEnvelope$Schema = z.looseObject({
+const QueryEnvelope$Schema = z.strictObject({
   results: z.array(QueryResult$Schema),
+  elapsed_ms: z.number().optional(),
 });
 
-const ListEnvelope$Schema = z.looseObject({
+const ListEnvelope$Schema = z.strictObject({
   entries: z.array(ListEntry$Schema),
+  elapsed_ms: z.number().optional(),
 });
 
-const SearchEnvelope$Schema = z.looseObject({
+const SearchEnvelope$Schema = z.strictObject({
   matches: z.array(SearchMatch$Schema),
+  elapsed_ms: z.number().optional(),
 });
 
 const SandboxListEntry$Schema = z.looseObject({

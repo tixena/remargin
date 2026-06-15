@@ -202,6 +202,8 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
               checksum: yaml.checksum,
               signature: yaml.signature,
               line: blockStartLine,
+              sl: blockStartLine,
+              el: i + 1,
             },
             valid: true,
           };

@@ -85,6 +85,11 @@ pub struct Comment {
     /// (see [`crate::crypto::signature_payload`] for the rationale).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<DateTime<FixedOffset>>,
+    /// 1-indexed last source line of the comment block (closing fence).
+    /// `None` for in-memory comments with no source position. Runtime-only:
+    /// never written to disk (the on-disk form is [`OnDiskComment`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub el: Option<usize>,
     pub id: String,
     /// 1-indexed line number of the opening fence in the source document.
     /// Zero means "not yet placed" (e.g. newly created, before write).
@@ -108,6 +113,11 @@ pub struct Comment {
     pub reply_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    /// 1-indexed first source line of the comment block (opening fence).
+    /// Mirrors [`Comment::line`]; `None` for in-memory comments. Runtime-only:
+    /// never written to disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sl: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     pub to: Vec<String>,
@@ -170,9 +180,6 @@ impl Comment {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ParsedDocument {
-    /// Source line span `(sl, el)`, 1-indexed, per comment in
-    /// `comments()` order. Empty for documents built in memory.
-    pub comment_spans: Vec<(usize, usize)>,
     pub segments: Vec<Segment>,
 }
 
@@ -218,15 +225,12 @@ impl ParsedDocument {
         self.comments().into_iter().find(|cm| cm.id == id)
     }
 
-    /// Build a document from segments with no source spans — for
-    /// in-memory construction (writer, projections, tests). Only
-    /// [`parse`] records spans.
+    /// Build a document from segments — for in-memory construction
+    /// (writer, projections, tests). Comments built this way carry no
+    /// source span (`sl`/`el` are `None`); only [`parse`] records spans.
     #[must_use]
     pub const fn from_segments(segments: Vec<Segment>) -> Self {
-        Self {
-            comment_spans: Vec::new(),
-            segments,
-        }
+        Self { segments }
     }
 
     /// Round-trip: parse -> modify -> serialize back to a markdown string.
@@ -295,7 +299,6 @@ pub fn is_pending_broadcast_for(to: &[String], ack: &[Acknowledgment], me: &str)
 pub fn parse(content: &str) -> Result<ParsedDocument> {
     let blocks = scan_fences(content);
     let mut segments = Vec::new();
-    let mut comment_spans: Vec<(usize, usize)> = Vec::new();
     let mut last_end: usize = 0;
 
     for block in &blocks {
@@ -306,14 +309,15 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
         let line = byte_offset_to_line(content, block.start);
 
         if block.tag == "remargin" {
-            let comment = parse_remargin_block(&block.inner, line)
+            let mut comment = parse_remargin_block(&block.inner, line)
                 .with_context(|| format!("in remargin block starting at byte {}", block.start))?;
             // Exact source line span from the block's byte range — never
             // re-serialized, so it cannot drift.
             let block_text = &content[block.start..block.end];
             let block_lines =
                 block_text.matches('\n').count() + usize::from(!block_text.ends_with('\n'));
-            comment_spans.push((line, line + block_lines - 1));
+            comment.sl = Some(line);
+            comment.el = Some(line + block_lines - 1);
             segments.push(Segment::Comment(Box::new(comment)));
         } else {
             segments.push(Segment::Body(content[block.start..block.end].to_owned()));
@@ -326,10 +330,7 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
         segments.push(Segment::Body(content[last_end..].to_owned()));
     }
 
-    Ok(ParsedDocument {
-        comment_spans,
-        segments,
-    })
+    Ok(ParsedDocument { segments })
 }
 
 /// # Errors

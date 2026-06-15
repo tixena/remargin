@@ -820,7 +820,11 @@ fn comment_spans_track_exact_block_lines() {
     let doc = format!("intro \u{2014}\n{drifting}mid \u{2014}\n{plain}tail \u{2014}\n");
 
     let parsed = parse(&doc).unwrap();
-    let spans = &parsed.comment_spans;
+    let spans: Vec<(usize, usize)> = parsed
+        .comments()
+        .iter()
+        .map(|cm| (cm.sl.unwrap(), cm.el.unwrap()))
+        .collect();
     assert_eq!(spans.len(), 2);
 
     let drift_lines = drifting.matches('\n').count();
@@ -833,7 +837,7 @@ fn comment_spans_track_exact_block_lines() {
     assert_eq!(spans[1], (plain_start, plain_end), "plain block span");
 
     let total = doc.lines().count();
-    for &(sl, el) in spans {
+    for &(sl, el) in &spans {
         assert!(
             sl <= el && el <= total,
             "span {sl}..={el} within {total} lines"
@@ -847,7 +851,11 @@ fn comment_span_handles_block_at_eof_without_trailing_newline() {
     let doc = format!("intro\n{}", block.trim_end_matches('\n'));
 
     let parsed = parse(&doc).unwrap();
-    let spans = &parsed.comment_spans;
+    let spans: Vec<(usize, usize)> = parsed
+        .comments()
+        .iter()
+        .map(|cm| (cm.sl.unwrap(), cm.el.unwrap()))
+        .collect();
     assert_eq!(spans.len(), 1);
     assert_eq!(spans[0].0, 2, "block starts on line 2");
     assert_eq!(

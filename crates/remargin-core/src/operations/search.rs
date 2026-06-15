@@ -222,18 +222,17 @@ fn build_matcher(options: &SearchOptions) -> Result<Matcher> {
 /// Build a per-line attribution map from a parsed document.
 ///
 /// Each comment's source line span (`sl`, `el`) is recorded at parse time
-/// from the exact block bytes ([`parser::ParsedDocument::comment_spans`]),
-/// so this works purely in line space — no byte slicing, no
-/// re-serialization, no drift.
+/// from the exact block bytes, so this works purely in line space — no byte
+/// slicing, no re-serialization, no drift.
 fn build_line_attribution(content: &str, doc: &parser::ParsedDocument) -> Vec<LineAttribution> {
     let total_lines = content.lines().count() + usize::from(content.ends_with('\n'));
     let mut attribution = vec![LineAttribution::Body; total_lines];
 
-    let comments = doc.comments();
-    for (cm, &(sl, el)) in comments.iter().zip(&doc.comment_spans) {
-        if sl == 0 {
-            continue; // in-memory comment with no source position
-        }
+    for cm in doc.comments() {
+        // In-memory comments carry no source position.
+        let (Some(sl), Some(el)) = (cm.sl, cm.el) else {
+            continue;
+        };
         let end = el.min(attribution.len());
         for slot in attribution.iter_mut().take(end).skip(sl - 1) {
             *slot = LineAttribution::Comment(cm.id.clone());

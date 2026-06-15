@@ -326,12 +326,9 @@ pub fn project_batch(
         .as_deref()
         .context("identity is required to create comments")?;
 
-    let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
-
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    let markdown_before = after.to_markdown()?;
-    linter::lint_or_fail(&markdown_before)
+    linter::lint_or_fail(&after.to_markdown()?)
         .context("document has structural issues before plan batch")?;
 
     // Preflight the whole list before any mutation so we surface the
@@ -349,10 +346,8 @@ pub fn project_batch(
     for (idx, op) in operations.iter().enumerate() {
         let existing_ids = after.comment_ids();
         let new_id = id::generate(&existing_ids);
-        // remargin_kind is not yet wired through the batch
-        // projection op surface adds it to `BatchCommentOp`.
-        // `None` preserves the pre-field checksum shape and leaves the
-        // projected YAML without a `remargin_kind:` line.
+        // remargin_kind is not yet wired through the batch op surface; None
+        // preserves the pre-field checksum shape (no `remargin_kind:` line).
         let remargin_kind: Option<Vec<String>> = None;
         let checksum = compute_checksum(&op.content, &[]);
 
@@ -382,16 +377,18 @@ pub fn project_batch(
             ack: Vec::new(),
             attachments: resolved_attachments,
             author: String::from(identity),
-            author_type: author_type.clone(),
+            author_type: config.author_type.clone().unwrap_or(AuthorType::Human),
             checksum,
             content: op.content.clone(),
             edited_at: None,
+            el: None,
             id: new_id,
             line: 0,
             reactions: Reactions::new(),
             remargin_kind,
             reply_to: op.reply_to.clone(),
             signature: None,
+            sl: None,
             thread,
             to: effective_to,
             ts: now,
@@ -542,12 +539,14 @@ pub fn project_comment(
         checksum,
         content: String::from(params.content),
         edited_at: None,
+        el: None,
         id: new_id,
         line: 0,
         reactions: Reactions::new(),
         remargin_kind,
         reply_to: params.reply_to.map(String::from),
         signature: None,
+        sl: None,
         thread,
         to: effective_to,
         ts: now,
