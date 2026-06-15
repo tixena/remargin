@@ -10,6 +10,7 @@ pub mod mime;
 #[cfg(test)]
 mod tests;
 
+use core::cmp::Reverse;
 use std::collections::HashSet;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -65,7 +66,7 @@ pub struct ListEntry {
     pub size: Option<u64>,
 }
 
-/// Result of a file removal operation.
+/// Result of a single-file removal operation.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RmResult {
@@ -82,6 +83,107 @@ impl RmResult {
             "deleted": requested_path,
             "existed": self.existed,
         })
+    }
+}
+
+/// Report of a recursive directory removal.
+///
+/// Produced by the directory branch of [`rm`]. Every listed resource
+/// passed the readability + per-file gate pre-flight (a failure aborts
+/// before any deletion, so a populated report is always a fully-applied
+/// delete). Paths are the resolved (canonical) on-disk paths the walk
+/// observed.
+///
+/// `folders_left_behind` records directories remargin could not remove
+/// without force because they still held entries remargin cannot list
+/// (hidden / non-visible files, or a nested `.remargin.yaml`). This is
+/// not an error — remargin deleted everything it could see and left the
+/// rest intact.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub struct RmDirReport {
+    /// Visible files removed, deepest-first.
+    pub files_deleted: Vec<PathBuf>,
+    /// Directories left in place because a no-force remove failed: they
+    /// still hold entries remargin cannot list.
+    pub folders_left_behind: Vec<PathBuf>,
+    /// Directories removed, deepest-first.
+    pub folders_removed: Vec<PathBuf>,
+}
+
+impl RmDirReport {
+    fn render_text(&self, requested_path: &str) -> String {
+        use core::fmt::Write as _;
+
+        let mut out = format!(
+            "deleted directory: {requested_path} ({} file(s), {} folder(s) removed)",
+            self.files_deleted.len(),
+            self.folders_removed.len()
+        );
+        if !self.folders_left_behind.is_empty() {
+            let _ = write!(
+                out,
+                "\n{} folder(s) left behind (not empty / unlistable contents):",
+                self.folders_left_behind.len()
+            );
+            for path in &self.folders_left_behind {
+                let _ = write!(out, "\n  {}", path.display());
+            }
+        }
+        out
+    }
+
+    fn to_json(&self, requested_path: &str) -> Value {
+        json!({
+            "deleted": requested_path,
+            "is_directory": true,
+            "files_deleted": display_paths(&self.files_deleted),
+            "folders_left_behind": display_paths(&self.folders_left_behind),
+            "folders_removed": display_paths(&self.folders_removed),
+        })
+    }
+}
+
+/// Outcome of an [`rm`] call.
+///
+/// `rm` deletes a single file or, when pointed at a directory, removes
+/// the directory tree recursively. The two cases surface different
+/// reports; this enum lets callers render each without the directory
+/// report leaking into the long-standing single-file JSON shape.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum RmOutcome {
+    /// A directory was removed recursively.
+    Directory(RmDirReport),
+    /// A single file was removed (or was already absent).
+    File(RmResult),
+}
+
+impl RmOutcome {
+    /// Human-readable one-or-more-line summary for non-JSON output.
+    #[must_use]
+    pub fn render_text(&self, requested_path: &str) -> String {
+        match self {
+            Self::Directory(report) => report.render_text(requested_path),
+            Self::File(result) => {
+                if result.existed {
+                    format!("deleted: {requested_path}")
+                } else {
+                    format!("already absent: {requested_path}")
+                }
+            }
+        }
+    }
+
+    /// `requested_path` echoes the caller-supplied path verbatim so the
+    /// response round-trips through the same surface. The `File` variant
+    /// emits the long-standing `{deleted, existed}` shape unchanged.
+    #[must_use]
+    pub fn to_json(&self, requested_path: &str) -> Value {
+        match self {
+            Self::Directory(report) => report.to_json(requested_path),
+            Self::File(result) => result.to_json(requested_path),
+        }
     }
 }
 
@@ -469,21 +571,39 @@ fn format_with_line_numbers(lines: &[&str], start_num: usize) -> String {
         .join("\n")
 }
 
-/// Idempotent: deleting a file that does not exist returns success with
-/// `existed: false`.
+/// Remove a file, or — when pointed at a directory — remove the
+/// directory tree recursively.
+///
+/// Directory removal is always recursive (there is no `--recursive`
+/// flag) and is driven by what remargin can *see*: it walks the tree,
+/// keeps only the resources `ls` would list (visible extensions,
+/// dotfiles hidden), pre-flights readability + the per-file gate over
+/// every one of them, then deletes bottom-up. The pre-flight is
+/// all-or-nothing — if any listed resource fails, nothing is deleted and
+/// the error names the blocking path. Each directory is removed with a
+/// no-force rmdir: a directory that still holds entries remargin could
+/// not list (hidden files, a nested `.remargin.yaml`) is left in place
+/// and recorded in the report, with no error. A nested realm's
+/// `.remargin.yaml` is a dotfile, so its folder always looks non-empty
+/// to the no-force remove and survives.
+///
+/// Idempotent: deleting a file that does not exist returns the `File`
+/// variant with `existed: false`.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The path escapes the sandbox
-/// - The file is a dotfile or otherwise not visible
-/// - The path is a directory (only files are supported)
+/// - The path is a forbidden target (e.g. `.remargin.yaml`)
+/// - The path is a single file that is a dotfile or otherwise not visible
+/// - (Directory case) any listed resource fails the readability /
+///   per-file gate pre-flight
 pub fn rm(
     system: &dyn System,
     base_dir: &Path,
     path: &Path,
     config: &ResolvedConfig,
-) -> Result<RmResult> {
+) -> Result<RmOutcome> {
     ensure_not_forbidden_target(path)?;
     let resolved = allowlist::resolve_sandboxed(
         system,
@@ -495,7 +615,7 @@ pub fn rm(
     ensure_not_forbidden_target(&resolved)?;
 
     if system.is_dir(&resolved).unwrap_or(false) {
-        bail!("cannot remove directory: {}", path.display());
+        return rm_directory(system, &resolved).map(RmOutcome::Directory);
     }
 
     if !allowlist::is_visible(&resolved, false) {
@@ -513,10 +633,106 @@ pub fn rm(
             .with_context(|| format!("removing {}", resolved.display()))?;
     }
 
-    Ok(RmResult {
+    Ok(RmOutcome::File(RmResult {
         existed,
         path: path.to_path_buf(),
-    })
+    }))
+}
+
+/// Recursive directory removal. `resolved` is the canonical directory
+/// path (already past the sandbox + forbidden-target guards).
+///
+/// 1. Walk the tree and keep only the resources `ls` would list
+///    (`allowlist::is_visible`) — these are the resources remargin can
+///    see. The directories under `resolved` are kept regardless (we
+///    remove them bottom-up); the root itself is removed last.
+/// 2. Pre-flight every visible file: forbidden-target guard + readability
+///    (`system.metadata`). A failure aborts before any deletion.
+/// 3. Delete visible files deepest-first, then directories deepest-first
+///    via a no-force rmdir (a directory that still holds entries
+///    remargin could not list is left in place and recorded).
+fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
+    let entries = system
+        .walk_dir(resolved, false, true)
+        .with_context(|| format!("walking {}", resolved.display()))?;
+
+    // The resources remargin can see: visible files, plus every
+    // subdirectory (directories are always visible for navigation, but
+    // dot-directories are not — and ls would not descend into them).
+    let mut visible_files: Vec<PathBuf> = Vec::new();
+    let mut directories: Vec<PathBuf> = Vec::new();
+    for entry in &entries {
+        if !allowlist::is_visible(&entry.path, entry.is_dir) {
+            continue;
+        }
+        if entry.is_dir {
+            directories.push(entry.path.clone());
+        } else {
+            visible_files.push(entry.path.clone());
+        }
+    }
+
+    // Pre-flight (all-or-nothing): every visible file must pass the
+    // per-file gate (config-file guard) and be readable before we delete
+    // anything. Readability is an actual open — a `stat`-only check would
+    // pass for a `000`-mode file whose bytes cannot be read.
+    for file in &visible_files {
+        ensure_not_forbidden_target(file)?;
+        if system.open(file).is_err() {
+            bail!("cannot read {}: aborting, nothing deleted", file.display());
+        }
+    }
+
+    let mut report = RmDirReport::default();
+
+    // Files first, deepest-first.
+    visible_files.sort_by_key(|path| Reverse(depth_of(path)));
+    for file in visible_files {
+        system
+            .remove_file(&file)
+            .with_context(|| format!("removing {}", file.display()))?;
+        report.files_deleted.push(file);
+    }
+
+    // Then directories deepest-first, finishing with the root itself.
+    directories.push(resolved.to_path_buf());
+    directories.sort_by_key(|path| Reverse(depth_of(path)));
+    for dir in directories {
+        if remove_dir_no_force(system, &dir) {
+            report.folders_removed.push(dir);
+        } else {
+            report.folders_left_behind.push(dir);
+        }
+    }
+
+    Ok(report)
+}
+
+/// No-force directory removal. Returns `true` when the directory was
+/// removed. The `System` trait only exposes a recursive `remove_dir_all`;
+/// to emulate `rmdir` (which refuses a non-empty directory) we read the
+/// directory first and only remove it when it has no remaining entries.
+/// A directory still holding entries remargin could not list (hidden
+/// files, a nested `.remargin.yaml`) is reported back as `false` and left
+/// in place — no error.
+fn remove_dir_no_force(system: &dyn System, dir: &Path) -> bool {
+    match system.read_dir(dir) {
+        Ok(entries) if entries.is_empty() => system.remove_dir_all(dir).is_ok(),
+        _ => false,
+    }
+}
+
+/// Component count of a path — used to order deepest-first deletes.
+fn depth_of(path: &Path) -> usize {
+    path.components().count()
+}
+
+/// Display-form of every path, for the directory-report JSON arrays.
+fn display_paths(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect()
 }
 
 /// Write document contents with comment preservation enforcement.

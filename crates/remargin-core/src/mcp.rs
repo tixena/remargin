@@ -784,11 +784,18 @@ fn desc_reply() -> ToolDesc {
 fn desc_rm() -> ToolDesc {
     ToolDesc {
         name: "rm",
-        description: "Remove a file from the managed document tree (idempotent)",
+        description: "Remove a file from the managed document tree (idempotent). \
+             Pointed at a directory it removes the tree recursively (always \
+             recursive, no flag): it deletes everything remargin can see \
+             bottom-up, leaves behind only directories holding entries it \
+             cannot list (hidden files, a nested .remargin.yaml), and returns a \
+             report {files_deleted, folders_removed, folders_left_behind}. If \
+             any listed resource is unreadable the call fails and nothing is \
+             deleted.",
         schema: json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Path to the file to delete" }
+                "path": { "type": "string", "description": "Path to the file or directory to delete" }
             },
             "required": ["path"]
         }),

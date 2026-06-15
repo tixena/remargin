@@ -1972,14 +1972,12 @@ pub fn cmd_rm(
     json_mode: bool,
 ) -> Result<()> {
     let target = expand_cli_path(system, file)?;
-    let result = document::rm(system, cwd, &target, config)?;
+    let outcome = document::rm(system, cwd, &target, config)?;
 
     if json_mode {
-        out_json(sinks, &result.to_json(file))
-    } else if result.existed {
-        out(sinks, &format!("deleted: {file}"))
+        out_json(sinks, &outcome.to_json(file))
     } else {
-        out(sinks, &format!("already absent: {file}"))
+        out(sinks, &outcome.render_text(file))
     }
 }
 

@@ -9,7 +9,9 @@ use os_shim::System as _;
 use os_shim::mock::MockSystem;
 
 use crate::config::{Mode, ResolvedConfig};
-use crate::document::{self, WriteOptions, WriteProjection, allowlist};
+use crate::document::{
+    self, RmDirReport, RmOutcome, RmResult, WriteOptions, WriteProjection, allowlist,
+};
 use crate::parser::AuthorType;
 use crate::writer::FORBIDDEN_TARGETS;
 
@@ -46,6 +48,24 @@ ack:
 Second comment (acked).
 ```
 ";
+
+/// The single-file variant of an [`RmOutcome`], or `None` for a
+/// directory report. Call sites `.unwrap()` to assert the variant.
+fn rm_file(outcome: &RmOutcome) -> Option<&RmResult> {
+    match outcome {
+        RmOutcome::File(result) => Some(result),
+        RmOutcome::Directory(_) => None,
+    }
+}
+
+/// The directory-report variant of an [`RmOutcome`], or `None` for a
+/// single-file result. Call sites `.unwrap()` to assert the variant.
+fn rm_dir(outcome: &RmOutcome) -> Option<&RmDirReport> {
+    match outcome {
+        RmOutcome::Directory(report) => Some(report),
+        RmOutcome::File(_) => None,
+    }
+}
 
 fn config_with_ignore(patterns: Vec<String>) -> ResolvedConfig {
     ResolvedConfig {
@@ -1898,7 +1918,7 @@ fn rm_deletes_existing_file() {
         .unwrap();
 
     let config = open_config();
-    let result = document::rm(
+    let outcome = document::rm(
         &system,
         Path::new("/project"),
         Path::new("notes.md"),
@@ -1906,7 +1926,7 @@ fn rm_deletes_existing_file() {
     )
     .unwrap();
 
-    assert!(result.existed);
+    assert!(rm_file(&outcome).unwrap().existed);
     system
         .read_to_string(Path::new("/project/notes.md"))
         .unwrap_err();
@@ -1921,7 +1941,7 @@ fn rm_idempotent_missing_file() {
         .unwrap();
 
     let config = open_config();
-    let result = document::rm(
+    let outcome = document::rm(
         &system,
         Path::new("/project"),
         Path::new("nonexistent.md"),
@@ -1929,7 +1949,7 @@ fn rm_idempotent_missing_file() {
     )
     .unwrap();
 
-    assert!(!result.existed);
+    assert!(!rm_file(&outcome).unwrap().existed);
 }
 
 #[test]
@@ -1975,7 +1995,7 @@ fn rm_rejects_path_outside_sandbox() {
 }
 
 #[test]
-fn rm_rejects_directory() {
+fn rm_removes_empty_directory() {
     let system = MockSystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -1983,16 +2003,17 @@ fn rm_rejects_directory() {
         .unwrap();
 
     let config = open_config();
-    let result = document::rm(&system, Path::new("/project"), Path::new("subdir"), &config);
+    let outcome =
+        document::rm(&system, Path::new("/project"), Path::new("subdir"), &config).unwrap();
 
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("cannot remove directory"),
-        "expected directory error"
+    let report = rm_dir(&outcome).unwrap();
+    assert!(report.files_deleted.is_empty());
+    assert_eq!(
+        report.folders_removed,
+        vec![PathBuf::from("/project/subdir")]
     );
+    assert!(report.folders_left_behind.is_empty());
+    assert!(!system.exists(Path::new("/project/subdir")).unwrap());
 }
 
 #[test]
@@ -2023,7 +2044,7 @@ fn rm_deletes_non_markdown_binary_file() {
     );
 
     // rm must really delete it and report it as removed.
-    let result = document::rm(
+    let outcome = document::rm(
         &system,
         Path::new("/project"),
         Path::new("assets/probe.png"),
@@ -2031,7 +2052,7 @@ fn rm_deletes_non_markdown_binary_file() {
     )
     .unwrap();
     assert!(
-        result.existed,
+        rm_file(&outcome).unwrap().existed,
         "existed must be true for a file that is present on disk"
     );
     assert!(
@@ -2066,20 +2087,225 @@ fn rm_can_delete_anything_the_read_layer_sees() {
     assert_eq!(meta.size_bytes, bytes.len() as u64);
 
     // ...then rm must be able to delete it (read/delete scope parity).
-    let result = document::rm(
+    let outcome = document::rm(
         &system,
         Path::new("/project"),
         Path::new("assets/figure.png"),
         &config,
     )
     .unwrap();
-    assert!(result.existed);
+    assert!(rm_file(&outcome).unwrap().existed);
     assert!(
         !system
             .exists(Path::new("/project/assets/figure.png"))
             .unwrap(),
         "read-visible file must be deletable"
     );
+}
+
+// ---------------------------------------------------------------------
+// Directory rm: recursive, ls-driven, all-or-nothing, with a report.
+// ---------------------------------------------------------------------
+
+#[test]
+fn rm_dir_removes_all_visible_files_and_reports_them() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/docs/a.md"), b"a")
+        .unwrap()
+        .with_file(Path::new("/project/docs/b.md"), b"b")
+        .unwrap()
+        .with_file(Path::new("/project/docs/c.txt"), b"c")
+        .unwrap();
+
+    let config = open_config();
+    let outcome = document::rm(&system, Path::new("/project"), Path::new("docs"), &config).unwrap();
+
+    let report = rm_dir(&outcome).unwrap();
+    assert_eq!(report.files_deleted.len(), 3, "all three files reported");
+    assert_eq!(report.folders_removed, vec![PathBuf::from("/project/docs")]);
+    assert!(report.folders_left_behind.is_empty());
+    assert!(!system.exists(Path::new("/project/docs")).unwrap());
+}
+
+#[test]
+fn rm_dir_removes_nested_subdirs_bottom_up() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/tree/top.md"), b"t")
+        .unwrap()
+        .with_file(Path::new("/project/tree/mid/m.md"), b"m")
+        .unwrap()
+        .with_file(Path::new("/project/tree/mid/deep/d.md"), b"d")
+        .unwrap();
+
+    let config = open_config();
+    let outcome = document::rm(&system, Path::new("/project"), Path::new("tree"), &config).unwrap();
+
+    let report = rm_dir(&outcome).unwrap();
+    assert_eq!(report.files_deleted.len(), 3);
+    // Deepest directory removed before its parents; root last.
+    assert_eq!(
+        report.folders_removed,
+        vec![
+            PathBuf::from("/project/tree/mid/deep"),
+            PathBuf::from("/project/tree/mid"),
+            PathBuf::from("/project/tree"),
+        ]
+    );
+    assert!(report.folders_left_behind.is_empty());
+    assert!(!system.exists(Path::new("/project/tree")).unwrap());
+}
+
+#[test]
+fn rm_dir_with_only_hidden_file_leaves_folder_behind() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/box/visible.md"), b"v")
+        .unwrap()
+        .with_file(Path::new("/project/box/.secret"), b"hidden")
+        .unwrap();
+
+    let config = open_config();
+    let outcome = document::rm(&system, Path::new("/project"), Path::new("box"), &config).unwrap();
+
+    let report = rm_dir(&outcome).unwrap();
+    // The visible file is removed; the folder survives (still holds the
+    // hidden file remargin cannot list). No error.
+    assert_eq!(
+        report.files_deleted,
+        vec![PathBuf::from("/project/box/visible.md")]
+    );
+    assert!(report.folders_removed.is_empty());
+    assert_eq!(
+        report.folders_left_behind,
+        vec![PathBuf::from("/project/box")]
+    );
+    assert!(!system.exists(Path::new("/project/box/visible.md")).unwrap());
+    assert!(system.exists(Path::new("/project/box/.secret")).unwrap());
+}
+
+#[test]
+fn rm_dir_with_nested_realm_config_leaves_realm_folder_intact() {
+    // A nested realm's `.remargin.yaml` is a dotfile: ls never lists it,
+    // so the folder looks empty to the no-force remove and survives.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/outer/top.md"), b"t")
+        .unwrap()
+        .with_file(
+            Path::new("/project/outer/realm/.remargin.yaml"),
+            b"mode: open\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/project/outer/realm/doc.md"), b"d")
+        .unwrap();
+
+    let config = open_config();
+    let outcome =
+        document::rm(&system, Path::new("/project"), Path::new("outer"), &config).unwrap();
+
+    let report = rm_dir(&outcome).unwrap();
+    // The visible docs are removed; the realm folder is left behind
+    // because its `.remargin.yaml` keeps it non-empty. The outer folder
+    // is therefore also left behind (it still contains the realm folder).
+    assert!(
+        report
+            .files_deleted
+            .contains(&PathBuf::from("/project/outer/top.md"))
+    );
+    assert!(
+        report
+            .files_deleted
+            .contains(&PathBuf::from("/project/outer/realm/doc.md"))
+    );
+    assert!(
+        report
+            .folders_left_behind
+            .contains(&PathBuf::from("/project/outer/realm"))
+    );
+    assert!(
+        report
+            .folders_left_behind
+            .contains(&PathBuf::from("/project/outer"))
+    );
+    assert!(
+        system
+            .exists(Path::new("/project/outer/realm/.remargin.yaml"))
+            .unwrap(),
+        "nested realm config must survive"
+    );
+}
+
+#[test]
+fn rm_dir_leaves_folder_holding_registry_dotfile_intact() {
+    // `.remargin-registry.yaml` is a forbidden target AND a dotfile, so
+    // ls never lists it: it does not block the pre-flight, and its folder
+    // is left behind because the no-force remove sees it as non-empty.
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/cfg/keep.md"), b"k")
+        .unwrap()
+        .with_file(Path::new("/project/cfg/.remargin-registry.yaml"), b"x")
+        .unwrap();
+
+    // The registry file is a dotfile: invisible to ls, so it does NOT
+    // block the pre-flight. The folder is left behind because it still
+    // holds the dotfile.
+    let config = open_config();
+    let outcome = document::rm(&system, Path::new("/project"), Path::new("cfg"), &config).unwrap();
+    let report = rm_dir(&outcome).unwrap();
+    assert_eq!(
+        report.files_deleted,
+        vec![PathBuf::from("/project/cfg/keep.md")]
+    );
+    assert_eq!(
+        report.folders_left_behind,
+        vec![PathBuf::from("/project/cfg")]
+    );
+}
+
+#[test]
+fn rm_dir_refuses_path_outside_sandbox() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/outside/secret.md"), b"s")
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("../outside"),
+        &config,
+    );
+
+    result.unwrap_err();
+}
+
+#[test]
+fn rm_dir_report_to_json_shape() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/d/one.md"), b"1")
+        .unwrap();
+
+    let config = open_config();
+    let outcome = document::rm(&system, Path::new("/project"), Path::new("d"), &config).unwrap();
+
+    let value = outcome.to_json("d");
+    assert_eq!(value["deleted"], "d");
+    assert_eq!(value["is_directory"], true);
+    assert_eq!(value["files_deleted"].as_array().unwrap().len(), 1);
+    assert_eq!(value["folders_removed"].as_array().unwrap().len(), 1);
+    assert_eq!(value["folders_left_behind"].as_array().unwrap().len(), 0);
 }
 
 // ---------------------------------------------------------------------
