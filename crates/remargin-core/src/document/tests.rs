@@ -330,6 +330,124 @@ fn get_markdown() {
 }
 
 #[test]
+fn get_with_links_excludes_comment_blocks() {
+    // A link inside a remargin comment block must NOT be surfaced; a link
+    // in the body must be. The body link's line number stays aligned with
+    // the file even though the comment block sits above it.
+    let doc = "\
+# Doc
+
+```remargin
+---
+id: abc
+author: eduardo
+type: human
+ts: 2026-04-06T12:00:00-04:00
+to: [alice]
+checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb
+---
+A comment mentioning [[Hidden]].
+```
+
+Body links to [[Real]].
+";
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), doc.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/project/Real.md"), b"# Real")
+        .unwrap()
+        .with_file(Path::new("/project/Hidden.md"), b"# Hidden")
+        .unwrap();
+
+    let result = document::get_with_links(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        false,
+        false,
+        &[],
+    )
+    .unwrap();
+
+    // Content is unchanged: same bytes the file holds.
+    assert_eq!(result.content, doc);
+    assert_eq!(result.links.len(), 1);
+    assert_eq!(result.links[0].target, "Real");
+    assert_eq!(result.links[0].path.as_deref(), Some("Real.md"));
+}
+
+#[test]
+fn get_with_links_slice_relative_references() {
+    let doc = "line 1\nline 2\nsee [[Alpha]]\nline 4\n[[Beta]] here\n";
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), doc.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/project/Alpha.md"), b"# Alpha")
+        .unwrap()
+        .with_file(Path::new("/project/Beta.md"), b"# Beta")
+        .unwrap();
+
+    // Whole-file: references are file-relative.
+    let whole = document::get_with_links(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        false,
+        false,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(whole.links.len(), 2);
+    let whole_alpha = whole.links.iter().find(|l| l.target == "Alpha").unwrap();
+    assert_eq!(whole_alpha.references[0].line, 3);
+
+    // Slice lines 3..=5: Alpha now on slice line 1, Beta on slice line 3.
+    let sliced = document::get_with_links(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        Some((3, 5)),
+        false,
+        false,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(sliced.links.len(), 2);
+    let sliced_alpha = sliced.links.iter().find(|l| l.target == "Alpha").unwrap();
+    assert_eq!(sliced_alpha.references[0].line, 1);
+    let sliced_beta = sliced.links.iter().find(|l| l.target == "Beta").unwrap();
+    assert_eq!(sliced_beta.references[0].line, 3);
+}
+
+#[test]
+fn get_with_links_empty_when_no_links() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/doc.md"), b"# Hello\nWorld")
+        .unwrap();
+
+    let result = document::get_with_links(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        None,
+        false,
+        false,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(result.content, "# Hello\nWorld");
+    assert!(result.links.is_empty());
+}
+
+#[test]
 fn get_dotfile_hidden() {
     let system = MockSystem::new()
         .with_current_dir("/project")

@@ -660,6 +660,45 @@ fn get_reads_file_content() {
 }
 
 #[test]
+fn get_returns_links_array() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(base.join("notes.md"), b"See [[Target]] for details.")
+        .unwrap()
+        .with_file(base.join("Target.md"), b"---\ntitle: The Target\n---\n# T")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get",
+                "arguments": { "path": "notes.md" }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    // Content unchanged (additive).
+    assert!(result["content"].as_str().unwrap().contains("[[Target]]"));
+    // Links surfaced from the shared core: one resolved internal link
+    // carrying path + the target's own title.
+    let links = result["links"].as_array().unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["target"], "Target");
+    assert_eq!(links[0]["path"], "Target.md");
+    assert_eq!(links[0]["title"], "The Target");
+    assert_eq!(links[0]["count"], 1_i32);
+    assert_eq!(links[0]["references"][0]["line"], 1_i32);
+}
+
+#[test]
 fn unknown_method_returns_error() {
     let base = Path::new("/docs");
     let system = MockSystem::new();

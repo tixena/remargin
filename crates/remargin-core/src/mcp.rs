@@ -1795,7 +1795,7 @@ fn handle_get(
         _ => None,
     };
 
-    let content = document::get(
+    let result = document::get_with_links(
         system,
         base_dir,
         target,
@@ -1807,14 +1807,15 @@ fn handle_get(
 
     if line_numbers {
         let start_num = lines.map_or(1, |(s, _)| s);
-        let json_lines: Vec<Value> = content
+        let json_lines: Vec<Value> = result
+            .content
             .split('\n')
             .enumerate()
             .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
             .collect();
-        Ok(json!({ "lines": json_lines }))
+        Ok(json!({ "lines": json_lines, "links": result.links }))
     } else {
-        Ok(json!({ "content": content }))
+        Ok(json!({ "content": result.content, "links": result.links }))
     }
 }
 

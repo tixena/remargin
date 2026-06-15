@@ -47,6 +47,7 @@ use remargin_core::mcp;
 use remargin_core::operations;
 use remargin_core::operations::batch::BatchCommentOp;
 use remargin_core::operations::cp as cp_op;
+use remargin_core::operations::links::Link;
 use remargin_core::operations::mv as mv_op;
 use remargin_core::operations::plan as plan_ops;
 use remargin_core::operations::projections;
@@ -459,7 +460,7 @@ pub fn cmd_get(
     };
 
     if gp.json_mode && gp.line_numbers {
-        let content = document::get(
+        let result = document::get_with_links(
             system,
             cwd,
             target,
@@ -469,14 +470,19 @@ pub fn cmd_get(
             &config.trusted_roots,
         )?;
         let start_num = lines.map_or(1, |(s, _)| s);
-        let json_lines: Vec<Value> = content
+        let json_lines: Vec<Value> = result
+            .content
             .split('\n')
             .enumerate()
             .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
             .collect();
-        print_output(sinks, true, &json!({ "lines": json_lines }))
+        print_output(
+            sinks,
+            true,
+            &json!({ "lines": json_lines, "links": result.links }),
+        )
     } else {
-        let content = document::get(
+        let result = document::get_with_links(
             system,
             cwd,
             target,
@@ -486,11 +492,52 @@ pub fn cmd_get(
             &config.trusted_roots,
         )?;
         if gp.json_mode {
-            print_output(sinks, true, &json!({ "content": content }))
+            print_output(
+                sinks,
+                true,
+                &json!({ "content": result.content, "links": result.links }),
+            )
         } else {
-            out_raw(sinks, &content)
+            out_raw(sinks, &result.content)?;
+            let block = render_links_block(&result.links);
+            if !block.is_empty() {
+                out_raw(sinks, &block)?;
+            }
+            Ok(())
         }
     }
+}
+
+/// Render the trailing pretty `Links` block for `get`. Returns an empty
+/// string when there are no links (the block is suppressed at zero). The
+/// arrow is kept; there are no colors and no internal/external label. An
+/// internal link shows its resolved path; a multiply-referenced target is
+/// annotated `(×N)`.
+fn render_links_block(links: &[Link]) -> String {
+    use core::fmt::Write as _;
+
+    if links.is_empty() {
+        return String::new();
+    }
+
+    let mut out = format!(
+        "\n\u{2500}\u{2500} Links ({}) \u{2500}\u{2500}\n",
+        links.len()
+    );
+    for link in links {
+        let path = link.path.as_deref().unwrap_or("");
+        let count = if link.count > 1 {
+            format!("  (\u{d7}{})", link.count)
+        } else {
+            String::new()
+        };
+        if path.is_empty() {
+            let _ = writeln!(out, "  \u{2192} {}{count}", link.target);
+        } else {
+            let _ = writeln!(out, "  \u{2192} {:<28}{path}{count}", link.target);
+        }
+    }
+    out
 }
 
 /// Binary-mode `get` dispatch. Reads bytes once through the shared

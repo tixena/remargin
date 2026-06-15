@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod cp;
+pub mod links;
 pub mod mv;
 pub mod plan;
 pub mod projections;

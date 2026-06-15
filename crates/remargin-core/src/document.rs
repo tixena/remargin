@@ -26,6 +26,7 @@ use tixschema::model_schema;
 
 use crate::config::ResolvedConfig;
 use crate::frontmatter;
+use crate::operations::links::{self, Link};
 use crate::operations::verify::commit_with_verify;
 use crate::parser;
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
@@ -354,6 +355,20 @@ pub enum WriteProjection {
     },
 }
 
+/// Body text + outbound links for a `get` call.
+///
+/// `content` is the same text [`get`] returns (sliced, optionally
+/// line-numbered). `links` is the deduped outbound-link list extracted
+/// from the same window — whole-file on a whole-file read, slice-relative
+/// (with slice-relative reference lines) on a sliced read. Both are
+/// produced by [`get_with_links`] so CLI and MCP cannot drift.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct GetResult {
+    pub content: String,
+    pub links: Vec<Link>,
+}
+
 /// List files and directories at the given path.
 ///
 /// Filters by allowlist, hides dotfiles and dot-directories.
@@ -492,6 +507,130 @@ pub fn get(
             }
         }
     }
+}
+
+/// Shared `get` core that returns body text **and** the outbound links in
+/// the same window.
+///
+/// Links are scanned from the body only: the read text is parsed and any
+/// remargin comment block is blanked out (newline-preserving) before the
+/// scan, so comment blocks, checksums, and signatures are excluded for
+/// free and reference line numbers stay aligned with what the caller read.
+/// Internal targets resolve same-folder only (against the document's own
+/// directory); a broken internal link is dropped, external URLs are kept
+/// with `path: None`. When sliced, only the slice is scanned and reference
+/// lines are slice-relative.
+///
+/// `content` mirrors [`get`] exactly (including `line_numbers`
+/// formatting); link extraction always runs over the un-numbered text.
+///
+/// # Errors
+///
+/// Mirrors [`get`]: sandbox escape, invisible file, binary-file slice /
+/// line-number requests, or a read failure.
+pub fn get_with_links(
+    system: &dyn System,
+    base_dir: &Path,
+    path: &Path,
+    lines: Option<(usize, usize)>,
+    line_numbers: bool,
+    unrestricted: bool,
+    trusted_roots: &[PathBuf],
+) -> Result<GetResult> {
+    let resolved =
+        allowlist::resolve_sandboxed(system, base_dir, path, unrestricted, trusted_roots)?;
+
+    if !allowlist::is_visible(&resolved, false) {
+        bail!("file not visible: {}", path.display());
+    }
+
+    if lines.is_some() && !allowlist::is_text(&resolved) {
+        bail!("--lines is not supported for binary files");
+    }
+
+    if line_numbers && !allowlist::is_text(&resolved) {
+        bail!("--line-numbers is not supported for binary files");
+    }
+
+    let full = system
+        .read_to_string(&resolved)
+        .with_context(|| format!("reading {}", resolved.display()))?;
+
+    // Raw (un-numbered) text for the window the caller asked for.
+    let window: String = match lines {
+        Some((start, end)) => full
+            .split('\n')
+            .enumerate()
+            .filter(|(i, _)| *i + 1 >= start && *i < end)
+            .map(|(_, line)| line)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => full,
+    };
+
+    // Scan body only: blank comment blocks (newline-preserving) so their
+    // contents are excluded while reference line numbers stay aligned with
+    // the window text.
+    let scan_text = mask_comment_blocks(&window);
+    let doc_dir = resolved.parent().unwrap_or_else(|| Path::new("."));
+    let outbound = links::extract_links(&scan_text, doc_dir, system);
+
+    let content = if line_numbers {
+        let start_num = lines.map_or(1, |(s, _)| s);
+        let numbered: Vec<&str> = window.split('\n').collect();
+        format_with_line_numbers(&numbered, start_num)
+    } else {
+        window
+    };
+
+    Ok(GetResult {
+        content,
+        links: outbound,
+    })
+}
+
+/// Blank every line inside a remargin comment block (a ```` ```remargin ````
+/// fenced block), replacing each such line with an empty line so a
+/// body-only link scan never sees comment-block contents while line
+/// numbers stay aligned with the original `text`. Non-comment text,
+/// including ordinary code fences, is preserved verbatim.
+///
+/// This mirrors the parser's `Body` / `Comment` split: comment blocks are
+/// the only segments excluded from the scan; everything else (including
+/// code fences, which the link scanner skips on its own) is kept.
+fn mask_comment_blocks(text: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut in_comment = false;
+    let mut fence_ticks: usize = 0;
+
+    for line in text.split('\n') {
+        let trimmed = line.trim_start();
+        let ticks = trimmed.chars().take_while(|&c| c == '`').count();
+
+        if in_comment {
+            // Inside a comment block: blank every line, including the
+            // closing fence, until the matching fence depth closes it.
+            let rest_after_ticks = trimmed[ticks.min(trimmed.len())..].trim();
+            if ticks == fence_ticks && rest_after_ticks.is_empty() {
+                in_comment = false;
+                fence_ticks = 0;
+            }
+            out.push("");
+            continue;
+        }
+
+        let tag = trimmed[ticks.min(trimmed.len())..].trim();
+        if ticks >= 3 && tag == "remargin" {
+            in_comment = true;
+            fence_ticks = ticks;
+            out.push("");
+            continue;
+        }
+
+        out.push(line);
+    }
+
+    out.join("\n")
 }
 
 /// Read a file as raw bytes, enforcing the same sandbox + visibility rules as
