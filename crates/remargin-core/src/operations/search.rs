@@ -39,9 +39,34 @@ pub enum MatchLocation {
     Comment,
 }
 
+/// Lowercase `location` for the MCP `search` output.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum SearchHitLocation {
+    Body,
+    Comment,
+}
+
 /// A compiled pattern matcher (wraps a `Regex`).
 struct Matcher {
     regex: Regex,
+}
+
+/// MCP `search` output row (lowercase `location`, empty fields omitted).
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct SearchHit {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub before: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment_id: Option<String>,
+    pub line: usize,
+    pub location: SearchHitLocation,
+    pub path: String,
+    pub text: String,
 }
 
 /// A single search match.
@@ -96,6 +121,25 @@ pub enum SearchScope {
     Body,
     /// Search only comment content.
     Comments,
+}
+
+impl SearchHit {
+    #[must_use]
+    pub fn from_match(m: &SearchMatch) -> Self {
+        let location = match m.location {
+            MatchLocation::Body => SearchHitLocation::Body,
+            MatchLocation::Comment => SearchHitLocation::Comment,
+        };
+        Self {
+            after: m.after.clone(),
+            before: m.before.clone(),
+            comment_id: m.comment_id.clone(),
+            line: m.line,
+            location,
+            path: m.path.display().to_string(),
+            text: m.text.clone(),
+        }
+    }
 }
 
 impl Matcher {

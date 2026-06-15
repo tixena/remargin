@@ -38,8 +38,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use core::fmt::Write as _;
 use os_shim::System;
+use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
+use tixschema::model_schema;
 
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::config::{Mode, ResolvedConfig};
@@ -133,31 +135,54 @@ pub struct VerifyReport {
     pub results: Vec<RowStatus>,
 }
 
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+enum RecipientsJson {
+    Ok,
+    Unknown { unresolved: Vec<String> },
+}
+
+#[derive(Serialize)]
+struct VerifyRowJson {
+    author: String,
+    checksum_ok: bool,
+    id: String,
+    line: usize,
+    recipients: RecipientsJson,
+    signature: &'static str,
+}
+
+#[derive(Serialize)]
+struct VerifyReportJson {
+    ok: bool,
+    results: Vec<VerifyRowJson>,
+}
+
 impl VerifyReport {
     #[must_use]
     pub fn to_json(&self) -> Value {
-        let results: Vec<Value> = self
+        let results = self
             .results
             .iter()
-            .map(|row| {
-                let recipients_json: Value = match &row.recipients {
-                    RecipientStatus::Ok => json!("ok"),
-                    RecipientStatus::Unknown(bad) => json!({
-                        "status": "unknown",
-                        "unresolved": bad,
-                    }),
-                };
-                json!({
-                    "id": row.id,
-                    "author": row.author,
-                    "line": row.line,
-                    "checksum_ok": row.checksum_ok,
-                    "recipients": recipients_json,
-                    "signature": row.signature.as_str(),
-                })
+            .map(|row| VerifyRowJson {
+                author: row.author.clone(),
+                checksum_ok: row.checksum_ok,
+                id: row.id.clone(),
+                line: row.line,
+                recipients: match &row.recipients {
+                    RecipientStatus::Ok => RecipientsJson::Ok,
+                    RecipientStatus::Unknown(bad) => RecipientsJson::Unknown {
+                        unresolved: bad.clone(),
+                    },
+                },
+                signature: row.signature.as_str(),
             })
             .collect();
-        json!({ "results": results, "ok": self.ok })
+        serde_json::to_value(VerifyReportJson {
+            ok: self.ok,
+            results,
+        })
+        .unwrap_or(Value::Null)
     }
 }
 
@@ -313,27 +338,59 @@ impl VerifyFailure {
     /// errors.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        let failures: Vec<Value> = self
+        let failures = self
             .failures
             .iter()
-            .map(|row| {
-                json!({
-                    "checksum_ok": row.checksum_ok,
-                    "id": row.id,
-                    "recipients": row.recipients.as_str(),
-                    "signature": row.signature.as_str(),
-                })
+            .map(|row| VerifyFailureRow {
+                checksum_ok: row.checksum_ok,
+                id: row.id.clone(),
+                recipients: row.recipients.as_str().to_owned(),
+                signature: row.signature.as_str().to_owned(),
             })
             .collect();
-        json!({
-            "error_kind": "verify_failed",
-            "failures": failures,
-            "headline": self.headline(),
-            "hint": self.hint(),
-            "mode": self.mode.as_str(),
-            "path": self.path.display().to_string(),
+        serde_json::to_value(VerifyFailurePayload {
+            error_kind: VerifyErrorKind::VerifyFailed,
+            failures,
+            headline: self.headline(),
+            hint: self.hint(),
+            mode: self.mode.as_str().to_owned(),
+            path: self.path.display().to_string(),
         })
+        .unwrap_or(Value::Null)
     }
+}
+
+/// `error_kind` discriminant for the verify-gate refusal payload.
+#[derive(Serialize)]
+#[non_exhaustive]
+#[model_schema]
+pub enum VerifyErrorKind {
+    #[serde(rename = "verify_failed")]
+    VerifyFailed,
+}
+
+/// One failing row in a [`VerifyFailure`] JSON payload.
+#[derive(Serialize)]
+#[non_exhaustive]
+#[model_schema]
+pub struct VerifyFailureRow {
+    pub checksum_ok: bool,
+    pub id: String,
+    pub recipients: String,
+    pub signature: String,
+}
+
+/// JSON projection of a [`VerifyFailure`] verify-gate refusal.
+#[derive(Serialize)]
+#[non_exhaustive]
+#[model_schema]
+pub struct VerifyFailurePayload {
+    pub error_kind: VerifyErrorKind,
+    pub failures: Vec<VerifyFailureRow>,
+    pub headline: String,
+    pub hint: String,
+    pub mode: String,
+    pub path: String,
 }
 
 /// Verifier-detected anomaly, identified by `(comment_id, kind)`.

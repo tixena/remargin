@@ -1,21 +1,7 @@
 import { z } from "zod/v4";
+import { VerifyFailurePayload$Schema } from "@/generated";
 
-const VerifyFailureRow$Schema = z.looseObject({
-  checksum_ok: z.boolean(),
-  id: z.string(),
-  signature: z.string(),
-});
-
-const VerifyFailure$Schema = z.looseObject({
-  error_kind: z.literal("verify_failed"),
-  failures: z.array(VerifyFailureRow$Schema),
-  headline: z.string(),
-  hint: z.string(),
-  mode: z.string(),
-  path: z.string(),
-});
-
-export type VerifyFailure = z.infer<typeof VerifyFailure$Schema>;
+export type VerifyFailure = z.infer<typeof VerifyFailurePayload$Schema>;
 
 /**
  * Try to read a verify-gate refusal out of an error message. The CLI's
@@ -44,7 +30,11 @@ export function parseVerifyFailure(err: unknown): VerifyFailure | null {
   } catch {
     return null;
   }
-  const result = VerifyFailure$Schema.safeParse(parsed);
+  // elapsed_ms is injected onto every payload, including error payloads.
+  if (parsed && typeof parsed === "object") {
+    delete (parsed as Record<string, unknown>).elapsed_ms;
+  }
+  const result = VerifyFailurePayload$Schema.safeParse(parsed);
   return result.success ? result.data : null;
 }
 

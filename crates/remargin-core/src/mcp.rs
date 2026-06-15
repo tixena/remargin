@@ -2461,31 +2461,10 @@ fn handle_search(
 
     let results = search::search(system, base_dir, &target, &options)?;
 
-    let matches: Vec<Value> = results
+    let matches = results
         .iter()
-        .map(|m| {
-            let mut obj = json!({
-                "path": m.path.display().to_string(),
-                "line": m.line,
-                "text": m.text,
-                "location": match m.location {
-                    search::MatchLocation::Body => "body",
-                    search::MatchLocation::Comment => "comment",
-                },
-            });
-            let map = obj.as_object_mut().unwrap();
-            if let Some(id) = &m.comment_id {
-                map.insert("comment_id".into(), json!(id));
-            }
-            if !m.before.is_empty() {
-                map.insert("before".into(), json!(m.before));
-            }
-            if !m.after.is_empty() {
-                map.insert("after".into(), json!(m.after));
-            }
-            obj
-        })
-        .collect();
+        .map(|m| serde_json::to_value(search::SearchHit::from_match(m)))
+        .collect::<Result<Vec<Value>, _>>()?;
 
     Ok(json!({ "matches": matches }))
 }

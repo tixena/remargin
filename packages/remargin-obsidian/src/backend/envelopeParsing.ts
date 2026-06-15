@@ -51,39 +51,3 @@ export function parsePayloadArray<E>(
   }
   return result.data;
 }
-
-// Loose envelope schemas for outputs not yet backed by a generated element
-// schema (sandbox, registry). Tolerant by design until those outputs are typed.
-export const SandboxListEntry$Schema = z.looseObject({
-  path: z.string(),
-  since: z.string(),
-});
-
-export const SandboxListEnvelope$Schema = z.looseObject({
-  files: z.array(SandboxListEntry$Schema),
-});
-
-export const Participant$Schema = z.looseObject({
-  name: z.string(),
-  display_name: z.string(),
-  type: z.enum(["human", "agent"]),
-  status: z.enum(["active", "revoked"]),
-  pubkeys: z.number(),
-});
-
-export const RegistryEnvelope$Schema = z.looseObject({
-  participants: z.array(Participant$Schema),
-});
-
-export const SandboxRemoveEnvelope$Schema = z.looseObject({
-  removed: z.array(z.string()).optional(),
-  skipped: z.array(z.string()).optional(),
-  failed: z
-    .array(
-      z.looseObject({
-        path: z.string(),
-        reason: z.string(),
-      })
-    )
-    .optional(),
-});

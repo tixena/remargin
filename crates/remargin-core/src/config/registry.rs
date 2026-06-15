@@ -27,7 +27,6 @@ use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
 /// JSON projection of a registry participant for `registry show --json`.
-/// `display_name` falls back to the participant id; `pubkeys` is the count.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 #[model_schema]

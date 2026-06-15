@@ -3,16 +3,14 @@ import { describe, it } from "node:test";
 import {
   Comment$Schema,
   ListEntry$Schema,
+  ParticipantView$Schema,
   QueryResult$Schema,
+  SandboxFailureEntry$Schema,
+  SandboxListEntry$Schema,
   SearchMatch$Schema,
 } from "@/generated";
-import {
-  parseEnvelope,
-  parsePayloadArray,
-  RegistryEnvelope$Schema,
-  SandboxListEnvelope$Schema,
-  SandboxRemoveEnvelope$Schema,
-} from "./envelopeParsing";
+import { parseVerifyFailure } from "@/lib/verifyFailure";
+import { parsePayloadArray } from "./envelopeParsing";
 
 // Every fixture below is REAL `remargin <cmd> --json` stdout captured from the
 // CLI (not hand-authored), so each test proves the generated/checked schema
@@ -77,6 +75,18 @@ const REGISTRY = `{
     { "name": "alice", "display_name": "Alice", "type": "human", "status": "active", "pubkeys": 1 } ]
 }`;
 
+// Verify-gate refusal as it arrives on stderr (elapsed_ms injected on errors).
+const VERIFY_REFUSAL = `{
+  "elapsed_ms": 2,
+  "error_kind": "verify_failed",
+  "failures": [
+    { "checksum_ok": false, "id": "abc", "recipients": "ok", "signature": "missing" } ],
+  "headline": "verify failed (mode: strict)",
+  "hint": "fix or sign the listed comments",
+  "mode": "strict",
+  "path": "doc.md"
+}`;
+
 describe("envelopeParsing — real CLI output parses", () => {
   it("comments: accepts the el/sl typed fields", () => {
     const comments = parsePayloadArray(COMMENTS, "comments", Comment$Schema, "comments");
@@ -106,20 +116,38 @@ describe("envelopeParsing — real CLI output parses", () => {
   });
 
   it("sandbox list: parses files", () => {
-    const env = parseEnvelope(SANDBOX_LIST, SandboxListEnvelope$Schema, "sandbox list");
-    assert.equal(env.files.length, 1);
-    assert.equal(env.files[0].path, "doc.md");
+    const files = parsePayloadArray(SANDBOX_LIST, "files", SandboxListEntry$Schema, "sandbox list");
+    assert.equal(files.length, 1);
+    assert.equal(files[0].path, "doc.md");
   });
 
-  it("sandbox remove: parses removed/skipped/failed", () => {
-    const env = parseEnvelope(SANDBOX_REMOVE, SandboxRemoveEnvelope$Schema, "sandbox remove");
-    assert.deepEqual(env.removed, ["doc.md"]);
+  it("sandbox remove: validates the failure rows", () => {
+    const failed = parsePayloadArray(
+      SANDBOX_REMOVE,
+      "failed",
+      SandboxFailureEntry$Schema,
+      "sandbox remove"
+    );
+    assert.equal(failed.length, 0);
   });
 
   it("registry show: parses participants", () => {
-    const env = parseEnvelope(REGISTRY, RegistryEnvelope$Schema, "registry show");
-    assert.equal(env.participants.length, 1);
-    assert.equal(env.participants[0].name, "alice");
+    const participants = parsePayloadArray(
+      REGISTRY,
+      "participants",
+      ParticipantView$Schema,
+      "registry show"
+    );
+    assert.equal(participants.length, 1);
+    assert.equal(participants[0].name, "alice");
+  });
+
+  it("verify refusal: parses the verify_failed payload (elapsed_ms stripped)", () => {
+    const parsed = parseVerifyFailure(VERIFY_REFUSAL);
+    assert.ok(parsed);
+    assert.equal(parsed.error_kind, "verify_failed");
+    assert.equal(parsed.failures.length, 1);
+    assert.equal(parsed.failures[0].id, "abc");
   });
 });
 

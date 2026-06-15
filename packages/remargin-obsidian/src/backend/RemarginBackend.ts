@@ -6,8 +6,11 @@ import {
   Comment$Schema,
   type ListEntry,
   ListEntry$Schema,
+  ParticipantView$Schema,
   type QueryResult,
   QueryResult$Schema,
+  SandboxFailureEntry$Schema,
+  SandboxListEntry$Schema,
   type SearchMatch,
   SearchMatch$Schema,
 } from "@/generated";
@@ -18,13 +21,7 @@ import type { RemarginSettings } from "@/types";
 import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
 import { parsePluginsListOutput } from "./detectPlugin";
-import {
-  parseEnvelope,
-  parsePayloadArray,
-  RegistryEnvelope$Schema,
-  SandboxListEnvelope$Schema,
-  SandboxRemoveEnvelope$Schema,
-} from "./envelopeParsing";
+import { parsePayloadArray } from "./envelopeParsing";
 import { IDENTITY_ACCEPTING_SUBCOMMANDS } from "./identityAcceptingSubcommands";
 import { performUpdateCheck } from "./performUpdateCheck";
 import type {
@@ -159,7 +156,7 @@ export class RemarginBackend {
    */
   async sandboxList(): Promise<SandboxListEntry[]> {
     const raw = await this.exec(["sandbox", "list"]);
-    return parseEnvelope(raw, SandboxListEnvelope$Schema, "sandbox list").files;
+    return parsePayloadArray(raw, "files", SandboxListEntry$Schema, "sandbox list");
   }
 
   /**
@@ -174,8 +171,8 @@ export class RemarginBackend {
   async sandboxRemove(files: string[]): Promise<void> {
     if (files.length === 0) return;
     const raw = await this.exec(["sandbox", "remove", ...files]);
-    // Validate the shape but discard the result — we refetch after this.
-    parseEnvelope(raw, SandboxRemoveEnvelope$Schema, "sandbox remove");
+    // Validate the failure rows; result discarded (we refetch after).
+    parsePayloadArray(raw, "failed", SandboxFailureEntry$Schema, "sandbox remove");
   }
 
   /**
@@ -448,8 +445,12 @@ export class RemarginBackend {
   async registryShow(): Promise<Participant[]> {
     try {
       const raw = await this.exec(["registry", "show"]);
-      return parseEnvelope(raw, RegistryEnvelope$Schema, "registry show")
-        .participants as Participant[];
+      return parsePayloadArray(
+        raw,
+        "participants",
+        ParticipantView$Schema,
+        "registry show"
+      ) as Participant[];
     } catch (err) {
       if (err instanceof Error && /no registry found/i.test(err.message)) {
         return [];

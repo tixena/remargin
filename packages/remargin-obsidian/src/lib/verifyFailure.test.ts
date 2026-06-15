@@ -22,8 +22,8 @@ describe("parseVerifyFailure", () => {
       elapsed_ms: 12,
       error_kind: "verify_failed",
       failures: [
-        { checksum_ok: true, id: "abc", signature: "missing" },
-        { checksum_ok: true, id: "def", signature: "missing" },
+        { checksum_ok: true, id: "abc", recipients: "ok", signature: "missing" },
+        { checksum_ok: true, id: "def", recipients: "ok", signature: "missing" },
       ],
       headline: "verify failed: 2 unsigned or invalid comments in /d/a.md",
       hint: "Try `remargin verify /d/a.md --json` for the full breakdown.",
@@ -43,7 +43,7 @@ describe("parseVerifyFailure", () => {
   it("ignores leading text before the JSON object", () => {
     const payload = JSON.stringify({
       error_kind: "verify_failed",
-      failures: [{ checksum_ok: false, id: "abc", signature: "missing" }],
+      failures: [{ checksum_ok: false, id: "abc", recipients: "ok", signature: "missing" }],
       headline: "verify failed: 1 unsigned or invalid comment in /d/a.md",
       hint: "Try ...",
       mode: "open",

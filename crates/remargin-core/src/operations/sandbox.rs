@@ -55,10 +55,7 @@ pub struct SandboxBulkResult {
 }
 
 impl SandboxBulkResult {
-    /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for
-    /// `sandbox remove`. Paths are rendered relative to `base_dir`. The
-    /// output is serialized from a typed report; the key name is the only
-    /// thing that varies between the two operations.
+    /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for remove.
     #[must_use]
     pub fn to_json(&self, base_dir: &Path, changed_key: &str) -> Value {
         let changed = display_paths(&self.changed, base_dir);
@@ -126,8 +123,6 @@ pub struct SandboxListEntry {
 }
 
 impl SandboxListEntry {
-    /// Render a [`SandboxListing`] for JSON output: the path relative to
-    /// `root` (or absolute when `absolute`), plus the RFC 3339 timestamp.
     #[must_use]
     pub fn from_listing(listing: &SandboxListing, root: &Path, absolute: bool) -> Self {
         let path = if absolute {
@@ -169,7 +164,6 @@ fn strip_prefix_display(path: &Path, base: &Path) -> String {
         .to_string()
 }
 
-/// Render each path relative to `base_dir` for JSON output.
 fn display_paths(paths: &[PathBuf], base_dir: &Path) -> Vec<String> {
     paths
         .iter()
