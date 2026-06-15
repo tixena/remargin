@@ -138,31 +138,31 @@ pub struct VerifyReport {
 
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
-enum RecipientsJson {
+enum Recipients {
     Ok,
     Unknown { unresolved: Vec<String> },
 }
 
 #[derive(Serialize)]
-struct VerifyRowJson {
+struct VerifyRow {
     author: String,
     checksum_ok: bool,
     id: String,
     line: usize,
-    recipients: RecipientsJson,
+    recipients: Recipients,
     signature: &'static str,
 }
 
 #[derive(Serialize)]
-struct VerifyReportJson {
+struct VerifyReportView {
     ok: bool,
-    results: Vec<VerifyRowJson>,
+    results: Vec<VerifyRow>,
 }
 
 impl VerifyReport {
     #[must_use]
     pub fn to_json(&self) -> Value {
-        serde_json::to_value(VerifyReportJson {
+        serde_json::to_value(VerifyReportView {
             ok: self.ok,
             results: verify_rows_json(self),
         })
@@ -200,18 +200,18 @@ pub struct FolderVerifyReport {
 }
 
 #[derive(Serialize)]
-struct FolderFileJson {
+struct FolderFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
     ok: bool,
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    results: Option<Vec<VerifyRowJson>>,
+    results: Option<Vec<VerifyRow>>,
 }
 
 #[derive(Serialize)]
-struct FolderVerifyReportJson {
-    files: Vec<FolderFileJson>,
+struct FolderVerifyReportView {
+    files: Vec<FolderFile>,
     ok: bool,
 }
 
@@ -229,7 +229,7 @@ impl FolderVerifyReport {
                 let (ok, results) = f.report.as_ref().map_or((false, None), |report| {
                     (report.ok, Some(verify_rows_json(report)))
                 });
-                FolderFileJson {
+                FolderFile {
                     error: f.error.clone(),
                     ok,
                     path: f.path.display().to_string(),
@@ -237,7 +237,7 @@ impl FolderVerifyReport {
                 }
             })
             .collect();
-        serde_json::to_value(FolderVerifyReportJson { files, ok: self.ok }).unwrap_or(Value::Null)
+        serde_json::to_value(FolderVerifyReportView { files, ok: self.ok }).unwrap_or(Value::Null)
     }
 }
 
@@ -512,17 +512,17 @@ pub struct SubsetGateFailure {
 }
 
 #[derive(Serialize)]
-struct IntroducedJson {
+struct Introduced {
     id: String,
     kind: &'static str,
 }
 
 #[derive(Serialize)]
-struct SubsetGateJson {
+struct SubsetGate {
     error_kind: &'static str,
     headline: String,
     hint: String,
-    introduced: Vec<IntroducedJson>,
+    introduced: Vec<Introduced>,
     mode: &'static str,
     path: String,
 }
@@ -563,12 +563,12 @@ impl SubsetGateFailure {
         let introduced = self
             .introduced
             .iter()
-            .map(|a| IntroducedJson {
+            .map(|a| Introduced {
                 id: a.id.clone(),
                 kind: a.kind.as_str(),
             })
             .collect();
-        serde_json::to_value(SubsetGateJson {
+        serde_json::to_value(SubsetGate {
             error_kind: "subset_gate_failed",
             headline: self.headline(),
             hint: self.hint(),
@@ -582,18 +582,18 @@ impl SubsetGateFailure {
 
 /// Project a [`VerifyReport`]'s rows to their JSON row shape, shared by
 /// [`VerifyReport::to_json`] and [`FolderVerifyReport::to_json`].
-fn verify_rows_json(report: &VerifyReport) -> Vec<VerifyRowJson> {
+fn verify_rows_json(report: &VerifyReport) -> Vec<VerifyRow> {
     report
         .results
         .iter()
-        .map(|row| VerifyRowJson {
+        .map(|row| VerifyRow {
             author: row.author.clone(),
             checksum_ok: row.checksum_ok,
             id: row.id.clone(),
             line: row.line,
             recipients: match &row.recipients {
-                RecipientStatus::Ok => RecipientsJson::Ok,
-                RecipientStatus::Unknown(bad) => RecipientsJson::Unknown {
+                RecipientStatus::Ok => Recipients::Ok,
+                RecipientStatus::Unknown(bad) => Recipients::Unknown {
                     unresolved: bad.clone(),
                 },
             },
