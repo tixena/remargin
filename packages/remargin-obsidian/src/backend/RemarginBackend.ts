@@ -1,7 +1,6 @@
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname as dirnamePath, join as joinPath } from "node:path";
 import { spawn } from "child_process";
-import { z } from "zod/v4";
 import {
   type Comment,
   Comment$Schema,
@@ -19,6 +18,13 @@ import type { RemarginSettings } from "@/types";
 import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
 import { parsePluginsListOutput } from "./detectPlugin";
+import {
+  parseEnvelope,
+  parsePayloadArray,
+  RegistryEnvelope$Schema,
+  SandboxListEnvelope$Schema,
+  SandboxRemoveEnvelope$Schema,
+} from "./envelopeParsing";
 import { IDENTITY_ACCEPTING_SUBCOMMANDS } from "./identityAcceptingSubcommands";
 import { performUpdateCheck } from "./performUpdateCheck";
 import type {
@@ -41,85 +47,6 @@ import type {
 // (`identityAcceptingSubcommands.ts`) so tests can import it without
 // pulling in this module, whose TypeScript parameter-property
 // constructor the test runner's strip-only loader cannot parse.
-
-/**
- * Every CLI/MCP response carries `elapsed_ms` timing metadata alongside its
- * payload. Envelopes are strict so a stray, un-modeled key (the class of bug
- * that shipped `sl`/`el` grafted onto comments) fails loudly instead of being
- * silently swallowed; `elapsed_ms` is the one acknowledged envelope field.
- */
-const CommentsEnvelope$Schema = z.strictObject({
-  comments: z.array(Comment$Schema),
-  elapsed_ms: z.number().optional(),
-});
-
-const QueryEnvelope$Schema = z.strictObject({
-  results: z.array(QueryResult$Schema),
-  elapsed_ms: z.number().optional(),
-});
-
-const ListEnvelope$Schema = z.strictObject({
-  entries: z.array(ListEntry$Schema),
-  elapsed_ms: z.number().optional(),
-});
-
-const SearchEnvelope$Schema = z.strictObject({
-  matches: z.array(SearchMatch$Schema),
-  elapsed_ms: z.number().optional(),
-});
-
-const SandboxListEntry$Schema = z.looseObject({
-  path: z.string(),
-  since: z.string(),
-});
-
-const SandboxListEnvelope$Schema = z.looseObject({
-  files: z.array(SandboxListEntry$Schema),
-});
-
-const Participant$Schema = z.looseObject({
-  name: z.string(),
-  display_name: z.string(),
-  type: z.enum(["human", "agent"]),
-  status: z.enum(["active", "revoked"]),
-  pubkeys: z.number(),
-});
-
-const RegistryEnvelope$Schema = z.looseObject({
-  participants: z.array(Participant$Schema),
-});
-
-const SandboxRemoveEnvelope$Schema = z.looseObject({
-  removed: z.array(z.string()).optional(),
-  skipped: z.array(z.string()).optional(),
-  failed: z
-    .array(
-      z.looseObject({
-        path: z.string(),
-        reason: z.string(),
-      })
-    )
-    .optional(),
-});
-
-/**
- * Parse CLI stdout against a Zod schema and surface a readable error on
- * validation failure so callers can tell the difference between a broken
- * CLI version and a transient runtime problem.
- */
-function parseEnvelope<T>(raw: string, schema: z.ZodType<T>, label: string): T {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw);
-  } catch (err) {
-    throw new Error(`remargin ${label}: could not parse JSON (${(err as Error).message})`);
-  }
-  const result = schema.safeParse(payload);
-  if (!result.success) {
-    throw new Error(`remargin ${label}: output did not match schema: ${result.error.message}`);
-  }
-  return result.data;
-}
 
 export class RemarginBackend {
   private pluginPresenceCache: PluginPresence | null = null;
@@ -178,7 +105,7 @@ export class RemarginBackend {
 
   async ls(path: string): Promise<ListEntry[]> {
     const raw = await this.exec(["ls", path]);
-    return parseEnvelope(raw, ListEnvelope$Schema, "ls").entries;
+    return parsePayloadArray(raw, "entries", ListEntry$Schema, "ls");
   }
 
   async write(path: string, content: string, opts?: WriteOpts): Promise<void> {
@@ -195,7 +122,7 @@ export class RemarginBackend {
 
   async comments(file: string): Promise<Comment[]> {
     const raw = await this.exec(["comments", file]);
-    return parseEnvelope(raw, CommentsEnvelope$Schema, "comments").comments;
+    return parsePayloadArray(raw, "comments", Comment$Schema, "comments");
   }
 
   async comment(file: string, content: string, opts?: CommentOpts): Promise<string> {
@@ -308,7 +235,7 @@ export class RemarginBackend {
     if (opts?.contentRegex) args.push("--content-regex", opts.contentRegex);
     if (opts?.ignoreCase) args.push("--ignore-case");
     const raw = await this.exec(args);
-    return parseEnvelope(raw, QueryEnvelope$Schema, "query").results;
+    return parsePayloadArray(raw, "results", QueryResult$Schema, "query");
   }
 
   async search(pattern: string, opts?: SearchOpts): Promise<SearchMatch[]> {
@@ -319,7 +246,7 @@ export class RemarginBackend {
     if (opts?.ignoreCase) args.push("--ignore-case");
     if (opts?.context != null) args.push("--context", String(opts.context));
     const raw = await this.exec(args);
-    return parseEnvelope(raw, SearchEnvelope$Schema, "search").matches;
+    return parsePayloadArray(raw, "matches", SearchMatch$Schema, "search");
   }
 
   async version(): Promise<string> {
