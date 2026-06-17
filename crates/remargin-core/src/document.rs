@@ -767,6 +767,7 @@ pub fn rm(
     let existed = system.exists(&resolved).unwrap_or(false);
 
     if existed {
+        ensure_no_comments(system, &resolved)?;
         system
             .remove_file(&resolved)
             .with_context(|| format!("removing {}", resolved.display()))?;
@@ -776,6 +777,28 @@ pub fn rm(
         existed,
         path: path.to_path_buf(),
     }))
+}
+
+/// Refuse to delete a markdown file that still carries comment threads —
+/// comments are durable, signed records, so `rm` must point the caller at
+/// `purge` rather than destroy them. Non-markdown files have no comments
+/// and pass through untouched.
+fn ensure_no_comments(system: &dyn System, resolved: &Path) -> Result<()> {
+    if !is_markdown_extension(resolved) {
+        return Ok(());
+    }
+    let content = system
+        .read_to_string(resolved)
+        .with_context(|| format!("reading {}", resolved.display()))?;
+    let doc = parser::parse(&content).with_context(|| format!("parsing {}", resolved.display()))?;
+    if !doc.comments().is_empty() {
+        bail!(
+            "{} has {} comment(s); purge it first to delete",
+            resolved.display(),
+            doc.comments().len()
+        );
+    }
+    Ok(())
 }
 
 /// Recursive directory removal. `resolved` is the canonical directory
@@ -819,6 +842,20 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
         ensure_not_forbidden_target(file)?;
         if system.open(file).is_err() {
             bail!("cannot read {}: aborting, nothing deleted", file.display());
+        }
+        if is_markdown_extension(file) {
+            let content = system
+                .read_to_string(file)
+                .with_context(|| format!("reading {}", file.display()))?;
+            let doc =
+                parser::parse(&content).with_context(|| format!("parsing {}", file.display()))?;
+            if !doc.comments().is_empty() {
+                bail!(
+                    "{} has {} comment(s): aborting, nothing deleted; purge it first to delete",
+                    file.display(),
+                    doc.comments().len()
+                );
+            }
         }
     }
 

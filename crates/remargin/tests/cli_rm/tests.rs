@@ -28,6 +28,71 @@ fn assert_status(out: &Output, expected: i32) {
     );
 }
 
+fn doc_with_one_comment() -> &'static str {
+    "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n\n```remargin\n---\nid: aaa111\nauthor: alice\ntype: human\nts: 2026-04-29T10:00:00+00:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment.\n```\n"
+}
+
+/// Single-file `rm` on a commented markdown file is refused, names the
+/// file, points at purge, and leaves the file on disk.
+#[test]
+fn refuses_commented_file_via_cli() {
+    let realm = TempDir::new().unwrap();
+    fs::write(realm.path().join("note.md"), doc_with_one_comment()).unwrap();
+
+    let out = run_in(realm.path(), &["rm", "note.md"]);
+    assert_ne!(out.status.code(), Some(0_i32), "expected a refusal");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("comment"),
+        "names the comment count: {stderr}"
+    );
+    assert!(stderr.contains("purge"), "points at purge: {stderr}");
+    assert!(realm.path().join("note.md").exists(), "file must survive");
+}
+
+/// Directory `rm` aborts when any nested file has comments; nothing is
+/// deleted and the error names the offending file.
+#[test]
+fn dir_with_commented_file_aborts_via_cli() {
+    let realm = TempDir::new().unwrap();
+    fs::create_dir_all(realm.path().join("tree/sub")).unwrap();
+    fs::write(realm.path().join("tree/top.md"), b"top").unwrap();
+    fs::write(
+        realm.path().join("tree/sub/commented.md"),
+        doc_with_one_comment(),
+    )
+    .unwrap();
+
+    let out = run_in(realm.path(), &["rm", "tree", "--json"]);
+    assert_ne!(out.status.code(), Some(0_i32), "expected an abort");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("commented.md"),
+        "names the offending file: {stderr}"
+    );
+    assert!(realm.path().join("tree/top.md").exists());
+    assert!(realm.path().join("tree/sub/commented.md").exists());
+}
+
+/// `purge` then `rm` deletes a previously-commented directory tree.
+#[test]
+fn purge_then_rm_deletes_tree_via_cli() {
+    let realm = TempDir::new().unwrap();
+    fs::create_dir_all(realm.path().join("tree")).unwrap();
+    fs::write(
+        realm.path().join("tree/commented.md"),
+        doc_with_one_comment(),
+    )
+    .unwrap();
+
+    let purge = run_in(realm.path(), &["purge", "--recursive", "tree"]);
+    assert_status(&purge, 0);
+
+    let out = run_in(realm.path(), &["rm", "tree", "--json"]);
+    assert_status(&out, 0);
+    assert!(!realm.path().join("tree").exists());
+}
+
 /// A managed directory with mixed visible contents is removed
 /// recursively; the JSON report names the files and folders.
 #[test]

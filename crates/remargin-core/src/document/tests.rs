@@ -12,6 +12,7 @@ use crate::config::{Mode, ResolvedConfig};
 use crate::document::{
     self, RmDirReport, RmOutcome, RmResult, WriteOptions, WriteProjection, allowlist,
 };
+use crate::operations::purge::{purge, purge_dir};
 use crate::parser::AuthorType;
 use crate::writer::FORBIDDEN_TARGETS;
 
@@ -2424,6 +2425,164 @@ fn rm_dir_report_to_json_shape() {
     assert_eq!(value["files_deleted"].as_array().unwrap().len(), 1);
     assert_eq!(value["folders_removed"].as_array().unwrap().len(), 1);
     assert_eq!(value["folders_left_behind"].as_array().unwrap().len(), 0);
+}
+
+// ---------------------------------------------------------------------
+// rm refuses to delete a commented markdown file (single + directory),
+// pointing the caller at `purge`. Comment-free / non-markdown files are
+// unaffected.
+// ---------------------------------------------------------------------
+
+#[test]
+fn rm_refuses_commented_markdown_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/note.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("note.md"),
+        &config,
+    );
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("comment"),
+        "error names the comment count: {err}"
+    );
+    assert!(err.contains("purge"), "error points at purge: {err}");
+    assert!(
+        system.exists(Path::new("/project/note.md")).unwrap(),
+        "commented file must survive a refused rm"
+    );
+}
+
+#[test]
+fn rm_deletes_comment_free_markdown_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(
+            Path::new("/project/plain.md"),
+            b"# Plain\n\nNo comments here.",
+        )
+        .unwrap();
+
+    let config = open_config();
+    let outcome = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("plain.md"),
+        &config,
+    )
+    .unwrap();
+
+    assert!(rm_file(&outcome).unwrap().existed);
+    assert!(!system.exists(Path::new("/project/plain.md")).unwrap());
+}
+
+#[test]
+fn rm_purge_then_rm_deletes_previously_commented_file() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/note.md"), DOC_WITH_COMMENTS.as_bytes())
+        .unwrap();
+
+    let config = open_config();
+    purge(&system, Path::new("/project/note.md"), &config).unwrap();
+
+    let outcome = document::rm(
+        &system,
+        Path::new("/project"),
+        Path::new("note.md"),
+        &config,
+    )
+    .unwrap();
+    assert!(rm_file(&outcome).unwrap().existed);
+    assert!(!system.exists(Path::new("/project/note.md")).unwrap());
+}
+
+#[test]
+fn rm_dir_aborts_when_any_nested_file_has_comments() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/tree/top.md"), b"t")
+        .unwrap()
+        .with_file(
+            Path::new("/project/tree/mid/deep/commented.md"),
+            DOC_WITH_COMMENTS.as_bytes(),
+        )
+        .unwrap();
+
+    let config = open_config();
+    let result = document::rm(&system, Path::new("/project"), Path::new("tree"), &config);
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("commented.md"),
+        "error names the offending file: {err}"
+    );
+    assert!(
+        err.contains("nothing deleted"),
+        "all-or-nothing wording: {err}"
+    );
+    assert!(
+        system.exists(Path::new("/project/tree/top.md")).unwrap(),
+        "sibling file must survive an aborted dir rm"
+    );
+    assert!(
+        system
+            .exists(Path::new("/project/tree/mid/deep/commented.md"))
+            .unwrap(),
+        "commented file must survive an aborted dir rm"
+    );
+}
+
+#[test]
+fn rm_dir_deletes_tree_with_no_commented_files() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(Path::new("/project/clean/a.md"), b"a")
+        .unwrap()
+        .with_file(Path::new("/project/clean/sub/b.md"), b"b")
+        .unwrap();
+
+    let config = open_config();
+    let outcome =
+        document::rm(&system, Path::new("/project"), Path::new("clean"), &config).unwrap();
+
+    let report = rm_dir(&outcome).unwrap();
+    assert_eq!(report.files_deleted.len(), 2);
+    assert!(!system.exists(Path::new("/project/clean")).unwrap());
+}
+
+#[test]
+fn rm_purge_dir_then_rm_dir_deletes_tree() {
+    let system = MockSystem::new()
+        .with_current_dir("/project")
+        .unwrap()
+        .with_file(
+            Path::new("/project/tree/commented.md"),
+            DOC_WITH_COMMENTS.as_bytes(),
+        )
+        .unwrap()
+        .with_file(Path::new("/project/tree/plain.md"), b"p")
+        .unwrap();
+
+    let config = open_config();
+    purge_dir(&system, Path::new("/project/tree"), &config).unwrap();
+
+    let outcome = document::rm(&system, Path::new("/project"), Path::new("tree"), &config).unwrap();
+    let report = rm_dir(&outcome).unwrap();
+    assert_eq!(report.files_deleted.len(), 2);
+    assert!(!system.exists(Path::new("/project/tree")).unwrap());
 }
 
 // ---------------------------------------------------------------------

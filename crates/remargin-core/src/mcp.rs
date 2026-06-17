@@ -791,7 +791,9 @@ fn desc_rm() -> ToolDesc {
              cannot list (hidden files, a nested .remargin.yaml), and returns a \
              report {files_deleted, folders_removed, folders_left_behind}. If \
              any listed resource is unreadable the call fails and nothing is \
-             deleted.",
+             deleted. A markdown file carrying one or more comments is refused \
+             (single file or anywhere in a directory tree): purge the path \
+             first to strip its comments, then rm.",
         schema: json!({
             "type": "object",
             "properties": {
