@@ -66,16 +66,16 @@ fn broken_internal_link_omitted() {
     assert_eq!(links[0].target, "Alpha");
 }
 
-// 4. External URL kept with path null.
+// 4. External URL dropped entirely (local links only).
 #[test]
-fn external_url_kept_path_null() {
+fn external_url_dropped() {
     let sys = vault(&[]);
     let body = "See [docs](https://stripe.com/docs) for details.";
     let links = run(body, &sys);
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].target, "https://stripe.com/docs");
-    assert!(links[0].path.is_none());
-    assert_eq!(links[0].alias.as_deref(), Some("docs"));
+    assert!(
+        links.is_empty(),
+        "external URLs are not returned: {links:?}"
+    );
 }
 
 // 5. Link inside a code fence → not detected.
@@ -215,26 +215,28 @@ fn self_anchor_not_a_link() {
     assert!(links.is_empty());
 }
 
-// Autolink and bare URL detection.
+// Autolinks and bare URLs are external → dropped.
 #[test]
-fn autolink_and_bare_url_detected() {
+fn autolink_and_bare_url_dropped() {
     let sys = vault(&[]);
     let body = "Autolink <https://a.example> and bare https://b.example here.";
     let links = run(body, &sys);
-    assert_eq!(links.len(), 2);
-    assert!(target_of(&links, "https://a.example").path.is_none());
-    assert!(target_of(&links, "https://b.example").path.is_none());
+    assert!(
+        links.is_empty(),
+        "external autolinks are dropped: {links:?}"
+    );
 }
 
-// Reference links resolve against their definition.
+// A reference link resolving to an external URL is dropped.
 #[test]
-fn reference_link_resolves_against_definition() {
+fn external_reference_link_dropped() {
     let sys = vault(&[]);
     let body = "See [the docs][d].\n\n[d]: https://example.com/docs";
     let links = run(body, &sys);
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].target, "https://example.com/docs");
-    assert_eq!(links[0].alias.as_deref(), Some("the docs"));
+    assert!(
+        links.is_empty(),
+        "external reference link is dropped: {links:?}"
+    );
 }
 
 // A reference link with no matching definition is dropped.
@@ -255,4 +257,66 @@ fn md_image_internal_resolvable() {
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].target, "pic.png");
     assert_eq!(links[0].path.as_deref(), Some("pic.png"));
+}
+
+// One resolvable internal link amid five external links → only the
+// internal one survives, and it carries a real path.
+#[test]
+fn mixed_local_and_external_returns_only_local() {
+    let sys = vault(&[("Alpha.md", "# Alpha")]);
+    let body = "[[Alpha]] \
+        [a](https://a.example) [b](https://b.example) \
+        <https://c.example> https://d.example mailto:x@y.example";
+    let links = run(body, &sys);
+    assert_eq!(links.len(), 1, "only the local link survives: {links:?}");
+    assert_eq!(links[0].target, "Alpha");
+    assert_eq!(links[0].path.as_deref(), Some("Alpha.md"));
+}
+
+// An external target repeated three times creates no entry at all (no
+// entry, no references).
+#[test]
+fn repeated_external_target_creates_no_entry() {
+    let sys = vault(&[]);
+    let body = "[x](https://r.example)\n[x](https://r.example)\n[x](https://r.example)";
+    let links = run(body, &sys);
+    assert!(links.is_empty(), "repeated external is absent: {links:?}");
+}
+
+// `alias` / `title` keys are omitted (not null) when absent; present when
+// the link supplies them.
+#[test]
+fn null_optional_fields_omitted_from_json() {
+    // Internal link, no alias, target with no title → alias + title absent.
+    let sys = vault(&[("Plain.md", "no heading, no frontmatter")]);
+    let links = run("[[Plain]]", &sys);
+    let json = serde_json::to_value(&links[0]).unwrap();
+    let map = json.as_object().unwrap();
+    assert!(!map.contains_key("alias"), "absent alias omitted: {json}");
+    assert!(!map.contains_key("title"), "absent title omitted: {json}");
+    assert!(map.contains_key("path"), "path is always present: {json}");
+
+    // Aliased link to a titled target → both keys present.
+    let sys2 = vault(&[("Beta.md", "---\ntitle: Beta Doc\n---\n# H")]);
+    let links2 = run("[[Beta|nick]]", &sys2);
+    let json2 = serde_json::to_value(&links2[0]).unwrap();
+    let map2 = json2.as_object().unwrap();
+    assert_eq!(map2["alias"], "nick");
+    assert_eq!(map2["title"], "Beta Doc");
+}
+
+// `skip_serializing_if` only affects output: a Link with `None` fields
+// round-trips back to `None`.
+#[test]
+fn link_with_none_fields_round_trips() {
+    let sys = vault(&[("Plain.md", "no heading")]);
+    let original = run("[[Plain]]", &sys).remove(0);
+    assert!(original.alias.is_none());
+    assert!(original.title.is_none());
+
+    let json = serde_json::to_string(&original).unwrap();
+    let back: Link = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, original);
+    assert!(back.alias.is_none());
+    assert!(back.title.is_none());
 }

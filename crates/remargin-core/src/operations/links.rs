@@ -12,7 +12,7 @@
 //! the document's own directory and nowhere else. A resolvable internal
 //! link gets its on-disk `path` and the target document's own `title`; a
 //! broken internal link (no same-folder file) is dropped entirely.
-//! External URLs are kept with `path: None` and are never network-checked.
+//! External URLs are dropped entirely: only local links are returned.
 
 #[cfg(test)]
 mod tests;
@@ -45,20 +45,22 @@ const RELATION_PROPERTIES: &[&str] = &["up", "related"];
 pub struct Link {
     /// Display text the link used, when it carried one
     /// (`[[X|the model]]` -> `"the model"`, `[text](url)` -> `"text"`).
-    /// `None` when the link had no distinct display text.
+    /// Omitted when the link had no distinct display text.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
     /// Number of occurrences (`references.len()`).
     pub count: usize,
-    /// Same-folder resolved file for an internal link; `None` for an
-    /// external URL.
+    /// Same-folder resolved file. Always present: only locally-resolving
+    /// links are returned (external URLs are dropped).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     /// Every occurrence of this target (dedup detail).
     pub references: Vec<LinkRef>,
-    /// The link target: a note name / relative file for internal links,
-    /// or a URL for external ones.
+    /// The link target: a note name / relative file for the local link.
     pub target: String,
     /// One-hop metadata: the target document's own title, when the link
-    /// resolves to a readable same-folder document.
+    /// resolves to a readable same-folder document. Omitted when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 }
 
@@ -75,8 +77,8 @@ pub struct LinkRef {
 /// A link occurrence before dedup + resolution.
 struct RawLink {
     alias: Option<String>,
-    /// `true` when the target is an external URL (no same-folder
-    /// resolution attempted, kept with `path: None`).
+    /// `true` when the target is an external URL (dropped: only
+    /// locally-resolving links are returned).
     external: bool,
     line: usize,
     target: String,
@@ -95,7 +97,7 @@ struct Resolved {
 /// aligned with what the caller read. Internal targets resolve against
 /// `base_dir` (the document's own folder) only; resolvable links get a
 /// `path` and the target document's `title`, broken internal links are
-/// dropped, and external URLs are kept with `path: None`.
+/// dropped, and external URLs are dropped entirely (local links only).
 ///
 /// Lines are 1-indexed relative to the start of `body` — slice-relative
 /// when the caller passed a slice, whole-file-relative otherwise.
@@ -110,11 +112,19 @@ pub fn extract_links(body: &str, base_dir: &Path, system: &dyn System) -> Vec<Li
 }
 
 /// Collapse raw occurrences into deduped [`Link`] entries, resolving
-/// internal targets same-folder only and dropping broken internal links.
+/// internal targets same-folder only and dropping broken internal links
+/// and every external URL (local links only).
 fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) -> Vec<Link> {
     let mut out: Vec<Link> = Vec::new();
 
     for occurrence in raw {
+        // Local-only: drop external URLs before the dedup-append branch so
+        // an external target never creates an entry a later occurrence
+        // could append to.
+        if occurrence.external {
+            continue;
+        }
+
         if let Some(existing) = out.iter_mut().find(|link| link.target == occurrence.target) {
             existing.references.push(LinkRef {
                 line: occurrence.line,
@@ -126,14 +136,10 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
             continue;
         }
 
-        let (path, title) = if occurrence.external {
-            (None, None)
-        } else {
-            match resolve_internal(&occurrence.target, base_dir, system) {
-                // Broken internal link: drop the occurrence entirely.
-                None => continue,
-                Some(resolved) => (Some(resolved.path), resolved.title),
-            }
+        let (path, title) = match resolve_internal(&occurrence.target, base_dir, system) {
+            // Broken internal link: drop the occurrence entirely.
+            None => continue,
+            Some(resolved) => (Some(resolved.path), resolved.title),
         };
 
         out.push(Link {

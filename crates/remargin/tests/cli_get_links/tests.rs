@@ -29,8 +29,13 @@ fn get_json_returns_links_array() {
     // Content is unchanged (additive).
     assert!(payload["content"].as_str().unwrap().contains("[[Budget]]"));
 
+    // Local links only: the external URL is dropped entirely.
     let links = payload["links"].as_array().unwrap();
-    assert_eq!(links.len(), 2);
+    assert_eq!(links.len(), 1, "only the local link survives: {links:?}");
+    assert!(
+        links.iter().all(|l| l["target"] != "https://example.com/x"),
+        "external URL must be absent: {links:?}"
+    );
 
     let budget = links.iter().find(|l| l["target"] == "Budget").unwrap();
     assert_eq!(budget["path"], "Budget.md");
@@ -38,11 +43,10 @@ fn get_json_returns_links_array() {
     assert_eq!(budget["count"], 2_i32);
     assert_eq!(budget["references"].as_array().unwrap().len(), 2);
 
-    let external = links
-        .iter()
-        .find(|l| l["target"] == "https://example.com/x")
-        .unwrap();
-    assert!(external["path"].is_null());
+    // No null keys: absent optionals are omitted, every link has a path.
+    let budget_map = budget.as_object().unwrap();
+    assert!(!budget_map.values().any(serde_json::Value::is_null));
+    assert!(budget_map.contains_key("path"));
 }
 
 #[test]
