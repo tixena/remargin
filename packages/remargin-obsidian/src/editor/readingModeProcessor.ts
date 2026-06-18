@@ -86,10 +86,9 @@ export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProce
       // to this widget's subtree (tooltips and all).
       host.className = "remargin-reading-host remargin-container";
       host.dataset.remarginId = block.comment.id;
-      // Pre-hide so reply-to-this-doc blocks never flash before the
-      // async loadTree resolves. `render()` flips display back to "" on
-      // the post-resolve render; the suppression branch keeps it hidden.
-      host.style.display = "none";
+      // visibility, not display:none — a zero-height section stalls
+      // Obsidian's incremental reading-mode renderer.
+      host.style.visibility = "hidden";
       pre.replaceWith(host);
 
       ctx.addChild(new ReadingModeCommentChild(host, block, ctx.sourcePath, plugin));
@@ -140,11 +139,8 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
   onload(): void {
     this.root = createRootImpl(this.containerEl);
     this.subtreeIds = new Set([this.parsed.comment.id ?? ""]);
-    // Do NOT render here. The host is pre-hidden by the post-processor;
-    // `loadTree` decides whether to show (root → render + un-hide) or
-    // keep hidden (reply with parent in this doc). Painting the leaf
-    // before that decision would let suppressed replies flash visible
-    // and (worse) persist when the suppression race lost.
+    // Paint now (hidden) to reserve the section's height; loadTree reveals.
+    this.render();
     this.unsubscribeCollapse = this.plugin.collapseState.subscribe((id) => {
       if (this.subtreeIds.has(id)) this.render();
     });
@@ -181,7 +177,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
       // suppress, so render the leaf as a graceful fallback so the
       // user at least sees something.
       console.warn("[remargin] loadTree: no TFile for", this.sourcePath, "— rendering leaf only");
-      this.render();
+      this.reveal();
       return;
     }
     const generation = (this.loadGeneration += 1);
@@ -193,7 +189,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
       // stay hidden forever. Without doc-scope context we can't make a
       // suppression decision; surface the comment rather than nothing.
       console.warn("[remargin] loadTree: cachedRead failed for", this.sourcePath, err);
-      this.render();
+      this.reveal();
       return;
     }
     // Bail if we were unloaded or a newer load superseded this one.
@@ -227,6 +223,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     this.suppressed = false;
     this.subtreeIds = collectIds(node);
     this.render();
+    this.reveal();
   }
 
   private render(): void {
@@ -259,9 +256,12 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
         })
       )
     );
-    // Show now that we've populated the host. Pre-hidden in the
-    // post-processor so suppressed replies never flash.
-    (this.containerEl as HTMLElement).style.display = "";
+  }
+
+  private reveal(): void {
+    const el = this.containerEl as HTMLElement;
+    el.style.display = "";
+    el.style.visibility = "";
   }
 }
 

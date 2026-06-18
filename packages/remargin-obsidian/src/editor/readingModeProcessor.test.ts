@@ -376,6 +376,23 @@ describe("remarginPostProcessor", () => {
     assert.equal(ctx.__children.length, 0, "ctx.addChild must NOT be called");
   });
 
+  // Pre-hide must reserve layout height (visibility), not collapse the
+  // section (display:none) — a zero-height section stalls Obsidian's
+  // incremental reading-mode renderer.
+  it("test #5b: valid block → host pre-hidden via visibility, not display:none", () => {
+    const plugin = makePlugin(true);
+    const code = makeCode(VALID_BLOCK);
+    const el = makeEl([code]);
+    const ctx = makeCtx();
+    const processor = remarginPostProcessor(plugin as unknown as RemarginPlugin);
+
+    processor(el, ctx);
+
+    const host = createdHosts[0];
+    assert.equal(host.style.visibility, "hidden", "host must be pre-hidden via visibility");
+    assert.notEqual(host.style.display, "none", "host must NOT be collapsed via display:none");
+  });
+
   // AC: Multiple separate <pre> elements in the same DOM root are each
   // handled independently.
   it("test #5: two separate <pre> elements → both replaced; addChild fires twice", () => {
