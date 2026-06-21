@@ -10,6 +10,17 @@
   height: 100%;
 }
 
+/* The Live Preview CM6 widget host carries `remargin-container` ONLY for
+   Tailwind scoping (the `important: ".remargin-container"` config). It must
+   NOT take the full-height rule above, which is meant for the sidebar /
+   settings panes: in a CM6 block widget `height: 100%` resolves against the
+   editor, so the widget renders enormous — a huge scrollbar with nothing
+   below it, because CM6 can't lay out anything past a viewport-sized block.
+   The two-class selector outranks the rule above regardless of order. */
+.remargin-widget-host.remargin-container {
+  height: auto;
+}
+
 /* Scoped styles for markdown rendered inside sidebar comment content. */
 .remargin-markdown-content {
   font-size: 12px;
