@@ -5191,3 +5191,190 @@ fn mcp_tools_list_descriptor_text_matches_spec() {
         "reply descriptor must surface the smart auto-ack default; got: {reply_desc}",
     );
 }
+
+/// Text body of an MCP tool-error response.
+fn tool_error_text(response: &Value) -> String {
+    String::from(response["result"]["content"][0]["text"].as_str().unwrap())
+}
+
+/// Fetch the comment with `id` from a `comments` listing.
+fn fetch_comment(
+    system: &dyn os_shim::System,
+    base: &Path,
+    config: &ResolvedConfig,
+    id: &str,
+) -> Value {
+    let resp = call(
+        system,
+        base,
+        config,
+        &json!({
+            "jsonrpc": "2.0", "id": 99_i32, "method": "tools/call",
+            "params": { "name": "comments", "arguments": { "file": "doc.md" } }
+        }),
+    );
+    extract_tool_text(&resp)["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == id)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn reply_auto_ack_false_to_other_without_reason_is_rejected() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "reply", "arguments": {
+                "file": "doc.md", "parent_id": "aaa",
+                "content": "A reply.", "auto_ack": false
+            } }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let text = tool_error_text(&response);
+    assert!(text.contains("ack_skip_reason"), "got: {text}");
+    // Document was not mutated — only the original comment remains.
+    let parent = fetch_comment(&system, base, &config, "aaa");
+    assert!(parent["ack"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn reply_auto_ack_false_to_other_with_reason_succeeds_unacked() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "reply", "arguments": {
+                "file": "doc.md", "parent_id": "aaa",
+                "content": "A reply.", "auto_ack": false,
+                "ack_skip_reason": "deferring until the build is green"
+            } }
+        }),
+    );
+
+    assert!(!is_tool_error(&response));
+    // auto_ack:false honored — parent stays unacked.
+    let parent = fetch_comment(&system, base, &config, "aaa");
+    assert!(parent["ack"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn reply_auto_ack_false_to_own_comment_needs_no_reason() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // tester posts a root comment, then replies to it suppressing the ack.
+    let posted = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "comment", "arguments": {
+                "file": "doc.md", "content": "My own note."
+            } }
+        }),
+    );
+    let own_id = String::from(extract_tool_text(&posted)["id"].as_str().unwrap());
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 2_i32, "method": "tools/call",
+            "params": { "name": "reply", "arguments": {
+                "file": "doc.md", "parent_id": own_id,
+                "content": "Self reply.", "auto_ack": false
+            } }
+        }),
+    );
+
+    assert!(
+        !is_tool_error(&response),
+        "self-reply must not require a reason"
+    );
+}
+
+#[test]
+fn reply_with_smart_default_still_acks_parent() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "reply", "arguments": {
+                "file": "doc.md", "parent_id": "aaa", "content": "A reply."
+            } }
+        }),
+    );
+
+    assert!(!is_tool_error(&response));
+    // Smart default unchanged: replying to another author acks the parent.
+    let parent = fetch_comment(&system, base, &config, "aaa");
+    let ack = parent["ack"].as_array().unwrap();
+    assert_eq!(ack.len(), 1);
+    assert_eq!(ack[0]["author"], "tester");
+}
+
+#[test]
+fn batch_reply_auto_ack_false_without_reason_rejects_whole_batch() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "batch", "arguments": {
+                "file": "doc.md",
+                "operations": [
+                    { "content": "Standalone note." },
+                    { "content": "A reply.", "reply_to": "aaa", "auto_ack": false }
+                ]
+            } }
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    let text = tool_error_text(&response);
+    assert!(text.contains("ack_skip_reason"), "got: {text}");
+    // Atomic: nothing was written — only the original comment remains.
+    let listing = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 2_i32, "method": "tools/call",
+            "params": { "name": "comments", "arguments": { "file": "doc.md" } }
+        }),
+    );
+    let comments = extract_tool_text(&listing);
+    assert_eq!(comments["comments"].as_array().unwrap().len(), 1);
+}

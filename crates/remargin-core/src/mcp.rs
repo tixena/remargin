@@ -132,6 +132,27 @@ pub struct McpIdentityFlagRejected {
     pub tool: String,
 }
 
+/// Caller-owned scratch for [`build_plan_comment_request`]: the projected
+/// `ProjectCommentParams` borrows these, so they must outlive the request.
+/// `attach_refs` is kept separate (it borrows `attach_names`).
+struct PlanCommentStaging {
+    attach_names: Vec<String>,
+    position: InsertPosition,
+    reply_to_owned: Option<String>,
+    to_owned: Vec<String>,
+}
+
+impl Default for PlanCommentStaging {
+    fn default() -> Self {
+        Self {
+            attach_names: Vec::new(),
+            position: InsertPosition::Append,
+            reply_to_owned: None,
+            to_owned: Vec::new(),
+        }
+    }
+}
+
 impl McpIdentityFlagRejected {
     /// One-line plain-English summary.
     #[must_use]
@@ -246,7 +267,8 @@ fn desc_batch() -> ToolDesc {
                             "after_line": { "type": "integer" },
                             "after_comment": { "type": "string" },
                             "after_heading": { "type": "string", "description": "ATX heading path; resolved at write time. Mutually exclusive with after_line/after_comment." },
-                            "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." }
+                            "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." },
+                            "ack_skip_reason": { "type": "string", "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default." }
                         },
                         "required": ["content"]
                     },
@@ -302,6 +324,7 @@ fn desc_comment() -> ToolDesc {
                 },
                 "reply_to": { "type": "string", "description": "ID of the comment to reply to" },
                 "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." },
+                "ack_skip_reason": { "type": "string", "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default." },
                 "attachments": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -535,12 +558,13 @@ fn desc_plan() -> ToolDesc {
                     "description": "Attachment basenames to record on the projected comment. Bytes are NOT copied by plan."
                 },
                 "auto_ack": { "type": "boolean", "description": "For comment replies: auto-ack the parent. If omitted, the parent is auto-acked iff its author differs from the caller. Pass true to force the ack, false to skip it." },
+                "ack_skip_reason": { "type": "string", "description": "For comment/reply: required when auto_ack:false skips acking another author's comment. Mirrors the live reply gate." },
                 "sandbox": { "type": "boolean", "description": "For comment: atomically project a sandbox entry", "default": false },
                 "emoji": { "type": "string", "description": "Emoji for react op" },
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
                 "ops": {
                     "type": "array",
-                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, to.",
+                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, ack_skip_reason, to.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -551,6 +575,7 @@ fn desc_plan() -> ToolDesc {
                             "after_line": { "type": "integer" },
                             "attach_names": { "type": "array", "items": { "type": "string" } },
                             "auto_ack": { "type": "boolean" },
+                            "ack_skip_reason": { "type": "string" },
                             "to": { "type": "array", "items": { "type": "string" } }
                         },
                         "required": ["content"]
@@ -756,6 +781,10 @@ fn desc_reply() -> ToolDesc {
                 "auto_ack": {
                     "type": "boolean",
                     "description": "Force the smart default off. true = always ack the parent; false = never ack. Omit for the smart default: ack iff parent.author differs from caller."
+                },
+                "ack_skip_reason": {
+                    "type": "string",
+                    "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default."
                 },
                 "attachments": {
                     "type": "array",
@@ -1595,6 +1624,162 @@ fn handle_ack(
 }
 
 /// Handle the `batch` tool: create multiple comments atomically.
+/// MCP-only gate: a reply that explicitly opts out of acking *another author's*
+/// comment (`auto_ack: false`) must justify it via `ack_skip_reason`. The smart
+/// default and self-replies are exempt; the reason is validated, never stored.
+fn check_ack_skip_reason(
+    doc: &parser::ParsedDocument,
+    identity: &str,
+    parent_id: &str,
+    auto_ack: Option<bool>,
+    reason: Option<&str>,
+) -> Result<()> {
+    if auto_ack != Some(false) {
+        return Ok(());
+    }
+    let Some(parent) = doc.find_comment(parent_id) else {
+        return Ok(());
+    };
+    if parent.author == identity {
+        return Ok(());
+    }
+    if reason.is_none_or(|r| r.trim().is_empty()) {
+        bail!(
+            "reply to comment {parent_id:?} sets auto_ack:false; provide ack_skip_reason explaining why you are not acknowledging it"
+        );
+    }
+    Ok(())
+}
+
+/// Run [`check_ack_skip_reason`] over every reply op against a single file.
+/// `ops` is `(reply_to, auto_ack, ack_skip_reason)` per op. The document is
+/// parsed once, and only when at least one op opts out, so the common path
+/// stays free. Parse/identity failures defer to the live op's canonical error.
+fn enforce_ack_skip_reasons(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    file: &str,
+    ops: &[(Option<&str>, Option<bool>, Option<&str>)],
+) -> Result<()> {
+    if !ops.iter().any(|(_, auto_ack, _)| *auto_ack == Some(false)) {
+        return Ok(());
+    }
+    let Some(identity) = config.identity.as_deref() else {
+        return Ok(());
+    };
+    let path = base_dir.join(file);
+    let Ok(doc) = parser::parse_file(system, &path) else {
+        return Ok(());
+    };
+    for (reply_to, auto_ack, reason) in ops {
+        if let Some(parent_id) = reply_to {
+            check_ack_skip_reason(&doc, identity, parent_id, *auto_ack, *reason)?;
+        }
+    }
+    Ok(())
+}
+
+/// Single-op convenience over [`enforce_ack_skip_reasons`]: reads `auto_ack`
+/// and `ack_skip_reason` from `params` for one reply.
+fn gate_reply_ack(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    file: &str,
+    reply_to: Option<&str>,
+    params: &Map<String, Value>,
+) -> Result<()> {
+    enforce_ack_skip_reasons(
+        system,
+        base_dir,
+        config,
+        file,
+        &[(
+            reply_to,
+            optional_bool_opt(params, "auto_ack"),
+            optional_str(params, "ack_skip_reason"),
+        )],
+    )
+}
+
+/// Gate the `plan batch` projection exactly as the live `batch` tool, pulling
+/// each sub-op's `ack_skip_reason` from the raw `ops` array.
+fn enforce_plan_batch_ack_reasons(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    file: &str,
+    ops: &[projections::ProjectBatchOp],
+    params: &Map<String, Value>,
+) -> Result<()> {
+    let ack_gate: Vec<_> = ops
+        .iter()
+        .enumerate()
+        .map(|(idx, op)| {
+            let reason = params
+                .get("ops")
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.get(idx))
+                .and_then(Value::as_object)
+                .and_then(|obj| obj.get("ack_skip_reason"))
+                .and_then(Value::as_str);
+            (op.reply_to.as_deref(), op.auto_ack, reason)
+        })
+        .collect();
+    enforce_ack_skip_reasons(system, base_dir, config, file, &ack_gate)
+}
+
+/// Parse the `plan batch` sub-ops and apply the MCP ack-reason gate before they
+/// become a [`plan_ops::PlanRequest`].
+fn gated_plan_batch_ops(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    params: &Map<String, Value>,
+) -> Result<Vec<projections::ProjectBatchOp>> {
+    let file = required_str(params, "file")?;
+    let ops = parse_plan_batch_ops(params)?;
+    enforce_plan_batch_ack_reasons(system, base_dir, config, file, &ops, params)?;
+    Ok(ops)
+}
+
+/// Build the `plan comment` / `plan reply` request, applying the MCP ack-reason
+/// gate. Owns nothing — the borrowed staging values live in the caller.
+fn build_plan_comment_request<'plan>(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    op: &str,
+    params: &'plan Map<String, Value>,
+    staging: &'plan mut PlanCommentStaging,
+    attach_refs: &'plan mut Vec<&'plan str>,
+) -> Result<plan_ops::PlanRequest<'plan>> {
+    let file = required_str(params, "file")?;
+    let content = required_str(params, "content")?;
+    staging.to_owned = string_array(params, "to");
+    let parent = optional_str(params, "parent_id").or_else(|| optional_str(params, "reply_to"));
+    if op == "reply" && parent.is_none() {
+        bail!("plan reply: `parent_id` is required");
+    }
+    staging.reply_to_owned = parent.map(String::from);
+    let reply_to = staging.reply_to_owned.as_deref();
+    gate_reply_ack(system, base_dir, config, file, reply_to, params)?;
+    staging.attach_names = string_array(params, "attach_names");
+    staging.position = resolve_insert_position(params, staging.reply_to_owned.as_deref());
+    *attach_refs = staging.attach_names.iter().map(String::as_str).collect();
+    let project_params = projections::ProjectCommentParams::new(content, &staging.position)
+        .with_attachment_filenames(attach_refs)
+        .with_auto_ack(optional_bool_opt(params, "auto_ack"))
+        .with_reply_to(staging.reply_to_owned.as_deref())
+        .with_sandbox(optional_bool(params, "sandbox"))
+        .with_to(&staging.to_owned);
+    Ok(plan_ops::PlanRequest::Comment {
+        path: base_dir.join(file),
+        params: project_params,
+    })
+}
+
 fn handle_batch(
     system: &dyn System,
     base_dir: &Path,
@@ -1615,6 +1800,20 @@ fn handle_batch(
             .with_context(|| format!("batch op[{idx}]: expected object"))?;
         batch_ops.push(BatchCommentOp::from_json_object(op_obj, idx)?);
     }
+
+    let ack_gate: Vec<_> = batch_ops
+        .iter()
+        .enumerate()
+        .map(|(idx, op)| {
+            let reason = ops_value
+                .get(idx)
+                .and_then(Value::as_object)
+                .and_then(|obj| obj.get("ack_skip_reason"))
+                .and_then(Value::as_str);
+            (op.reply_to.as_deref(), op.auto_ack, reason)
+        })
+        .collect();
+    enforce_ack_skip_reasons(system, base_dir, cfg, file, &ack_gate)?;
 
     let path = base_dir.join(file);
     let ids = operations::batch::batch_comment(system, &path, cfg, &batch_ops)?;
@@ -1650,6 +1849,7 @@ fn handle_comment(
     let position = resolve_insert_position(params, reply_to.as_deref());
 
     let auto_ack = optional_bool_opt(params, "auto_ack");
+    gate_reply_ack(system, base_dir, cfg, file, reply_to.as_deref(), params)?;
 
     let sandbox = optional_bool(params, "sandbox");
     let create_params = operations::CreateCommentParams {
@@ -1912,14 +2112,10 @@ fn handle_plan(
     let op = required_str(params, "op")?;
     let cfg = config;
 
-    // `comment` needs an owned `InsertPosition` + attach refs that outlive
-    // the `ProjectCommentParams` it feeds into — we stage them here so the
-    // borrow survives long enough for the dispatch call below.
-    let reply_to_owned;
-    let to_owned;
-    let attach_names;
-    let attach_refs: Vec<&str>;
-    let position;
+    // `comment` stages owned values (position, attach refs, …) that the
+    // projected `ProjectCommentParams` borrows — they must outlive dispatch.
+    let mut staging = PlanCommentStaging::default();
+    let mut attach_refs: Vec<&str> = Vec::new();
 
     let request = match op {
         "ack" => plan_ops::PlanRequest::Ack {
@@ -1927,32 +2123,15 @@ fn handle_plan(
             ids: string_array(params, "ids"),
             remove: optional_bool(params, "remove"),
         },
-        "comment" | "reply" => {
-            let file = required_str(params, "file")?;
-            let content = required_str(params, "content")?;
-            to_owned = string_array(params, "to");
-            // `reply` requires `parent_id` (or accepts a `reply_to` alias).
-            // `comment` accepts `reply_to` for an optional thread parent.
-            let parent =
-                optional_str(params, "parent_id").or_else(|| optional_str(params, "reply_to"));
-            if op == "reply" && parent.is_none() {
-                bail!("plan reply: `parent_id` is required");
-            }
-            reply_to_owned = parent.map(String::from);
-            attach_names = string_array(params, "attach_names");
-            attach_refs = attach_names.iter().map(String::as_str).collect();
-            position = resolve_insert_position(params, reply_to_owned.as_deref());
-            let project_params = projections::ProjectCommentParams::new(content, &position)
-                .with_attachment_filenames(&attach_refs)
-                .with_auto_ack(optional_bool_opt(params, "auto_ack"))
-                .with_reply_to(reply_to_owned.as_deref())
-                .with_sandbox(optional_bool(params, "sandbox"))
-                .with_to(&to_owned);
-            plan_ops::PlanRequest::Comment {
-                path: base_dir.join(file),
-                params: project_params,
-            }
-        }
+        "comment" | "reply" => build_plan_comment_request(
+            system,
+            base_dir,
+            cfg,
+            op,
+            params,
+            &mut staging,
+            &mut attach_refs,
+        )?,
         "delete" => plan_ops::PlanRequest::Delete {
             path: base_dir.join(required_str(params, "file")?),
             ids: string_array(params, "ids"),
@@ -1970,7 +2149,7 @@ fn handle_plan(
         },
         "batch" => plan_ops::PlanRequest::Batch {
             path: base_dir.join(required_str(params, "file")?),
-            ops: parse_plan_batch_ops(params)?,
+            ops: gated_plan_batch_ops(system, base_dir, cfg, params)?,
         },
         "cp" => {
             let (src, dst, force) = parse_plan_src_dst(params)?;
