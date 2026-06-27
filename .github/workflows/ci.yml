@@ -1,0 +1,230 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        components: clippy, rustfmt
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+        run_install: false
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: pnpm
+        cache-dependency-path: packages/pnpm-lock.yaml
+
+    - name: Install just
+      uses: taiki-e/install-action@v2
+      with:
+        tool: just
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install pnpm dependencies
+      working-directory: packages
+      run: pnpm install --frozen-lockfile
+
+    # The steps below run the equivalent of `just all`
+    # (generate-types -> lint -> build -> test), split into separate steps so
+    # the Discord notification can report which stage failed.
+
+    - name: Generate types
+      id: generate
+      run: |
+        echo "🧬 Generating TypeScript types + Zod schemas..."
+        just generate-types
+
+    - name: Lint (Rust + TypeScript)
+      id: check
+      run: |
+        echo "🔍 Linting (clippy + fmt + biome + tsc)..."
+        just lint
+
+    - name: Build (Rust + TypeScript)
+      id: build
+      run: |
+        echo "🏗️ Building..."
+        just build
+
+    - name: Run tests
+      id: test
+      run: |
+        echo "🧪 Running tests..."
+        just test
+
+    - name: Send Discord notification
+      if: always()
+      run: |
+        # Validate repository to prevent forks from sending notifications
+        if [[ "${{ github.repository }}" != "tixena/remargin" ]]; then
+          echo "⏭️ Skipping Discord notification (repository is ${{ github.repository }}, not tixena/remargin)"
+          exit 0
+        fi
+
+        # Determine overall job status
+        JOB_STATUS="success"
+        if [[ "${{ steps.generate.outcome }}" == "failure" || "${{ steps.check.outcome }}" == "failure" || "${{ steps.build.outcome }}" == "failure" || "${{ steps.test.outcome }}" == "failure" ]]; then
+          JOB_STATUS="failure"
+        fi
+
+        # Determine which step failed (if any)
+        FAILED_STEP="None"
+        if [[ "${{ steps.generate.outcome }}" == "failure" ]]; then
+          FAILED_STEP="Generate types (just generate-types)"
+        elif [[ "${{ steps.check.outcome }}" == "failure" ]]; then
+          FAILED_STEP="Lint (just lint)"
+        elif [[ "${{ steps.build.outcome }}" == "failure" ]]; then
+          FAILED_STEP="Build (just build)"
+        elif [[ "${{ steps.test.outcome }}" == "failure" ]]; then
+          FAILED_STEP="Tests (just test)"
+        fi
+
+        # Create status indicators
+        GENERATE_STATUS="${{ steps.generate.outcome == 'success' && '✅' || steps.generate.outcome == 'failure' && '❌' || '⏭️' }}"
+        CHECK_STATUS="${{ steps.check.outcome == 'success' && '✅' || steps.check.outcome == 'failure' && '❌' || '⏭️' }}"
+        BUILD_STATUS="${{ steps.build.outcome == 'success' && '✅' || steps.build.outcome == 'failure' && '❌' || '⏭️' }}"
+        TEST_STATUS="${{ steps.test.outcome == 'success' && '✅' || steps.test.outcome == 'failure' && '❌' || '⏭️' }}"
+
+        # Prepare JSON payload based on job status
+        if [[ "$JOB_STATUS" == "success" ]]; then
+          JSON_PAYLOAD='{
+            "embeds": [{
+              "title": "✅ CI Pipeline Success",
+              "description": "All checks passed successfully!",
+              "color": 3066993,
+              "fields": [
+                {
+                  "name": "Repository",
+                  "value": "${{ github.repository }}",
+                  "inline": true
+                },
+                {
+                  "name": "Branch",
+                  "value": "${{ github.ref_name }}",
+                  "inline": true
+                },
+                {
+                  "name": "Commit",
+                  "value": "[`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})",
+                  "inline": true
+                },
+                {
+                  "name": "Build Status",
+                  "value": "🧬 Generate: '"$GENERATE_STATUS"'\n🔍 Lint: '"$CHECK_STATUS"'\n🏗️ Build: '"$BUILD_STATUS"'\n🧪 Tests: '"$TEST_STATUS"'",
+                  "inline": false
+                }
+              ],
+              "footer": {
+                "text": "Remargin CI"
+              },
+              "timestamp": "${{ github.event.head_commit.timestamp }}"
+            }],
+            "components": [{
+              "type": 1,
+              "components": [{
+                "type": 2,
+                "style": 5,
+                "label": "View Build",
+                "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }]
+            }]
+          }'
+        else
+          JSON_PAYLOAD='{
+            "embeds": [{
+              "title": "❌ CI Pipeline Failed",
+              "description": "Build or tests failed!",
+              "color": 15158332,
+              "fields": [
+                {
+                  "name": "Repository",
+                  "value": "${{ github.repository }}",
+                  "inline": true
+                },
+                {
+                  "name": "Branch",
+                  "value": "${{ github.ref_name }}",
+                  "inline": true
+                },
+                {
+                  "name": "Commit",
+                  "value": "[`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})",
+                  "inline": true
+                },
+                {
+                  "name": "Failed Step",
+                  "value": "'"$FAILED_STEP"'",
+                  "inline": false
+                },
+                {
+                  "name": "Build Status",
+                  "value": "🧬 Generate: '"$GENERATE_STATUS"'\n🔍 Lint: '"$CHECK_STATUS"'\n🏗️ Build: '"$BUILD_STATUS"'\n🧪 Tests: '"$TEST_STATUS"'",
+                  "inline": false
+                }
+              ],
+              "footer": {
+                "text": "Remargin CI"
+              },
+              "timestamp": "${{ github.event.head_commit.timestamp }}"
+            }],
+            "components": [{
+              "type": 1,
+              "components": [{
+                "type": 2,
+                "style": 4,
+                "label": "View Failed Build",
+                "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }]
+            }]
+          }'
+        fi
+
+        # Send Discord webhook with error handling
+        echo "Sending Discord notification..."
+        echo "Job Status: $JOB_STATUS"
+        echo "Failed Step: $FAILED_STEP"
+
+        RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$DISCORD_WEBHOOK")
+
+        # Extract HTTP status code
+        HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+
+        if [[ $HTTP_STATUS -eq 200 || $HTTP_STATUS -eq 204 ]]; then
+          echo "✅ Discord notification sent successfully (HTTP $HTTP_STATUS)"
+        else
+          echo "❌ Discord notification failed (HTTP $HTTP_STATUS)"
+          echo "Response: $RESPONSE"
+        fi
