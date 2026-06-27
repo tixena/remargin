@@ -87,140 +87,106 @@ jobs:
 
     - name: Send Discord notification
       if: always()
+      # All GitHub context is passed via env (NOT interpolated into the script
+      # body) so attacker-controllable strings like commit messages cannot break
+      # the JSON or inject shell. The payload is assembled with jq, which escapes
+      # everything safely.
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        PUSH_MSG: ${{ github.event.head_commit.message }}
+        PUSH_AUTHOR: ${{ github.event.head_commit.author.name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        ACTOR: ${{ github.actor }}
+        SERVER_URL: ${{ github.server_url }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+        GEN: ${{ steps.generate.outcome }}
+        CHK: ${{ steps.check.outcome }}
+        BLD: ${{ steps.build.outcome }}
+        TST: ${{ steps.test.outcome }}
       run: |
         # Validate repository to prevent forks from sending notifications
-        if [[ "${{ github.repository }}" != "tixena/remargin" ]]; then
-          echo "⏭️ Skipping Discord notification (repository is ${{ github.repository }}, not tixena/remargin)"
+        if [[ "$REPO" != "tixena/remargin" ]]; then
+          echo "⏭️ Skipping Discord notification (repository is $REPO, not tixena/remargin)"
           exit 0
         fi
 
-        # Determine overall job status
+        # Overall status + which step failed
         JOB_STATUS="success"
-        if [[ "${{ steps.generate.outcome }}" == "failure" || "${{ steps.check.outcome }}" == "failure" || "${{ steps.build.outcome }}" == "failure" || "${{ steps.test.outcome }}" == "failure" ]]; then
-          JOB_STATUS="failure"
-        fi
-
-        # Determine which step failed (if any)
         FAILED_STEP="None"
-        if [[ "${{ steps.generate.outcome }}" == "failure" ]]; then
-          FAILED_STEP="Generate types (just generate-types)"
-        elif [[ "${{ steps.check.outcome }}" == "failure" ]]; then
-          FAILED_STEP="Lint (just lint)"
-        elif [[ "${{ steps.build.outcome }}" == "failure" ]]; then
-          FAILED_STEP="Build (just build)"
-        elif [[ "${{ steps.test.outcome }}" == "failure" ]]; then
-          FAILED_STEP="Tests (just test)"
+        if [[ "$GEN" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Generate types (just generate-types)";
+        elif [[ "$CHK" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Lint (just lint)";
+        elif [[ "$BLD" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Build (just build)";
+        elif [[ "$TST" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Tests (just test)";
         fi
 
-        # Create status indicators
-        GENERATE_STATUS="${{ steps.generate.outcome == 'success' && '✅' || steps.generate.outcome == 'failure' && '❌' || '⏭️' }}"
-        CHECK_STATUS="${{ steps.check.outcome == 'success' && '✅' || steps.check.outcome == 'failure' && '❌' || '⏭️' }}"
-        BUILD_STATUS="${{ steps.build.outcome == 'success' && '✅' || steps.build.outcome == 'failure' && '❌' || '⏭️' }}"
-        TEST_STATUS="${{ steps.test.outcome == 'success' && '✅' || steps.test.outcome == 'failure' && '❌' || '⏭️' }}"
+        icon() { case "$1" in success) printf '✅';; failure) printf '❌';; *) printf '⏭️';; esac; }
+        STATUS_VALUE=$(printf '🧬 Generate: %s\n🔍 Lint: %s\n🏗️ Build: %s\n🧪 Tests: %s' \
+          "$(icon "$GEN")" "$(icon "$CHK")" "$(icon "$BLD")" "$(icon "$TST")")
 
-        # Prepare JSON payload based on job status
-        if [[ "$JOB_STATUS" == "success" ]]; then
-          JSON_PAYLOAD='{
-            "embeds": [{
-              "title": "✅ CI Pipeline Success",
-              "description": "All checks passed successfully!",
-              "color": 3066993,
-              "fields": [
-                {
-                  "name": "Repository",
-                  "value": "${{ github.repository }}",
-                  "inline": true
-                },
-                {
-                  "name": "Branch",
-                  "value": "${{ github.ref_name }}",
-                  "inline": true
-                },
-                {
-                  "name": "Commit",
-                  "value": "[`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})",
-                  "inline": true
-                },
-                {
-                  "name": "Build Status",
-                  "value": "🧬 Generate: '"$GENERATE_STATUS"'\n🔍 Lint: '"$CHECK_STATUS"'\n🏗️ Build: '"$BUILD_STATUS"'\n🧪 Tests: '"$TEST_STATUS"'",
-                  "inline": false
-                }
-              ],
-              "footer": {
-                "text": "Remargin CI"
-              },
-              "timestamp": "${{ github.event.head_commit.timestamp }}"
-            }],
-            "components": [{
-              "type": 1,
-              "components": [{
-                "type": 2,
-                "style": 5,
-                "label": "View Build",
-                "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              }]
-            }]
-          }'
+        # Per-event details: commit message / author / PR link
+        if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          COMMIT_MSG="$PR_TITLE"
+          AUTHOR="${PR_AUTHOR:-$ACTOR}"
+          PR_MD="[#${PR_NUMBER}: ${PR_TITLE}](${PR_URL})"
         else
-          JSON_PAYLOAD='{
-            "embeds": [{
-              "title": "❌ CI Pipeline Failed",
-              "description": "Build or tests failed!",
-              "color": 15158332,
-              "fields": [
-                {
-                  "name": "Repository",
-                  "value": "${{ github.repository }}",
-                  "inline": true
-                },
-                {
-                  "name": "Branch",
-                  "value": "${{ github.ref_name }}",
-                  "inline": true
-                },
-                {
-                  "name": "Commit",
-                  "value": "[`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})",
-                  "inline": true
-                },
-                {
-                  "name": "Failed Step",
-                  "value": "'"$FAILED_STEP"'",
-                  "inline": false
-                },
-                {
-                  "name": "Build Status",
-                  "value": "🧬 Generate: '"$GENERATE_STATUS"'\n🔍 Lint: '"$CHECK_STATUS"'\n🏗️ Build: '"$BUILD_STATUS"'\n🧪 Tests: '"$TEST_STATUS"'",
-                  "inline": false
-                }
-              ],
-              "footer": {
-                "text": "Remargin CI"
-              },
-              "timestamp": "${{ github.event.head_commit.timestamp }}"
-            }],
-            "components": [{
-              "type": 1,
-              "components": [{
-                "type": 2,
-                "style": 4,
-                "label": "View Failed Build",
-                "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              }]
-            }]
-          }'
+          COMMIT_MSG=$(printf '%s' "$PUSH_MSG" | head -n1)
+          AUTHOR="${PUSH_AUTHOR:-$ACTOR}"
+          PR_MD=""
+        fi
+        [[ -z "$COMMIT_MSG" ]] && COMMIT_MSG="(no message)"
+        SHORT_SHA="${COMMIT_SHA:0:7}"
+        COMMIT_MD="[\`${SHORT_SHA}\`](${SERVER_URL}/${REPO}/commit/${COMMIT_SHA})"
+
+        if [[ "$JOB_STATUS" == "success" ]]; then
+          TITLE="✅ CI Pipeline Success"; DESC="All checks passed successfully!"; COLOR=3066993; BTN_STYLE=5; BTN_LABEL="View Build"
+        else
+          TITLE="❌ CI Pipeline Failed"; DESC="Build or tests failed!"; COLOR=15158332; BTN_STYLE=4; BTN_LABEL="View Failed Build"
         fi
 
-        # Send Discord webhook with error handling
+        # Assemble the payload with jq (safe escaping of all dynamic strings)
+        PAYLOAD=$(jq -n \
+          --arg title "$TITLE" --arg desc "$DESC" --argjson color "$COLOR" \
+          --arg repo "$REPO" --arg branch "$BRANCH" --arg author "$AUTHOR" \
+          --arg commit "$COMMIT_MD" --arg msg "$COMMIT_MSG" \
+          --arg pr "$PR_MD" --arg failed "$FAILED_STEP" --arg status "$STATUS_VALUE" \
+          --arg ts "$TIMESTAMP" \
+          --arg run_url "$RUN_URL" --argjson btn_style "$BTN_STYLE" --arg btn_label "$BTN_LABEL" \
+          '{
+            embeds: [
+              ({
+                title: $title,
+                description: $desc,
+                color: $color,
+                fields: (
+                  [ {name: "Repository", value: $repo, inline: true},
+                    {name: "Branch", value: $branch, inline: true},
+                    {name: "Author", value: $author, inline: true},
+                    {name: "Commit", value: ($commit + "  " + $msg), inline: false} ]
+                  + (if $pr != "" then [ {name: "Pull Request", value: $pr, inline: false} ] else [] end)
+                  + (if $failed != "None" then [ {name: "Failed Step", value: $failed, inline: false} ] else [] end)
+                  + [ {name: "Build Status", value: $status, inline: false} ]
+                ),
+                footer: {text: "Remargin CI"}
+              } + (if $ts != "" then {timestamp: $ts} else {} end))
+            ],
+            components: [
+              {type: 1, components: [ {type: 2, style: $btn_style, label: $btn_label, url: $run_url} ]}
+            ]
+          }')
+
         echo "Sending Discord notification..."
         echo "Job Status: $JOB_STATUS"
         echo "Failed Step: $FAILED_STEP"
 
-        RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$DISCORD_WEBHOOK")
-
-        # Extract HTTP status code
-        HTTP_STATUS=$(echo $RESPONSE | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
+        RESPONSE=$(curl -s -w "HTTPSTATUS:%{http_code}" -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK")
+        HTTP_STATUS=$(echo "$RESPONSE" | tr -d '\n' | sed -e 's/.*HTTPSTATUS://')
 
         if [[ $HTTP_STATUS -eq 200 || $HTTP_STATUS -eq 204 ]]; then
           echo "✅ Discord notification sent successfully (HTTP $HTTP_STATUS)"
