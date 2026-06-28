@@ -238,6 +238,10 @@ Three exclusive branches — pick exactly one:
 
 **Default**: don't declare anything. The walked `.remargin.yaml` resolves your identity. Per-call declaration of someone else's identity is impersonation.
 
+### Q: Whose identity do I put in `to:` so the right person sees it?
+
+The human user's remargin identity is most likely defined at `~/.remargin.yaml` (`type: human`) and is the same across every repo/realm on this machine; use that identity in the `to:` field when a comment needs the human to see it in their pending queue. The agent identity is realm-specific — get the active one from `whoami`.
+
 ### Q: A user asked to "show comments" / "what's pending" — what do I return?
 
 Run the CLI with `--pretty` on `comments` or `query`, then **paste the full output verbatim into your text response.** The pretty threaded display is CLI-only — the MCP `comments`/`query` tools return JSON. MCP results are not visible to the user; calling the tool alone is not enough. Do not paraphrase or summarize.

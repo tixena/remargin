@@ -1,0 +1,8 @@
+# cargo-audit configuration. Picked up automatically by `cargo audit` when run
+# from the repo root (see `just audit` and CI).
+[advisories]
+# RUSTSEC-2023-0071 (rsa "Marvin Attack" timing sidechannel, medium 5.9): no
+# upstream fix exists. `rsa` is only an optional, unenabled feature of ssh-key,
+# so it is never compiled into remargin (`cargo tree -i rsa` finds nothing); it
+# sits in Cargo.lock only. Suppress until a fixed rsa release lands.
+ignore = ["RUSTSEC-2023-0071"]

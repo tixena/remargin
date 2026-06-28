@@ -85,6 +85,17 @@ jobs:
         echo "🧪 Running tests..."
         just test
 
+    - name: Install cargo-audit
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-audit
+
+    - name: Audit dependencies
+      id: audit
+      run: |
+        echo "🔒 Auditing dependencies (cargo audit)..."
+        just audit
+
     - name: Send Discord notification
       if: always()
       # All GitHub context is passed via env (NOT interpolated into the script
@@ -110,6 +121,7 @@ jobs:
         CHK: ${{ steps.check.outcome }}
         BLD: ${{ steps.build.outcome }}
         TST: ${{ steps.test.outcome }}
+        AUD: ${{ steps.audit.outcome }}
       run: |
         # Validate repository to prevent forks from sending notifications
         if [[ "$REPO" != "tixena/remargin" ]]; then
@@ -124,11 +136,12 @@ jobs:
         elif [[ "$CHK" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Lint (just lint)";
         elif [[ "$BLD" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Build (just build)";
         elif [[ "$TST" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Tests (just test)";
+        elif [[ "$AUD" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Audit (just audit)";
         fi
 
         icon() { case "$1" in success) printf '✅';; failure) printf '❌';; *) printf '⏭️';; esac; }
-        STATUS_VALUE=$(printf '🧬 Generate: %s\n🔍 Lint: %s\n🏗️ Build: %s\n🧪 Tests: %s' \
-          "$(icon "$GEN")" "$(icon "$CHK")" "$(icon "$BLD")" "$(icon "$TST")")
+        STATUS_VALUE=$(printf '🧬 Generate: %s\n🔍 Lint: %s\n🏗️ Build: %s\n🧪 Tests: %s\n🔒 Audit: %s' \
+          "$(icon "$GEN")" "$(icon "$CHK")" "$(icon "$BLD")" "$(icon "$TST")" "$(icon "$AUD")")
 
         # Per-event details: commit message / author / PR link
         if [[ "$EVENT_NAME" == "pull_request" ]]; then
