@@ -114,52 +114,6 @@
   margin: 4px 0;
 }
 
-/* Mermaid readability — scoped to comment markdown only so we never
-   touch diagrams elsewhere in the vault. Obsidian renders Mermaid with
-   its own theme, which yields thin, low-contrast edges and floating edge
-   labels that wash out in dark mode. We thicken strokes, raise node
-   border contrast, and drop a tinted chip behind edge labels using
-   Obsidian theme vars so the result tracks both light and dark themes.
-   `!important` is required: Mermaid paints strokes via inline styles and
-   an inlined <style> block, which a plain selector cannot outrank. */
-.remargin-markdown-content .mermaid svg .edgePath .path,
-.remargin-markdown-content .mermaid svg .flowchart-link {
-  stroke: var(--text-normal) !important;
-  stroke-width: 2px !important;
-}
-
-.remargin-markdown-content .mermaid svg .node rect,
-.remargin-markdown-content .mermaid svg .node circle,
-.remargin-markdown-content .mermaid svg .node ellipse,
-.remargin-markdown-content .mermaid svg .node polygon,
-.remargin-markdown-content .mermaid svg .node path {
-  stroke: var(--text-normal) !important;
-  stroke-width: 1.5px !important;
-}
-
-.remargin-markdown-content .mermaid svg .marker,
-.remargin-markdown-content .mermaid svg marker path {
-  fill: var(--text-normal) !important;
-  stroke: var(--text-normal) !important;
-}
-
-/* Edge labels: the readability win is the chip behind the text. The
-   foreignObject span carries the text; the sibling rect/`.labelBkg` is
-   Mermaid's background plate. Tint both so labels stay legible where an
-   edge passes behind them. */
-.remargin-markdown-content .mermaid svg .edgeLabel,
-.remargin-markdown-content .mermaid svg .edgeLabel p {
-  color: var(--text-normal) !important;
-  background-color: var(--background-primary) !important;
-  border-radius: 3px;
-}
-
-.remargin-markdown-content .mermaid svg .edgeLabel rect,
-.remargin-markdown-content .mermaid svg .edgeLabel .labelBkg {
-  fill: var(--background-primary) !important;
-  opacity: 0.85 !important;
-}
-
 /* ----------------------------------------------------------------------
  * Pretty-print foundation (T36): widget-side classes consumed by the
  * editor surfaces shipped in T37 (reading mode) and T38 (Live Preview).
