@@ -145,24 +145,6 @@
   background-color: var(--background-primary-alt);
 }
 
-/* In the editor widget the table sits inside Obsidian's editor DOM, whose
-   table styles outrank our single-class selectors — re-assert ours under
-   the widget host so the widget table matches the sidebar. */
-.remargin-widget-host .remargin-markdown-content th,
-.remargin-widget-host .remargin-markdown-content td {
-  border: 1px solid var(--background-modifier-border);
-  padding: 4px 8px;
-}
-
-.remargin-widget-host .remargin-markdown-content th {
-  background-color: var(--background-secondary-alt);
-  border-bottom: 2px solid var(--background-modifier-border);
-}
-
-.remargin-widget-host .remargin-markdown-content tbody tr:nth-child(even) td {
-  background-color: var(--background-primary-alt);
-}
-
 /* ----------------------------------------------------------------------
  * Pretty-print foundation (T36): widget-side classes consumed by the
  * editor surfaces shipped in T37 (reading mode) and T38 (Live Preview).
