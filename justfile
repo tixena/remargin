@@ -38,6 +38,10 @@ build-cli-obsidian:
 test:
     cargo test
 
+# Audit dependencies for security advisories.
+audit:
+    cargo audit
+
 # Full pipeline: generate types, lint everything, build everything, run tests.
 all: generate-types lint build test
 

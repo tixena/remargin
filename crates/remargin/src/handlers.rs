@@ -38,6 +38,7 @@ use crate::{
 use remargin_core::activity;
 use remargin_core::config::identity::{IdentityFlags, resolve_identity_report};
 use remargin_core::config::{self, ResolvedConfig};
+use remargin_core::crypto;
 use remargin_core::display;
 use remargin_core::document;
 use remargin_core::document::get_image as image_ops;
@@ -1110,19 +1111,7 @@ pub fn cmd_resolve_mode(
 }
 
 pub fn cmd_keygen(sinks: &mut IoSinks<'_>, system: &dyn System, output: &Path) -> Result<()> {
-    use ssh_key::{Algorithm, LineEnding, PrivateKey, rand_core::OsRng};
-
-    let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
-        .map_err(|err| anyhow::anyhow!("key generation failed: {err}"))?;
-
-    let private_pem = private_key
-        .to_openssh(LineEnding::LF)
-        .map_err(|err| anyhow::anyhow!("encoding private key: {err}"))?;
-
-    let public_key = private_key.public_key();
-    let public_openssh = public_key
-        .to_openssh()
-        .map_err(|err| anyhow::anyhow!("encoding public key: {err}"))?;
+    let (private_pem, public_openssh) = crypto::generate_keypair("remargin");
 
     system
         .write(output, private_pem.as_bytes())

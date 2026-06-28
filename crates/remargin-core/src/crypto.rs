@@ -1,6 +1,7 @@
 //! Checksum (SHA-256) and signature (Ed25519) operations.
 
 mod hex;
+mod ssh;
 
 #[cfg(test)]
 mod tests;
@@ -13,8 +14,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
 use sha2::{Digest as _, Sha256};
-use ssh_key::{HashAlg, PrivateKey, PublicKey};
 
+use crate::crypto::ssh::{PrivateKey, PublicKey, SshSig};
 use crate::kind::canonical_kinds;
 use crate::parser::Comment;
 use crate::reactions::{Reactions, ReactionsExt as _};
@@ -108,16 +109,23 @@ pub fn compute_signature(
         .map_err(|err| anyhow::anyhow!("failed to parse private key: {err}"))?;
 
     let payload = signature_payload(comment);
-    let ssh_sig = private_key
-        .sign(SIGNATURE_NAMESPACE, HashAlg::Sha256, payload.as_bytes())
-        .map_err(|err| anyhow::anyhow!("signing failed: {err}"))?;
-
-    let pem = ssh_sig
-        .to_pem(ssh_key::LineEnding::LF)
-        .map_err(|err| anyhow::anyhow!("PEM encoding failed: {err}"))?;
+    let pem = private_key.sign(SIGNATURE_NAMESPACE, payload.as_bytes());
 
     let encoded = BASE64_STANDARD.encode(pem.as_bytes());
     Ok(format!("ed25519:{encoded}"))
+}
+
+/// Generates a fresh Ed25519 keypair.
+///
+/// Returns `(private_openssh, public_openssh)` where the private key is
+/// an unencrypted `openssh-key-v1` PEM and the public key is an
+/// `ssh-ed25519 <base64>` line — both accepted by `ssh-keygen`.
+#[must_use]
+pub fn generate_keypair(comment: &str) -> (String, String) {
+    let private_key = PrivateKey::generate();
+    let private_openssh = private_key.to_openssh(comment);
+    let public_openssh = private_key.public_key().to_openssh();
+    (private_openssh, public_openssh)
 }
 
 #[must_use]
@@ -149,7 +157,7 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
         .context("base64 decoding of signature failed")?;
     let pem_str = String::from_utf8(pem_bytes).context("signature PEM is not valid UTF-8")?;
 
-    let ssh_sig = ssh_key::SshSig::from_pem(&pem_str)
+    let ssh_sig = SshSig::from_pem(&pem_str)
         .map_err(|err| anyhow::anyhow!("failed to parse signature PEM: {err}"))?;
 
     let public_key = PublicKey::from_openssh(public_key_str)
@@ -157,10 +165,9 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
 
     let payload = signature_payload(comment);
 
-    match public_key.verify(SIGNATURE_NAMESPACE, payload.as_bytes(), &ssh_sig) {
-        Ok(()) => Ok(true),
-        Err(_) => Ok(false),
-    }
+    public_key
+        .verify(SIGNATURE_NAMESPACE, payload.as_bytes(), &ssh_sig)
+        .or(Ok(false))
 }
 
 /// Canonical payload for signing/verification.

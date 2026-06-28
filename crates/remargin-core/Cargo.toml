@@ -32,7 +32,8 @@ tixschema.workspace = true
 
 # Cryptography (checksums, signatures)
 sha2.workspace = true
-ssh-key.workspace = true
+ed25519-dalek.workspace = true
+rand_core.workspace = true
 base64.workspace = true
 
 # Error handling
