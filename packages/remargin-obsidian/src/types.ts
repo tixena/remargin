@@ -40,7 +40,7 @@ export interface RemarginSettings {
    * Single global font-scale multiplier for rendered comment markdown,
    * shared by the sidebar and the in-editor widget. Applied as the
    * `--remargin-md-scale` CSS var; the markdown container's base
-   * font-size is `calc(var(--remargin-md-scale) * 13px)` and every child
+   * font-size is `calc(var(--remargin-md-scale) * 15.6px)` and every child
    * font rule is `em`-relative, so this one knob scales the whole tree.
    */
   markdownScale: number;

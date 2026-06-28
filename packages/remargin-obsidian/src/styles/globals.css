@@ -27,7 +27,7 @@
  * editor widgets). The base size below is the only px anchor; all child
  * font rules are `em`-relative so this one var scales the whole tree. */
 .remargin-markdown-content {
-  font-size: calc(var(--remargin-md-scale, 1) * 13px);
+  font-size: calc(var(--remargin-md-scale, 1) * 15.6px);
   line-height: 1.5;
   color: var(--text-normal);
   word-break: break-word;
@@ -112,6 +112,35 @@
 
 .remargin-markdown-content hr {
   margin: 4px 0;
+}
+
+/* Tables: explicit rules so the sidebar pane renders them as tables —
+   Obsidian's reading-mode table styles only cascade inside the editor
+   DOM (the widget), not the custom sidebar view, so without these the
+   sidebar shows bare unstyled cells. Even-row tint adds zebra striping
+   on both surfaces. */
+.remargin-markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 6px 0;
+  font-size: 0.9em;
+}
+
+.remargin-markdown-content th,
+.remargin-markdown-content td {
+  border: 1px solid var(--background-modifier-border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.remargin-markdown-content th {
+  background-color: var(--background-secondary);
+  font-weight: 600;
+}
+
+.remargin-markdown-content tbody tr:nth-child(even) td {
+  background-color: var(--background-primary-alt);
 }
 
 /* ----------------------------------------------------------------------
