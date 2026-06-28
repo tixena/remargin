@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import type RemarginPlugin from "@/main";
 import type { RemarginFocusDetail } from "@/main";
 import { FilePathHeader } from "./FilePathHeader";
+import { FontScaleControl } from "./FontScaleControl";
 import { focusCardInRoot } from "./focusCard";
 import { SectionHeader } from "./SectionHeader";
 
@@ -190,31 +191,34 @@ export function SidebarShell({
             <ObsidianIcon icon="refresh-cw" size={12} />
           </button>
         </div>
-        <button
-          type="button"
-          onClick={onPlusClick}
-          aria-label="New comment at cursor"
-          title="New comment at cursor"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            height: 28,
-            padding: "0 12px",
-            borderRadius: 6,
-            border: "none",
-            cursor: "pointer",
-            backgroundColor: "var(--interactive-accent)",
-            color: "var(--text-on-accent)",
-            fontSize: 12,
-            fontWeight: 600,
-            gap: 4,
-            flexShrink: 0,
-          }}
-        >
-          <ObsidianIcon icon="plus" size={14} />
-          New
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <FontScaleControl />
+          <button
+            type="button"
+            onClick={onPlusClick}
+            aria-label="New comment at cursor"
+            title="New comment at cursor"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 28,
+              padding: "0 12px",
+              borderRadius: 6,
+              border: "none",
+              cursor: "pointer",
+              backgroundColor: "var(--interactive-accent)",
+              color: "var(--text-on-accent)",
+              fontSize: 12,
+              fontWeight: 600,
+              gap: 4,
+              flexShrink: 0,
+            }}
+          >
+            <ObsidianIcon icon="plus" size={14} />
+            New
+          </button>
+        </div>
       </div>
 
       <ScrollArea className="flex-1 min-w-0">

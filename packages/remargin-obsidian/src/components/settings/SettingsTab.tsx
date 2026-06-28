@@ -15,7 +15,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useBackend } from "@/hooks/useBackend";
 import { expandPath } from "@/lib/expandPath";
 import { type FilePickerFilter, isFilePickerAvailable, pickFile } from "@/lib/pickFile";
-import type { RemarginSettings } from "@/types";
+import {
+  clampMarkdownScale,
+  MARKDOWN_SCALE_DEFAULT,
+  MARKDOWN_SCALE_MAX,
+  MARKDOWN_SCALE_MIN,
+  MARKDOWN_SCALE_STEP,
+  type RemarginSettings,
+} from "@/types";
 import { SettingsField } from "./SettingsField";
 import { UpdatesSection } from "./UpdatesSection";
 
@@ -389,6 +396,58 @@ export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabPro
           >
             {current.editorWidgets ? "Enabled" : "Disabled"}
           </Toggle>
+        </SettingsField>
+
+        <Separator />
+
+        <SettingsField
+          label="Comment font size"
+          description="Global font scale for rendered comment markdown, shared by the sidebar and the in-editor widgets. The same minus/plus/reset control lives in the sidebar toolbar."
+        >
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Decrease comment font size"
+              disabled={current.markdownScale <= MARKDOWN_SCALE_MIN}
+              onClick={() =>
+                update(
+                  "markdownScale",
+                  clampMarkdownScale(current.markdownScale - MARKDOWN_SCALE_STEP)
+                )
+              }
+            >
+              <ObsidianIcon icon="minus" size={14} />
+            </Button>
+            <span className="font-mono text-sm text-text-normal min-w-[3rem] text-center tabular-nums">
+              {Math.round(clampMarkdownScale(current.markdownScale) * 100)}%
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Increase comment font size"
+              disabled={current.markdownScale >= MARKDOWN_SCALE_MAX}
+              onClick={() =>
+                update(
+                  "markdownScale",
+                  clampMarkdownScale(current.markdownScale + MARKDOWN_SCALE_STEP)
+                )
+              }
+            >
+              <ObsidianIcon icon="plus" size={14} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Reset comment font size"
+              onClick={() => update("markdownScale", MARKDOWN_SCALE_DEFAULT)}
+            >
+              Reset
+            </Button>
+          </div>
         </SettingsField>
 
         <Separator />

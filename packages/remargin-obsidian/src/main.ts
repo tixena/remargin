@@ -22,7 +22,7 @@ import { snapAfterCommentBlock } from "./lib/line-snap";
 import { buildThreadTree } from "./lib/threadTree";
 import { parseRemarginBlocks } from "./parser/parseRemarginBlocks";
 import { CollapseState } from "./state/collapseState";
-import { DEFAULT_SETTINGS, type RemarginSettings } from "./types";
+import { clampMarkdownScale, DEFAULT_SETTINGS, type RemarginSettings } from "./types";
 import "./styles/globals.css";
 
 /**
@@ -235,6 +235,7 @@ export default class RemarginPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    this.applyMarkdownScale();
 
     const adapter = this.app.vault.adapter as unknown as { basePath?: string };
     const vaultPath = adapter.basePath ?? "";
@@ -360,6 +361,13 @@ export default class RemarginPlugin extends Plugin {
     void this.runUpdateCheck(false);
   }
 
+  onunload(): void {
+    // Drop the shared font-scale var so a disabled plugin leaves no stray
+    // styling hook on <body>.
+    if (typeof document === "undefined") return;
+    document.body.style.removeProperty("--remargin-md-scale");
+  }
+
   /**
    * Run the GitHub-releases update check and persist the result. Fires a
    * single unobtrusive Notice per component that transitioned to
@@ -448,6 +456,10 @@ export default class RemarginPlugin extends Plugin {
     this.backend?.updateSettings(settings);
     await this.saveData(settings);
 
+    // Push the (possibly changed) font scale to the shared CSS var so both
+    // the sidebar and editor widgets restyle live, no reload needed.
+    this.applyMarkdownScale();
+
     if (previousSide !== settings.sidebarSide) {
       for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REMARGIN)) {
         leaf.detach();
@@ -459,6 +471,30 @@ export default class RemarginPlugin extends Plugin {
     // refresh the cached identity so widget threads pick up the new
     // "pending for me" identity on the next render.
     void this.refreshIdentity();
+  }
+
+  /**
+   * Write the current comment-markdown font scale to the `--remargin-md-scale`
+   * CSS var on <body>. Both comment surfaces (sidebar + editor widgets)
+   * live under <body>, so this one assignment restyles them together.
+   */
+  applyMarkdownScale(): void {
+    // Guard the DOM access so headless unit tests that drive `onload`
+    // without a document don't throw.
+    if (typeof document === "undefined") return;
+    document.body.style.setProperty(
+      "--remargin-md-scale",
+      String(clampMarkdownScale(this.settings.markdownScale))
+    );
+  }
+
+  /**
+   * Set the global comment-markdown font scale, persist it, and apply it
+   * live. Shared by the sidebar +/-/reset control and the settings tab so
+   * both paths clamp and persist identically.
+   */
+  async setMarkdownScale(scale: number): Promise<void> {
+    await this.saveSettings({ ...this.settings, markdownScale: clampMarkdownScale(scale) });
   }
 
   /**

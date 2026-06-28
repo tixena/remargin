@@ -36,6 +36,27 @@ export interface RemarginSettings {
    * each gate behind this flag).
    */
   editorWidgets: boolean;
+  /**
+   * Single global font-scale multiplier for rendered comment markdown,
+   * shared by the sidebar and the in-editor widget. Applied as the
+   * `--remargin-md-scale` CSS var; the markdown container's base
+   * font-size is `calc(var(--remargin-md-scale) * 13px)` and every child
+   * font rule is `em`-relative, so this one knob scales the whole tree.
+   */
+  markdownScale: number;
+}
+
+/** Bounds for {@link RemarginSettings.markdownScale}. */
+export const MARKDOWN_SCALE_MIN = 0.7;
+export const MARKDOWN_SCALE_MAX = 2;
+export const MARKDOWN_SCALE_STEP = 0.1;
+export const MARKDOWN_SCALE_DEFAULT = 1;
+
+/** Clamp to the allowed range and snap float drift to one decimal. */
+export function clampMarkdownScale(value: number): number {
+  if (!Number.isFinite(value)) return MARKDOWN_SCALE_DEFAULT;
+  const clamped = Math.min(MARKDOWN_SCALE_MAX, Math.max(MARKDOWN_SCALE_MIN, value));
+  return Math.round(clamped * 100) / 100;
 }
 
 export const DEFAULT_SETTINGS: RemarginSettings = {
@@ -51,4 +72,5 @@ export const DEFAULT_SETTINGS: RemarginSettings = {
   inboxView: "tree",
   checkForUpdates: true,
   editorWidgets: false,
+  markdownScale: MARKDOWN_SCALE_DEFAULT,
 };
