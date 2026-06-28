@@ -37,9 +37,6 @@ remargin-core.workspace = true
 # CLI framework
 clap.workspace = true
 
-# Cryptography (key generation for `remargin identity`)
-ssh-key.workspace = true
-
 # Base64 (binary payloads for `get --binary --json`)
 base64.workspace = true
 

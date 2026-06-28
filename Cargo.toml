@@ -29,7 +29,8 @@ tixschema = { git = "https://github.com/tixena/tixschema.git", features = ["chro
 
 # Cryptography (checksums, signatures)
 sha2 = "0.11"
-ssh-key = { version = "0.6", features = ["ed25519", "std", "rand_core", "getrandom"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 base64 = "0.22"
 
 # Error handling

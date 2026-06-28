@@ -38,8 +38,7 @@ build-cli-obsidian:
 test:
     cargo test
 
-# Audit dependencies for security advisories. Suppression for RUSTSEC-2023-0071
-# (unused optional rsa dep via ssh-key, no upstream fix) lives in .cargo/audit.toml.
+# Audit dependencies for security advisories.
 audit:
     cargo audit
 
