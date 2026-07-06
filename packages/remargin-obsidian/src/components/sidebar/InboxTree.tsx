@@ -30,7 +30,7 @@ interface CommentLeafProps {
   onOpenAtLine?: (filePath: string, line?: number) => void;
 }
 
-function formatRelativeTime(ts?: string): string {
+function formatRelativeTime(ts?: string | Date): string {
   if (!ts) return "";
   try {
     const diff = Date.now() - new Date(ts).getTime();
@@ -277,7 +277,7 @@ export function InboxTree({ items, me, onOpenAtLine }: InboxTreeProps) {
   }
   // Sort comments within each file by timestamp descending
   for (const arr of itemsByFile.values()) {
-    arr.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
+    arr.sort((a, b) => (b.comment.ts?.getTime() ?? 0) - (a.comment.ts?.getTime() ?? 0));
   }
 
   const files = Array.from(itemsByFile.keys());

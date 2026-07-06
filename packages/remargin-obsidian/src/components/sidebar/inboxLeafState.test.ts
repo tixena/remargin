@@ -4,7 +4,7 @@ import type { Acknowledgment, ExpandedComment } from "../../generated/types.ts";
 import { deriveLeafState } from "./inboxLeafState.ts";
 
 function ack(author: string): Acknowledgment {
-  return { author, ts: "2026-04-06T12:00:00-04:00" };
+  return { author, ts: new Date("2026-04-06T12:00:00-04:00") };
 }
 
 function fixture(

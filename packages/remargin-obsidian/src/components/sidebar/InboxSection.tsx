@@ -125,7 +125,7 @@ export function InboxSection({
           flat.push({ file: result.path, comment });
         }
       }
-      flat.sort((a, b) => (b.comment.ts ?? "").localeCompare(a.comment.ts ?? ""));
+      flat.sort((a, b) => (b.comment.ts?.getTime() ?? 0) - (a.comment.ts?.getTime() ?? 0));
       setItems(flat);
       setError(null);
     } catch (err) {
@@ -386,7 +386,7 @@ function InboxFlatRow({ item, me, onOpenAtLine }: InboxFlatRowProps) {
   );
 }
 
-function formatRelativeTime(ts?: string): string {
+function formatRelativeTime(ts?: string | Date): string {
   if (!ts) return "";
   try {
     const diff = Date.now() - new Date(ts).getTime();

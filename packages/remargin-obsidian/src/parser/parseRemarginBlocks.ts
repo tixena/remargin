@@ -17,9 +17,9 @@ function normalizeAcks(
       // Wire shape: "author@rfc3339-ts"
       const at = entry.indexOf("@");
       if (at < 0) return [];
-      return [{ author: entry.slice(0, at), ts: entry.slice(at + 1) }];
+      return [{ author: entry.slice(0, at), ts: new Date(entry.slice(at + 1)) }];
     }
-    return [entry];
+    return [{ author: entry.author, ts: new Date(entry.ts) }];
   });
 }
 
@@ -30,7 +30,9 @@ function normalizeReactions(
   const out: Record<string, ReactionEntry[]> = {};
   for (const [emoji, items] of Object.entries(raw)) {
     out[emoji] = items.map((item) =>
-      typeof item === "string" ? { author: item, ts: LEGACY_REACTION_TS } : item
+      typeof item === "string"
+        ? { author: item, ts: new Date(LEGACY_REACTION_TS) }
+        : { author: item.author, ts: new Date(item.ts) }
     );
   }
   return out;
@@ -190,7 +192,7 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
               // OnDiskComment renames `author_type` → `type` for the
               // wire form; map back to the in-memory field here.
               author_type: yaml.type as AuthorType | undefined,
-              ts: yaml.ts,
+              ts: yaml.ts ? new Date(yaml.ts) : undefined,
               content,
               // OnDiskComment renames `reply_to` → `reply-to`; map back.
               reply_to: yaml["reply-to"],

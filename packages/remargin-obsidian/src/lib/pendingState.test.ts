@@ -17,7 +17,7 @@ interface MkOpts {
 
 function mk(id: string, opts: MkOpts = {}): Comment {
   return {
-    ack: (opts.ackBy ?? []).map((author) => ({ author, ts: "2026-01-01T00:00:00Z" })),
+    ack: (opts.ackBy ?? []).map((author) => ({ author, ts: new Date("2026-01-01T00:00:00Z") })),
     attachments: [],
     author: "alice",
     author_type: "human",
@@ -34,7 +34,7 @@ function mk(id: string, opts: MkOpts = {}): Comment {
     sl: undefined,
     thread: undefined,
     to: opts.to ?? [],
-    ts: "2026-01-01T00:00:00Z",
+    ts: new Date("2026-01-01T00:00:00Z"),
   };
 }
 

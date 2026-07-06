@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { Comment } from "@/generated/types";
 import { buildThreadTree, indexById, walkThread } from "./threadTree.ts";
 
-function mkComment(id: string, replyTo?: string, ts?: string): Comment {
+function mkComment(id: string, replyTo?: string, ts?: Date): Comment {
   return {
     ack: [],
     attachments: [],
@@ -22,7 +22,7 @@ function mkComment(id: string, replyTo?: string, ts?: string): Comment {
     sl: undefined,
     thread: undefined,
     to: [],
-    ts: ts ?? "2026-01-01T00:00:00Z",
+    ts: ts ?? new Date("2026-01-01T00:00:00Z"),
   };
 }
 
@@ -67,9 +67,9 @@ describe("buildThreadTree", () => {
 
   it("sorts replies oldest-first regardless of source order", () => {
     const cs = [
-      mkComment("root", undefined, "2026-01-01T00:00:00Z"),
-      mkComment("late", "root", "2026-01-03T00:00:00Z"),
-      mkComment("early", "root", "2026-01-02T00:00:00Z"),
+      mkComment("root", undefined, new Date("2026-01-01T00:00:00Z")),
+      mkComment("late", "root", new Date("2026-01-03T00:00:00Z")),
+      mkComment("early", "root", new Date("2026-01-02T00:00:00Z")),
     ];
     const trees = buildThreadTree(cs);
     assert.equal(trees[0].replies.length, 2);
@@ -79,10 +79,10 @@ describe("buildThreadTree", () => {
 
   it("sorts replies oldest-first at every depth", () => {
     const cs = [
-      mkComment("root", undefined, "2026-01-01T00:00:00Z"),
-      mkComment("a", "root", "2026-01-02T00:00:00Z"),
-      mkComment("a2", "a", "2026-01-04T00:00:00Z"),
-      mkComment("a1", "a", "2026-01-03T00:00:00Z"),
+      mkComment("root", undefined, new Date("2026-01-01T00:00:00Z")),
+      mkComment("a", "root", new Date("2026-01-02T00:00:00Z")),
+      mkComment("a2", "a", new Date("2026-01-04T00:00:00Z")),
+      mkComment("a1", "a", new Date("2026-01-03T00:00:00Z")),
     ];
     const trees = buildThreadTree(cs);
     assert.equal(trees[0].replies[0].comment.id, "a");

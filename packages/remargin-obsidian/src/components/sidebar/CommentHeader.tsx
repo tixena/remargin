@@ -86,7 +86,7 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
   );
 }
 
-function formatFullTime(ts?: string): string {
+function formatFullTime(ts?: string | Date): string {
   if (!ts) return "";
   try {
     return new Date(ts).toLocaleString(undefined, {
@@ -97,6 +97,6 @@ function formatFullTime(ts?: string): string {
       minute: "2-digit",
     });
   } catch {
-    return ts;
+    return "";
   }
 }

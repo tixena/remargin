@@ -43,7 +43,7 @@ export function buildThreadTree(comments: Comment[]): ThreadNode[] {
 
 function sortRepliesAsc(nodes: ThreadNode[]): void {
   for (const node of nodes) {
-    node.replies.sort((a, b) => (a.comment.ts ?? "").localeCompare(b.comment.ts ?? ""));
+    node.replies.sort((a, b) => (a.comment.ts?.getTime() ?? 0) - (b.comment.ts?.getTime() ?? 0));
     sortRepliesAsc(node.replies);
   }
 }

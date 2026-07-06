@@ -37,7 +37,7 @@ function fixture(overrides: Partial<Comment> = {}): Comment {
     sl: undefined,
     thread: undefined,
     to: [],
-    ts: "2026-04-25T12:00:00-04:00",
+    ts: new Date("2026-04-25T12:00:00-04:00"),
     ...overrides,
   };
 }
