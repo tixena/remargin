@@ -74,6 +74,22 @@ fn literal_match_in_body() {
 }
 
 #[test]
+fn file_path_searches_that_file() {
+    // Regression: a `path` naming a file must search that file, not
+    // silently return an empty set (the file-path footgun).
+    let base = Path::new("/docs");
+    let file = Path::new("/docs/note.md");
+    let system = MockSystem::new()
+        .with_file(file, b"# Title\n\nThe notification system works.\n")
+        .unwrap();
+
+    let results = search(&system, base, file, &literal_opts("notification")).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].line, 3);
+    assert_eq!(results[0].path, Path::new("note.md"));
+}
+
+#[test]
 fn literal_match_in_comment() {
     let base = Path::new("/docs");
     let doc = format!(

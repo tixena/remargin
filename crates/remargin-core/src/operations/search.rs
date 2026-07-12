@@ -212,6 +212,20 @@ pub fn search(
 
     let matcher = build_matcher(options)?;
 
+    // A path naming one file is searched directly; walking a file as a
+    // directory yields no entries (silent zero matches). Mirrors query.
+    if system.is_file(search_dir).unwrap_or(false) {
+        let mut results = Vec::new();
+        if let Ok(content) = system.read_to_string(search_dir) {
+            let relative = search_dir
+                .strip_prefix(base_dir)
+                .unwrap_or(search_dir)
+                .to_path_buf();
+            search_file(&content, &relative, &matcher, options, &mut results);
+        }
+        return Ok(results);
+    }
+
     let entries = system
         .walk_dir(search_dir, false, false)
         .with_context(|| format!("walking directory {}", search_dir.display()))?;
