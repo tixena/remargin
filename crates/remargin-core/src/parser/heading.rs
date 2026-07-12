@@ -58,7 +58,7 @@ pub fn resolve_heading_path(doc: &ParsedDocument, path: &str) -> Result<usize> {
 /// `Some(count)` when `line` starts with one or more `` ` ``, `None`
 /// otherwise. ATX headings can contain backticks but never start with
 /// them, so this is a sound discriminator for fence-opener lines.
-fn leading_backtick_count(line: &str) -> Option<usize> {
+const fn leading_backtick_count(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut count: usize = 0;
     while count < bytes.len() && bytes[count] == b'`' {
