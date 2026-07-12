@@ -20,6 +20,7 @@ import { patchModeInYaml } from "@/lib/patchModeInYaml";
 import type { RemarginSettings } from "@/types";
 import { assembleExecArgs } from "./assembleExecArgs";
 import { buildIdentityArgs } from "./buildIdentityArgs";
+import { buildWriteInvocation } from "./buildWriteInvocation";
 import { parsePluginsListOutput } from "./detectPlugin";
 import { parsePayloadArray } from "./envelopeParsing";
 import { IDENTITY_ACCEPTING_SUBCOMMANDS } from "./identityAcceptingSubcommands";
@@ -106,10 +107,8 @@ export class RemarginBackend {
   }
 
   async write(path: string, content: string, opts?: WriteOpts): Promise<void> {
-    const args: string[] = ["write", path, content];
-    if (opts?.create) args.push("--create");
-    if (opts?.raw) args.push("--raw");
-    await this.exec(args);
+    const { args, stdin } = buildWriteInvocation(path, content, opts);
+    await this.exec(args, { stdin });
   }
 
   async rm(path: string): Promise<{ deleted: string; existed: boolean }> {
