@@ -827,6 +827,93 @@ fn regression_symlink_into_realm_via_bash_denies() {
     ));
 }
 
+/// A symlink chain (link -> link -> realm target) named by a shell
+/// command resolves through every hop and denies. Real FS because
+/// `MockSystem` does not model symlinks.
+#[cfg(unix)]
+#[test]
+fn regression_symlink_chain_into_realm_via_bash_denies() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use os_shim::real::RealSystem;
+    use tempfile::TempDir;
+
+    let realm = TempDir::new().unwrap();
+    let realm_path = realm.path().canonicalize().unwrap();
+    fs::create_dir_all(realm_path.join("src/secret")).unwrap();
+    fs::write(realm_path.join("src/secret/foo"), "x").unwrap();
+    fs::write(
+        realm_path.join(".remargin.yaml"),
+        "permissions:\n  trusted_roots:\n    - path: src/secret\n",
+    )
+    .unwrap();
+    symlink(realm_path.join("src/secret"), realm_path.join("hop2")).unwrap();
+    symlink(realm_path.join("hop2"), realm_path.join("hop1")).unwrap();
+
+    let cwd = realm_path.display().to_string();
+    let command = format!("cat {cwd}/hop1/foo");
+    let stdin = event_json("Bash", &cwd, &json!({ "command": command }));
+    assert!(matches!(
+        pretool(&RealSystem::new(), &stdin),
+        PretoolOutcome::Deny(_)
+    ));
+}
+
+/// A symlink whose target lies outside every realm resolves out of the
+/// realm and silent-allows. The realm's wildcard root covers the link's
+/// own path, so only canonicalization following the link out flips the
+/// decision away from a false deny. Real FS for the same reason.
+#[cfg(unix)]
+#[test]
+fn regression_symlink_outside_realm_via_bash_silent_allows() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use os_shim::real::RealSystem;
+    use tempfile::TempDir;
+
+    let realm = TempDir::new().unwrap();
+    let realm_path = realm.path().canonicalize().unwrap();
+    let outside = TempDir::new().unwrap();
+    let outside_path = outside.path().canonicalize().unwrap();
+    fs::create_dir_all(outside_path.join("target")).unwrap();
+    fs::write(outside_path.join("target/foo"), "x").unwrap();
+    fs::write(
+        realm_path.join(".remargin.yaml"),
+        "permissions:\n  trusted_roots:\n    - path: '*'\n",
+    )
+    .unwrap();
+    symlink(outside_path.join("target"), realm_path.join("alias")).unwrap();
+
+    // cwd sits outside the realm so the bare verb word cannot itself
+    // resolve under the wildcard root; only the symlinked argument matters.
+    let cwd = outside_path.display().to_string();
+    let realm_str = realm_path.display().to_string();
+    let command = format!("rm {realm_str}/alias/foo");
+    let stdin = event_json("Bash", &cwd, &json!({ "command": command }));
+    assert_eq!(
+        pretool(&RealSystem::new(), &stdin),
+        PretoolOutcome::SilentAllow
+    );
+}
+
+/// A `~`-relative word expands via `HOME` into a realm and denies. Uses
+/// `MockSystem::with_env` — the `env_var("HOME")` seam `expand_tilde`
+/// reads — so no symlink modelling or real filesystem is needed.
+#[test]
+fn bash_tilde_word_expanding_into_realm_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))])
+        .with_env("HOME", "/r")
+        .unwrap();
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "sed -i s/a/b/ ~/secret/x" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
 // ---------------------------------------------------------------------
 // Testing Plan cases (design item 2): reads deny like writes, chains and
 // pipes are parsed, embedded literal paths are recovered, and the CLI
