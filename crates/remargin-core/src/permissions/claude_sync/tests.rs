@@ -57,31 +57,33 @@ fn subpath_no_extras_emits_full_default_set() {
     let entry = restrict_subpath("/a/b", &[], false);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    // deny: 4 editor-tool path denies + 4 dot-folder wildcards +
+    // deny: 5 editor-tool path denies + 5 dot-folder wildcards +
     // BASH_MUTATORS.len() bash mutators + 3 source-side mv shapes
     // + 3 source-side cp shapes. No global remargin-cli deny —
     // that is now hook-enforced via cli_allowed.
-    let expected = 4 + 4 + BASH_MUTATORS.len() + 3 + 3;
+    let expected = 5 + 5 + BASH_MUTATORS.len() + 3 + 3;
     assert_eq!(rules.deny.len(), expected, "{:#?}", rules.deny);
 
-    // Editor-tool denies in spec order.
+    // Editor-tool denies in spec order; `MultiEdit` appended last.
     assert_eq!(rules.deny[0], "Edit(/a/b/**)");
     assert_eq!(rules.deny[1], "Write(/a/b/**)");
     assert_eq!(rules.deny[2], "Read(/a/b/**)");
     assert_eq!(rules.deny[3], "NotebookEdit(/a/b/**)");
+    assert_eq!(rules.deny[4], "MultiEdit(/a/b/**)");
 
     // Dot-folder wildcard denies.
-    assert_eq!(rules.deny[4], "Edit(/a/b/.*/**)");
-    assert_eq!(rules.deny[5], "Write(/a/b/.*/**)");
-    assert_eq!(rules.deny[6], "Read(/a/b/.*/**)");
-    assert_eq!(rules.deny[7], "NotebookEdit(/a/b/.*/**)");
+    assert_eq!(rules.deny[5], "Edit(/a/b/.*/**)");
+    assert_eq!(rules.deny[6], "Write(/a/b/.*/**)");
+    assert_eq!(rules.deny[7], "Read(/a/b/.*/**)");
+    assert_eq!(rules.deny[8], "NotebookEdit(/a/b/.*/**)");
+    assert_eq!(rules.deny[9], "MultiEdit(/a/b/.*/**)");
 
-    // Bash mutators: original write-side surface anchors at index 8
+    // Bash mutators: original write-side surface anchors at index 10
     // and is preserved verbatim so older settings files do not churn
     // on re-runs.
-    assert_eq!(rules.deny[8], "Bash(cp * /a/b/**)");
-    assert_eq!(rules.deny[9], "Bash(mv * /a/b/**)");
-    assert_eq!(rules.deny[10], "Bash(tee /a/b/**)");
+    assert_eq!(rules.deny[10], "Bash(cp * /a/b/**)");
+    assert_eq!(rules.deny[11], "Bash(mv * /a/b/**)");
+    assert_eq!(rules.deny[12], "Bash(tee /a/b/**)");
 
     // Membership check (not exact index) so reordering inside
     // BASH_MUTATORS does not break the test.
@@ -239,7 +241,9 @@ fn wildcard_uses_realm_root_for_glob() {
     let rules = rules_for(&entry, Path::new("/r"), &[]);
 
     assert_eq!(rules.deny[0], "Edit(/r/**)");
-    assert_eq!(rules.deny[4], "Edit(/r/.*/**)");
+    // 5 editor-tool path denies precede the dot-folder wildcards, so the
+    // first dot-folder deny sits at index 5.
+    assert_eq!(rules.deny[5], "Edit(/r/.*/**)");
     // All projected rules are path-anchored — they all contain `/r/`.
     // `Bash(remargin *)` is no longer projected (CLI denial is
     // hook-enforced), so every rule must contain `/r/`.
@@ -267,9 +271,9 @@ fn projection_never_emits_remargin_cli_deny_regardless_of_cli_allowed() {
             "cli_allowed={cli_allowed}: Bash(remargin *) must never be projected, got: {:#?}",
             rules.deny
         );
-        // 4 editor + 4 dot-folder + BASH_MUTATORS.len() + 3 source-side
+        // 5 editor + 5 dot-folder + BASH_MUTATORS.len() + 3 source-side
         // mv shapes + 3 source-side cp shapes.
-        let expected = 4 + 4 + BASH_MUTATORS.len() + 3 + 3;
+        let expected = 5 + 5 + BASH_MUTATORS.len() + 3 + 3;
         assert_eq!(rules.deny.len(), expected, "cli_allowed={cli_allowed}");
     }
 }
@@ -346,7 +350,7 @@ fn allow_dot_folders_emits_re_allows() {
         .collect();
     assert_eq!(
         github_allows.len(),
-        4,
+        5,
         "expected one .github re-allow per editor tool, got: {github_allows:#?}"
     );
     let remargin_allow_count = rules
@@ -372,7 +376,7 @@ fn explicit_remargin_in_allow_list_emits_re_allows() {
         .iter()
         .filter(|rule| rule.contains(".remargin"))
         .count();
-    assert_eq!(count, 4, "{:#?}", rules.allow);
+    assert_eq!(count, 5, "{:#?}", rules.allow);
 }
 
 /// deletion family emits BOTH bare and `*`-flag forms so
@@ -503,7 +507,7 @@ fn no_implicit_remargin_native_allows_emitted() {
     let entry = restrict_subpath("/a/b", &[], false);
     let rules = rules_for(&entry, Path::new("/a"), &[]);
 
-    for tool in ["Edit", "Write", "Read", "NotebookEdit"] {
+    for tool in ["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"] {
         let needle = format!("{tool}(/a/b/.remargin/**)");
         assert!(
             !rules.allow.iter().any(|r| r == &needle),

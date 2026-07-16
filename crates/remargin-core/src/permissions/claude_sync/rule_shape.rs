@@ -183,8 +183,8 @@ pub enum RuleShape {
     Tool {
         /// Canonicalized path glob.
         path_glob: PathGlob,
-        /// Literal tool name (`Read`, `Write`, `Edit`, `NotebookEdit`,
-        /// …). Compared case-sensitively.
+        /// Literal tool name (`Read`, `Write`, `Edit`, `MultiEdit`,
+        /// `NotebookEdit`, …). Compared case-sensitively.
         tool: String,
     },
 }
@@ -211,7 +211,10 @@ impl RuleShape {
             return parse_bash(rule, body);
         }
         // Heuristic: known editor tools whose body is a path glob.
-        if matches!(tool, "Read" | "Write" | "Edit" | "NotebookEdit") {
+        if matches!(
+            tool,
+            "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit"
+        ) {
             let path_glob = PathGlob::parse(body);
             return Self::Tool {
                 path_glob,

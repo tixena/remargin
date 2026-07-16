@@ -30,10 +30,11 @@ use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::permissions::sidecar::{self, SidecarEntry};
 
 /// Editor-side Claude tools touched by the base path-deny and the
-/// dot-folder default-deny. Order matches the spec's example output
-/// (Edit / Write / Read / `NotebookEdit`) so settings-file diffs read
-/// the way users expect.
-const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit"];
+/// dot-folder default-deny. The original four keep their spec order
+/// (Edit / Write / Read / `NotebookEdit`) so existing settings-file
+/// diffs do not churn; `MultiEdit` is appended so the projection covers
+/// the same tools the `PreToolUse` hook gates.
+const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"];
 
 /// Default-deny Bash command tokens for the restricted path.
 ///

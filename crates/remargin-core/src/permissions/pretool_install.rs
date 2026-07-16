@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 /// Matcher string written into the `PreToolUse` hook entry. Every tool
 /// the dispatcher inspects must be listed here so Claude Code fans the
 /// hook in for those calls.
-pub const HOOK_MATCHER: &str = "Read|Write|Edit|Bash|NotebookEdit";
+pub const HOOK_MATCHER: &str = "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash";
 
 /// Hook command Claude Code invokes for each gated tool call. The
 /// dispatcher reads stdin and writes the decision JSON to stdout.
@@ -47,12 +47,20 @@ pub enum TestOutcome {
 /// invalid JSON, or if writing the updated settings fails.
 pub fn install(system: &dyn System, settings_file: &Path) -> Result<InstallOutcome> {
     let mut value = load_or_default(system, settings_file)?;
-    if hook_present(&value) {
-        return Ok(InstallOutcome::AlreadyInstalled);
+    match upgrade_existing_entry(&mut value) {
+        // A remargin entry already carries the current matcher.
+        Some(false) => Ok(InstallOutcome::AlreadyInstalled),
+        // A remargin entry carried a drifted matcher, now rewritten.
+        Some(true) => {
+            write_settings(system, settings_file, &value)?;
+            Ok(InstallOutcome::Installed)
+        }
+        None => {
+            insert_hook(&mut value);
+            write_settings(system, settings_file, &value)?;
+            Ok(InstallOutcome::Installed)
+        }
     }
-    insert_hook(&mut value);
-    write_settings(system, settings_file, &value)?;
-    Ok(InstallOutcome::Installed)
 }
 
 /// # Errors
@@ -171,17 +179,43 @@ fn pretool_entries(value: &Value) -> Option<&Vec<Value>> {
         .and_then(Value::as_array)
 }
 
+/// Locate the remargin entry (identified by its [`HOOK_COMMAND`], not its
+/// matcher) and reconcile its matcher with [`HOOK_MATCHER`]. Returns
+/// `None` when no remargin entry is present, `Some(false)` when the
+/// matcher already matches, and `Some(true)` after rewriting a drifted
+/// matcher in place — so a widened `HOOK_MATCHER` upgrades an older
+/// installation rather than duplicating the entry.
+fn upgrade_existing_entry(value: &mut Value) -> Option<bool> {
+    let entries = value
+        .get_mut("hooks")
+        .and_then(Value::as_object_mut)?
+        .get_mut("PreToolUse")
+        .and_then(Value::as_array_mut)?;
+    let entry = entries
+        .iter_mut()
+        .find(|entry| matches_remargin_entry(entry))?;
+    let obj = entry.as_object_mut()?;
+    let matcher_current = obj
+        .get("matcher")
+        .and_then(Value::as_str)
+        .is_some_and(|m| m == HOOK_MATCHER);
+    if matcher_current {
+        return Some(false);
+    }
+    let _prev: Option<Value> = obj.insert(
+        String::from("matcher"),
+        Value::String(String::from(HOOK_MATCHER)),
+    );
+    Some(true)
+}
+
+/// A remargin hook entry is identified by its inner [`HOOK_COMMAND`]; the
+/// matcher string is informational, so an installation whose matcher has
+/// drifted from the current [`HOOK_MATCHER`] is still recognized.
 fn matches_remargin_entry(entry: &Value) -> bool {
     let Some(obj) = entry.as_object() else {
         return false;
     };
-    let matcher_ok = obj
-        .get("matcher")
-        .and_then(Value::as_str)
-        .is_some_and(|m| m == HOOK_MATCHER);
-    if !matcher_ok {
-        return false;
-    }
     let Some(hooks_arr) = obj.get("hooks").and_then(Value::as_array) else {
         return false;
     };

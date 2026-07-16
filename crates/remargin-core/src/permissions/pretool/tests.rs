@@ -193,9 +193,12 @@ fn bash_per_realm_extra_verb_triggers_check() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 11: `Glob` / `Grep` are never gated.
+/// Test 11: `Glob` with only a `pattern` (no `path`) resolves the search
+/// root to the event cwd. Here cwd `/r` sits above the trusted root
+/// `/r/secret`, so the resolved root is unrestricted → `SilentAllow`. The
+/// missing optional `path` must not fail-closed.
 #[test]
-fn glob_tool_is_not_gated() {
+fn glob_no_path_resolves_cwd_outside_root_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json("Glob", "/r", &json!({ "pattern": "**/*.md" }));
     let outcome = pretool(&system, &stdin);
@@ -207,6 +210,86 @@ fn glob_tool_is_not_gated() {
 fn unknown_tool_name_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json("FooBar", "/r", &json!({ "anything": 1_i32 }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+// ---------------------------------------------------------------------
+// Widened matcher (design item 1): MultiEdit, Grep, Glob join the gated
+// tools. MultiEdit uses `file_path`; Grep/Glob use an optional `path`
+// defaulting to the event cwd.
+// ---------------------------------------------------------------------
+
+/// Widened 1: `MultiEdit` on a restricted `file_path` → `Deny`.
+#[test]
+fn multi_edit_on_restricted_path_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "MultiEdit",
+        "/r",
+        &json!({ "file_path": "/r/secret/foo.md", "edits": [] }),
+    );
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(deny_reason(&decision).contains("remargin-managed"));
+    assert!(deny_reason(&decision).contains("/r/secret/foo.md"));
+}
+
+/// Widened 2: `Grep` whose `path` is the restricted search root → `Deny`.
+/// The per-command `search` redirect message is a separate task; the
+/// generic guidance is acceptable here.
+#[test]
+fn grep_on_restricted_path_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Grep",
+        "/r",
+        &json!({ "pattern": "foo", "path": "/r/secret" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Widened 3: `Glob` whose `path` is the restricted search root → `Deny`.
+#[test]
+fn glob_on_restricted_path_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Glob",
+        "/r",
+        &json!({ "pattern": "**/*.md", "path": "/r/secret" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Widened 4: `Grep` with no `path` resolves the search root to the event
+/// cwd. cwd `/r` sits above the trusted root, so the resolved root is
+/// unrestricted → `SilentAllow`; the missing optional field never fails.
+#[test]
+fn grep_no_path_resolves_cwd_outside_root_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Grep", "/r", &json!({ "pattern": "foo" }));
+    let outcome = pretool(&system, &stdin);
+    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+}
+
+/// Widened 4b: `Grep` with no `path` under a wildcard realm resolves the
+/// root to the event cwd, which lands inside the realm → `Deny`. Proves
+/// the cwd fallback participates in restriction, not just fail-open.
+#[test]
+fn grep_no_path_resolves_cwd_inside_wildcard_realm_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Grep", "/r/sub", &json!({ "pattern": "foo" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Widened 5: an unmatched tool (`WebFetch`) is not gated → `SilentAllow`.
+#[test]
+fn web_fetch_tool_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "WebFetch",
+        "/r",
+        &json!({ "url": "https://example.com", "prompt": "x" }),
+    );
     let outcome = pretool(&system, &stdin);
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }

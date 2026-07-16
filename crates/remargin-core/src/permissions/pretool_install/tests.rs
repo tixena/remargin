@@ -212,3 +212,77 @@ fn test_reports_not_installed_when_entry_absent() {
     let system = seed(MockSystem::new(), &path, &body);
     assert_eq!(test(&system, &path).unwrap(), TestOutcome::NotInstalled);
 }
+
+/// A remargin entry whose matcher has drifted from the current
+/// `HOOK_MATCHER` (an older installation) is still detected as installed —
+/// detection keys on `HOOK_COMMAND` — and `install` upgrades the matcher
+/// in place without duplicating the entry.
+#[test]
+fn install_upgrades_drifted_matcher_in_place() {
+    let stale_matcher = "Read|Write|Edit|Bash|NotebookEdit";
+    let body = serde_json::to_string_pretty(&json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": stale_matcher,
+                    "hooks": [
+                        { "type": "command", "command": HOOK_COMMAND },
+                    ],
+                },
+            ],
+        },
+    }))
+    .unwrap();
+    let path = settings_path();
+    let system = seed(MockSystem::new(), &path, &body);
+
+    // Detected as installed despite the stale matcher string.
+    assert_eq!(test(&system, &path).unwrap(), TestOutcome::Installed);
+
+    // Install rewrites the matcher in place and reports the write.
+    assert_eq!(install(&system, &path).unwrap(), InstallOutcome::Installed);
+
+    let value = read_json(&system, &path);
+    let entries = value["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["matcher"].as_str().unwrap(), HOOK_MATCHER);
+    assert_eq!(
+        entries[0]["hooks"][0]["command"].as_str().unwrap(),
+        HOOK_COMMAND,
+    );
+
+    // A second install is now a no-op.
+    assert_eq!(
+        install(&system, &path).unwrap(),
+        InstallOutcome::AlreadyInstalled,
+    );
+}
+
+/// `uninstall` removes a remargin entry even when its matcher has drifted
+/// from the current `HOOK_MATCHER`.
+#[test]
+fn uninstall_removes_entry_with_drifted_matcher() {
+    let stale_matcher = "Read|Write|Edit|Bash|NotebookEdit";
+    let body = serde_json::to_string_pretty(&json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": stale_matcher,
+                    "hooks": [
+                        { "type": "command", "command": HOOK_COMMAND },
+                    ],
+                },
+            ],
+        },
+    }))
+    .unwrap();
+    let path = settings_path();
+    let system = seed(MockSystem::new(), &path, &body);
+
+    assert_eq!(
+        uninstall(&system, &path).unwrap(),
+        UninstallOutcome::Uninstalled,
+    );
+    let value = read_json(&system, &path);
+    assert!(value.get("hooks").is_none());
+}

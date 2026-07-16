@@ -219,6 +219,85 @@ fn decision_json_matches_claude_code_contract() {
     assert!(obj.contains_key("hookSpecificOutput"));
 }
 
+/// Widened matcher: `MultiEdit` on a restricted `file_path` denies
+/// end-to-end through the wired hook. `MultiEdit`'s path field is
+/// `file_path`, same as `Edit`.
+#[test]
+fn multi_edit_against_restricted_realm_denies() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let target = realm.path().join("secret/foo.md");
+    let stdin = envelope(
+        "MultiEdit",
+        realm.path(),
+        &json!({ "file_path": target, "edits": [] }),
+    );
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+}
+
+/// Widened matcher: `Grep` whose `path` is the restricted search root
+/// denies end-to-end.
+#[test]
+fn grep_against_restricted_realm_denies() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let target = realm.path().join("secret");
+    let stdin = envelope(
+        "Grep",
+        realm.path(),
+        &json!({ "pattern": "foo", "path": target }),
+    );
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+}
+
+/// Widened matcher: `Glob` whose `path` is the restricted search root
+/// denies end-to-end.
+#[test]
+fn glob_against_restricted_realm_denies() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let target = realm.path().join("secret");
+    let stdin = envelope(
+        "Glob",
+        realm.path(),
+        &json!({ "pattern": "**/*.md", "path": target }),
+    );
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+}
+
 fn run_pretool_args(args: &[&str], cwd: &Path, home: &Path) -> Output {
     Command::cargo_bin("remargin")
         .unwrap()

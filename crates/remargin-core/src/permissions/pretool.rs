@@ -96,9 +96,10 @@ enum ToolTarget {
     /// `Bash` command — every path-shaped word is resolved against the
     /// realm governing it and denied if it lands inside one.
     BashCommand { command: String },
-    /// `Glob`, `Grep`, unknown tool — never deny.
+    /// Unknown / ungated tool — never deny.
     NoCheck,
-    /// File-touching tool (`Read`, `Write`, `Edit`, `NotebookEdit`).
+    /// Path-touching tool (`Read`, `Write`, `Edit`, `MultiEdit`,
+    /// `NotebookEdit`, `Grep`, `Glob`).
     Path { path: PathBuf, tool_name: String },
 }
 
@@ -163,12 +164,18 @@ pub fn resolve_for_target(system: &dyn System, canonical: &Path) -> Result<Resol
 
 fn extract_target(event: &PreToolUseEvent) -> Result<ToolTarget, String> {
     match event.tool_name.as_str() {
-        "Read" | "Write" | "Edit" => Ok(ToolTarget::Path {
+        "Read" | "Write" | "Edit" | "MultiEdit" => Ok(ToolTarget::Path {
             path: required_path(&event.tool_input, "file_path", &event.tool_name)?,
             tool_name: event.tool_name.clone(),
         }),
         "NotebookEdit" => Ok(ToolTarget::Path {
             path: required_path(&event.tool_input, "notebook_path", &event.tool_name)?,
+            tool_name: event.tool_name.clone(),
+        }),
+        // `Grep` / `Glob` may omit `path`, defaulting the search root to
+        // the session cwd; the absent optional field must not fail-closed.
+        "Grep" | "Glob" => Ok(ToolTarget::Path {
+            path: optional_path(&event.tool_input, "path").unwrap_or_else(|| event.cwd.clone()),
             tool_name: event.tool_name.clone(),
         }),
         "Bash" => Ok(ToolTarget::BashCommand {
@@ -180,6 +187,10 @@ fn extract_target(event: &PreToolUseEvent) -> Result<ToolTarget, String> {
 
 fn required_path(input: &Value, key: &str, tool: &str) -> Result<PathBuf, String> {
     required_string(input, key, tool).map(PathBuf::from)
+}
+
+fn optional_path(input: &Value, key: &str) -> Option<PathBuf> {
+    input.get(key).and_then(Value::as_str).map(PathBuf::from)
 }
 
 fn required_string(input: &Value, key: &str, tool: &str) -> Result<String, String> {
