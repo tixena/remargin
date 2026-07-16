@@ -137,6 +137,16 @@ impl ResolvedPermissions {
         }
     }
 
+    /// A realm that locked itself to an empty allow-set: some walked
+    /// `.remargin.yaml` declared `trusted_roots: []` and no entry
+    /// survived. The op guard treats this as deny-all; the pretool hook
+    /// mirrors it so a locked realm is unreachable through a native tool
+    /// or a shell word.
+    #[must_use]
+    pub const fn locked_to_empty_roots(&self) -> bool {
+        self.trusted_roots.is_empty() && self.trusted_roots_lock.is_some()
+    }
+
     /// No opinion stated: every walked file was silent and nothing
     /// locked the realm. Callers fall back to cwd.
     #[must_use]

@@ -389,23 +389,25 @@ fn find_trusted_roots_violation(
     target: &Path,
     permissions: &ResolvedPermissions,
 ) -> Option<OpGuardError> {
-    // `target_is_sanctioned` returns `true` for an empty list (open
-    // mode), so the lock case (`trusted_roots: []` with no inherited
-    // entries) needs an explicit check: any target outside the empty
-    // set is denied.
-    let inside = !permissions.trusted_roots.is_empty()
-        && target_is_sanctioned(target, &permissions.trusted_roots);
-    if inside {
-        return None;
-    }
-    let source_file = permissions
-        .trusted_roots
-        .first()
-        .map(|entry| entry.source_file.clone())
-        .or_else(|| permissions.trusted_roots_lock.clone())?;
-    Some(OpGuardError::OutsideAllowedRoots {
+    // A realm locked to an empty allow-set denies every target under it;
+    // the shared predicate keeps this in lockstep with the pretool hook.
+    // `target_is_sanctioned` returns `true` for the empty/open set, so the
+    // lock case is decided first; otherwise a non-empty root set denies
+    // only targets no entry covers.
+    let source_file = if permissions.locked_to_empty_roots() {
+        permissions.trusted_roots_lock.clone()
+    } else if target_is_sanctioned(target, &permissions.trusted_roots) {
+        None
+    } else {
+        permissions
+            .trusted_roots
+            .first()
+            .map(|entry| entry.source_file.clone())
+            .or_else(|| permissions.trusted_roots_lock.clone())
+    };
+    source_file.map(|file| OpGuardError::OutsideAllowedRoots {
         op: String::from(op),
-        source_file,
+        source_file: file,
         target: target.to_path_buf(),
     })
 }

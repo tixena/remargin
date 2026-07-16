@@ -123,7 +123,7 @@ pub fn pretool(system: &dyn System, stdin_bytes: &[u8]) -> PretoolOutcome {
             // event.cwd's only job is rooting a relative target; the
             // governing realm is resolved from the target itself.
             let absolute = absolutise(&event.cwd, &path);
-            let canonical = system.canonicalize(&absolute).unwrap_or(absolute);
+            let canonical = canonicalize_existing_prefix(system, &absolute);
             let resolved = match resolve_for_target(system, &canonical) {
                 Ok(value) => value,
                 Err(err) => {
@@ -244,6 +244,14 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 /// re-allow, so it is checked first and never lifted — matching the op
 /// guard, which denies `deny_ops` before consulting `allow_dot_folders`.
 fn path_is_restricted(resolved: &ResolvedPermissions, candidate: &Path) -> bool {
+    // A realm locked to an empty allow-set (`trusted_roots: []`) denies
+    // every target under it. `candidate`'s realm is resolved by walking up
+    // from it, so a lock in `resolved` is an ancestor's — the candidate is
+    // inside the locked realm by construction. Mirrors the op guard's
+    // `find_trusted_roots_violation` fallback so the layers cannot diverge.
+    if resolved.locked_to_empty_roots() {
+        return true;
+    }
     if resolved
         .deny_ops
         .iter()
@@ -271,8 +279,8 @@ fn reallowed_dot_folder_path(resolved: &ResolvedPermissions, candidate: &Path) -
 
 /// Directory of the `.remargin.yaml` that governs `candidate` — the realm
 /// the no-equivalent fallback names. Mirrors `path_is_restricted`'s match
-/// order (`deny_ops` before `trusted_roots`) so the named realm is the one
-/// that actually triggered the deny.
+/// order (`deny_ops`, then `trusted_roots`, then a `trusted_roots: []` lock)
+/// so the named realm is the one that actually triggered the deny.
 fn realm_root_for(resolved: &ResolvedPermissions, candidate: &Path) -> PathBuf {
     let source = resolved
         .deny_ops
@@ -285,7 +293,8 @@ fn realm_root_for(resolved: &ResolvedPermissions, candidate: &Path) -> PathBuf {
                 .iter()
                 .find(|entry| root_covers_word(&entry.path, candidate))
                 .map(|entry| entry.source_file.as_path())
-        });
+        })
+        .or(resolved.trusted_roots_lock.as_deref());
     source.map_or_else(
         || candidate.parent().unwrap_or(candidate).to_path_buf(),
         |file| file.parent().unwrap_or(file).to_path_buf(),
@@ -583,7 +592,40 @@ fn resolve_run(system: &dyn System, run: &str, base_cwd: &Path) -> PathBuf {
         base_cwd.join(raw)
     };
     let normalized = lexical_normalize(&absolute);
-    system.canonicalize(&normalized).unwrap_or(normalized)
+    canonicalize_existing_prefix(system, &normalized)
+}
+
+/// Canonicalize the deepest ancestor of `absolute` that exists on disk,
+/// then rejoin the not-yet-created tail. `canonicalize` fails outright for
+/// any nonexistent leaf — every new-file `Write` — so a blanket
+/// failure-inside-a-realm deny would block legitimate writes to
+/// unrestricted subpaths. Resolving the existing prefix instead defeats a
+/// symlinked directory in the prefix of a missing leaf
+/// (`<realm>/link/new.md`, where `link` points elsewhere): a purely lexical
+/// path would be checked under the link name, not its target. Restriction
+/// is therefore always resolved on a real path — never silently allowed as
+/// unchecked. `MockSystem`'s join-only `canonicalize` never fails, so this
+/// collapses to plain canonicalization there.
+fn canonicalize_existing_prefix(system: &dyn System, absolute: &Path) -> PathBuf {
+    let mut tail: Vec<&OsStr> = Vec::new();
+    let mut current = absolute;
+    loop {
+        if let Ok(canonical) = system.canonicalize(current) {
+            let mut resolved = canonical;
+            for component in tail.iter().rev() {
+                resolved.push(component);
+            }
+            return resolved;
+        }
+        let Some(name) = current.file_name() else {
+            return absolute.to_path_buf();
+        };
+        tail.push(name);
+        let Some(parent) = current.parent() else {
+            return absolute.to_path_buf();
+        };
+        current = parent;
+    }
 }
 
 fn expand_tilde(system: &dyn System, run: &str) -> String {

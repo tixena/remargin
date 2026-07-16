@@ -1464,3 +1464,128 @@ fn msg_mv_carries_src_and_dst() {
         deny_reason(&decision),
     );
 }
+
+// ---------------------------------------------------------------------
+// Fail closed inside a realm, fail open when none is found. A realm
+// locked with `trusted_roots: []` is deny-all (parity with the op guard);
+// a canonicalize failure under a governing realm resolves the existing
+// prefix so restriction is checked on a real path, never silently
+// allowed; absence of any realm still fails open.
+// ---------------------------------------------------------------------
+
+/// A realm locked to an empty allow-set (`trusted_roots: []`).
+fn locked_empty_yaml() -> &'static str {
+    "permissions:\n  trusted_roots: []\n"
+}
+
+/// Plan 1: `Read` a target under a locked-empty realm → `Deny`. The empty
+/// allow-set locks the realm, so every path under it is managed.
+#[test]
+fn locked_empty_realm_read_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", locked_empty_yaml())]);
+    let stdin = event_json("Read", "/r", &json!({ "file_path": "/r/foo.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Plan 2: a `Bash rm` of a target under the same locked-empty realm →
+/// `Deny`. The Bash branch shares `path_is_restricted`, so the lock denies
+/// there too.
+#[test]
+fn locked_empty_realm_bash_rm_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", locked_empty_yaml())]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/foo.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Plan 3: a `Write` to a not-yet-existing leaf reached through a symlinked
+/// directory in the prefix. Full-path canonicalize fails (the leaf does not
+/// exist), but canonicalizing the deepest existing ancestor resolves the
+/// symlink into the realm, so restriction is checked on the real target and
+/// denies — never a silent allow of an unchecked path. Real FS because
+/// `MockSystem` does not model symlinks.
+#[cfg(unix)]
+#[test]
+fn canonicalize_prefix_symlink_new_file_write_denies() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use os_shim::real::RealSystem;
+    use tempfile::TempDir;
+
+    let realm = TempDir::new().unwrap();
+    let realm_path = realm.path().canonicalize().unwrap();
+    fs::create_dir_all(realm_path.join("src/secret")).unwrap();
+    fs::write(
+        realm_path.join(".remargin.yaml"),
+        "permissions:\n  trusted_roots:\n    - path: src/secret\n",
+    )
+    .unwrap();
+    // `alias` -> the trusted root; the `new.md` leaf under it does not exist.
+    symlink(realm_path.join("src/secret"), realm_path.join("alias")).unwrap();
+
+    let cwd = realm_path.display().to_string();
+    let target = realm_path.join("alias/new.md").display().to_string();
+    let stdin = event_json(
+        "Write",
+        &cwd,
+        &json!({ "file_path": target, "content": "x" }),
+    );
+    assert!(matches!(
+        pretool(&RealSystem::new(), &stdin),
+        PretoolOutcome::Deny(_)
+    ));
+}
+
+/// Plan 4: a `Write` to a nonexistent leaf with no `.remargin.yaml` above
+/// it. Full-path canonicalize fails, but with no governing realm the
+/// fallback stays allow → `SilentAllow`. Real FS so canonicalize actually
+/// fails on the missing leaf.
+#[cfg(unix)]
+#[test]
+fn canonicalize_fail_no_realm_silent_allows() {
+    use os_shim::real::RealSystem;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.path().canonicalize().unwrap();
+    let cwd = dir_path.display().to_string();
+    let target = dir_path.join("does/not/exist.md").display().to_string();
+    let stdin = event_json(
+        "Write",
+        &cwd,
+        &json!({ "file_path": target, "content": "x" }),
+    );
+    assert_eq!(
+        pretool(&RealSystem::new(), &stdin),
+        PretoolOutcome::SilentAllow
+    );
+}
+
+/// Plan 5: a malformed event JSON envelope → `Fail` (the CLI maps `Fail`
+/// to exit 2), unchanged.
+#[test]
+fn malformed_event_json_fails() {
+    let system = MockSystem::new();
+    let reason = expect_fail(pretool(&system, b"{ not valid json"));
+    assert!(
+        reason.contains("malformed PreToolUse event"),
+        "reason: {reason}"
+    );
+}
+
+/// Plan 6: a normal realm with a resolvable path is unchanged — a target
+/// under the trusted root still denies, a sibling outside it still
+/// silent-allows.
+#[test]
+fn normal_realm_resolvable_path_unchanged() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+
+    let restricted = event_json("Read", "/r", &json!({ "file_path": "/r/secret/a.md" }));
+    assert!(matches!(
+        pretool(&system, &restricted),
+        PretoolOutcome::Deny(_)
+    ));
+
+    let allowed = event_json("Read", "/r", &json!({ "file_path": "/r/public/a.md" }));
+    assert_eq!(pretool(&system, &allowed), PretoolOutcome::SilentAllow);
+}
