@@ -43,7 +43,9 @@ fn assert_status(out: &Output, expected: i32) {
     );
 }
 
-/// Build a JSON settings file containing the required `PreToolUse` hook.
+/// Build a JSON settings file containing both enforcement hooks — the
+/// `PreToolUse` hook and the `SessionStart` guard — so `doctor` reports a
+/// fully clean stack.
 fn hook_settings_json() -> String {
     let v = json!({
         "hooks": {
@@ -52,6 +54,13 @@ fn hook_settings_json() -> String {
                     "matcher": "Read|Write|Edit|Bash|NotebookEdit",
                     "hooks": [
                         { "type": "command", "command": "remargin claude pretool" }
+                    ]
+                }
+            ],
+            "SessionStart": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": "remargin claude session-guard" }
                     ]
                 }
             ]
@@ -113,6 +122,10 @@ fn clean_verbose_appends_checks_section() {
     assert!(
         stdout.contains("hook-installed: ok"),
         "verbose output must show hook-installed: ok, got:\n{stdout}",
+    );
+    assert!(
+        stdout.contains("session-guard: ok"),
+        "verbose output must show session-guard: ok, got:\n{stdout}",
     );
     assert!(
         stdout.contains("user-settings:"),

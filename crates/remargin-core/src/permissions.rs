@@ -7,10 +7,13 @@
 
 pub mod claude_sync;
 pub mod doctor;
+mod hook_settings;
 pub mod inspect;
 pub mod op_guard;
 pub mod pretool;
 pub mod pretool_install;
 pub mod restrict;
+pub mod session_guard;
+pub mod session_guard_install;
 pub mod sidecar;
 pub mod unprotect;

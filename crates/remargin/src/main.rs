@@ -13,7 +13,8 @@ mod render;
 pub(crate) use cli::{
     AssetsArgs, ClaudeAction, Cli, Commands, IdentityAction, IdentityArgs, McpAction,
     ObsidianAction, OutputArgs, PermissionsAction, PlanAction, PlanClaudeAction, PluginAction,
-    PretoolAction, PromptAction, RegistryAction, SandboxAction, UnrestrictedArgs,
+    PretoolAction, PromptAction, RegistryAction, SandboxAction, SessionGuardAction,
+    UnrestrictedArgs,
 };
 
 use std::io::{stderr as stderr_handle, stdout as stdout_handle};

@@ -920,6 +920,19 @@ pub enum ClaudeAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
+    /// Claude Code `SessionStart` guard hook surface.
+    ///
+    /// With no subcommand (or `dispatch`), re-verifies enforcement will
+    /// be live for the session — the `remargin` binary resolves on PATH
+    /// and the realm's `.remargin.yaml` parses — and emits a diagnostic
+    /// on stdout when it will not. `install` / `uninstall` / `test`
+    /// manage the hook entry in the target Claude settings file.
+    SessionGuard {
+        #[command(subcommand)]
+        action: Option<SessionGuardAction>,
+        #[command(flatten)]
+        output_args: OutputArgs,
+    },
     /// Reverse a previous `claude restrict`.
     ///
     /// Removes the matching `permissions.trusted_roots` entry from the
@@ -1387,6 +1400,29 @@ pub enum PretoolAction {
         local: bool,
     },
     /// Remove the `PreToolUse` hook entry. Preserves unrelated entries.
+    Uninstall {
+        #[arg(long)]
+        local: bool,
+    },
+}
+
+/// `remargin claude session-guard` subcommands.
+#[derive(clap::Subcommand)]
+pub enum SessionGuardAction {
+    /// Re-verify enforcement will be live and emit the `SessionStart` JSON.
+    Dispatch,
+    /// Wire the `SessionStart` guard hook into `~/.claude/settings.json`
+    /// (default) or `.claude/settings.json` with `--local`.
+    Install {
+        #[arg(long)]
+        local: bool,
+    },
+    /// Report whether the `SessionStart` guard hook is wired.
+    Test {
+        #[arg(long)]
+        local: bool,
+    },
+    /// Remove the `SessionStart` guard hook entry. Preserves unrelated entries.
     Uninstall {
         #[arg(long)]
         local: bool,

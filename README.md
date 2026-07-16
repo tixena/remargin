@@ -330,6 +330,26 @@ remargin claude plugin install
 remargin claude plugin test
 ```
 
+### Hooks: enforcing the boundary
+
+Two Claude Code hooks keep agents on the sanctioned surface. Both are idempotent; `install` accepts `--local` to write project-scope settings instead of the default `~/.claude/settings.json`.
+
+**PreToolUse enforcement** — inspects every gated tool call (`Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep`, `Glob`, `Bash`) and denies the ones that would touch a remargin-managed path, redirecting the agent to the matching `mcp__remargin__*` op. This hook is the single source of truth for enforcement.
+
+```bash
+remargin claude pretool install
+remargin claude pretool test
+```
+
+**SessionStart guard** — the enforcement hook *fails open*: if `remargin` is not on `PATH` the `PreToolUse` command exits 127, which Claude Code treats as non-blocking, so the tool call proceeds unprotected with no signal. The guard runs once at session start, re-checks that `remargin` resolves on `PATH` and that the realm's `.remargin.yaml` parses, and — because a `SessionStart` hook cannot block a session — surfaces any failure as a loud diagnostic injected into the session context (and a warning to the user) telling the agent enforcement may be silently disabled.
+
+```bash
+remargin claude session-guard install
+remargin claude session-guard test
+```
+
+Run `remargin doctor` at any time to confirm both hooks are wired; it reports a critical finding for each missing hook, naming the install command to run.
+
 ### Permissions (optional)
 
 To avoid per-tool confirmation prompts, add this to your Claude Code `settings.local.json`:
@@ -351,6 +371,8 @@ For a single agent in one project:
 ```bash
 remargin mcp install
 remargin claude plugin install
+remargin claude pretool install       # enforce the boundary
+remargin claude session-guard install # backstop the fail-open hook
 ```
 
 For a multi-agent setup (multiple Claude Code instances sharing a realm):

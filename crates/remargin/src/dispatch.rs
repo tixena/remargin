@@ -24,7 +24,8 @@ use crate::params::{
 };
 use crate::{
     AssetsArgs, ClaudeAction, Cli, Commands, IdentityArgs, OutputArgs, PermissionsAction,
-    PlanAction, PlanClaudeAction, PluginAction, PretoolAction, PromptAction, UnrestrictedArgs,
+    PlanAction, PlanClaudeAction, PluginAction, PretoolAction, PromptAction, SessionGuardAction,
+    UnrestrictedArgs,
 };
 use remargin_core::config::identity::IdentityFlags;
 use remargin_core::config::{self, ResolvedConfig};
@@ -32,6 +33,7 @@ use remargin_core::document;
 use remargin_core::operations;
 use remargin_core::operations::replace;
 use remargin_core::permissions::pretool::{PretoolOutcome, pretool};
+use remargin_core::permissions::session_guard::{GuardOutcome, session_guard};
 
 pub const EXIT_ERROR: u8 = 1;
 pub const EXIT_LINT: u8 = 2;
@@ -108,6 +110,7 @@ const fn claude_action_output(action: &ClaudeAction) -> &OutputArgs {
     match action {
         ClaudeAction::Plugin { output_args, .. }
         | ClaudeAction::Pretool { output_args, .. }
+        | ClaudeAction::SessionGuard { output_args, .. }
         | ClaudeAction::Restrict { output_args, .. }
         | ClaudeAction::Unrestrict { output_args, .. } => output_args,
     }
@@ -727,6 +730,16 @@ fn handle_claude(
             action: pretool_action,
             output_args,
         } => handle_claude_pretool_action(sinks, system, pretool_action.as_ref(), output_args.json),
+        ClaudeAction::SessionGuard {
+            action: guard_action,
+            output_args,
+        } => handle_claude_session_guard_action(
+            sinks,
+            system,
+            cwd,
+            guard_action.as_ref(),
+            output_args.json,
+        ),
         ClaudeAction::Restrict {
             path,
             also_deny_bash,
@@ -804,6 +817,54 @@ fn handle_claude_pretool_dispatch(sinks: &mut IoSinks<'_>, system: &dyn System) 
         _ => Err(anyhow::anyhow!(
             "{PRETOOL_FAIL_SENTINEL}unexpected pretool outcome",
         )),
+    }
+}
+
+/// Route `remargin claude session-guard [subcommand]`. With no subcommand
+/// (or `dispatch`), runs the `SessionStart` guard. The install /
+/// uninstall / test variants manage the hook entry in a Claude settings
+/// file.
+fn handle_claude_session_guard_action(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+    action: Option<&SessionGuardAction>,
+    json_mode: bool,
+) -> Result<()> {
+    match action {
+        None | Some(SessionGuardAction::Dispatch) => {
+            handle_claude_session_guard_dispatch(sinks, system, cwd)
+        }
+        Some(SessionGuardAction::Install { local }) => {
+            handlers::cmd_session_guard_install(sinks, system, *local, json_mode)
+        }
+        Some(SessionGuardAction::Uninstall { local }) => {
+            handlers::cmd_session_guard_uninstall(sinks, system, *local, json_mode)
+        }
+        Some(SessionGuardAction::Test { local }) => {
+            handlers::cmd_session_guard_test(sinks, system, *local, json_mode)
+        }
+    }
+}
+
+/// Runs the `SessionStart` guard core and emits the outcome. Always exits
+/// 0: `SessionStart` has no blocking or decision control, and JSON is
+/// honored only on exit 0, so the diagnostic JSON on stdout is the
+/// strongest available signal (`additionalContext` into Claude's context,
+/// `systemMessage` to the user). A clean session emits nothing.
+fn handle_claude_session_guard_dispatch(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    cwd: &Path,
+) -> Result<()> {
+    match session_guard(system, cwd) {
+        GuardOutcome::Fail(diagnostic) => {
+            let json = serde_json::to_string(&diagnostic)
+                .context("serializing session guard diagnostic")?;
+            writeln!(sinks.stdout, "{json}").context("writing session guard diagnostic")
+        }
+        GuardOutcome::Ok => Ok(()),
+        _ => Err(anyhow::anyhow!("unexpected session guard outcome")),
     }
 }
 

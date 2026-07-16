@@ -9,8 +9,36 @@ use crate::permissions::doctor::{
     DoctorFinding, DoctorReport, FindingKind, Severity, render_doctor_text, run_doctor,
 };
 use crate::permissions::pretool_install::{HOOK_COMMAND, HOOK_MATCHER};
+use crate::permissions::session_guard_install::SESSION_HOOK_COMMAND;
 
+/// Settings carrying both enforcement hooks — the fully-configured, clean
+/// state (`PreToolUse` enforcement + `SessionStart` guard).
 fn hook_settings_json() -> String {
+    let v = json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": HOOK_MATCHER,
+                    "hooks": [
+                        { "type": "command", "command": HOOK_COMMAND }
+                    ]
+                }
+            ],
+            "SessionStart": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": SESSION_HOOK_COMMAND }
+                    ]
+                }
+            ]
+        }
+    });
+    serde_json::to_string_pretty(&v).unwrap()
+}
+
+/// Settings carrying only the `PreToolUse` hook — enforcement is wired but
+/// the `SessionStart` guard is missing.
+fn pretool_only_settings_json() -> String {
     let v = json!({
         "hooks": {
             "PreToolUse": [
@@ -26,14 +54,36 @@ fn hook_settings_json() -> String {
     serde_json::to_string_pretty(&v).unwrap()
 }
 
+/// Settings carrying only the `SessionStart` guard hook.
+fn guard_only_settings_json() -> String {
+    let v = json!({
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": SESSION_HOOK_COMMAND }
+                    ]
+                }
+            ]
+        }
+    });
+    serde_json::to_string_pretty(&v).unwrap()
+}
+
 fn mock_with_file(path: &str, body: &str) -> MockSystem {
-    MockSystem::new()
+    mock_with_files(&[(path, body)])
+}
+
+fn mock_with_files(files: &[(&str, &str)]) -> MockSystem {
+    let mut system = MockSystem::new()
         .with_dir(Path::new("/r"))
         .unwrap()
         .with_dir(Path::new("/r/.claude"))
-        .unwrap()
-        .with_file(Path::new(path), body.as_bytes())
-        .unwrap()
+        .unwrap();
+    for (path, body) in files {
+        system = system.with_file(Path::new(path), body.as_bytes()).unwrap();
+    }
+    system
 }
 
 /// Hook present in user-scope → clean report.
@@ -184,12 +234,100 @@ fn report_includes_correct_settings_file_paths() {
     );
 }
 
+// --- SessionStart guard (SessionGuardMissing) unit tests ---
+
+/// Case 1: both hooks present in user-scope, guard installed, no
+/// `SessionGuardMissing`, clean report.
+#[test]
+fn guard_in_user_scope_is_clean() {
+    let system = mock_with_file("/home/u/.claude/settings.json", &hook_settings_json());
+    let report = run_doctor(
+        &system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap();
+    assert!(report.hook_installed);
+    assert!(report.session_guard_installed, "expected guard installed");
+    assert!(report.is_clean(), "expected no findings: {report:#?}");
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|f| f.kind != FindingKind::SessionGuardMissing),
+        "no SessionGuardMissing expected: {report:#?}",
+    );
+}
+
+/// Case 2: `PreToolUse` hook in user-scope, `SessionStart` guard in
+/// project-scope only, both checks pass, no finding.
+#[test]
+fn guard_in_project_scope_only_is_clean() {
+    let system = mock_with_files(&[
+        (
+            "/home/u/.claude/settings.json",
+            &pretool_only_settings_json(),
+        ),
+        (
+            "/r/.claude/settings.local.json",
+            &guard_only_settings_json(),
+        ),
+    ]);
+    let report = run_doctor(
+        &system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap();
+    assert!(report.hook_installed);
+    assert!(report.session_guard_installed);
+    assert!(report.is_clean(), "expected no findings: {report:#?}");
+}
+
+/// Case 3: `PreToolUse` hook present but the guard is absent from both
+/// scopes, exactly one `SessionGuardMissing` finding (Critical) naming
+/// the install command.
+#[test]
+fn guard_absent_from_both_scopes_reports_session_guard_missing() {
+    let system = mock_with_file(
+        "/home/u/.claude/settings.json",
+        &pretool_only_settings_json(),
+    );
+    let report = run_doctor(
+        &system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap();
+    assert!(report.hook_installed, "PreToolUse hook should be detected");
+    assert!(!report.session_guard_installed);
+    assert_eq!(
+        report.findings.len(),
+        1,
+        "expected one finding: {report:#?}"
+    );
+    let finding = &report.findings[0];
+    assert_eq!(finding.kind, FindingKind::SessionGuardMissing);
+    assert_eq!(finding.severity, Severity::Critical);
+    assert!(
+        finding.message.contains("SessionStart"),
+        "message should mention SessionStart: {}",
+        finding.message,
+    );
+    assert!(
+        finding.remedy.contains("session-guard install"),
+        "remedy should name the install command: {}",
+        finding.remedy,
+    );
+}
+
 // --- render_doctor_text unit tests ---
 
 fn clean_report() -> DoctorReport {
     DoctorReport {
         findings: vec![],
         hook_installed: true,
+        session_guard_installed: true,
         project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
     }
@@ -204,6 +342,7 @@ fn findings_report() -> DoctorReport {
             severity: Severity::Critical,
         }],
         hook_installed: false,
+        session_guard_installed: false,
         project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
     }
@@ -224,6 +363,10 @@ fn render_doctor_clean_verbose() {
     assert!(
         out.contains("hook-installed: ok"),
         "missing hook verdict: {out}"
+    );
+    assert!(
+        out.contains("session-guard: ok"),
+        "missing session-guard verdict: {out}"
     );
     assert!(
         out.contains("user-settings:"),

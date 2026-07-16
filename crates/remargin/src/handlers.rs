@@ -63,6 +63,7 @@ use remargin_core::permissions::doctor as permissions_doctor;
 use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::permissions::pretool_install;
 use remargin_core::permissions::restrict as permissions_restrict;
+use remargin_core::permissions::session_guard_install;
 use remargin_core::permissions::unprotect as permissions_unprotect;
 use remargin_core::responses;
 use remargin_core::writer::InsertPosition;
@@ -180,6 +181,88 @@ pub fn cmd_pretool_test(
         writeln!(
             sinks.stderr,
             "PreToolUse hook ({scope}): {status} at {}",
+            path.display(),
+        )
+        .context("writing to stderr")?;
+        Ok(())
+    }
+}
+
+pub fn cmd_session_guard_install(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    local: bool,
+    json_mode: bool,
+) -> Result<()> {
+    let cwd = env::current_dir().context("resolving current directory")?;
+    let path = pretool_settings_path(system, &cwd, local)?;
+    let outcome = session_guard_install::install(system, &path)?;
+    let scope = scope_label(local);
+    let status = match outcome {
+        session_guard_install::InstallOutcome::AlreadyInstalled => "already_installed",
+        session_guard_install::InstallOutcome::Installed => "installed",
+        _ => "unknown",
+    };
+    emit_session_guard_status(sinks, json_mode, scope, status, &path)
+}
+
+pub fn cmd_session_guard_uninstall(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    local: bool,
+    json_mode: bool,
+) -> Result<()> {
+    let cwd = env::current_dir().context("resolving current directory")?;
+    let path = pretool_settings_path(system, &cwd, local)?;
+    let outcome = session_guard_install::uninstall(system, &path)?;
+    let scope = scope_label(local);
+    let status = match outcome {
+        session_guard_install::UninstallOutcome::NotInstalled => "not_installed",
+        session_guard_install::UninstallOutcome::Uninstalled => "uninstalled",
+        _ => "unknown",
+    };
+    emit_session_guard_status(sinks, json_mode, scope, status, &path)
+}
+
+pub fn cmd_session_guard_test(
+    sinks: &mut IoSinks<'_>,
+    system: &dyn System,
+    local: bool,
+    json_mode: bool,
+) -> Result<()> {
+    let cwd = env::current_dir().context("resolving current directory")?;
+    let path = pretool_settings_path(system, &cwd, local)?;
+    let outcome = session_guard_install::test(system, &path)?;
+    let scope = scope_label(local);
+    let status = match outcome {
+        session_guard_install::TestOutcome::Installed => "installed",
+        session_guard_install::TestOutcome::NotInstalled => "not_installed",
+        _ => "unknown",
+    };
+    emit_session_guard_status(sinks, json_mode, scope, status, &path)
+}
+
+fn emit_session_guard_status(
+    sinks: &mut IoSinks<'_>,
+    json_mode: bool,
+    scope: &str,
+    status: &str,
+    path: &Path,
+) -> Result<()> {
+    if json_mode {
+        print_output(
+            sinks,
+            true,
+            &json!({
+                "status": status,
+                "scope": scope,
+                "settings_file": path.display().to_string(),
+            }),
+        )
+    } else {
+        writeln!(
+            sinks.stderr,
+            "SessionStart guard ({scope}): {status} at {}",
             path.display(),
         )
         .context("writing to stderr")?;

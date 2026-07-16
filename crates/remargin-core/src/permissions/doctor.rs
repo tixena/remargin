@@ -19,6 +19,7 @@ use os_shim::System;
 use serde::{Deserialize, Serialize};
 
 use crate::permissions::pretool_install::{self, TestOutcome};
+use crate::permissions::session_guard_install::{self, TestOutcome as GuardTestOutcome};
 
 /// Severity levels for doctor findings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +42,12 @@ pub enum FindingKind {
     /// native-tool enforcement is active for any managed path in the
     /// realm. All subsequent checks are skipped.
     HookMissing,
+    /// The `SessionStart` guard (`remargin claude session-guard`) is
+    /// absent from both user-scope and project-scope settings files.
+    /// Without it, a broken enforcement path (e.g. `remargin` fell off
+    /// `PATH`) fails open silently — the guard is the fail-open backstop
+    /// that surfaces such a failure into the session.
+    SessionGuardMissing,
 }
 
 /// A single diagnostic finding from a doctor check.
@@ -74,6 +81,9 @@ pub struct DoctorReport {
     /// Project-scope settings file that was tested for the hook.
     pub project_settings_file: PathBuf,
 
+    /// Whether the `SessionStart` guard is registered in either scope.
+    pub session_guard_installed: bool,
+
     /// User-scope settings file that was tested for the hook.
     pub user_settings_file: PathBuf,
 }
@@ -94,6 +104,10 @@ impl DoctorReport {
 ///    either `user_settings_file` or `project_settings_file`. When
 ///    absent from both, emits a `HookMissing` finding and short-circuits
 ///    (all subsequent checks would be moot).
+/// 2. **Session-guard-installed** — verifies the `SessionStart` guard
+///    (`remargin claude session-guard`) is present in either scope. When
+///    absent from both, emits a `SessionGuardMissing` finding: without
+///    the guard, a broken enforcement path fails open silently.
 ///
 /// # Errors
 ///
@@ -111,6 +125,13 @@ pub fn run_doctor(
     let hook_installed = matches!(
         (&user_outcome, &project_outcome),
         (TestOutcome::Installed, _) | (_, TestOutcome::Installed)
+    );
+
+    let user_guard = session_guard_install::test(system, user_settings_file)?;
+    let project_guard = session_guard_install::test(system, &project_settings_file)?;
+    let session_guard_installed = matches!(
+        (&user_guard, &project_guard),
+        (GuardTestOutcome::Installed, _) | (_, GuardTestOutcome::Installed)
     );
 
     let mut findings: Vec<DoctorFinding> = Vec::new();
@@ -133,14 +154,35 @@ pub fn run_doctor(
         return Ok(DoctorReport {
             findings,
             hook_installed,
+            session_guard_installed,
             project_settings_file,
             user_settings_file: user_settings_file.to_path_buf(),
+        });
+    }
+
+    if !session_guard_installed {
+        findings.push(DoctorFinding {
+            kind: FindingKind::SessionGuardMissing,
+            message: format!(
+                "The SessionStart guard (`remargin claude session-guard`) is not registered in \
+                 either the user-scope settings ({}) or the project-scope settings ({}). The \
+                 PreToolUse hook fails open — if `remargin` falls off PATH it exits 127 \
+                 (non-blocking) and gated tool calls proceed unprotected with no signal. The \
+                 guard is the backstop that surfaces that failure into the session.",
+                user_settings_file.display(),
+                project_settings_file.display()
+            ),
+            remedy: String::from(
+                "Run `remargin claude session-guard install` to register the guard.",
+            ),
+            severity: Severity::Critical,
         });
     }
 
     Ok(DoctorReport {
         findings,
         hook_installed,
+        session_guard_installed,
         project_settings_file,
         user_settings_file: user_settings_file.to_path_buf(),
     })
@@ -174,8 +216,14 @@ pub fn render_doctor_text(report: &DoctorReport, verbose: bool) -> String {
         } else {
             "missing"
         };
+        let guard_verdict = if report.session_guard_installed {
+            "ok"
+        } else {
+            "missing"
+        };
         let _ = writeln!(out, "Checks:");
         let _ = writeln!(out, "  hook-installed: {hook_verdict}");
+        let _ = writeln!(out, "  session-guard: {guard_verdict}");
         let _ = writeln!(
             out,
             "  user-settings: {}",

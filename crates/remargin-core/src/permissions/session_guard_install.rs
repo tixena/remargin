@@ -1,6 +1,13 @@
-//! Install / uninstall / test the `PreToolUse` hook entry that
-//! dispatches to `remargin claude pretool`. Operates over a single
+//! Install / uninstall / test the `SessionStart` guard hook entry.
+//!
+//! Dispatches to `remargin claude session-guard`. Operates over a single
 //! settings file (caller picks user-scope or project-scope). Idempotent.
+//!
+//! The entry carries no `matcher`, so it fires for every `SessionStart`
+//! source (startup, resume, clear, compact). The remargin entry is
+//! identified by its inner command — not by any matcher — so an
+//! installation a user has annotated with a matcher is still recognized
+//! (drift-tolerant, mirroring `pretool_install`).
 
 #[cfg(test)]
 mod tests;
@@ -13,14 +20,10 @@ use serde_json::{Map, Value, json};
 
 use crate::permissions::hook_settings;
 
-/// Matcher string written into the `PreToolUse` hook entry. Every tool
-/// the dispatcher inspects must be listed here so Claude Code fans the
-/// hook in for those calls.
-pub const HOOK_MATCHER: &str = "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash";
-
-/// Hook command Claude Code invokes for each gated tool call. The
-/// dispatcher reads stdin and writes the decision JSON to stdout.
-pub const HOOK_COMMAND: &str = "remargin claude pretool";
+/// Hook command Claude Code invokes at session start. The guard reads no
+/// stdin; it re-verifies enforcement will be live and writes its
+/// diagnostic JSON to stdout.
+pub const SESSION_HOOK_COMMAND: &str = "remargin claude session-guard";
 
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -49,20 +52,12 @@ pub enum TestOutcome {
 /// invalid JSON, or if writing the updated settings fails.
 pub fn install(system: &dyn System, settings_file: &Path) -> Result<InstallOutcome> {
     let mut value = hook_settings::load_or_default(system, settings_file)?;
-    match upgrade_existing_entry(&mut value) {
-        // A remargin entry already carries the current matcher.
-        Some(false) => Ok(InstallOutcome::AlreadyInstalled),
-        // A remargin entry carried a drifted matcher, now rewritten.
-        Some(true) => {
-            hook_settings::write_settings(system, settings_file, &value)?;
-            Ok(InstallOutcome::Installed)
-        }
-        None => {
-            insert_hook(&mut value);
-            hook_settings::write_settings(system, settings_file, &value)?;
-            Ok(InstallOutcome::Installed)
-        }
+    if hook_present(&value) {
+        return Ok(InstallOutcome::AlreadyInstalled);
     }
+    insert_hook(&mut value);
+    hook_settings::write_settings(system, settings_file, &value)?;
+    Ok(InstallOutcome::Installed)
 }
 
 /// # Errors
@@ -98,7 +93,7 @@ pub fn test(system: &dyn System, settings_file: &Path) -> Result<TestOutcome> {
 }
 
 fn hook_present(value: &Value) -> bool {
-    pretool_entries(value).is_some_and(|entries| entries.iter().any(matches_remargin_entry))
+    session_entries(value).is_some_and(|entries| entries.iter().any(matches_remargin_entry))
 }
 
 fn insert_hook(value: &mut Value) {
@@ -111,16 +106,15 @@ fn insert_hook(value: &mut Value) {
     let Some(hooks_obj) = hooks.as_object_mut() else {
         return;
     };
-    let pretool = hooks_obj
-        .entry(String::from("PreToolUse"))
+    let session = hooks_obj
+        .entry(String::from("SessionStart"))
         .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(pretool_arr) = pretool.as_array_mut() else {
+    let Some(session_arr) = session.as_array_mut() else {
         return;
     };
-    pretool_arr.push(json!({
-        "matcher": HOOK_MATCHER,
+    session_arr.push(json!({
         "hooks": [
-            { "type": "command", "command": HOOK_COMMAND },
+            { "type": "command", "command": SESSION_HOOK_COMMAND },
         ],
     }));
 }
@@ -132,14 +126,14 @@ fn remove_hook(value: &mut Value) -> bool {
     let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) else {
         return false;
     };
-    let Some(pretool) = hooks.get_mut("PreToolUse").and_then(Value::as_array_mut) else {
+    let Some(session) = hooks.get_mut("SessionStart").and_then(Value::as_array_mut) else {
         return false;
     };
-    let before = pretool.len();
-    pretool.retain(|entry| !matches_remargin_entry(entry));
-    let removed = pretool.len() < before;
-    if pretool.is_empty() {
-        let _removed_pretool: Option<Value> = hooks.remove("PreToolUse");
+    let before = session.len();
+    session.retain(|entry| !matches_remargin_entry(entry));
+    let removed = session.len() < before;
+    if session.is_empty() {
+        let _removed_session: Option<Value> = hooks.remove("SessionStart");
     }
     if hooks.is_empty() {
         let _removed_hooks: Option<Value> = root.remove("hooks");
@@ -147,46 +141,16 @@ fn remove_hook(value: &mut Value) -> bool {
     removed
 }
 
-fn pretool_entries(value: &Value) -> Option<&Vec<Value>> {
+fn session_entries(value: &Value) -> Option<&Vec<Value>> {
     value
         .get("hooks")
-        .and_then(|h| h.get("PreToolUse"))
+        .and_then(|h| h.get("SessionStart"))
         .and_then(Value::as_array)
 }
 
-/// Locate the remargin entry (identified by its [`HOOK_COMMAND`], not its
-/// matcher) and reconcile its matcher with [`HOOK_MATCHER`]. Returns
-/// `None` when no remargin entry is present, `Some(false)` when the
-/// matcher already matches, and `Some(true)` after rewriting a drifted
-/// matcher in place — so a widened `HOOK_MATCHER` upgrades an older
-/// installation rather than duplicating the entry.
-fn upgrade_existing_entry(value: &mut Value) -> Option<bool> {
-    let entries = value
-        .get_mut("hooks")
-        .and_then(Value::as_object_mut)?
-        .get_mut("PreToolUse")
-        .and_then(Value::as_array_mut)?;
-    let entry = entries
-        .iter_mut()
-        .find(|entry| matches_remargin_entry(entry))?;
-    let obj = entry.as_object_mut()?;
-    let matcher_current = obj
-        .get("matcher")
-        .and_then(Value::as_str)
-        .is_some_and(|m| m == HOOK_MATCHER);
-    if matcher_current {
-        return Some(false);
-    }
-    let _prev: Option<Value> = obj.insert(
-        String::from("matcher"),
-        Value::String(String::from(HOOK_MATCHER)),
-    );
-    Some(true)
-}
-
-/// A remargin hook entry is identified by its inner [`HOOK_COMMAND`]; the
-/// matcher string is informational, so an installation whose matcher has
-/// drifted from the current [`HOOK_MATCHER`] is still recognized.
+/// A remargin guard entry is identified solely by its inner
+/// [`SESSION_HOOK_COMMAND`]; any `matcher` a user has added is
+/// informational, so an annotated installation is still recognized.
 fn matches_remargin_entry(entry: &Value) -> bool {
     let Some(obj) = entry.as_object() else {
         return false;
@@ -205,7 +169,7 @@ fn matches_remargin_entry(entry: &Value) -> bool {
         let command_ok = hook_obj
             .get("command")
             .and_then(Value::as_str)
-            .is_some_and(|c| c == HOOK_COMMAND);
+            .is_some_and(|c| c == SESSION_HOOK_COMMAND);
         type_ok && command_ok
     })
 }

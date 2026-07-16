@@ -286,6 +286,12 @@ remargin permissions show  # what's restricted in this realm?
 
 In strict mode, an unsigned or unregistered post is rejected by the verify gate before write. Don't assume an earlier op succeeding implies the next will.
 
+### Q: Is enforcement actually live? (the fail-open trap)
+
+Two Claude Code hooks enforce the boundary: a **PreToolUse** hook denies native-tool access to managed paths, and a **SessionStart** guard backstops it. The PreToolUse hook *fails open* — if `remargin` is not on `PATH` it exits 127, which Claude Code treats as non-blocking, so gated tool calls proceed **unprotected with no signal**. The SessionStart guard exists to catch exactly that: at session start it re-checks that `remargin` resolves and the realm config parses, and injects a loud diagnostic when either is broken.
+
+If you ever see that guard diagnostic in your context (enforcement may be silently disabled), or you are unsure the hooks are wired, run `remargin doctor`. A missing guard means enforcement can silently fail — a `SessionGuardMissing` finding is not cosmetic. Do not assume managed files are protected just because an earlier op was denied; treat every `.md` under a `.remargin.yaml` realm as remargin-managed regardless.
+
 ### Q: I want to restrict (or unrestrict) a path.
 
 1. `remargin claude restrict <path>` — appends an entry to
