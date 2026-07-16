@@ -40,6 +40,12 @@ fn restrict_with_extra_bash(path: &str, verb: &str) -> String {
     format!("permissions:\n  trusted_roots:\n    - path: {path}\n      also_deny_bash: [{verb}]\n")
 }
 
+/// A realm whose only restriction is a `deny_ops` entry on `path` — no
+/// `trusted_roots`. Exercises the shared predicate's `deny_ops` branch.
+fn deny_ops_yaml(path: &str, op: &str) -> String {
+    format!("permissions:\n  deny_ops:\n    - path: {path}\n      ops: [{op}]\n")
+}
+
 fn expect_deny(outcome: PretoolOutcome) -> Decision {
     assert!(
         matches!(outcome, PretoolOutcome::Deny(_)),
@@ -1102,4 +1108,49 @@ fn plan_two_realm_pipeline_denies() {
     ]);
     let stdin = event_json("Bash", "/", &json!({ "command": "cat /r1/a | tee /r2/b" }));
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+// ---------------------------------------------------------------------
+// Shared-predicate unification: the Bash branch decides restriction
+// through the same `path_is_restricted` predicate as the Path branch, so
+// a deny_ops-only path is denied under Bash too and the two branches
+// cannot drift. Trusted-root glob coverage stays green.
+// ---------------------------------------------------------------------
+
+/// Unify 1: a `deny_ops`-only path (no `trusted_roots`) denies under `Edit`.
+#[test]
+fn deny_ops_only_path_edit_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &deny_ops_yaml("x.md", "edit"))]);
+    let stdin = event_json(
+        "Edit",
+        "/r",
+        &json!({ "file_path": "/r/x.md", "old_string": "a", "new_string": "b" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Unify 2 (the fix): the same `deny_ops`-only path denies under `Bash rm`,
+/// which previously consulted `trusted_roots` only and let it through.
+#[test]
+fn deny_ops_only_path_bash_rm_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &deny_ops_yaml("x.md", "edit"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/x.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Unify 3: a wildcard `trusted_roots` realm still denies a `Bash rm` of a
+/// path inside it — trusted-root coverage is unchanged by the unification.
+#[test]
+fn wildcard_trusted_roots_bash_rm_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/x.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Unify 4: a path in neither `deny_ops` nor `trusted_roots` silent-allows.
+#[test]
+fn path_in_neither_bash_rm_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &deny_ops_yaml("x.md", "edit"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/y.md" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }

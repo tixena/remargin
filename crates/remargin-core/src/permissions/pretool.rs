@@ -26,7 +26,6 @@ use serde_json::Value;
 use crate::config::permissions::resolve::{
     ResolvedPermissions, TrustedRootPath, resolve_permissions,
 };
-use crate::permissions::op_guard::target_is_sanctioned;
 
 const WRAPPER_PREFIXES: &[WrapperPrefix] = &[WrapperPrefix {
     has_proxy_subcommand: true,
@@ -229,20 +228,26 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     out
 }
 
-/// True when `path` falls under any `trusted_roots` entry or any
-/// `deny_ops` entry — i.e. when the realm has declared the path as
-/// remargin-managed. Mirrors the deny rules `claude restrict` writes
-/// into `.claude/settings.local.json` so this layer and Claude's
-/// native-tool denies stay aligned.
-fn path_is_restricted(resolved: &ResolvedPermissions, canonical: &Path) -> bool {
+/// The single definition of "restricted", shared by the Path branch and
+/// the per-word Bash branch so the two cannot drift. True when
+/// `candidate` falls under any `deny_ops` entry or is covered by any
+/// `trusted_roots` entry — i.e. when the realm has declared the path as
+/// remargin-managed. Trusted-root coverage is glob-aware so a bash word
+/// carrying glob metacharacters (`/r/sec*ret/foo`) that could expand into
+/// a root is denied without touching disk; a literal path (every
+/// Path-branch target) matches by plain component equality, unchanged.
+fn path_is_restricted(resolved: &ResolvedPermissions, candidate: &Path) -> bool {
     if resolved
         .deny_ops
         .iter()
-        .any(|entry| canonical == entry.path || canonical.starts_with(&entry.path))
+        .any(|entry| candidate == entry.path || candidate.starts_with(&entry.path))
     {
         return true;
     }
-    target_is_sanctioned(canonical, &resolved.trusted_roots) && !resolved.trusted_roots.is_empty()
+    resolved
+        .trusted_roots
+        .iter()
+        .any(|entry| root_covers_word(&entry.path, candidate))
 }
 
 /// Parse `command` into simple commands, resolve every path-shaped word
@@ -299,7 +304,7 @@ fn evaluate_simple_command(
                     )));
                 }
             };
-            if bash_word_restricted(&resolved, &candidate) {
+            if path_is_restricted(&resolved, &candidate) {
                 return Some(PretoolOutcome::Deny(build_bash_decision(
                     &candidate.display().to_string(),
                     verb,
@@ -519,18 +524,10 @@ fn expand_tilde(system: &dyn System, run: &str) -> String {
     run.to_owned()
 }
 
-/// A resolved bash word is restricted when it lands inside one of the
-/// realm's trusted roots. Coverage is glob-aware so a pattern that would
-/// expand into the realm (`/r/sec*ret/foo`) is denied without touching
-/// disk. `deny_ops` is intentionally not consulted here yet.
-fn bash_word_restricted(resolved: &ResolvedPermissions, candidate: &Path) -> bool {
-    !resolved.trusted_roots.is_empty()
-        && resolved
-            .trusted_roots
-            .iter()
-            .any(|entry| root_covers_word(&entry.path, candidate))
-}
-
+/// True when the glob-aware trusted root `root` covers `candidate`.
+/// Component-wise: each anchor component must match the aligned word
+/// component, where a word component with glob metacharacters matches
+/// as a pattern (so `/r/sec*ret/foo` covers the `secret` root).
 fn root_covers_word(root: &TrustedRootPath, candidate: &Path) -> bool {
     let anchor = match root {
         TrustedRootPath::Absolute(path) => path.as_path(),
