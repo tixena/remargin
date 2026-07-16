@@ -211,14 +211,76 @@ fn unknown_tool_name_silent_allows() {
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
 
-/// Test 13: no `.remargin.yaml` anywhere in the cwd's ancestry →
-/// `SilentAllow` (nothing is managed here).
+/// Test 13 (inverted): the session cwd sits outside every realm, but
+/// the absolute target lands inside one. Scope is resolved from the
+/// target, so the realm's `.remargin.yaml` governs → `Deny`. This
+/// case fail-opened while resolution keyed off the cwd.
 #[test]
-fn no_remargin_yaml_in_ancestry_silent_allows() {
+fn cwd_outside_realm_absolute_target_inside_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Read",
+        "/home/x",
+        &json!({ "file_path": "/r/secret/foo.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+// ---------------------------------------------------------------------
+// Target-path scope resolution (design item 1). Permissions come from
+// the realm above the canonicalized target, never from the session cwd.
+// ---------------------------------------------------------------------
+
+/// Scenario 2: cwd inside realm A, absolute target inside realm B.
+/// Realm B's `.remargin.yaml` governs — realm A never enters the walk,
+/// so A's unrelated root cannot silent-allow B's restricted target.
+#[test]
+fn target_in_other_realm_uses_that_realms_config() {
+    let system = mock_with(&[
+        ("/r1/.remargin.yaml", &restrict_yaml("apub")),
+        ("/r2/.remargin.yaml", &restrict_yaml("secret")),
+    ]);
+    let stdin = event_json(
+        "Read",
+        "/r1/sub",
+        &json!({ "file_path": "/r2/secret/a.md" }),
+    );
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Scenario 3: no `.remargin.yaml` anywhere above the target →
+/// `SilentAllow`. Unprotected paths stay unprotected regardless of cwd.
+#[test]
+fn no_realm_above_target_silent_allows() {
     let system = MockSystem::new();
-    let stdin = event_json("Read", "/tmp", &json!({ "file_path": "/tmp/foo.md" }));
-    let outcome = pretool(&system, &stdin);
-    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+    let stdin = event_json("Read", "/anywhere", &json!({ "file_path": "/tmp/a.md" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// Scenario 4: nested realms. The target sits under the inner realm's
+/// trusted root, which only the inner `.remargin.yaml` declares — the
+/// outer root does not cover it, so the `Deny` proves the nearest realm
+/// above the target governs.
+#[test]
+fn nested_realms_nearest_above_target_governs() {
+    let system = mock_with(&[
+        ("/r/.remargin.yaml", &restrict_yaml("outer")),
+        ("/r/inner/.remargin.yaml", &restrict_yaml("sec")),
+    ]);
+    let stdin = event_json("Read", "/r", &json!({ "file_path": "/r/inner/sec/a.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Scenario 5: a relative target is rooted at the cwd, then scope is
+/// resolved from the resulting absolute path. `../secret/a.md` from
+/// `/r/sub` lands inside the realm → `Deny`.
+#[test]
+fn relative_target_rooted_at_cwd_then_resolved() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))])
+        .with_dir(Path::new("/r/sub"))
+        .unwrap();
+    let stdin = event_json("Read", "/r/sub", &json!({ "file_path": "../secret/a.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
 /// Test 14: malformed stdin JSON → `Fail`.

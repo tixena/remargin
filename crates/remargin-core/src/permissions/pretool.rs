@@ -16,6 +16,7 @@ mod tests;
 
 use std::path::{Component, Path, PathBuf};
 
+use anyhow::Result;
 use os_shim::System;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -100,8 +101,8 @@ enum ToolTarget {
     Path { path: PathBuf, tool_name: String },
 }
 
-/// Top-level entry point. Parses stdin, resolves permissions against
-/// the realm anchored at `event.cwd`, and returns the outcome.
+/// Top-level entry point. Parses stdin, extracts the target, and
+/// resolves permissions from the realm that governs it.
 #[must_use]
 pub fn pretool(system: &dyn System, stdin_bytes: &[u8]) -> PretoolOutcome {
     let event: PreToolUseEvent = match serde_json::from_slice(stdin_bytes) {
@@ -114,24 +115,47 @@ pub fn pretool(system: &dyn System, stdin_bytes: &[u8]) -> PretoolOutcome {
         Err(reason) => return PretoolOutcome::Fail(reason),
     };
 
-    let resolved = match resolve_permissions(system, &event.cwd) {
-        Ok(value) => value,
-        Err(err) => return PretoolOutcome::Fail(format!("permissions resolve failed: {err}")),
-    };
-
     match target {
         ToolTarget::NoCheck => PretoolOutcome::SilentAllow,
         ToolTarget::Path { tool_name, path } => {
+            // event.cwd's only job is rooting a relative target; the
+            // governing realm is resolved from the target itself.
             let absolute = absolutise(&event.cwd, &path);
             let canonical = system.canonicalize(&absolute).unwrap_or(absolute);
+            let resolved = match resolve_for_target(system, &canonical) {
+                Ok(value) => value,
+                Err(err) => {
+                    return PretoolOutcome::Fail(format!("permissions resolve failed: {err}"));
+                }
+            };
             if path_is_restricted(&resolved, &canonical) {
                 PretoolOutcome::Deny(build_decision(&tool_name, &canonical))
             } else {
                 PretoolOutcome::SilentAllow
             }
         }
-        ToolTarget::BashCommand { command } => bash_decision(&resolved, &command),
+        ToolTarget::BashCommand { command } => {
+            let resolved = match resolve_permissions(system, &event.cwd) {
+                Ok(value) => value,
+                Err(err) => {
+                    return PretoolOutcome::Fail(format!("permissions resolve failed: {err}"));
+                }
+            };
+            bash_decision(&resolved, &command)
+        }
     }
+}
+
+/// Resolve the realm governing `canonical` by walking up from its
+/// parent directory — independent of the session cwd. Shared so the
+/// Bash branch can resolve each path-shaped word the same way.
+///
+/// # Errors
+///
+/// Surfaces the same parse-time errors as [`resolve_permissions`].
+pub fn resolve_for_target(system: &dyn System, canonical: &Path) -> Result<ResolvedPermissions> {
+    let start = canonical.parent().unwrap_or(canonical);
+    resolve_permissions(system, start)
 }
 
 fn extract_target(event: &PreToolUseEvent) -> Result<ToolTarget, String> {

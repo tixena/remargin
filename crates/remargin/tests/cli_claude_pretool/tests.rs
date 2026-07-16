@@ -95,6 +95,35 @@ fn end_to_end_against_real_claude_restricted_realm() {
     assert!(reason.contains("mcp__remargin__get"));
 }
 
+/// Scenario 7 (target-path scope): the session cwd sits outside the
+/// realm, but the target is an absolute path inside a `claude
+/// restrict`-ed realm. Scope is resolved from the target, so the hook
+/// still denies — exit 0 with the deny payload on stdout.
+#[test]
+fn cwd_outside_realm_absolute_target_inside_denies() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let outside = TempDir::new().unwrap();
+    let target = realm.path().join("secret/foo.md");
+    let stdin = envelope("Read", outside.path(), &json!({ "file_path": target }));
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+    let reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap();
+    assert!(reason.contains("mcp__remargin__get"));
+}
+
 /// Scenario 22: exit 0 with empty stdout when the path is
 /// unrestricted.
 #[test]
