@@ -269,6 +269,29 @@ fn reallowed_dot_folder_path(resolved: &ResolvedPermissions, candidate: &Path) -
         .any(|entry| dot_folder_reallowed(trusted_root_anchor(entry), candidate, &allowed))
 }
 
+/// Directory of the `.remargin.yaml` that governs `candidate` — the realm
+/// the no-equivalent fallback names. Mirrors `path_is_restricted`'s match
+/// order (`deny_ops` before `trusted_roots`) so the named realm is the one
+/// that actually triggered the deny.
+fn realm_root_for(resolved: &ResolvedPermissions, candidate: &Path) -> PathBuf {
+    let source = resolved
+        .deny_ops
+        .iter()
+        .find(|entry| candidate == entry.path || candidate.starts_with(&entry.path))
+        .map(|entry| entry.source_file.as_path())
+        .or_else(|| {
+            resolved
+                .trusted_roots
+                .iter()
+                .find(|entry| root_covers_word(&entry.path, candidate))
+                .map(|entry| entry.source_file.as_path())
+        });
+    source.map_or_else(
+        || candidate.parent().unwrap_or(candidate).to_path_buf(),
+        |file| file.parent().unwrap_or(file).to_path_buf(),
+    )
+}
+
 /// Parse `command` into simple commands, resolve every path-shaped word
 /// against the realm that governs it, and deny the first one that lands
 /// inside a protected realm — regardless of verb. The verb is no longer
@@ -337,9 +360,13 @@ fn evaluate_simple_command(
                 }
             };
             if path_is_restricted(&resolved, &candidate) {
+                let realm_root = realm_root_for(&resolved, &candidate);
                 return Some(PretoolOutcome::Deny(build_bash_decision(
                     &candidate.display().to_string(),
+                    &realm_root,
                     verb,
+                    tokens,
+                    verb_idx,
                 )));
             }
         }
@@ -702,73 +729,159 @@ fn build_cli_denied_decision() -> Decision {
     }
 }
 
-fn build_bash_decision(matched_path: &str, verb: Option<&str>) -> Decision {
-    let suffix = verb.and_then(verb_guidance).unwrap_or(
-        "There is no direct shell substitute -- use the appropriate remargin MCP tool for the \
-         underlying operation, or do not access this path through shell.",
-    );
+fn build_bash_decision(
+    matched_path: &str,
+    realm_root: &Path,
+    verb: Option<&str>,
+    tokens: &[String],
+    verb_idx: Option<usize>,
+) -> Decision {
+    let reason = verb
+        .and_then(|name| verb_guidance(name, matched_path, tokens, verb_idx))
+        .map_or_else(
+            || no_equivalent_message(matched_path, realm_root),
+            |guidance| {
+                format!(
+                    "This shell command would touch the remargin-managed path {matched_path}. \
+                     {guidance}"
+                )
+            },
+        );
     Decision {
         hook_specific_output: DecisionInner {
             hook_event_name: "PreToolUse",
             permission_decision: PermissionDecision::Deny,
-            permission_decision_reason: format!(
-                "This shell command would touch the remargin-managed path {matched_path}. \
-                 {suffix}"
-            ),
+            permission_decision_reason: reason,
         },
     }
 }
 
-fn verb_guidance(verb: &str) -> Option<&'static str> {
+/// Per-verb redirect, with the blocked command's own arguments carried into
+/// the exact replacement op so the next call is a copy-paste. `None` means
+/// the verb has no remargin equivalent — the caller emits the realm-scoped
+/// no-equivalent message instead.
+fn verb_guidance(
+    verb: &str,
+    matched_path: &str,
+    tokens: &[String],
+    verb_idx: Option<usize>,
+) -> Option<String> {
     Some(match verb {
-        "sed" | "awk" => {
-            "Use `mcp__remargin__get` with `start_line`/`end_line` for reads, or \
-             `mcp__remargin__write` partial for in-place edits."
+        "sed" | "awk" => format!(
+            "Use `mcp__remargin__get path={matched_path}` with `start_line`/`end_line` for reads, \
+             or `mcp__remargin__write path={matched_path}` partial for in-place edits."
+        ),
+        "cat" | "less" | "more" => {
+            format!("Use `mcp__remargin__get path={matched_path}` (text mode by default).")
         }
-        "cat" | "less" | "more" => "Use `mcp__remargin__get` (text mode by default).",
-        "head" | "tail" => {
-            "Use `mcp__remargin__get` with bounded `start_line`/`end_line` (consult \
-             `mcp__remargin__metadata` first)."
-        }
+        "head" | "tail" => format!(
+            "Use `mcp__remargin__get path={matched_path}` with bounded `start_line`/`end_line` \
+             (consult `mcp__remargin__metadata` first)."
+        ),
         "grep" | "rg" | "ag" => {
-            "Use `mcp__remargin__search` (file-scoped; respects comment / body distinction)."
+            let pattern = first_non_flag_arg(tokens, verb_idx).unwrap_or("<pattern>");
+            format!(
+                "Use `mcp__remargin__search pattern={pattern} path={matched_path}` (file-scoped; \
+                 respects comment / body distinction)."
+            )
         }
-        "find" => {
-            "Use `mcp__remargin__query` for comment/file enumeration, or `mcp__remargin__ls` for \
-             listings."
+        "find" => format!(
+            "Use `mcp__remargin__query` for comment/file enumeration, or \
+             `mcp__remargin__ls path={matched_path}` for listings."
+        ),
+        "ls" => format!("Use `mcp__remargin__ls path={matched_path}`."),
+        "mv" => {
+            let (src, dst) = mv_src_dst(tokens, verb_idx, matched_path);
+            format!(
+                "Use `mcp__remargin__mv src={src} dst={dst}` -- preserves comment IDs + thread \
+                 state."
+            )
         }
-        "mv" => "Use `mcp__remargin__mv` -- preserves comment IDs + thread state.",
-        "rm" => {
-            "Use `mcp__remargin__rm` (sandbox-aware) or `mcp__remargin__purge` when you mean drop \
-             comments only."
-        }
-        "cp" => {
+        "rm" => format!(
+            "Use `mcp__remargin__rm path={matched_path}` (sandbox-aware) or `mcp__remargin__purge` \
+             when you mean drop comments only."
+        ),
+        "cp" => String::from(
             "Use `mcp__remargin__cp` -- copies the file under remargin's guards (markdown is \
-             copied body-only so the duplicate gets a clean comment history)."
-        }
-        "tee" | "dd" => "Use `mcp__remargin__write` instead of redirecting output to the file.",
-        "vim" | "nvim" | "nano" | "code" => {
-            "Use `mcp__remargin__write` or `mcp__remargin__edit` for managed paths -- your editor \
-             would bypass the comment-preservation guarantees."
-        }
-        "git" => {
+             copied body-only so the duplicate gets a clean comment history).",
+        ),
+        "tee" | "dd" => format!(
+            "Use `mcp__remargin__write path={matched_path}` instead of redirecting output to the \
+             file."
+        ),
+        "vim" | "nvim" | "nano" | "code" => format!(
+            "Use `mcp__remargin__write path={matched_path}` or `mcp__remargin__edit \
+             path={matched_path}` for managed paths -- your editor would bypass the \
+             comment-preservation guarantees."
+        ),
+        "git" => String::from(
             "If the managed path is being staged or moved by git, run the matching \
-             `mcp__remargin__*` op first (mv / rm / write), then let git track the result."
-        }
+             `mcp__remargin__*` op first (mv / rm / write), then let git track the result.",
+        ),
         _ => return None,
     })
+}
+
+/// The fallback when the blocked verb has no remargin equivalent (a build,
+/// a script writing into the realm). It names the realm and rules the work
+/// out of it — deliberately no alternative op, no mention of unrestricting
+/// or asking. Explaining the rule is what ends the agent's retry loop.
+fn no_equivalent_message(matched_path: &str, realm_root: &Path) -> String {
+    let realm = realm_root.display();
+    format!(
+        "This shell command would touch the remargin-managed path {matched_path} inside the realm \
+         rooted at {realm}. This kind of work does not belong inside the realm -- it belongs \
+         outside {realm}, and there is no remargin operation that performs it."
+    )
+}
+
+/// Arguments of a simple command that are not option flags — the words after
+/// the verb that do not start with `-`.
+fn non_flag_args(tokens: &[String], verb_idx: Option<usize>) -> impl Iterator<Item = &str> {
+    let start = verb_idx.map_or(0, |idx| idx + 1);
+    tokens
+        .iter()
+        .skip(start)
+        .map(String::as_str)
+        .filter(|token| !token.starts_with('-'))
+}
+
+fn first_non_flag_arg(tokens: &[String], verb_idx: Option<usize>) -> Option<&str> {
+    non_flag_args(tokens, verb_idx).next()
+}
+
+/// The `mv` source and destination — its first two non-flag arguments. Falls
+/// back to the matched path for a source it could not recover.
+fn mv_src_dst<'cmd>(
+    tokens: &'cmd [String],
+    verb_idx: Option<usize>,
+    matched_path: &'cmd str,
+) -> (&'cmd str, &'cmd str) {
+    let mut args = non_flag_args(tokens, verb_idx);
+    let src = args.next().unwrap_or(matched_path);
+    let dst = args.next().unwrap_or("<dst>");
+    (src, dst)
 }
 
 fn message_for(tool: &str, path: &Path) -> String {
     let p = path.display();
     match tool {
-        "Read" => format!("Path {p} is remargin-managed. Use mcp__remargin__get instead."),
-        "Write" => format!("Path {p} is remargin-managed. Use mcp__remargin__write instead."),
-        "Edit" => format!("Path {p} is remargin-managed. Use mcp__remargin__edit instead."),
+        "Read" => format!("Path {p} is remargin-managed. Use mcp__remargin__get path={p} instead."),
+        "Write" | "MultiEdit" => {
+            format!("Path {p} is remargin-managed. Use mcp__remargin__write path={p} instead.")
+        }
+        "Edit" => {
+            format!("Path {p} is remargin-managed. Use mcp__remargin__edit path={p} instead.")
+        }
         "NotebookEdit" => format!(
-            "Path {p} is remargin-managed. Use mcp__remargin__write (notebook edits are text \
-             edits here)."
+            "Path {p} is remargin-managed. Use mcp__remargin__write path={p} (notebook edits are \
+             text edits here)."
         ),
+        "Grep" => format!(
+            "Path {p} is remargin-managed. Use mcp__remargin__search path={p} (file-scoped; \
+             respects comment / body distinction)."
+        ),
+        "Glob" => format!("Path {p} is remargin-managed. Use mcp__remargin__ls path={p}."),
         _ => format!("Path {p} is remargin-managed; use the appropriate remargin MCP tool."),
     }
 }

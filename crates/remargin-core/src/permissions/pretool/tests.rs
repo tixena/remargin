@@ -719,7 +719,7 @@ fn bash_git_verb_guidance() {
 }
 
 #[test]
-fn bash_unknown_mutator_falls_back_to_generic_message() {
+fn bash_unknown_mutator_falls_back_to_no_equivalent_message() {
     let system = mock_with(&[(
         "/r/.remargin.yaml",
         &restrict_with_extra_bash("secret", "weirdtool"),
@@ -731,7 +731,11 @@ fn bash_unknown_mutator_falls_back_to_generic_message() {
     );
     let decision = expect_deny(pretool(&system, &stdin));
     let reason = deny_reason(&decision);
-    assert!(reason.contains("no direct shell substitute"));
+    // The realm-scoped fallback: names the realm, rules the work outside it,
+    // never suggests unrestricting or asking.
+    assert!(reason.contains("/r"), "reason: {reason}");
+    assert!(reason.contains("outside"), "reason: {reason}");
+    assert!(!reason.contains("unrestrict"), "reason: {reason}");
 }
 
 #[test]
@@ -1327,4 +1331,136 @@ fn bash_wildcard_cd_then_bare_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
     let stdin = event_json("Bash", "/x", &json!({ "command": "cd /r && rm foo" }));
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+// ---------------------------------------------------------------------
+// Per-command deny messages (design item 8): every deny reason carries the
+// exact replacement op with the blocked command's own arguments, or — when
+// the verb has no equivalent — names the realm and rules the work outside
+// it without ever offering an alternative or mentioning unrestrict.
+// ---------------------------------------------------------------------
+
+/// Message 1: `cat` carries `get path=<p>` with the specific resolved path.
+#[test]
+fn msg_cat_carries_get_with_path() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "cat /r/secret/x.md" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(
+        deny_reason(&decision).contains("mcp__remargin__get path=/r/secret/x.md"),
+        "reason: {}",
+        deny_reason(&decision),
+    );
+}
+
+/// Message 2: `grep` carries both the pattern and the resolved path.
+#[test]
+fn msg_grep_carries_search_with_pattern_and_path() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "grep -r foo /r/secret" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(
+        deny_reason(&decision).contains("mcp__remargin__search pattern=foo path=/r/secret"),
+        "reason: {}",
+        deny_reason(&decision),
+    );
+}
+
+/// Message 3: the `Glob` tool carries `ls path=<p>`.
+#[test]
+fn msg_glob_tool_carries_ls_with_path() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Glob",
+        "/r",
+        &json!({ "pattern": "**/*.md", "path": "/r/secret" }),
+    );
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(
+        deny_reason(&decision).contains("mcp__remargin__ls path=/r/secret"),
+        "reason: {}",
+        deny_reason(&decision),
+    );
+}
+
+/// Message 4: `rm` carries `rm path=<p>`.
+#[test]
+fn msg_rm_carries_rm_with_path() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/secret/x.md" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(
+        deny_reason(&decision).contains("mcp__remargin__rm path=/r/secret/x.md"),
+        "reason: {}",
+        deny_reason(&decision),
+    );
+}
+
+/// Message 5: the `Edit` tool carries `edit path=<p>` (existing per-verb op).
+#[test]
+fn msg_edit_tool_carries_edit_with_path() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Edit",
+        "/r",
+        &json!({ "file_path": "/r/secret/x.md", "old_string": "a", "new_string": "b" }),
+    );
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(
+        deny_reason(&decision).contains("mcp__remargin__edit path=/r/secret/x.md"),
+        "reason: {}",
+        deny_reason(&decision),
+    );
+}
+
+/// Message 6: a verb with no remargin equivalent (`cargo`) writing into the
+/// realm names the realm and rules the work outside it — never "unrestrict".
+#[test]
+fn msg_no_equivalent_names_realm_and_stays_outside() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Bash", "/x", &json!({ "command": "cargo build /r/out.md" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    assert!(reason.contains("/r"), "reason: {reason}");
+    assert!(reason.contains("outside"), "reason: {reason}");
+    assert!(!reason.contains("unrestrict"), "reason: {reason}");
+}
+
+/// Message 7: every deny reason is non-empty and names either a remargin op
+/// or the realm rule — no denial is ever bare.
+#[test]
+fn msg_no_denial_is_bare() {
+    for command in [
+        "rm /r/secret/x.md",
+        "cat /r/secret/x.md",
+        "cargo build /r/secret/out",
+        "mv /r/secret/a.md /tmp/b",
+    ] {
+        let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+        let stdin = event_json("Bash", "/r", &json!({ "command": command }));
+        let decision = expect_deny(pretool(&system, &stdin));
+        let reason = deny_reason(&decision);
+        assert!(!reason.is_empty(), "empty reason for `{command}`");
+        assert!(
+            reason.contains("mcp__remargin__") || reason.contains("realm"),
+            "reason for `{command}` names neither an op nor the realm rule: {reason}",
+        );
+    }
+}
+
+/// The `mv` deny carries both source and destination arguments.
+#[test]
+fn msg_mv_carries_src_and_dst() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Bash",
+        "/r",
+        &json!({ "command": "mv /r/secret/a.md /tmp/b" }),
+    );
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(
+        deny_reason(&decision).contains("mcp__remargin__mv src=/r/secret/a.md dst=/tmp/b"),
+        "reason: {}",
+        deny_reason(&decision),
+    );
 }
