@@ -78,6 +78,18 @@ pub fn emit_doctor_text(
     .context("writing doctor output")
 }
 
+pub fn emit_doctor_prompt(
+    sinks: &mut IoSinks<'_>,
+    report: &permissions_doctor::DoctorReport,
+) -> Result<()> {
+    write!(
+        sinks.stdout,
+        "{}",
+        permissions_doctor::render_doctor_prompt(report)
+    )
+    .context("writing doctor repair prompt")
+}
+
 pub fn emit_permissions_show_text(
     sinks: &mut IoSinks<'_>,
     cwd: &Path,

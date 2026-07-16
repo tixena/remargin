@@ -1,4 +1,5 @@
 use core::str;
+use std::fs;
 use std::path::Path;
 use std::process::Output;
 
@@ -101,6 +102,73 @@ fn doctor_flags_missing_guard_when_only_pretool_installed() {
             .unwrap()
             .contains("session-guard install"),
         "remedy should name the install command: {report}",
+    );
+}
+
+/// A fixture mirroring the real stale `Bash(remargin *)` entry in a
+/// project settings file (with the enforcement hooks wired so doctor
+/// does not short-circuit) is detected as a `LeftoverProjectedRule`,
+/// and `--prompt-mode` emits an agent-executable removal instruction
+/// naming the rule and its file.
+#[test]
+fn doctor_detects_stale_remargin_cli_deny_and_prompt_mode_repairs_it() {
+    let realm = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+
+    let pretool = run_args(&["claude", "pretool", "install"], realm.path(), home.path());
+    assert!(pretool.status.success());
+    let guard = run_args(
+        &["claude", "session-guard", "install"],
+        realm.path(),
+        home.path(),
+    );
+    assert!(guard.status.success());
+
+    let claude_dir = realm.path().join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(
+        claude_dir.join("settings.local.json"),
+        r#"{ "permissions": { "deny": ["Bash(remargin *)"] } }"#,
+    )
+    .unwrap();
+
+    let user_settings = home.path().join(".claude/settings.json");
+
+    // --json: the stale rule is detected as a leftover.
+    let out = run_doctor(realm.path(), &user_settings, &["--json"]);
+    assert_status(&out, 1);
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        finding_kinds(&report)
+            .iter()
+            .any(|k| k == "leftover_projected_rule"),
+        "expected a leftover_projected_rule finding: {report}",
+    );
+    let leftover = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "leftover_projected_rule")
+        .unwrap();
+    assert_eq!(leftover["severity"], Value::from("warning"));
+    assert!(
+        leftover["message"]
+            .as_str()
+            .unwrap()
+            .contains("Bash(remargin *)"),
+        "message should name the stale rule: {report}",
+    );
+
+    // --prompt-mode: emits a removal instruction for the same rule.
+    let prompt_out = run_doctor(realm.path(), &user_settings, &["--prompt-mode"]);
+    let prompt = str::from_utf8(&prompt_out.stdout).unwrap();
+    assert!(
+        prompt.contains("Remove the deny rule `Bash(remargin *)`"),
+        "prompt should instruct removal of the rule: {prompt}",
+    );
+    assert!(
+        prompt.contains("settings.local.json"),
+        "prompt should name the settings file: {prompt}",
     );
 }
 

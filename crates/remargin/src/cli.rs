@@ -333,6 +333,13 @@ pub enum Commands {
         /// user's real home.
         #[arg(long)]
         user_settings: Option<PathBuf>,
+        /// Emit an agent-executable repair prompt instead of the
+        /// human-readable report — one imperative instruction per
+        /// finding, or a "nothing to do" line when the realm is clean.
+        /// Pipe it to an agent to auto-repair the drift:
+        /// `remargin doctor --prompt-mode | claude --auto-mode -p`.
+        #[arg(long, conflicts_with = "json")]
+        prompt_mode: bool,
         #[command(flatten)]
         output_args: OutputArgs,
     },

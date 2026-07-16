@@ -852,6 +852,7 @@ pub fn cmd_doctor(
 ) -> Result<()> {
     let Commands::Doctor {
         user_settings,
+        prompt_mode,
         output_args,
     } = command
     else {
@@ -866,6 +867,8 @@ pub fn cmd_doctor(
     if output_args.json {
         let value = serde_json::to_value(&report).context("serializing doctor report")?;
         print_output(sinks, true, &value)?;
+    } else if *prompt_mode {
+        render::emit_doctor_prompt(sinks, &report)?;
     } else {
         render::emit_doctor_text(sinks, &report, output_args.verbose)?;
     }

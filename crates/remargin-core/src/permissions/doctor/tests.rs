@@ -6,7 +6,8 @@ use os_shim::mock::MockSystem;
 use serde_json::json;
 
 use crate::permissions::doctor::{
-    DoctorFinding, DoctorReport, FindingKind, Severity, render_doctor_text, run_doctor,
+    DoctorFinding, DoctorReport, FindingKind, Severity, render_doctor_prompt, render_doctor_text,
+    run_doctor,
 };
 use crate::permissions::pretool_install::{HOOK_COMMAND, HOOK_MATCHER};
 use crate::permissions::session_guard_install::SESSION_HOOK_COMMAND;
@@ -67,6 +68,14 @@ fn guard_only_settings_json() -> String {
             ]
         }
     });
+    serde_json::to_string_pretty(&v).unwrap()
+}
+
+/// Settings carrying only a `permissions.deny` array — used to seed a
+/// project-scope file with leftover drift while the enforcement hooks
+/// live in the user-scope file.
+fn deny_only_settings_json(deny: &[&str]) -> String {
+    let v = json!({ "permissions": { "deny": deny } });
     serde_json::to_string_pretty(&v).unwrap()
 }
 
@@ -395,5 +404,156 @@ fn render_doctor_findings_verbose() {
     assert!(
         out.contains("hook-installed: missing"),
         "expected missing verdict: {out}"
+    );
+}
+
+// --- LeftoverProjectedRule (drift detection) unit tests ---
+
+fn leftover_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
+    report
+        .findings
+        .iter()
+        .filter(|f| f.kind == FindingKind::LeftoverProjectedRule)
+        .collect()
+}
+
+/// Case 1: a settings file carrying the stale `Bash(remargin *)` CLI
+/// deny — a shape `rules_for` no longer emits — yields one
+/// `LeftoverProjectedRule` (Warning) naming the file, the rule, and a
+/// removal remedy.
+#[test]
+fn leftover_flags_stale_remargin_cli_deny() {
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        (
+            "/r/.claude/settings.local.json",
+            &deny_only_settings_json(&["Bash(remargin *)"]),
+        ),
+    ]);
+    let report = run_doctor(
+        &system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap();
+    let leftovers = leftover_findings(&report);
+    assert_eq!(leftovers.len(), 1, "expected one leftover: {report:#?}");
+    let finding = leftovers[0];
+    assert_eq!(finding.severity, Severity::Warning);
+    assert!(
+        finding.message.contains("Bash(remargin *)"),
+        "message should name the rule: {}",
+        finding.message,
+    );
+    assert!(
+        finding.message.contains("/r/.claude/settings.local.json"),
+        "message should name the file: {}",
+        finding.message,
+    );
+    assert!(
+        finding.remedy.contains("Remove the deny rule")
+            && finding.remedy.contains("Bash(remargin *)"),
+        "remedy should name the removal + rule: {}",
+        finding.remedy,
+    );
+}
+
+/// Case 2: a settings file carrying a path deny that `rules_for` still
+/// projects for the realm (`Edit(/r/**)` under a wildcard trusted
+/// root) is flagged as leftover.
+#[test]
+fn leftover_flags_projected_path_deny() {
+    let yaml = "permissions:\n  trusted_roots:\n    - path: \"*\"\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+        (
+            "/r/.claude/settings.local.json",
+            &deny_only_settings_json(&["Edit(/r/**)"]),
+        ),
+    ]);
+    let report = run_doctor(
+        &system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap();
+    let leftovers = leftover_findings(&report);
+    assert_eq!(leftovers.len(), 1, "expected one leftover: {report:#?}");
+    assert!(
+        leftovers[0].message.contains("Edit(/r/**)"),
+        "message should name the projected rule: {}",
+        leftovers[0].message,
+    );
+}
+
+/// Case 3: a clean, hook-only settings tree (no projected or stale deny
+/// rules) yields no `LeftoverProjectedRule` and a clean report.
+#[test]
+fn leftover_clean_when_no_projected_or_stale_denies() {
+    let system = mock_with_file("/home/u/.claude/settings.json", &hook_settings_json());
+    let report = run_doctor(
+        &system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap();
+    assert!(
+        leftover_findings(&report).is_empty(),
+        "no leftover expected: {report:#?}",
+    );
+    assert!(report.is_clean(), "expected clean report: {report:#?}");
+}
+
+fn leftover_finding_fixture(rule: &str, file: &str) -> DoctorFinding {
+    DoctorFinding {
+        kind: FindingKind::LeftoverProjectedRule,
+        message: format!("The deny rule `{rule}` in {file} is drift."),
+        remedy: format!("Remove the deny rule `{rule}` from the permissions.deny array in {file}."),
+        severity: Severity::Warning,
+    }
+}
+
+/// Case 4: `--prompt-mode` over two leftover findings emits one
+/// imperative instruction per finding, naming both rules and both
+/// files.
+#[test]
+fn render_prompt_names_each_finding_rule_and_file() {
+    let report = DoctorReport {
+        findings: vec![
+            leftover_finding_fixture("Bash(remargin *)", "/r/.claude/settings.local.json"),
+            leftover_finding_fixture("Edit(/r/**)", "/home/u/.claude/settings.json"),
+        ],
+        hook_installed: true,
+        session_guard_installed: true,
+        project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
+        user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
+    };
+    let out = render_doctor_prompt(&report);
+    assert!(out.contains("1."), "expected numbered instruction: {out}");
+    assert!(out.contains("2."), "expected numbered instruction: {out}");
+    assert!(
+        out.contains("Bash(remargin *)") && out.contains("Edit(/r/**)"),
+        "prompt must name both rules: {out}",
+    );
+    assert!(
+        out.contains("/r/.claude/settings.local.json")
+            && out.contains("/home/u/.claude/settings.json"),
+        "prompt must name both files: {out}",
+    );
+}
+
+/// Case 5: `--prompt-mode` over a clean report emits a "nothing to do"
+/// prompt with no instructions.
+#[test]
+fn render_prompt_clean_says_nothing_to_do() {
+    let out = render_doctor_prompt(&clean_report());
+    assert!(
+        out.to_lowercase().contains("nothing to do"),
+        "expected nothing-to-do prompt: {out}",
+    );
+    assert!(
+        !out.contains("1."),
+        "clean prompt must list no steps: {out}"
     );
 }
