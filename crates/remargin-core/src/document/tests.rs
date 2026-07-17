@@ -436,7 +436,7 @@ fn get_with_links_slice_relative_references() {
     .unwrap();
     assert_eq!(whole.links.len(), 2);
     let whole_alpha = whole.links.iter().find(|l| l.target == "Alpha").unwrap();
-    assert_eq!(whole_alpha.references[0].line, 3);
+    assert_eq!(whole_alpha.ref_lines[0], 3);
 
     // Slice lines 3..=5: Alpha now on slice line 1, Beta on slice line 3.
     let sliced = document::get_with_links(
@@ -451,9 +451,9 @@ fn get_with_links_slice_relative_references() {
     .unwrap();
     assert_eq!(sliced.links.len(), 2);
     let sliced_alpha = sliced.links.iter().find(|l| l.target == "Alpha").unwrap();
-    assert_eq!(sliced_alpha.references[0].line, 1);
+    assert_eq!(sliced_alpha.ref_lines[0], 1);
     let sliced_beta = sliced.links.iter().find(|l| l.target == "Beta").unwrap();
-    assert_eq!(sliced_beta.references[0].line, 3);
+    assert_eq!(sliced_beta.ref_lines[0], 3);
 }
 
 #[test]

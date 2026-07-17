@@ -950,7 +950,7 @@ fn get_returns_links_array() {
     assert_eq!(links[0]["path"], "Target.md");
     assert_eq!(links[0]["title"], "The Target");
     assert_eq!(links[0]["count"], 1_i32);
-    assert_eq!(links[0]["references"][0]["line"], 1_i32);
+    assert_eq!(links[0]["ref_lines"][0], 1_i32);
 }
 
 #[test]

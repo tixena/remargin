@@ -41,7 +41,7 @@ fn get_json_returns_links_array() {
     assert_eq!(budget["path"], "Budget.md");
     assert_eq!(budget["title"], "Q3 Budget");
     assert_eq!(budget["count"], 2_i32);
-    assert_eq!(budget["references"].as_array().unwrap().len(), 2);
+    assert_eq!(budget["ref_lines"].as_array().unwrap().len(), 2);
 
     // No null keys: absent optionals are omitted, every link has a path.
     let budget_map = budget.as_object().unwrap();

@@ -12,7 +12,7 @@ use remargin_core::config::registry::{participant_status_schema, participant_vie
 use remargin_core::document::list_entry_schema;
 use remargin_core::on_disk_comment::{on_disk_comment_schema, reaction_entry_on_disk_schema};
 use remargin_core::operations::cp::{cp_kind_schema, cp_outcome_schema};
-use remargin_core::operations::links::{link_ref_schema, link_schema};
+use remargin_core::operations::links::link_schema;
 use remargin_core::operations::query::{expanded_comment_schema, query_result_schema};
 use remargin_core::operations::replace::{replace_file_outcome_schema, replace_report_schema};
 use remargin_core::operations::sandbox::{
@@ -51,7 +51,6 @@ pub fn run() -> Result<()> {
         replace_report_schema::Schema::ts_definition(),
         cp_kind_schema::Schema::ts_definition(),
         cp_outcome_schema::Schema::ts_definition(),
-        link_ref_schema::Schema::ts_definition(),
         link_schema::Schema::ts_definition(),
         sandbox_failure_entry_schema::Schema::ts_definition(),
         sandbox_list_entry_schema::Schema::ts_definition(),
@@ -79,7 +78,6 @@ pub fn run() -> Result<()> {
         replace_report_schema::Schema::zod_schema(),
         cp_kind_schema::Schema::zod_schema(),
         cp_outcome_schema::Schema::zod_schema(),
-        link_ref_schema::Schema::zod_schema(),
         link_schema::Schema::zod_schema(),
         sandbox_failure_entry_schema::Schema::zod_schema(),
         sandbox_list_entry_schema::Schema::zod_schema(),
@@ -118,7 +116,6 @@ pub fn run() -> Result<()> {
            ReplaceReport,\n  \
            CpKind,\n  \
            CpOutcome,\n  \
-           LinkRef,\n  \
            Link,\n  \
            SandboxFailureEntry,\n  \
            SandboxListEntry,\n  \

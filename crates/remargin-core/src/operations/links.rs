@@ -37,8 +37,8 @@ const RELATION_PROPERTIES: &[&str] = &["up", "related"];
 /// A single outbound link from a document, deduped by target.
 ///
 /// One `Link` exists per distinct `target`; every occurrence of that
-/// target in the scanned text contributes a [`LinkRef`] to `references`
-/// and bumps `count`.
+/// target in the scanned text contributes its line to `ref_lines` and
+/// bumps `count`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 #[model_schema]
@@ -48,30 +48,22 @@ pub struct Link {
     /// Omitted when the link had no distinct display text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
-    /// Number of occurrences (`references.len()`).
+    /// Number of occurrences (`ref_lines.len()`).
     pub count: usize,
     /// Same-folder resolved file. Always present: only locally-resolving
     /// links are returned (external URLs are dropped).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// Every occurrence of this target (dedup detail).
-    pub references: Vec<LinkRef>,
+    /// 1-indexed line of every occurrence of this target. Slice-relative
+    /// when the `get` that produced it was sliced; whole-file-relative
+    /// otherwise.
+    pub ref_lines: Vec<usize>,
     /// The link target: a note name / relative file for the local link.
     pub target: String,
     /// One-hop metadata: the target document's own title, when the link
     /// resolves to a readable same-folder document. Omitted when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-}
-
-/// A single occurrence of a [`Link`]'s target.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[non_exhaustive]
-#[model_schema]
-pub struct LinkRef {
-    /// 1-indexed line of this occurrence. Slice-relative when the `get`
-    /// that produced it was sliced; whole-file-relative otherwise.
-    pub line: usize,
 }
 
 /// A link occurrence before dedup + resolution.
@@ -126,10 +118,8 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
         }
 
         if let Some(existing) = out.iter_mut().find(|link| link.target == occurrence.target) {
-            existing.references.push(LinkRef {
-                line: occurrence.line,
-            });
-            existing.count = existing.references.len();
+            existing.ref_lines.push(occurrence.line);
+            existing.count = existing.ref_lines.len();
             if existing.alias.is_none() {
                 existing.alias = occurrence.alias;
             }
@@ -146,9 +136,7 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
             alias: occurrence.alias,
             count: 1,
             path,
-            references: vec![LinkRef {
-                line: occurrence.line,
-            }],
+            ref_lines: vec![occurrence.line],
             target: occurrence.target,
             title,
         });

@@ -41,7 +41,7 @@ fn three_distinct_wikilinks_three_entries() {
     assert_eq!(target_of(&links, "Beta").count, 1);
 }
 
-// 2. Same target ×3 → one entry, count 3, references length 3.
+// 2. Same target ×3 → one entry, count 3, ref_lines length 3.
 #[test]
 fn same_target_thrice_one_entry_count_three() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -50,10 +50,10 @@ fn same_target_thrice_one_entry_count_three() {
     assert_eq!(links.len(), 1);
     let link = &links[0];
     assert_eq!(link.count, 3);
-    assert_eq!(link.references.len(), 3);
-    assert_eq!(link.references[0].line, 1);
-    assert_eq!(link.references[1].line, 2);
-    assert_eq!(link.references[2].line, 3);
+    assert_eq!(link.ref_lines.len(), 3);
+    assert_eq!(link.ref_lines[0], 1);
+    assert_eq!(link.ref_lines[1], 2);
+    assert_eq!(link.ref_lines[2], 3);
 }
 
 // 3. Broken internal link → omitted entirely.
@@ -87,7 +87,7 @@ fn link_in_code_fence_not_detected() {
     // Only the out-of-fence occurrence counts.
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].count, 1);
-    assert_eq!(links[0].references[0].line, 4);
+    assert_eq!(links[0].ref_lines[0], 4);
 }
 
 // 5b. Link inside an inline code span → not detected.
@@ -157,7 +157,7 @@ fn sliced_references_are_slice_relative() {
     let slice = "intro line\nsee [[Alpha]]";
     let links = run(slice, &sys);
     assert_eq!(links.len(), 1);
-    assert_eq!(links[0].references[0].line, 2);
+    assert_eq!(links[0].ref_lines[0], 2);
 }
 
 // 10. One-hop title → title equals the target doc's own title.
@@ -192,7 +192,7 @@ fn dedup_across_mixed_syntaxes() {
     // text: wikilinks carry no extension, md-links carry the file name.
     let alpha = target_of(&links, "Alpha");
     assert_eq!(alpha.count, 2);
-    assert_eq!(alpha.references.len(), 2);
+    assert_eq!(alpha.ref_lines.len(), 2);
 }
 
 // 12. Heading / block / anchor handling.
