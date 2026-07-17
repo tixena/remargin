@@ -899,8 +899,9 @@ fn desc_get_image() -> ToolDesc {
         description: "Return a downscaled / cropped raster image sized to fit \
              the MCP token budget. Use this when `get --binary` would exceed \
              the inline limit. Accepts PNG / JPEG / GIF / WebP; rejects SVG, \
-             PDF, audio, video. Returns `{binary, content (base64), mime, \
-             format, width, height, size_bytes, source}` where `source` echoes \
+             PDF, audio, video. Returns a content array: an image block the \
+             harness renders as vision input, plus a text block with `{format, \
+             width, height, mime, size_bytes, source}` where `source` echoes \
              the original mime / dimensions / size. Defaults: max_dimension=1024, \
              max_bytes=262144 (256 KiB), format=jpeg for photographic source \
              formats / png for lossless ones.",
