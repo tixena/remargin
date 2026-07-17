@@ -167,8 +167,9 @@ fn identity_flag_drives_caller() {
     assert_eq!(value["files"].as_array().unwrap().len(), 1);
 }
 
-/// E10: MCP / CLI parity. Same realm + identity through both
-/// surfaces produces structurally identical JSON.
+/// E10: MCP / CLI parity. The MCP surface returns the compact columnar
+/// payload unconditionally; `remargin activity --json --compact` yields the
+/// same shape, so the two surfaces are structurally identical.
 #[test]
 fn mcp_and_cli_match() {
     let realm = realm();
@@ -180,7 +181,15 @@ fn mcp_and_cli_match() {
 
     let cli = run_in(
         realm.path(),
-        &["activity", "--identity", "alice", "--type", "human"],
+        &[
+            "activity",
+            "--json",
+            "--compact",
+            "--identity",
+            "alice",
+            "--type",
+            "human",
+        ],
     );
     assert_status(&cli, 0);
     let cli_payload: Value = serde_json::from_str(str::from_utf8(&cli.stdout).unwrap()).unwrap();
@@ -210,14 +219,18 @@ fn mcp_and_cli_match() {
     let text = content[0].get("text").and_then(Value::as_str).unwrap();
     let mcp_payload: Value = serde_json::from_str(text).unwrap();
 
-    // Compare the structural shape: file count, change count,
-    // and the comment_id of the first change.
+    // Same columnar header; change rows carry no path, so they match
+    // element-wise across surfaces.
+    assert_eq!(cli_payload["change_cols"], mcp_payload["change_cols"]);
     let cli_files = cli_payload["files"].as_array().unwrap();
     let mcp_files = mcp_payload["files"].as_array().unwrap();
     assert_eq!(cli_files.len(), mcp_files.len());
     assert_eq!(cli_files.len(), 1);
     let cli_changes = cli_files[0]["changes"].as_array().unwrap();
     let mcp_changes = mcp_files[0]["changes"].as_array().unwrap();
-    assert_eq!(cli_changes.len(), mcp_changes.len());
-    assert_eq!(cli_changes[0]["comment_id"], mcp_changes[0]["comment_id"]);
+    assert_eq!(cli_changes, mcp_changes);
+    // comment_id lives at column index 4 (see `change_cols`).
+    let cli_row = cli_changes[0].as_array().unwrap();
+    assert_eq!(cli_row.len(), 9);
+    assert_eq!(cli_row[4], json!("c1"));
 }

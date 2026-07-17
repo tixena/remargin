@@ -206,14 +206,23 @@ fn pretty_and_json_are_mutually_exclusive() {
     assert!(stderr.contains("mutually exclusive"), "{stderr}");
 }
 
-/// MCP parity: `mcp__remargin__activity` returns a payload
-/// with the same structural shape as the CLI `--json` output.
+/// MCP parity: `mcp__remargin__activity` (compact, hardcoded) matches the
+/// CLI `--json --compact` payload. The change rows are path-independent, so
+/// they must be equal element-wise across both surfaces.
 #[test]
-fn mcp_activity_matches_cli_shape() {
+fn mcp_activity_matches_cli_compact_shape() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
     let cli = run_in(
         realm.path(),
-        &["activity", "--identity", "alice", "--type", "human"],
+        &[
+            "activity",
+            "--json",
+            "--compact",
+            "--identity",
+            "alice",
+            "--type",
+            "human",
+        ],
     );
     assert_status(&cli, 0);
     let cli_payload: Value = serde_json::from_str(str::from_utf8(&cli.stdout).unwrap()).unwrap();
@@ -243,14 +252,115 @@ fn mcp_activity_matches_cli_shape() {
     let text = content[0].get("text").and_then(Value::as_str).unwrap();
     let mcp_payload: Value = serde_json::from_str(text).unwrap();
 
+    // Same columnar header + envelope flags on both surfaces.
+    assert_eq!(cli_payload["change_cols"], mcp_payload["change_cols"]);
+    assert_eq!(
+        cli_payload["cutoff_explicit"],
+        mcp_payload["cutoff_explicit"]
+    );
+
     let cli_files = cli_payload["files"].as_array().unwrap();
     let mcp_files = mcp_payload["files"].as_array().unwrap();
-    assert_eq!(cli_files.len(), mcp_files.len());
-    // Both should report exactly one file with one comment change.
     assert_eq!(cli_files.len(), 1);
-    let cli_changes = cli_files[0]["changes"].as_array().unwrap();
-    let mcp_changes = mcp_files[0]["changes"].as_array().unwrap();
-    assert_eq!(cli_changes.len(), mcp_changes.len());
-    assert_eq!(cli_changes[0]["kind"], mcp_changes[0]["kind"]);
-    assert_eq!(cli_changes[0]["comment_id"], mcp_changes[0]["comment_id"]);
+    assert_eq!(mcp_files.len(), 1);
+    // Change rows carry no path — they must match element-wise.
+    assert_eq!(cli_files[0]["changes"], mcp_files[0]["changes"]);
+    let row = cli_files[0]["changes"][0].as_array().unwrap();
+    assert_eq!(row.len(), 9);
+    assert_eq!(row[1], json!("comment"));
+    assert_eq!(row[4], json!("c1"));
+}
+
+/// `--json --compact` emits the columnar payload minified: a single output
+/// line, positional 9-column rows under a `change_cols` header.
+#[test]
+fn cli_activity_compact_minified_columnar() {
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let out = run_in(
+        realm.path(),
+        &[
+            "activity",
+            "--json",
+            "--compact",
+            "--identity",
+            "alice",
+            "--type",
+            "human",
+        ],
+    );
+    assert_status(&out, 0);
+    let raw = str::from_utf8(&out.stdout).unwrap();
+    // Minified: only the trailing newline breaks the single payload line.
+    assert_eq!(
+        raw.trim_end_matches('\n').lines().count(),
+        1,
+        "compact payload must be minified: {raw:?}"
+    );
+
+    let payload: Value = serde_json::from_str(raw.trim()).unwrap();
+    let cols = payload["change_cols"].as_array().unwrap();
+    assert_eq!(cols.len(), 9);
+    assert_eq!(cols[0], "ts");
+    assert_eq!(cols[1], "kind");
+
+    let rows = payload["files"][0]["changes"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = rows[0].as_array().unwrap();
+    assert_eq!(row.len(), 9, "positional row, no named keys: {row:?}");
+    assert_eq!(row[1], json!("comment"));
+    assert_eq!(row[4], json!("c1"));
+}
+
+/// Regression: `--json` (no `--compact`) keeps today's verbose, pretty
+/// payload — tagged `Change` objects with named fields. Compact must not
+/// leak in.
+#[test]
+fn cli_activity_verbose_json_unchanged() {
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let out = run_in(
+        realm.path(),
+        &[
+            "activity",
+            "--json",
+            "--identity",
+            "alice",
+            "--type",
+            "human",
+        ],
+    );
+    assert_status(&out, 0);
+    let raw = str::from_utf8(&out.stdout).unwrap();
+    // Verbose stays pretty-printed (multi-line).
+    assert!(raw.lines().count() > 3, "pretty-printed: {raw:?}");
+
+    let payload: Value = serde_json::from_str(raw).unwrap();
+    assert!(payload.get("change_cols").is_none(), "no columnar header");
+    let change = &payload["files"][0]["changes"][0];
+    assert!(change.is_object(), "verbose change is an object: {change}");
+    assert_eq!(change["kind"], json!("comment"));
+    assert_eq!(change["comment_id"], json!("c1"));
+    assert!(change.get("line_start").is_some());
+}
+
+/// `--compact` without `--json` is a clap-level error (requires `--json`).
+#[test]
+fn compact_requires_json() {
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let out = run_in(
+        realm.path(),
+        &[
+            "activity",
+            "--compact",
+            "--identity",
+            "alice",
+            "--type",
+            "human",
+        ],
+    );
+    assert_ne!(out.status.code(), Some(0_i32));
+    let stderr = str::from_utf8(&out.stderr).unwrap();
+    assert!(
+        stderr.contains("--json"),
+        "clap requires error must name --json: {stderr}"
+    );
 }

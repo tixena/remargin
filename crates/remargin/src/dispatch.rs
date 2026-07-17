@@ -18,9 +18,9 @@ use crate::io::{
     resolve_comment_content,
 };
 use crate::params::{
-    AckParams, ActivityParams, CommentParams, CpParams, EditParams, GetImageParams, GetOutputMode,
-    GetParams, MvParams, PromptSetParams, ReactParams, ReplaceParams, RestrictParams, SearchParams,
-    SignParams, WriteParams,
+    AckParams, ActivityOutputMode, ActivityParams, CommentParams, CpParams, EditParams,
+    GetImageParams, GetOutputMode, GetParams, MvParams, PromptSetParams, ReactParams,
+    ReplaceParams, RestrictParams, SearchParams, SignParams, WriteParams,
 };
 use crate::{
     AssetsArgs, ClaudeAction, Cli, Commands, IdentityArgs, OutputArgs, PermissionsAction,
@@ -157,12 +157,17 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
 
 /// Reject `--compact` on subcommands that do not emit the compact
 /// columnar contract. `OutputArgs` is flattened everywhere, so a single
-/// gate here keeps the flag from being silently ignored. `get` and
-/// `query` wire compact today; the follow-up search / activity tasks
-/// extend the allow-set.
+/// gate here keeps the flag from being silently ignored. `get`, `query`,
+/// and `activity` wire compact today; the follow-up search task extends
+/// the allow-set.
 fn reject_unsupported_compact(cmd: &Commands) -> Result<()> {
     let compact = subcommand_output(cmd).is_some_and(|o| o.compact);
-    if compact && !matches!(cmd, Commands::Get { .. } | Commands::Query { .. }) {
+    if compact
+        && !matches!(
+            cmd,
+            Commands::Activity { .. } | Commands::Get { .. } | Commands::Query { .. }
+        )
+    {
         bail!("--compact is not supported for this subcommand");
     }
     Ok(())
@@ -720,11 +725,22 @@ fn handle_activity(
     else {
         bail!("internal: handle_activity called with wrong subcommand");
     };
+    // --pretty and --json (hence --compact) are mutually exclusive.
+    if *pretty && output_args.json {
+        bail!("--pretty and --json are mutually exclusive");
+    }
+    // clap enforces `--compact` requires `--json`, so compact implies json.
+    let output = if output_args.compact {
+        ActivityOutputMode::Compact
+    } else if *pretty {
+        ActivityOutputMode::Pretty
+    } else {
+        ActivityOutputMode::Json
+    };
     let p = ActivityParams {
         explicit_path: path.as_deref(),
         identity_args,
-        json_mode: output_args.json,
-        pretty: *pretty,
+        output,
         since: since.as_deref(),
     };
     handlers::cmd_activity(sinks, system, cwd, &p)

@@ -2421,6 +2421,99 @@ fn mcp_query_compact_include_integrity_widens_rows() {
     assert_eq!(row0[15].as_str().unwrap(), "Pending comment from alice.");
 }
 
+/// Assert the three compact change rows (comment, ack, sandbox) carry the
+/// right populated / null columns. Extracted so the caller stays under the
+/// cognitive-complexity cap.
+fn assert_activity_change_rows(rows: &[Value]) {
+    assert_eq!(rows.len(), 3_usize);
+    let comment = rows[0].as_array().unwrap();
+    assert_eq!(comment.len(), 9_usize);
+    assert_eq!(comment[1], "comment");
+    assert_eq!(comment[2], "bob");
+    assert_eq!(comment[3], "human");
+    assert_eq!(comment[4], "c1");
+    assert_eq!(comment[8], json!(["carol"]));
+
+    let ack = rows[1].as_array().unwrap();
+    assert_eq!(ack[1], "ack");
+    assert_eq!(ack[4], "c1");
+    assert!(ack[5].is_null(), "ack line_start null: {ack:?}");
+    assert!(ack[6].is_null(), "ack line_end null: {ack:?}");
+    assert!(ack[7].is_null(), "ack reply_to null: {ack:?}");
+    assert!(ack[8].is_null(), "ack to null: {ack:?}");
+
+    let sandbox = rows[2].as_array().unwrap();
+    assert_eq!(sandbox[1], "sandbox");
+    assert!(sandbox[4].is_null(), "sandbox comment_id null: {sandbox:?}");
+    assert!(sandbox[8].is_null(), "sandbox to null: {sandbox:?}");
+}
+
+/// MCP `activity` returns the compact columnar envelope, minified, with all
+/// three change kinds sharing one `change_cols` header. Acks / sandboxes
+/// null the comment-only columns; sandboxes also null `comment_id`.
+#[test]
+fn mcp_activity_compact_columnar_minified() {
+    let base = Path::new("/docs");
+    let body = "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T17:00:00-04:00\n---\n\n# Body\n\n```remargin\n---\nid: c1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nto: [carol]\nchecksum: sha256:test\nack:\n  - carol@2026-04-06T14:00:00-04:00\n---\nHello.\n```\n";
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/.remargin.yaml"),
+            b"identity: tester\ntype: human\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/docs/note.md"), body.as_bytes())
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "activity",
+                "arguments": { "since": "2026-01-01T00:00:00-04:00" }
+            }
+        }),
+    );
+
+    // Minified: the payload text carries no literal newline.
+    let raw = extract_tool_raw_text(&response);
+    assert!(
+        !raw.contains('\n'),
+        "compact payload must be minified: {raw}"
+    );
+
+    let result = extract_tool_text(&response);
+    // Envelope header: nine columns, ts first, kind second, to last.
+    let cols = result["change_cols"].as_array().unwrap();
+    assert_eq!(cols.len(), 9_usize);
+    assert_eq!(cols[0], "ts");
+    assert_eq!(cols[1], "kind");
+    assert_eq!(cols[8], "to");
+    assert_eq!(result["cutoff_explicit"], json!(true));
+    assert!(result["newest_ts_overall"].is_string());
+    // elapsed_ms survives the style-preserving injector without un-minifying.
+    assert!(result["elapsed_ms"].is_number());
+
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1_usize);
+    let file = &files[0];
+    assert!(file["path"].as_str().unwrap().ends_with("note.md"));
+    assert!(file["newest_ts"].is_string());
+    assert_eq!(
+        file["cutoff_applied"].as_str().unwrap(),
+        "2026-01-01T00:00:00-04:00"
+    );
+
+    // Rows sorted by ts: comment (12:00), ack (14:00), sandbox (17:00).
+    let rows = file["changes"].as_array().unwrap();
+    assert_activity_change_rows(rows);
+}
+
 #[test]
 fn mcp_query_summary_omits_comments() {
     let base = Path::new("/docs");

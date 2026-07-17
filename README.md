@@ -703,7 +703,7 @@ Returns a projection of any mutating op (`ack`, `batch`, `comment`, `cp`, `delet
 | `--key <PATH>` | Path to Ed25519 signing key |
 | `--assets-dir <PATH>` | Assets directory path |
 | `--json` | Output as JSON |
-| `--compact` | Compact columnar JSON, minified. Requires `--json`; supported by `get` and `query` today (see [Compact output](#compact-output)) |
+| `--compact` | Compact columnar JSON, minified. Requires `--json`; supported by `get`, `query`, and `activity` today (see [Compact output](#compact-output)) |
 | `--verbose` | Enable tracing output |
 
 > To preview a mutating op without writing, use `remargin plan <op>`. The per-op `--dry-run` flag was removed in favour of the uniform `plan` projection.
@@ -722,6 +722,11 @@ Returns a projection of any mutating op (`ack`, `batch`, `comment`, `cp`, `delet
 - **`comments`** rows are positional arrays named once by the envelope's `comment_cols` header: `["id", "line", "author", "author_type", "ts", "reply_to", "thread", "to", "ack", "reactions", "remargin_kind", "edited_at", "attachments", "content"]` (`content` last). Acks compact to `author@ts` strings; the verbose per-comment `checksum` / `signature` and the redundant `file` are dropped. Nullable columns (`reply_to`, `thread`, `remargin_kind`, `edited_at`) are `null` when absent.
 - **`--include-integrity`** (requires `--compact`) re-adds `checksum`, `signature` as columns immediately before `content`, widening both `comment_cols` and every row. On the MCP surface this is the `include_integrity: true` boolean.
 
+`remargin activity --json --compact` emits the same token-lean, minified variant of the `activity` payload the MCP `activity` tool returns unconditionally. Plain `--json` is unchanged (verbose tagged `Change` objects); `--pretty` is unaffected.
+
+- Shape: `{cutoff_explicit, newest_ts_overall, change_cols, files}`, where each file is `{path, newest_ts, cutoff_applied?, changes}`.
+- **`changes`** rows are positional arrays named once by the envelope's `change_cols` header: `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. One uniform 9-column shape serves all three kinds; `kind` is `ack` / `comment` / `sandbox`. Columns a kind lacks are `null`: acks / sandboxes null the comment-only columns (`line_start`, `line_end`, `reply_to`) and their `to`; sandboxes also null `comment_id`. `to` is `[]` for a broadcast comment (vs `null` for the not-applicable acks / sandboxes). Timestamps keep full fidelity.
+
 ## Tracking change
 
 The `remargin activity` command answers "what's new since X?" across managed `.md` files in the current realm. Per-file change records (comments, acks, sandbox-adds) are returned sorted by timestamp:
@@ -737,11 +742,11 @@ remargin activity --since 2026-04-20T00:00:00Z
 remargin activity --pretty
 ```
 
-The default JSON output is the structured `ActivityResult` shape; `--pretty` switches to a per-file timeline rendered to stderr (so stdout stays clean for piping). Each per-file block opens with a header line that names the cutoff that was applied — `(since 2026-04-20 00:00)` for explicit `--since`, `(since you last touched this file: …)` for the caller-last-action default, and `(since the beginning — no prior activity by you in this file)` for the initial-touch fallback.
+The default JSON output is the structured `ActivityResult` shape; `--json --compact` emits the token-lean columnar payload instead (see [Compact output](#compact-output)). `--pretty` switches to a per-file timeline rendered to stderr (so stdout stays clean for piping). Each per-file block opens with a header line that names the cutoff that was applied — `(since 2026-04-20 00:00)` for explicit `--since`, `(since you last touched this file: …)` for the caller-last-action default, and `(since the beginning — no prior activity by you in this file)` for the initial-touch fallback.
 
 When `--since` is omitted, the per-file cutoff is the latest of (caller's authored comments, caller's acks, caller's sandbox-adds) in that file — files where the caller has never acted return everything (the "initial-touch" fallback). The command also folds in comment edits (via the `Comment.edited_at` field) and sandbox-roster timestamp refreshes, neither of which `comments` / `query` surface as distinct events.
 
-Same surface is exposed via MCP as `mcp__remargin__activity`.
+Same surface is exposed via MCP as `mcp__remargin__activity`, which always returns the compact columnar payload (the MCP surface has no format flag).
 
 ## Typical workflows
 

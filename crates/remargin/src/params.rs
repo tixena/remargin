@@ -72,11 +72,20 @@ pub struct EditParams<'cmd> {
     pub remargin_kind: Option<&'cmd [String]>,
 }
 
+/// How `activity` renders its result. Mutually-exclusive successor to the
+/// previous `json_mode` / `pretty` bool pair. `Json` (the default) emits
+/// the verbose `ActivityResult`; `Compact` emits the columnar minified
+/// shape; `Pretty` emits the human timeline to stderr.
+pub enum ActivityOutputMode {
+    Compact,
+    Json,
+    Pretty,
+}
+
 pub struct ActivityParams<'cmd> {
     pub explicit_path: Option<&'cmd Path>,
     pub identity_args: &'cmd IdentityArgs,
-    pub json_mode: bool,
-    pub pretty: bool,
+    pub output: ActivityOutputMode,
     pub since: Option<&'cmd str>,
 }
 

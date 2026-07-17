@@ -473,3 +473,192 @@ fn newest_ts_matches_largest_change_ts() {
         Some(ts("2026-04-06T15:00:00-04:00"))
     );
 }
+
+/// Compact projection: each kind fills its columns and nulls the rest.
+/// `kind` keeps the serde tag values; comment-only columns are null for
+/// acks / sandboxes; sandboxes also null `comment_id`.
+#[test]
+fn compact_row_columns_per_kind() {
+    use crate::activity::{CHANGE_COLS, to_compact_row};
+
+    assert_eq!(
+        CHANGE_COLS,
+        [
+            "ts",
+            "kind",
+            "author",
+            "author_type",
+            "comment_id",
+            "line_start",
+            "line_end",
+            "reply_to",
+            "to",
+        ]
+    );
+
+    let t = ts("2026-04-06T12:00:00-04:00");
+
+    let comment = Change::Comment {
+        author: String::from("bob"),
+        author_type: String::from("human"),
+        comment_id: String::from("c1"),
+        line_end: 12,
+        line_start: 9,
+        reply_to: Some(String::from("c0")),
+        to: vec![String::from("alice")],
+        ts: t,
+    };
+    let comment_row = to_compact_row(&comment);
+    assert_eq!(comment_row.0, t);
+    assert_eq!(comment_row.1, "comment");
+    assert_eq!(comment_row.2, "bob");
+    assert_eq!(comment_row.3.as_deref(), Some("human"));
+    assert_eq!(comment_row.4.as_deref(), Some("c1"));
+    assert_eq!(comment_row.5, Some(9));
+    assert_eq!(comment_row.6, Some(12));
+    assert_eq!(comment_row.7.as_deref(), Some("c0"));
+    assert_eq!(comment_row.8, Some(vec![String::from("alice")]));
+
+    let ack = Change::Ack {
+        author: String::from("bob"),
+        author_type: None,
+        comment_id: String::from("c1"),
+        ts: t,
+    };
+    let ack_row = to_compact_row(&ack);
+    assert_eq!(ack_row.1, "ack");
+    assert_eq!(ack_row.4.as_deref(), Some("c1"));
+    assert!(ack_row.3.is_none(), "unknown author_type null");
+    assert!(ack_row.5.is_none() && ack_row.6.is_none(), "ack lines null");
+    assert!(ack_row.7.is_none(), "ack reply_to null");
+    assert!(ack_row.8.is_none(), "ack to not-applicable is null");
+
+    let sandbox = Change::Sandbox {
+        author: String::from("alice"),
+        author_type: Some(String::from("human")),
+        ts: t,
+    };
+    let sandbox_row = to_compact_row(&sandbox);
+    assert_eq!(sandbox_row.1, "sandbox");
+    assert_eq!(sandbox_row.3.as_deref(), Some("human"));
+    assert!(sandbox_row.4.is_none(), "sandbox comment_id null");
+    assert!(
+        sandbox_row.5.is_none() && sandbox_row.6.is_none(),
+        "sandbox lines null"
+    );
+    assert!(sandbox_row.7.is_none(), "sandbox reply_to null");
+    assert!(sandbox_row.8.is_none(), "sandbox to null");
+}
+
+/// A broadcast comment (empty `to`) compacts to `Some([])`, preserving the
+/// broadcast signal against acks / sandboxes whose `to` is not-applicable
+/// (`null`).
+#[test]
+fn compact_row_broadcast_to_is_some_empty_vs_null() {
+    use crate::activity::to_compact_row;
+
+    let t = ts("2026-04-06T12:00:00-04:00");
+    let broadcast = Change::Comment {
+        author: String::from("bob"),
+        author_type: String::from("human"),
+        comment_id: String::from("c1"),
+        line_end: 3,
+        line_start: 1,
+        reply_to: None,
+        to: Vec::new(),
+        ts: t,
+    };
+    let row = to_compact_row(&broadcast);
+    assert_eq!(row.8, Some(Vec::new()), "broadcast to = Some([])");
+    assert!(row.7.is_none(), "no reply_to is null");
+
+    let ack = Change::Ack {
+        author: String::from("bob"),
+        author_type: None,
+        comment_id: String::from("c1"),
+        ts: t,
+    };
+    assert!(
+        to_compact_row(&ack).8.is_none(),
+        "ack to null, distinct from broadcast Some([])"
+    );
+}
+
+/// End-to-end envelope: comment + ack + sandbox in one file surface as
+/// three positional rows under one `change_cols` header; per-file summary
+/// keys stay named, `cutoff_applied` is named under an explicit `since`.
+#[test]
+fn compact_activity_envelope_shape() {
+    use crate::activity::{CHANGE_COLS, to_compact_activity};
+
+    let body = "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T17:00:00-04:00\n---\n\n# Body\n\n```remargin\n---\nid: c1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nto: [carol]\nchecksum: sha256:test\nack:\n  - carol@2026-04-06T14:00:00-04:00\n---\nHello.\n```\n";
+    let system = realm_with(&[("/r/note.md", body)]);
+    let since = ts("2026-01-01T00:00:00-04:00");
+    let result = gather_activity(&system, Path::new("/r/note.md"), Some(since), "alice").unwrap();
+    let compact = to_compact_activity(&result);
+
+    assert_eq!(compact["cutoff_explicit"], serde_json::json!(true));
+    assert_eq!(compact["change_cols"], serde_json::json!(CHANGE_COLS));
+    assert!(compact["newest_ts_overall"].is_string());
+
+    let files = compact["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    let file = &files[0];
+    assert!(file["path"].as_str().unwrap().ends_with("note.md"));
+    assert!(file["newest_ts"].is_string());
+    assert_eq!(
+        file["cutoff_applied"].as_str().unwrap(),
+        "2026-01-01T00:00:00-04:00"
+    );
+
+    let rows = file["changes"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    // Sorted by ts ascending: comment (12:00), ack (14:00), sandbox (17:00).
+    let comment = rows[0].as_array().unwrap();
+    assert_eq!(comment.len(), 9);
+    assert_eq!(comment[1], "comment");
+    assert_eq!(comment[4], "c1");
+    assert_eq!(comment[8], serde_json::json!(["carol"]));
+    let ack = rows[1].as_array().unwrap();
+    assert_eq!(ack.len(), 9);
+    assert_eq!(ack[1], "ack");
+    assert_eq!(ack[4], "c1");
+    assert!(ack[5].is_null() && ack[6].is_null());
+    assert!(ack[8].is_null(), "ack to null");
+    let sandbox = rows[2].as_array().unwrap();
+    assert_eq!(sandbox.len(), 9);
+    assert_eq!(sandbox[1], "sandbox");
+    assert!(sandbox[4].is_null(), "sandbox comment_id null");
+    assert!(sandbox[8].is_null(), "sandbox to null");
+}
+
+/// Codegen contract: the compact change-row alias renders its `Option`
+/// tuple columns as nullable in TS and Zod (relies on the pinned tixschema
+/// nullable-in-tuple support), and the per-file record carries the row by
+/// reference.
+#[test]
+fn compact_change_row_schema_renders_nullable_columns() {
+    use crate::activity::{compact_change_row_schema, compact_file_changes_schema};
+
+    let row_ts = compact_change_row_schema::Schema::ts_definition();
+    assert!(
+        row_ts.contains("string | null"),
+        "TS nullable columns: {row_ts}"
+    );
+    let row_zod = compact_change_row_schema::Schema::zod_schema();
+    assert!(
+        row_zod.contains("z.nullable(z.string())"),
+        "Zod nullable columns: {row_zod}"
+    );
+
+    let file_ts = compact_file_changes_schema::Schema::ts_definition();
+    assert!(
+        file_ts.contains("Array<CompactChangeRow>"),
+        "record references row type: {file_ts}"
+    );
+    let file_zod = compact_file_changes_schema::Schema::zod_schema();
+    assert!(
+        file_zod.contains("z.array(CompactChangeRow$Schema)"),
+        "record Zod references row schema: {file_zod}"
+    );
+}

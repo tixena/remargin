@@ -16,11 +16,28 @@ use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, FixedOffset};
 use os_shim::System;
 use serde::Serialize;
+use serde_json::{Value, json};
+use tixschema::model_schema;
 
 use crate::config::registry::Registry;
 use crate::config::{load_config_filtered_with_path, load_registry};
 use crate::frontmatter::read_sandbox_entries;
 use crate::parser::{self, Comment, SandboxEntry};
+
+/// Uniform column names for every [`CompactChangeRow`], emitted once
+/// per response in the envelope's `change_cols` header. Columns a given
+/// kind lacks are `null` in that kind's row.
+pub const CHANGE_COLS: [&str; 9] = [
+    "ts",
+    "kind",
+    "author",
+    "author_type",
+    "comment_id",
+    "line_start",
+    "line_end",
+    "reply_to",
+    "to",
+];
 
 /// One file's changes, sorted by ts ascending. Files with no
 /// emitted changes are omitted from the wider [`ActivityResult`] —
@@ -137,6 +154,136 @@ pub struct ActivityResult {
     /// Max of every file's `newest_ts`. `None` when no file had
     /// any change.
     pub newest_ts_overall: Option<DateTime<FixedOffset>>,
+}
+
+/// One compact change row, positional columns named by [`CHANGE_COLS`].
+///
+/// The three kinds share this widest shape; a column absent for a kind
+/// is `None`. `author_type` is `Option<String>` (the ack / sandbox
+/// arity), always `Some` for comments. `to` is `Some(vec)` for comments
+/// (even an empty broadcast list), `None` for acks / sandboxes — so the
+/// broadcast signal survives against not-applicable. `kind` keeps the
+/// serde tag values `ack` / `comment` / `sandbox`.
+#[model_schema(name = "CompactChangeRow")]
+pub type CompactChangeRow = (
+    DateTime<FixedOffset>,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<usize>,
+    Option<usize>,
+    Option<String>,
+    Option<Vec<String>>,
+);
+
+/// Schema anchor for one compact per-file record.
+///
+/// Mirrors [`FileChanges`] but its `changes` are positional
+/// [`CompactChangeRow`]s. Exists so xtask emits the TS / Zod types the
+/// LLM consumer reads; the runtime builds the shape in [`to_compact_activity`]
+/// and the enclosing envelope (`cutoff_explicit`, `newest_ts_overall`,
+/// `change_cols`, `files`) is assembled there too.
+#[model_schema]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct CompactFileChanges {
+    pub changes: Vec<CompactChangeRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cutoff_applied: Option<DateTime<FixedOffset>>,
+    pub newest_ts: Option<DateTime<FixedOffset>>,
+    pub path: PathBuf,
+}
+
+/// Project one verbose [`Change`] onto its compact positional row.
+#[must_use]
+pub fn to_compact_row(change: &Change) -> CompactChangeRow {
+    let ts = change.ts();
+    let kind = change.kind_label().to_owned();
+    match change {
+        Change::Ack {
+            author,
+            author_type,
+            comment_id,
+            ..
+        } => (
+            ts,
+            kind,
+            author.clone(),
+            author_type.clone(),
+            Some(comment_id.clone()),
+            None,
+            None,
+            None,
+            None,
+        ),
+        Change::Comment {
+            author,
+            author_type,
+            comment_id,
+            line_end,
+            line_start,
+            reply_to,
+            to,
+            ..
+        } => (
+            ts,
+            kind,
+            author.clone(),
+            Some(author_type.clone()),
+            Some(comment_id.clone()),
+            Some(*line_start),
+            Some(*line_end),
+            reply_to.clone(),
+            Some(to.clone()),
+        ),
+        Change::Sandbox {
+            author,
+            author_type,
+            ..
+        } => (
+            ts,
+            kind,
+            author.clone(),
+            author_type.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    }
+}
+
+/// Build the full compact activity envelope from a verbose result.
+///
+/// Shape `{cutoff_explicit, newest_ts_overall, change_cols, files}`. Both
+/// the MCP surface (hardcoded) and CLI `--json --compact` route through
+/// this, then serialize minified.
+#[must_use]
+pub fn to_compact_activity(result: &ActivityResult) -> Value {
+    let files: Vec<Value> = result.files.iter().map(to_compact_file).collect();
+    json!({
+        "cutoff_explicit": result.cutoff_explicit,
+        "newest_ts_overall": result.newest_ts_overall,
+        "change_cols": CHANGE_COLS,
+        "files": files,
+    })
+}
+
+/// One compact per-file record: `path` / `newest_ts` stay named,
+/// `cutoff_applied` stays named when present, `changes` become positional
+/// rows.
+fn to_compact_file(file: &FileChanges) -> Value {
+    let changes: Vec<CompactChangeRow> = file.changes.iter().map(to_compact_row).collect();
+    let mut obj = serde_json::Map::new();
+    obj.insert(String::from("path"), json!(file.path));
+    obj.insert(String::from("newest_ts"), json!(file.newest_ts));
+    if let Some(cutoff) = file.cutoff_applied {
+        obj.insert(String::from("cutoff_applied"), json!(cutoff));
+    }
+    obj.insert(String::from("changes"), json!(changes));
+    Value::Object(obj)
 }
 
 /// Gather activity for `path` (file or directory) since `since`.

@@ -26,9 +26,10 @@ use crate::io::{
 #[cfg(feature = "obsidian")]
 use crate::obsidian;
 use crate::params::{
-    AckParams, ActivityParams, CommentParams, CpParams, EditParams, GetImageParams, GetParams,
-    MvParams, PromptSetParams, QueryOutputMode, QueryParams, QueryPendingFilters, ReactParams,
-    ReplaceParams, RestrictParams, SearchParams, SignParams, WriteParams,
+    AckParams, ActivityOutputMode, ActivityParams, CommentParams, CpParams, EditParams,
+    GetImageParams, GetParams, MvParams, PromptSetParams, QueryOutputMode, QueryParams,
+    QueryPendingFilters, ReactParams, ReplaceParams, RestrictParams, SearchParams, SignParams,
+    WriteParams,
 };
 use crate::render;
 use crate::{
@@ -819,11 +820,10 @@ pub fn cmd_identity_create(
 /// Wire the CLI `activity` subcommand to the
 /// [`activity::gather_activity`] core.
 ///
-/// Output mode follows the workspace `--json` convention:
-/// `--json` (default) emits the structured `ActivityResult`;
-/// `--pretty` switches to a human-readable timeline. Both flags
-/// at once is rejected (clap-level via the surrounding
-/// [`OutputArgs::json`] flag plus the local `pretty` boolean).
+/// Output mode arrives resolved as [`ActivityOutputMode`]: `Json`
+/// (default) emits the verbose `ActivityResult`, `Compact` the columnar
+/// minified shape (`--json --compact`), `Pretty` the human timeline to
+/// stderr. `--pretty` + `--json` is rejected upstream in dispatch.
 ///
 /// Identity is read-only here — the quartet resolves only the
 /// caller name driving the per-file cutoff. No signing, no key
@@ -834,10 +834,6 @@ pub fn cmd_activity(
     cwd: &Path,
     p: &ActivityParams<'_>,
 ) -> Result<()> {
-    if p.pretty && p.json_mode {
-        bail!("--pretty and --json are mutually exclusive");
-    }
-
     let resolved_path = match p.explicit_path {
         Some(path) => {
             let expanded = expand_cli_pathbuf(system, path)?;
@@ -867,11 +863,17 @@ pub fn cmd_activity(
 
     let result = activity::gather_activity(system, &resolved_path, cutoff, caller)?;
 
-    if p.pretty {
-        render::emit_activity_pretty(sinks, &result)?;
-    } else {
-        let value = serde_json::to_value(&result).context("serializing activity result")?;
-        print_output(sinks, true, &value)?;
+    match p.output {
+        ActivityOutputMode::Pretty => render::emit_activity_pretty(sinks, &result)?,
+        ActivityOutputMode::Compact => {
+            // Compact columnar shape, minified — matches the MCP `activity`
+            // contract. Verbose `--json` (below) stays byte-identical.
+            out_json_min(sinks, &activity::to_compact_activity(&result))?;
+        }
+        ActivityOutputMode::Json => {
+            let value = serde_json::to_value(&result).context("serializing activity result")?;
+            print_output(sinks, true, &value)?;
+        }
     }
     Ok(())
 }

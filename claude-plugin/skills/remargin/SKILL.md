@@ -230,6 +230,11 @@ remargin batch --ops '[
 - Pass `include_integrity: true` (MCP) / `--include-integrity` (CLI, requires `--compact`) to add `checksum`, `signature` columns immediately before `content`.
 - **CLI fallback:** `remargin query ... --json --compact` yields the same shape; plain `--json` is the older verbose `ExpandedComment` objects.
 
+**`activity` returns a compact, minified payload too.** The MCP `activity` tool always returns the token-lean columnar shape (no format flag): `{cutoff_explicit, newest_ts_overall, change_cols, files}`, each file `{path, newest_ts, cutoff_applied?, changes}`.
+
+- `changes` rows are positional arrays named once by the envelope's `change_cols` = `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. One uniform 9-column shape serves all three kinds; `kind` is `ack` / `comment` / `sandbox`. Columns a kind lacks are `null`: acks / sandboxes null `line_start` / `line_end` / `reply_to` and their `to`; sandboxes also null `comment_id`. `to` is `[]` for a broadcast comment vs `null` (not-applicable) for acks / sandboxes.
+- **CLI fallback:** `remargin activity --json --compact` yields the same shape; plain `--json` is the older verbose tagged `Change` objects, and `--pretty` is the human timeline.
+
 ### Q: The doc references an image. Should I view it?
 
 Yes — always view it before acting on the surrounding text. Markdown is often sparse because the visual is the spec (showing a bug, layout, before/after state, etc.). Skipping the image produces vague or wrong conclusions.

@@ -246,8 +246,14 @@ fn desc_activity() -> ToolDesc {
         description: "Call this BEFORE processing pending comments on a file or workspace you \
              haven't acted on recently - it surfaces new comments, reactions, acks, and sandbox \
              adds you'd otherwise miss. Walks <path> (file or directory; defaults to the MCP \
-             server's working directory) and returns per-file change records (comments, acks, \
-             sandbox-adds) sorted by ts. With `since` omitted, the per-file cutoff is the \
+             server's working directory) and returns a compact, minified columnar payload: \
+             `{cutoff_explicit, newest_ts_overall, change_cols, files}`, where each file is \
+             `{path, newest_ts, cutoff_applied?, changes}` and every change is a positional row \
+             named by `change_cols` (`[ts, kind, author, author_type, comment_id, line_start, \
+             line_end, reply_to, to]`). `kind` is `ack` / `comment` / `sandbox`; columns a kind \
+             lacks are `null` (acks / sandboxes null the comment-only columns, sandboxes also \
+             null `comment_id`; `to` is `null` for acks / sandboxes and `[]` for a broadcast \
+             comment). Rows sort by ts. With `since` omitted, the per-file cutoff is the \
              caller's last action in that file; files where the caller has never acted return \
              everything.",
         schema: json!({
@@ -1266,10 +1272,10 @@ fn tool_result_success_min(content: &Value) -> Value {
 }
 
 /// Tools whose success payload is the compact columnar contract, wrapped
-/// minified. `get` and `query` today; the follow-up search / activity
-/// tasks extend this set.
+/// minified. `get`, `query`, and `activity` today; the follow-up search
+/// task extends this set.
 fn tool_emits_minified(tool_name: &str) -> bool {
-    matches!(tool_name, "get" | "query")
+    matches!(tool_name, "activity" | "get" | "query")
 }
 
 /// Build an MCP tool result (error).
@@ -1681,7 +1687,10 @@ fn handle_activity(
         .context("activity: caller identity required (declare via identity / config_path)")?;
 
     let result = activity::gather_activity(system, &target, cutoff, caller)?;
-    serde_json::to_value(&result).context("serializing activity result")
+    // Compact columnar shape, hardcoded on the MCP surface: changes become
+    // positional rows named by `change_cols`. Serialized minified by
+    // `tool_result_success_min`.
+    Ok(activity::to_compact_activity(&result))
 }
 
 /// Handle the `ack` tool: acknowledge one or more comments.
