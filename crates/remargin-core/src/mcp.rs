@@ -60,6 +60,20 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 /// Server name reported in the initialize response.
 const SERVER_NAME: &str = "remargin";
 
+/// Seed for a session's [`SessionState::spill_cap`], in UTF-8 bytes of
+/// emitted tool-result text. This is a self-consistent proxy for the
+/// client's token limit, NOT an equivalent — remargin measures bytes, the
+/// client counts tokens. Seeded conservatively near Claude Code's ~10k-token
+/// soft-warn boundary and well under its 25k-token default hard spill, so a
+/// fresh session rarely spills before it learns; the cap only ratchets DOWN
+/// from here via [`handle_report_spill`].
+const DEFAULT_SPILL_CAP: usize = 40_000;
+
+/// Fraction of [`SessionState::spill_cap`] held back for the response
+/// envelope (matches wrapper, `total`, `effective_limit`, injected
+/// `elapsed_ms`) and pretty-print indentation when sizing a search page.
+const SPILL_MARGIN_DIVISOR: usize = 10;
+
 /// Path-like top-level fields that every tool accepts. Each is run through
 /// [`expand_path`] before the dispatch hands the params off to the per-tool
 /// handler so `~` / `$VAR` behave identically to the CLI side. The list is
@@ -92,6 +106,7 @@ const NO_PATH_TOOLS: &[&str] = &[
     "permissions_check",
     "permissions_show",
     "prompt_resolve",
+    "report_spill",
     "whoami",
 ];
 
@@ -142,6 +157,21 @@ struct PlanCommentStaging {
     to_owned: Vec<String>,
 }
 
+/// Per-session adaptive state owned by the stdio run loop.
+///
+/// `spill_cap` is a learned size ceiling in remargin's own unit (UTF-8 bytes
+/// of emitted tool-result text) — a self-consistent proxy for the client's
+/// token limit, not an equivalent. It only ratchets DOWN (from an
+/// agent-reported spill) and is seeded fresh each session with no disk
+/// persistence, so a session re-learns rather than carrying a stale ceiling.
+/// `last_response_size` is the byte size of the most recently emitted tool
+/// result — what `report_spill` infers the offending size from.
+#[derive(Debug)]
+struct SessionState {
+    last_response_size: usize,
+    spill_cap: usize,
+}
+
 impl Default for PlanCommentStaging {
     fn default() -> Self {
         Self {
@@ -149,6 +179,15 @@ impl Default for PlanCommentStaging {
             position: InsertPosition::Append,
             reply_to_owned: None,
             to_owned: Vec::new(),
+        }
+    }
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            last_response_size: 0,
+            spill_cap: DEFAULT_SPILL_CAP,
         }
     }
 }
@@ -809,6 +848,25 @@ fn desc_reply() -> ToolDesc {
     }
 }
 
+/// Build the `report_spill` tool descriptor.
+fn desc_report_spill() -> ToolDesc {
+    ToolDesc {
+        name: "report_spill",
+        description: "Call this the moment your client spills a remargin tool result to a file \
+             (because it exceeded the client's output-token limit) - BEFORE you read that file. \
+             remargin infers the offending size from the last result it emitted and ratchets its \
+             per-session page cap down so future `search` pages stay under your client's limit. \
+             The cap only ever falls, never rises, and resets each session. Omit `size` for the \
+             inferred value; pass it only to force an explicit one.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "size": { "type": "integer", "minimum": 0, "description": "Optional explicit size (bytes) of the spilled result. Omit to let remargin infer it from the last emitted result." }
+            }
+        }),
+    }
+}
+
 /// Build the rm tool descriptor.
 fn desc_rm() -> ToolDesc {
     ToolDesc {
@@ -1130,6 +1188,7 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_react(),
         desc_replace(),
         desc_reply(),
+        desc_report_spill(),
         desc_rm(),
         desc_sandbox_add(),
         desc_sandbox_list(),
@@ -1438,6 +1497,7 @@ fn dispatch_tool(
     base_dir: &Path,
     permissions: &ResolvedPermissions,
     config: &ResolvedConfig,
+    session: &mut SessionState,
     tool_name: &str,
     params: &Map<String, Value>,
 ) -> Value {
@@ -1497,6 +1557,7 @@ fn dispatch_tool(
         "react" => handle_react(system, base_dir, config, p),
         "replace" => handle_replace(system, base_dir, config, p),
         "reply" => handle_reply(system, base_dir, config, p),
+        "report_spill" => Ok(handle_report_spill(session, p)),
         "claude_restrict" => {
             return tool_result_error(
                 "tool 'claude_restrict' is not available via MCP - use the CLI: 'remargin claude \
@@ -1513,7 +1574,7 @@ fn dispatch_tool(
         "sandbox_add" => handle_sandbox_add(system, base_dir, config, p),
         "sandbox_list" => handle_sandbox_list(system, base_dir, config, p),
         "sandbox_remove" => handle_sandbox_remove(system, base_dir, config, p),
-        "search" => handle_search(system, base_dir, p),
+        "search" => handle_search(system, base_dir, session.spill_cap, p),
         "sign" => handle_sign(system, base_dir, config, p),
         "verify" => handle_verify(system, base_dir, config, p),
         "whoami" => handle_whoami(system, base_dir),
@@ -2634,6 +2695,7 @@ fn handle_sandbox_list(
 fn handle_search(
     system: &dyn System,
     base_dir: &Path,
+    spill_cap: usize,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let pattern = required_str(params, "pattern")?;
@@ -2661,13 +2723,81 @@ fn handle_search(
 
     let results = search::search(system, base_dir, &target, &options)?;
 
-    let matches = results
+    let window = results
         .matches
         .iter()
         .map(|m| serde_json::to_value(search::SearchHit::from_match(m)))
         .collect::<Result<Vec<Value>, _>>()?;
 
-    Ok(json!({ "matches": matches, "total": results.total }))
+    // The caller's own `limit` already bounded the window; the cap only ever
+    // narrows it further, never widens past what the caller asked for. When
+    // the cap clamps below the window, `effective_limit` is surfaced so the
+    // agent knows this is a bounded page and can offset for the rest — `total`
+    // already tells it how many remain.
+    let (matches, effective_limit) = size_search_page(window, spill_cap);
+
+    let mut envelope = json!({ "matches": matches, "total": results.total });
+    if let Some(effective) = effective_limit
+        && let Some(obj) = envelope.as_object_mut()
+    {
+        obj.insert(String::from("effective_limit"), Value::from(effective));
+    }
+    Ok(envelope)
+}
+
+/// Trim a search page so its emitted size stays under `spill_cap`.
+///
+/// Greedily keeps hits while the running serialized size stays within the cap
+/// (minus a margin for the envelope and pretty-print indentation). Always
+/// keeps at least one hit when the window is non-empty, so a single oversized
+/// match can never livelock paging. Returns `Some(effective_limit)` only when
+/// the cap forced fewer rows than the window carried — that clamp is the
+/// signal the agent should page for the rest. `spill_cap` is a self-consistent
+/// byte proxy for the client's token limit, not an equivalent.
+fn size_search_page(window: Vec<Value>, spill_cap: usize) -> (Vec<Value>, Option<usize>) {
+    let window_len = window.len();
+    let budget = spill_cap.saturating_sub(spill_cap / SPILL_MARGIN_DIVISOR);
+    let mut running = 0_usize;
+    let mut kept = 0_usize;
+    for hit in &window {
+        let size = serde_json::to_string_pretty(hit).map_or(usize::MAX, |s| s.len());
+        // Admit the first hit unconditionally; a lone oversized match must
+        // still ship or the caller can never page past it.
+        if kept > 0 && running.saturating_add(size) > budget {
+            break;
+        }
+        running = running.saturating_add(size);
+        kept = kept.saturating_add(1);
+    }
+    if kept >= window_len {
+        (window, None)
+    } else {
+        let mut page = window;
+        page.truncate(kept);
+        (page, Some(kept))
+    }
+}
+
+/// Handle the `report_spill` tool: ratchet the session's `spill_cap` DOWN
+/// after the client spilled a remargin result to a file.
+///
+/// remargin infers the offending size from `last_response_size` (the last
+/// result it emitted); an explicit `size` supersedes that inference. The cap
+/// only ever falls — a report can never raise it — and a reported size of 0
+/// is a no-op (nothing meaningful was measured).
+fn handle_report_spill(session: &mut SessionState, params: &Map<String, Value>) -> Value {
+    let explicit = optional_usize(params, "size");
+    let reported = explicit.unwrap_or(session.last_response_size);
+    let previous_cap = session.spill_cap;
+    if reported > 0 {
+        session.spill_cap = session.spill_cap.min(reported);
+    }
+    json!({
+        "inferred": explicit.is_none(),
+        "previous_cap": previous_cap,
+        "reported_size": reported,
+        "spill_cap": session.spill_cap,
+    })
 }
 
 /// Handle the `replace` tool: body-only find/replace over a file or
@@ -2818,6 +2948,7 @@ fn process_message(
     base_dir: &Path,
     permissions: &ResolvedPermissions,
     config: &ResolvedConfig,
+    session: &mut SessionState,
     message: &Value,
 ) -> Option<Value> {
     let id = message.get("id");
@@ -2879,8 +3010,15 @@ fn process_message(
                 .unwrap_or_default();
 
             let start = Instant::now();
-            let mut result =
-                dispatch_tool(system, base_dir, permissions, config, tool_name, &arguments);
+            let mut result = dispatch_tool(
+                system,
+                base_dir,
+                permissions,
+                config,
+                session,
+                tool_name,
+                &arguments,
+            );
             let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
             // Inject elapsed_ms into the tool result's text JSON.
@@ -2894,6 +3032,18 @@ fn process_message(
                 *text_val =
                     Value::String(serde_json::to_string_pretty(&parsed).unwrap_or_default());
             }
+
+            // Record the emitted result's measured size (UTF-8 bytes of the
+            // final tool-result text) so a later `report_spill` can infer the
+            // offending size. Recorded after elapsed_ms injection so it
+            // reflects exactly what the client received.
+            session.last_response_size = result
+                .get("content")
+                .and_then(Value::as_array)
+                .and_then(|c| c.first())
+                .and_then(|first| first.get("text"))
+                .and_then(Value::as_str)
+                .map_or(0, str::len);
 
             Some(success_response(request_id, &result))
         }
@@ -2934,6 +3084,10 @@ pub fn run(
     let reader = stdin.lock();
     let mut writer = stdout.lock();
 
+    // Adaptive spill cap lives for the life of the stdio session — it
+    // ratchets down as the client reports spills and re-learns on restart.
+    let mut session = SessionState::default();
+
     for raw_line in reader.lines() {
         let line = raw_line.context("reading from stdin")?;
         let trimmed = line.trim();
@@ -2959,7 +3113,14 @@ pub fn run(
         let config = ResolvedConfig::resolve(system, base_dir, startup_flags, startup_assets_dir)?;
         let permissions = resolve_permissions(system, base_dir)?;
 
-        if let Some(response) = process_message(system, base_dir, &permissions, &config, &message) {
+        if let Some(response) = process_message(
+            system,
+            base_dir,
+            &permissions,
+            &config,
+            &mut session,
+            &message,
+        ) {
             writeln!(writer, "{response}").context("writing to stdout")?;
             writer.flush().context("flushing stdout")?;
         }
@@ -2982,8 +3143,27 @@ pub fn process_request(
     config: &ResolvedConfig,
     request_json: &str,
 ) -> Result<Option<String>> {
+    let mut session = SessionState::default();
+    process_request_with_session(system, base_dir, config, &mut session, request_json)
+}
+
+/// Process a single JSON-RPC request against a caller-owned [`SessionState`],
+/// so adaptive state (the spill cap, last-response size) persists across
+/// several requests — the shape the run loop drives, and the seam the
+/// spill-cap tests exercise.
+///
+/// # Errors
+///
+/// Returns an error if the input is not valid JSON.
+fn process_request_with_session(
+    system: &dyn System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    session: &mut SessionState,
+    request_json: &str,
+) -> Result<Option<String>> {
     let permissions = resolve_permissions(system, base_dir)?;
     let message: Value = serde_json::from_str(request_json).context("parsing JSON-RPC request")?;
-    let response = process_message(system, base_dir, &permissions, config, &message);
+    let response = process_message(system, base_dir, &permissions, config, session, &message);
     Ok(response.map(|val| val.to_string()))
 }

@@ -3,6 +3,7 @@
 //! Tests use the `process_request` function to exercise the JSON-RPC layer
 //! without actual stdin/stdout I/O.
 
+use core::fmt::Write as _;
 use std::path::Path;
 
 use base64::Engine as _;
@@ -195,6 +196,58 @@ fn call(
     serde_json::from_str(&response_str).unwrap()
 }
 
+/// Drive a JSON-RPC request against a persistent [`super::SessionState`] so
+/// adaptive state (spill cap, last-response size) carries across calls.
+fn call_session(
+    system: &dyn os_shim::System,
+    base_dir: &Path,
+    config: &ResolvedConfig,
+    session: &mut super::SessionState,
+    request: &Value,
+) -> Value {
+    let request_str = serde_json::to_string(request).unwrap();
+    let response_str =
+        super::process_request_with_session(system, base_dir, config, session, &request_str)
+            .unwrap()
+            .unwrap();
+    serde_json::from_str(&response_str).unwrap()
+}
+
+/// A `tools/call` request for `search` over `pattern`, with an optional page
+/// `limit`.
+fn search_request(pattern: &str, limit: Option<i64>) -> Value {
+    let mut arguments = json!({ "pattern": pattern });
+    if let Some(lim) = limit {
+        arguments["limit"] = json!(lim);
+    }
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1_i32,
+        "method": "tools/call",
+        "params": { "name": "search", "arguments": arguments }
+    })
+}
+
+/// A `tools/call` request for `report_spill`, with an optional explicit `size`.
+fn report_spill_request(size: Option<i64>) -> Value {
+    let arguments = size.map_or_else(|| json!({}), |s| json!({ "size": s }));
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1_i32,
+        "method": "tools/call",
+        "params": { "name": "report_spill", "arguments": arguments }
+    })
+}
+
+/// A document body with `n` distinct `needle` lines (one match per line).
+fn needle_doc(n: usize) -> String {
+    let mut doc = String::from("# Needles\n\n");
+    for i in 0..n {
+        let _ = writeln!(doc, "needle {i}");
+    }
+    doc
+}
+
 /// Extract the text content from an MCP tool result.
 fn extract_tool_text(response: &Value) -> Value {
     let result = &response["result"];
@@ -268,6 +321,7 @@ fn tools_list_returns_all_tools() {
         "react",
         "replace",
         "reply",
+        "report_spill",
         "rm",
         "sandbox_add",
         "sandbox_list",
@@ -565,6 +619,166 @@ fn search_limit_offset_envelope_carries_total() {
     assert_eq!(result["total"], 5_i32);
     // Offset 1 skips the first needle; the page starts at line 4.
     assert_eq!(matches[0]["line"], 4_i32);
+}
+
+#[test]
+fn report_spill_infers_size_from_last_result() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", &needle_doc(100));
+    let config = test_config();
+    let mut session = super::SessionState::default();
+    assert_eq!(session.spill_cap, super::DEFAULT_SPILL_CAP);
+
+    // A full search sits well under the default cap: no clamp, and its
+    // emitted size is recorded as last_response_size.
+    let response = call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &search_request("needle", None),
+    );
+    let result = extract_tool_text(&response);
+    assert_eq!(result["matches"].as_array().unwrap().len(), 100_usize);
+    assert!(result.get("effective_limit").is_none());
+    let learned = session.last_response_size;
+    assert!(learned > 0);
+    assert!(learned < super::DEFAULT_SPILL_CAP);
+
+    // report_spill with no explicit size infers the offending size from that
+    // last result and ratchets the cap down to it.
+    let spill = call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &report_spill_request(None),
+    );
+    let spill_result = extract_tool_text(&spill);
+    assert_eq!(spill_result["inferred"], true);
+    assert_eq!(spill_result["spill_cap"].as_u64().unwrap(), learned as u64);
+    assert_eq!(session.spill_cap, learned);
+    assert!(session.spill_cap < super::DEFAULT_SPILL_CAP);
+}
+
+#[test]
+fn report_spill_lowers_the_cap_and_never_raises() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", &needle_doc(100));
+    let config = test_config();
+    let mut session = super::SessionState::default();
+
+    // Explicit size lowers the cap.
+    let low = call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &report_spill_request(Some(1000)),
+    );
+    assert_eq!(
+        extract_tool_text(&low)["spill_cap"].as_u64().unwrap(),
+        1000_u64
+    );
+    assert_eq!(session.spill_cap, 1000_usize);
+
+    // A larger explicit report must not raise it — the cap only ratchets down.
+    let high = call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &report_spill_request(Some(50_000)),
+    );
+    let high_result = extract_tool_text(&high);
+    assert_eq!(high_result["reported_size"].as_u64().unwrap(), 50_000_u64);
+    assert_eq!(high_result["spill_cap"].as_u64().unwrap(), 1000_u64);
+    assert_eq!(session.spill_cap, 1000_usize);
+
+    // Nor does an inferred report from a larger real result raise it: a full
+    // search records a size above the cap, yet the cap holds.
+    call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &search_request("needle", None),
+    );
+    assert!(session.last_response_size > 1000);
+    call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &report_spill_request(None),
+    );
+    assert_eq!(session.spill_cap, 1000_usize);
+}
+
+#[test]
+fn search_page_sized_under_cap() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", &needle_doc(100));
+    let config = test_config();
+
+    // Tight cap: the emitted page is clamped well below the 100-match corpus,
+    // and effective_limit signals the clamp so the agent knows to page.
+    let mut tight = super::SessionState::default();
+    call_session(
+        &system,
+        base,
+        &config,
+        &mut tight,
+        &report_spill_request(Some(1500)),
+    );
+    let tight_page = extract_tool_text(&call_session(
+        &system,
+        base,
+        &config,
+        &mut tight,
+        &search_request("needle", None),
+    ));
+    let tight_n = tight_page["matches"].as_array().unwrap().len();
+    assert_eq!(tight_page["total"].as_u64().unwrap(), 100_u64);
+    assert!((1..100).contains(&tight_n));
+    assert_eq!(
+        usize::try_from(tight_page["effective_limit"].as_u64().unwrap()).unwrap(),
+        tight_n
+    );
+
+    // A looser cap admits strictly more rows: page sizing tracks the cap.
+    let mut loose = super::SessionState::default();
+    call_session(
+        &system,
+        base,
+        &config,
+        &mut loose,
+        &report_spill_request(Some(6000)),
+    );
+    let loose_page = extract_tool_text(&call_session(
+        &system,
+        base,
+        &config,
+        &mut loose,
+        &search_request("needle", None),
+    ));
+    let loose_n = loose_page["matches"].as_array().unwrap().len();
+    assert_eq!(loose_page["total"].as_u64().unwrap(), 100_u64);
+    assert!(loose_n > tight_n);
+
+    // An explicit caller limit is never widened by the cap: with the default
+    // (high) cap, limit=3 yields exactly three rows and no clamp signal.
+    let mut caller = super::SessionState::default();
+    let bounded = extract_tool_text(&call_session(
+        &system,
+        base,
+        &config,
+        &mut caller,
+        &search_request("needle", Some(3)),
+    ));
+    assert_eq!(bounded["matches"].as_array().unwrap().len(), 3_usize);
+    assert!(bounded.get("effective_limit").is_none());
+    assert_eq!(bounded["total"].as_u64().unwrap(), 100_u64);
 }
 
 #[test]
