@@ -8,6 +8,9 @@ use std::path::Path;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use image::codecs::gif::GifEncoder;
+use image::codecs::png::PngEncoder;
+use image::{Frame, Rgb, RgbImage, Rgba, RgbaImage};
 use os_shim::System as _;
 use os_shim::mock::MockSystem;
 use serde_json::{Value, json};
@@ -1859,6 +1862,159 @@ fn tool_result_includes_elapsed_ms() {
     assert!(
         result["elapsed_ms"].is_u64(),
         "elapsed_ms should be a non-negative integer"
+    );
+}
+
+/// A small solid-colour PNG for `get_image` round-trips.
+fn solid_png(width: u32, height: u32, colour: [u8; 3]) -> Vec<u8> {
+    let img: RgbImage = RgbImage::from_pixel(width, height, Rgb(colour));
+    let mut bytes: Vec<u8> = Vec::new();
+    img.write_with_encoder(PngEncoder::new(&mut bytes)).unwrap();
+    bytes
+}
+
+/// A two-frame GIF: frame 1 is `first`, frame 2 is `second`. Used to prove
+/// `get_image` returns frame 1.
+fn two_frame_gif(width: u32, height: u32, first: [u8; 4], second: [u8; 4]) -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut bytes);
+        for colour in [first, second] {
+            let frame: RgbaImage = RgbaImage::from_pixel(width, height, Rgba(colour));
+            encoder.encode_frame(Frame::new(frame)).unwrap();
+        }
+    }
+    bytes
+}
+
+/// Send a `get_image` `tools/call` and return the raw `result` object (its
+/// `content` array is the point of these tests, so we don't flatten it).
+fn get_image_result(system: &dyn os_shim::System, base: &Path, config: &ResolvedConfig) -> Value {
+    let response = call(
+        system,
+        base,
+        config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get_image",
+                "arguments": { "path": "pic.png" }
+            }
+        }),
+    );
+    response["result"].clone()
+}
+
+#[test]
+fn get_image_returns_image_content_block() {
+    let base = Path::new("/docs");
+    let png = solid_png(64, 48, [10, 120, 200]);
+    let system = MockSystem::new()
+        .with_file(base.join("pic.png"), &png)
+        .unwrap();
+    let config = test_config();
+
+    let result = get_image_result(&system, base, &config);
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 2, "content is an image + metadata pair");
+
+    // Block 0: a real MCP image block with bare base64 and the detected MIME.
+    assert_eq!(content[0]["type"], "image");
+    assert_eq!(content[0]["mimeType"], "image/png");
+    let data = content[0]["data"].as_str().unwrap();
+    assert!(
+        !data.starts_with("data:"),
+        "data must be bare base64, not a data: URI"
+    );
+    let decoded = BASE64_STANDARD.decode(data).unwrap();
+    assert_eq!(&decoded[..8], b"\x89PNG\r\n\x1a\n", "data decodes to a PNG");
+
+    // Block 1: the metadata envelope, carrying the injected elapsed_ms.
+    assert_eq!(content[1]["type"], "text");
+    let metadata: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(metadata["mime"], "image/png");
+    assert!(metadata.get("elapsed_ms").is_some(), "elapsed_ms injected");
+    assert!(metadata["elapsed_ms"].is_u64());
+    // The image bytes live in the image block, never the metadata text.
+    assert!(metadata.get("content").is_none());
+}
+
+#[test]
+fn get_image_gif_returns_first_frame() {
+    let base = Path::new("/docs");
+    // Frame 1 red, frame 2 blue — the returned pixel proves which frame won.
+    let gif = two_frame_gif(16, 16, [255, 0, 0, 255], [0, 0, 255, 255]);
+    let system = MockSystem::new()
+        .with_file(base.join("pic.gif"), &gif)
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get_image",
+                "arguments": { "path": "pic.gif" }
+            }
+        }),
+    );
+
+    let content = response["result"]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "image");
+    let decoded = BASE64_STANDARD
+        .decode(content[0]["data"].as_str().unwrap())
+        .unwrap();
+    let pixel = image::load_from_memory(&decoded).unwrap().to_rgb8();
+    let Rgb([r, g, b]) = *pixel.get_pixel(0, 0);
+    assert!(
+        r > 200 && g < 60 && b < 60,
+        "expected frame 1 (red), got rgb({r},{g},{b})"
+    );
+}
+
+#[test]
+fn get_image_records_nonzero_response_size() {
+    let base = Path::new("/docs");
+    let png = solid_png(64, 48, [10, 120, 200]);
+    let system = MockSystem::new()
+        .with_file(base.join("pic.png"), &png)
+        .unwrap();
+    let config = test_config();
+    let mut session = super::SessionState::default();
+
+    let response = call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get_image",
+                "arguments": { "path": "pic.png" }
+            }
+        }),
+    );
+
+    // The image block's base64 dominates the payload; a content[0]-only text
+    // measure would record 0 here.
+    let data_len = response["result"]["content"][0]["data"]
+        .as_str()
+        .unwrap()
+        .len();
+    assert!(
+        session.last_response_size >= data_len,
+        "size {} should include the base64 image payload ({data_len} bytes)",
+        session.last_response_size
     );
 }
 

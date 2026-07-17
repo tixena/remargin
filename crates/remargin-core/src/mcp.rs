@@ -2621,11 +2621,20 @@ fn handle_get_image(
         &options,
     )?;
 
-    let mut envelope = result.to_json_without_content();
-    envelope["binary"] = Value::Bool(true);
-    envelope["content"] = Value::String(BASE64_STANDARD.encode(&result.bytes));
-    envelope["path"] = json!(result.source_path);
-    Ok(envelope)
+    // Return a content array so the dispatcher passes it through unchanged:
+    // a real MCP image block (Claude Code renders it as vision input) plus a
+    // trailing text block carrying the metadata envelope. `data` is bare
+    // base64 (no `data:` URI prefix) and `mimeType` is the detected output
+    // MIME, not the extension. get_image always produces a raster image
+    // (SVG/PDF/audio/video are rejected upstream), so no branching is needed.
+    let metadata = result.to_json_without_content();
+    let data = BASE64_STANDARD.encode(&result.bytes);
+    Ok(json!({
+        "content": [
+            { "type": "image", "data": data, "mimeType": result.mime },
+            { "type": "text", "text": serde_json::to_string_pretty(&metadata).unwrap_or_default() },
+        ]
+    }))
 }
 
 /// Handle the `sandbox_add` tool: stage files in the caller's sandbox.
@@ -2942,6 +2951,46 @@ fn handle_write(
     Ok(outcome.to_json(path_str, binary, raw))
 }
 
+/// Inject `elapsed_ms` into the first content block whose `text` parses as a
+/// JSON object, then return the emitted payload size for `report_spill` to
+/// infer from.
+///
+/// Scanning for the JSON text block (rather than assuming index 0) keeps
+/// `elapsed_ms` on image-/resource-first arrays whose metadata text block trails
+/// a non-text block — an image at index 0 would otherwise swallow it. The size
+/// sums the UTF-8 byte lengths of every emitted `text` and `data` string: an
+/// image-first result carries its weight in the base64 `data` block, which a
+/// content[0]-only measure would miss and record as 0.
+fn inject_elapsed_ms_and_measure(result: &mut Value, elapsed_ms: u64) -> usize {
+    let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    for item in &mut *content {
+        let Some(text_val) = item.get_mut("text") else {
+            continue;
+        };
+        let Some(text_str) = text_val.as_str() else {
+            continue;
+        };
+        let Ok(mut parsed) = serde_json::from_str::<Value>(text_str) else {
+            continue;
+        };
+        let Some(obj) = parsed.as_object_mut() else {
+            continue;
+        };
+        obj.insert(String::from("elapsed_ms"), Value::from(elapsed_ms));
+        *text_val = Value::String(serde_json::to_string_pretty(&parsed).unwrap_or_default());
+        break;
+    }
+    content
+        .iter()
+        .flat_map(|item| [item.get("text"), item.get("data")])
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::len)
+        .sum()
+}
+
 /// Process a single JSON-RPC request and return a response (or `None` for notifications).
 fn process_message(
     system: &dyn System,
@@ -3021,29 +3070,9 @@ fn process_message(
             );
             let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-            // Inject elapsed_ms into the tool result's text JSON.
-            if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
-                && let Some(text_val) = content.first_mut().and_then(|c| c.get_mut("text"))
-                && let Some(text_str) = text_val.as_str()
-                && let Ok(mut parsed) = serde_json::from_str::<Value>(text_str)
-                && let Some(obj) = parsed.as_object_mut()
-            {
-                obj.insert(String::from("elapsed_ms"), Value::from(elapsed_ms));
-                *text_val =
-                    Value::String(serde_json::to_string_pretty(&parsed).unwrap_or_default());
-            }
-
-            // Record the emitted result's measured size (UTF-8 bytes of the
-            // final tool-result text) so a later `report_spill` can infer the
-            // offending size. Recorded after elapsed_ms injection so it
-            // reflects exactly what the client received.
-            session.last_response_size = result
-                .get("content")
-                .and_then(Value::as_array)
-                .and_then(|c| c.first())
-                .and_then(|first| first.get("text"))
-                .and_then(Value::as_str)
-                .map_or(0, str::len);
+            // Decorate with elapsed_ms and record the emitted payload size so a
+            // later `report_spill` can infer the offending size.
+            session.last_response_size = inject_elapsed_ms_and_measure(&mut result, elapsed_ms);
 
             Some(success_response(request_id, &result))
         }
