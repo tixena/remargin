@@ -95,6 +95,22 @@ pub struct SearchMatch {
     pub text: String,
 }
 
+/// A bounded page of matches plus the exact total.
+///
+/// `total` is the full match count from a complete scan (no short-circuit);
+/// `matches` is the clamped `[offset .. offset + limit]` window. An offset
+/// past the end yields empty `matches` with a truthful `total`, so a caller
+/// can always render "showing N of total" and never mistake a page for the
+/// whole set.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct SearchResults {
+    /// The clamped page of matches.
+    pub matches: Vec<SearchMatch>,
+    /// Total matches across the corpus, before offset/limit.
+    pub total: usize,
+}
+
 /// Options for a search operation.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -103,6 +119,10 @@ pub struct SearchOptions {
     pub context_lines: usize,
     /// Case-insensitive matching.
     pub ignore_case: bool,
+    /// Page size: return at most this many matches. `None` returns all.
+    pub limit: Option<usize>,
+    /// Number of matches to skip before the returned page.
+    pub offset: usize,
     /// The search pattern (literal or regex).
     pub pattern: String,
     /// Treat the pattern as a regex.
@@ -163,16 +183,32 @@ impl SearchOptions {
         self
     }
 
+    /// Set the page size (max matches returned). `None` returns all.
+    #[must_use]
+    pub const fn limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
     /// Create a new set of search options.
     #[must_use]
     pub const fn new(pattern: String) -> Self {
         Self {
             context_lines: 0,
             ignore_case: false,
+            limit: None,
+            offset: 0,
             pattern,
             regex: false,
             scope: SearchScope::All,
         }
+    }
+
+    /// Skip this many matches before the returned page.
+    #[must_use]
+    pub const fn offset(mut self, offset: usize) -> Self {
+        self.offset = offset;
+        self
     }
 
     /// Enable regex mode.
@@ -205,7 +241,7 @@ pub fn search(
     base_dir: &Path,
     search_dir: &Path,
     options: &SearchOptions,
-) -> Result<Vec<SearchMatch>> {
+) -> Result<SearchResults> {
     if options.pattern.is_empty() {
         bail!("search pattern cannot be empty");
     }
@@ -223,7 +259,7 @@ pub fn search(
                 .to_path_buf();
             search_file(&content, &relative, &matcher, options, &mut results);
         }
-        return Ok(results);
+        return Ok(paginate(results, options));
     }
 
     let entries = system
@@ -258,7 +294,17 @@ pub fn search(
         search_file(&content, &relative, &matcher, options, &mut results);
     }
 
-    Ok(results)
+    Ok(paginate(results, options))
+}
+
+/// Clamp the full match set to `[offset .. offset + limit]` while
+/// reporting the exact total. The scan is always complete, so `total`
+/// is honest even when the requested page is empty (offset past end).
+fn paginate(all: Vec<SearchMatch>, options: &SearchOptions) -> SearchResults {
+    let total = all.len();
+    let limit = options.limit.unwrap_or(usize::MAX);
+    let matches = all.into_iter().skip(options.offset).take(limit).collect();
+    SearchResults { matches, total }
 }
 
 /// Build a `Matcher` from the search options.

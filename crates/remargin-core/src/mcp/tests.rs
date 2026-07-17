@@ -530,6 +530,44 @@ fn search_finds_text_in_document() {
 }
 
 #[test]
+fn search_limit_offset_envelope_carries_total() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(
+        base,
+        "doc.md",
+        "# Hello\n\nneedle 1\nneedle 2\nneedle 3\nneedle 4\nneedle 5\n",
+    );
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": {
+                    "pattern": "needle",
+                    "limit": 2_i32,
+                    "offset": 1_i32
+                }
+            }
+        }),
+    );
+
+    let result = extract_tool_text(&response);
+    let matches = result["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 2_usize);
+    // The full corpus has five matches even though the page shows two.
+    assert_eq!(result["total"], 5_i32);
+    // Offset 1 skips the first needle; the page starts at line 4.
+    assert_eq!(matches[0]["line"], 4_i32);
+}
+
+#[test]
 fn replace_rewrites_body_via_mcp() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Hello\n\nThe foo system.\n");

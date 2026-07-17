@@ -1800,33 +1800,53 @@ pub fn cmd_search(
     let options = search::SearchOptions::new(String::from(params.pattern))
         .context_lines(params.context)
         .ignore_case(params.ignore_case)
+        .limit(params.limit)
+        .offset(params.offset)
         .regex(params.regex)
         .scope(scope);
 
     let results = search::search(system, cwd, &target, &options)?;
 
     if params.json_mode {
-        print_output(sinks, true, &json!({ "matches": results }))
-    } else {
-        for m in &results {
-            let loc = match m.location {
-                search::MatchLocation::Body => "body",
-                search::MatchLocation::Comment => "comment",
-                _ => "unknown",
-            };
-            for line in &m.before {
-                out(sinks, &format!("  {line}"))?;
-            }
-            out(
-                sinks,
-                &format!("{}:{}  [{}]  {}", m.path.display(), m.line, loc, m.text),
-            )?;
-            for line in &m.after {
-                out(sinks, &format!("  {line}"))?;
-            }
-        }
-        Ok(())
+        return print_output(
+            sinks,
+            true,
+            &json!({ "matches": results.matches, "total": results.total }),
+        );
     }
+
+    for m in &results.matches {
+        let loc = match m.location {
+            search::MatchLocation::Body => "body",
+            search::MatchLocation::Comment => "comment",
+            _ => "unknown",
+        };
+        for line in &m.before {
+            out(sinks, &format!("  {line}"))?;
+        }
+        out(
+            sinks,
+            &format!("{}:{}  [{}]  {}", m.path.display(), m.line, loc, m.text),
+        )?;
+        for line in &m.after {
+            out(sinks, &format!("  {line}"))?;
+        }
+    }
+
+    // Paging is honest: when a page is bounded, footer the true total so a
+    // truncated view is never mistaken for the whole match set.
+    if params.limit.is_some() || params.offset > 0 {
+        out(
+            sinks,
+            &format!(
+                "-- showing {} of {} (offset {})",
+                results.matches.len(),
+                results.total,
+                params.offset,
+            ),
+        )?;
+    }
+    Ok(())
 }
 
 pub fn cmd_replace(

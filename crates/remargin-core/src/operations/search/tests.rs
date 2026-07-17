@@ -1,5 +1,6 @@
 //! Tests for the cross-document text search engine.
 
+use core::fmt::Write as _;
 use std::path::Path;
 
 use os_shim::mock::MockSystem;
@@ -15,10 +16,21 @@ fn literal_opts(pattern: &str) -> SearchOptions {
     SearchOptions {
         context_lines: 0,
         ignore_case: false,
+        limit: None,
+        offset: 0,
         pattern: String::from(pattern),
         regex: false,
         scope: SearchScope::All,
     }
+}
+
+/// A single body document with `count` lines that each match `needle`.
+fn corpus_with_needles(count: usize) -> String {
+    let mut doc = String::from("# Title\n\n");
+    for i in 1..=count {
+        let _ = writeln!(doc, "needle line {i}");
+    }
+    doc
 }
 
 /// Create a minimal remargin comment block.
@@ -66,7 +78,9 @@ fn literal_match_in_body() {
         )
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("notification")).unwrap();
+    let results = search(&system, base, base, &literal_opts("notification"))
+        .unwrap()
+        .matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].line, 3);
     assert_eq!(results[0].location, MatchLocation::Body);
@@ -83,7 +97,9 @@ fn file_path_searches_that_file() {
         .with_file(file, b"# Title\n\nThe notification system works.\n")
         .unwrap();
 
-    let results = search(&system, base, file, &literal_opts("notification")).unwrap();
+    let results = search(&system, base, file, &literal_opts("notification"))
+        .unwrap()
+        .matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].line, 3);
     assert_eq!(results[0].path, Path::new("note.md"));
@@ -100,7 +116,9 @@ fn literal_match_in_comment() {
         .with_file(Path::new("/docs/test.md"), doc.as_bytes())
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("bd ready")).unwrap();
+    let results = search(&system, base, base, &literal_opts("bd ready"))
+        .unwrap()
+        .matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].location, MatchLocation::Comment);
     assert_eq!(results[0].comment_id.as_deref(), Some("abc"));
@@ -120,7 +138,7 @@ fn scope_body_only() {
     let mut opts = literal_opts("Notification");
     opts.scope = SearchScope::Body;
 
-    let results = search(&system, base, base, &opts).unwrap();
+    let results = search(&system, base, base, &opts).unwrap().matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].location, MatchLocation::Body);
 }
@@ -139,7 +157,7 @@ fn scope_comments_only() {
     let mut opts = literal_opts("Notification");
     opts.scope = SearchScope::Comments;
 
-    let results = search(&system, base, base, &opts).unwrap();
+    let results = search(&system, base, base, &opts).unwrap().matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].location, MatchLocation::Comment);
 }
@@ -157,12 +175,14 @@ fn regex_pattern() {
     let opts = SearchOptions {
         context_lines: 0,
         ignore_case: false,
+        limit: None,
+        offset: 0,
         pattern: String::from("bd (ready|list)"),
         regex: true,
         scope: SearchScope::All,
     };
 
-    let results = search(&system, base, base, &opts).unwrap();
+    let results = search(&system, base, base, &opts).unwrap().matches;
     assert_eq!(results.len(), 2);
 }
 
@@ -179,7 +199,7 @@ fn case_insensitive() {
     let mut opts = literal_opts("notification");
     opts.ignore_case = true;
 
-    let results = search(&system, base, base, &opts).unwrap();
+    let results = search(&system, base, base, &opts).unwrap().matches;
     assert_eq!(results.len(), 2);
 }
 
@@ -196,7 +216,7 @@ fn context_lines() {
     let mut opts = literal_opts("target");
     opts.context_lines = 1;
 
-    let results = search(&system, base, base, &opts).unwrap();
+    let results = search(&system, base, base, &opts).unwrap().matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].before, vec!["line 2"]);
     assert_eq!(results[0].after, vec!["line 4"]);
@@ -209,7 +229,9 @@ fn no_matches() {
         .with_file(Path::new("/docs/test.md"), b"# Hello\n\nWorld.\n")
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("nonexistent")).unwrap();
+    let results = search(&system, base, base, &literal_opts("nonexistent"))
+        .unwrap()
+        .matches;
     assert!(results.is_empty());
 }
 
@@ -222,7 +244,9 @@ fn non_markdown_skipped() {
         .with_file(Path::new("/docs/test.md"), b"notification in md\n")
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("notification")).unwrap();
+    let results = search(&system, base, base, &literal_opts("notification"))
+        .unwrap()
+        .matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].path.to_str().unwrap(), "test.md");
 }
@@ -245,7 +269,9 @@ fn multiple_files() {
         .with_file(Path::new("/docs/b.md"), b"hello there\n")
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("hello")).unwrap();
+    let results = search(&system, base, base, &literal_opts("hello"))
+        .unwrap()
+        .matches;
     assert_eq!(results.len(), 2);
 }
 
@@ -261,7 +287,9 @@ fn search_match_json_shape_matches_schema() {
         )
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("hello")).unwrap();
+    let results = search(&system, base, base, &literal_opts("hello"))
+        .unwrap()
+        .matches;
     assert!(!results.is_empty());
 
     // The body match has no comment_id; the comment match does.
@@ -315,7 +343,9 @@ fn multibyte_body_after_drifted_block_does_not_panic() {
         .with_file(Path::new("/docs/test.md"), doc.as_bytes())
         .unwrap();
 
-    let results = search(&system, base, base, &literal_opts("text")).unwrap();
+    let results = search(&system, base, base, &literal_opts("text"))
+        .unwrap()
+        .matches;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].location, MatchLocation::Body);
     assert_eq!(results[0].comment_id, None);
@@ -333,14 +363,16 @@ fn drifted_block_keeps_following_body_attribution() {
         .with_file(Path::new("/docs/test.md"), doc.as_bytes())
         .unwrap();
 
-    let all_scope = search(&system, base, base, &literal_opts("marker")).unwrap();
+    let all_scope = search(&system, base, base, &literal_opts("marker"))
+        .unwrap()
+        .matches;
     assert_eq!(all_scope.len(), 1);
     assert_eq!(all_scope[0].location, MatchLocation::Body);
     assert_eq!(all_scope[0].comment_id, None);
 
     let mut opts = literal_opts("marker");
     opts.scope = SearchScope::Body;
-    let body_scope = search(&system, base, base, &opts).unwrap();
+    let body_scope = search(&system, base, base, &opts).unwrap().matches;
     assert_eq!(
         body_scope.len(),
         1,
@@ -377,4 +409,93 @@ fn attribution_matches_stored_block_spans() {
         };
         assert!(ok, "line {idx}: expected {expected:?}, got {attr:?}");
     }
+}
+
+#[test]
+fn limit_and_offset_return_bounded_window_with_true_total() {
+    // Spec example: 320 matches, offset 50 limit 50 -> 50 matches, total 320.
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/big.md"),
+            corpus_with_needles(320).as_bytes(),
+        )
+        .unwrap();
+
+    let opts = literal_opts("needle").offset(50).limit(Some(50));
+    let results = search(&system, base, base, &opts).unwrap();
+
+    assert_eq!(results.total, 320);
+    assert_eq!(results.matches.len(), 50);
+    // Window starts at the 51st match (offset 50) and spans 50 matches.
+    assert_eq!(results.matches[0].text, "needle line 51");
+    assert_eq!(results.matches[49].text, "needle line 100");
+}
+
+#[test]
+fn offset_past_end_yields_empty_matches_with_true_total() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/big.md"),
+            corpus_with_needles(320).as_bytes(),
+        )
+        .unwrap();
+
+    let opts = literal_opts("needle").offset(400).limit(Some(50));
+    let results = search(&system, base, base, &opts).unwrap();
+
+    assert!(results.matches.is_empty());
+    assert_eq!(results.total, 320);
+}
+
+#[test]
+fn no_limit_returns_all_matches_and_total_equals_len() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/big.md"),
+            corpus_with_needles(320).as_bytes(),
+        )
+        .unwrap();
+
+    let results = search(&system, base, base, &literal_opts("needle")).unwrap();
+
+    assert_eq!(results.total, 320);
+    assert_eq!(results.matches.len(), results.total);
+}
+
+#[test]
+fn limit_larger_than_total_returns_all_matches() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/big.md"),
+            corpus_with_needles(320).as_bytes(),
+        )
+        .unwrap();
+
+    let opts = literal_opts("needle").limit(Some(1000));
+    let results = search(&system, base, base, &opts).unwrap();
+
+    assert_eq!(results.matches.len(), 320);
+    assert_eq!(results.total, 320);
+}
+
+#[test]
+fn offset_without_limit_returns_tail() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/docs/big.md"),
+            corpus_with_needles(320).as_bytes(),
+        )
+        .unwrap();
+
+    let opts = literal_opts("needle").offset(300);
+    let results = search(&system, base, base, &opts).unwrap();
+
+    assert_eq!(results.matches.len(), 20);
+    assert_eq!(results.total, 320);
+    assert_eq!(results.matches[0].text, "needle line 301");
 }

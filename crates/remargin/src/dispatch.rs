@@ -1443,6 +1443,8 @@ fn handle_search(
         scope,
         context,
         ignore_case,
+        limit,
+        offset,
         output_args,
     } = command
     else {
@@ -1452,6 +1454,8 @@ fn handle_search(
         context: *context,
         ignore_case: *ignore_case,
         json_mode: output_args.json,
+        limit: *limit,
+        offset: *offset,
         path: path.as_str(),
         pattern: pattern.as_str(),
         regex: *regex,

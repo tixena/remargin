@@ -888,7 +888,9 @@ fn desc_search() -> ToolDesc {
                 "regex": { "type": "boolean", "description": "Treat pattern as a regex", "default": false },
                 "scope": { "type": "string", "description": "Search scope: all, body, or comments", "default": "all" },
                 "context": { "type": "integer", "description": "Lines of context around matches", "default": 0 },
-                "ignore_case": { "type": "boolean", "description": "Case-insensitive matching", "default": false }
+                "ignore_case": { "type": "boolean", "description": "Case-insensitive matching", "default": false },
+                "limit": { "type": "integer", "minimum": 1, "description": "Page size: return at most this many matches. Omit for all matches. The response always carries the exact total, so a bounded page is never a silent truncation." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Number of matches to skip before the returned page", "default": 0 }
             },
             "required": ["pattern"]
         }),
@@ -2640,6 +2642,8 @@ fn handle_search(
     let regex = optional_bool(params, "regex");
     let ignore_case = optional_bool(params, "ignore_case");
     let context = optional_usize(params, "context").unwrap_or(0);
+    let limit = optional_usize(params, "limit");
+    let offset = optional_usize(params, "offset").unwrap_or(0);
 
     let scope = match optional_str(params, "scope").unwrap_or("all") {
         "body" => search::SearchScope::Body,
@@ -2650,17 +2654,20 @@ fn handle_search(
     let options = search::SearchOptions::new(String::from(pattern))
         .context_lines(context)
         .ignore_case(ignore_case)
+        .limit(limit)
+        .offset(offset)
         .regex(regex)
         .scope(scope);
 
     let results = search::search(system, base_dir, &target, &options)?;
 
     let matches = results
+        .matches
         .iter()
         .map(|m| serde_json::to_value(search::SearchHit::from_match(m)))
         .collect::<Result<Vec<Value>, _>>()?;
 
-    Ok(json!({ "matches": matches }))
+    Ok(json!({ "matches": matches, "total": results.total }))
 }
 
 /// Handle the `replace` tool: body-only find/replace over a file or

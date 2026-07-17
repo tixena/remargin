@@ -775,6 +775,12 @@ pub enum Commands {
         /// Case-insensitive matching.
         #[arg(long, short = 'i')]
         ignore_case: bool,
+        /// Page size: return at most this many matches. Omit for all.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Number of matches to skip before the returned page.
+        #[arg(long, default_value = "0")]
+        offset: usize,
         #[command(flatten)]
         output_args: OutputArgs,
     },

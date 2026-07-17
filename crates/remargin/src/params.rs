@@ -120,6 +120,8 @@ pub struct SearchParams<'cmd> {
     pub context: usize,
     pub ignore_case: bool,
     pub json_mode: bool,
+    pub limit: Option<usize>,
+    pub offset: usize,
     pub path: &'cmd str,
     pub pattern: &'cmd str,
     pub regex: bool,
