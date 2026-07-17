@@ -298,6 +298,75 @@ fn glob_against_restricted_realm_denies() {
     );
 }
 
+/// Ancestor gap, end-to-end: a `Bash rm` of the realm root (a strict
+/// ancestor of the trusted root `secret`) denies through the wired binary.
+#[test]
+fn bash_rm_realm_root_ancestor_denies() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let command = format!("rm -rf {}", realm.path().display());
+    let stdin = envelope("Bash", realm.path(), &json!({ "command": command }));
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let payload: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+}
+
+/// Ancestor gap, end-to-end: an `ls` of the same realm root reads the
+/// ancestor and stays allowed — exit 0 with empty stdout.
+#[test]
+fn bash_ls_realm_root_ancestor_silent_allows() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let command = format!("ls {}", realm.path().display());
+    let stdin = envelope("Bash", realm.path(), &json!({ "command": command }));
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    assert!(
+        out.stdout.is_empty(),
+        "expected silent allow for a read of the ancestor realm root"
+    );
+}
+
+/// Ancestor gap, end-to-end: a `Grep` whose search root is the realm root
+/// sweeps the protected subtree and denies through the wired binary.
+#[test]
+fn grep_realm_root_ancestor_denies() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "secret", &user_settings);
+
+    let stdin = envelope(
+        "Grep",
+        realm.path(),
+        &json!({ "pattern": "foo", "path": realm.path().to_string_lossy() }),
+    );
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let payload: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+    let reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap();
+    assert!(reason.contains("mcp__remargin__search"));
+}
+
 fn run_pretool_args(args: &[&str], cwd: &Path, home: &Path) -> Output {
     Command::cargo_bin("remargin")
         .unwrap()

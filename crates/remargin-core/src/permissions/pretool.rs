@@ -28,6 +28,18 @@ use crate::config::permissions::resolve::{
 };
 use crate::permissions::op_guard::dot_folder_reallowed;
 
+/// Verbs from the [`verb_guidance`] vocabulary whose effect on a path *at or
+/// above* a trusted root destroys or relocates the protected subtree: `rm`
+/// (recursive removal), `mv` (relocation / rename, or an overwrite when the
+/// ancestor is the destination), `dd` and `tee` (raw / truncating writes).
+/// Every other verb in that vocabulary only reads (`cat`, `less`, `head`,
+/// `tail`, `grep`, `find`, `ls`, and `cp` reading from the ancestor) or edits
+/// a single named file (`sed`, `awk`, `vim`, ...) -- none can recurse through
+/// the ancestor into the subtree, so a benign `ls /realm` or `cat /realm/x`
+/// stays allowed. Shell redirect writes (`>`, `>>`) are the non-verb member
+/// of this destructive set and are detected separately.
+const ANCESTOR_DESTRUCTIVE_VERBS: &[&str] = &["dd", "mv", "rm", "tee"];
+
 const WRAPPER_PREFIXES: &[WrapperPrefix] = &[WrapperPrefix {
     has_proxy_subcommand: true,
     name: "rtk",
@@ -91,6 +103,13 @@ pub enum PretoolOutcome {
     SilentAllow,
 }
 
+/// A trusted root that a candidate path sits at or above -- the payload of
+/// the ancestor-gap match.
+struct AncestorMatch {
+    realm_root: PathBuf,
+    trusted_root: PathBuf,
+}
+
 /// Per-tool extracted shape that drives the decision.
 enum ToolTarget {
     /// `Bash` command — every path-shaped word is resolved against the
@@ -131,10 +150,24 @@ pub fn pretool(system: &dyn System, stdin_bytes: &[u8]) -> PretoolOutcome {
                 }
             };
             if path_is_restricted(&resolved, &canonical) {
-                PretoolOutcome::Deny(build_decision(&tool_name, &canonical))
-            } else {
-                PretoolOutcome::SilentAllow
+                return PretoolOutcome::Deny(build_decision(&tool_name, &canonical));
             }
+            // Grep / Glob search a subtree recursively, so a search root at or
+            // above a trusted root sweeps the protected subtree even though the
+            // root itself is not at/below a trusted root. Read / Write / Edit
+            // touch only the named path, never its subtree, so they are exempt.
+            if is_search_tool(&tool_name) {
+                match matching_trusted_root_ancestor(system, &canonical) {
+                    Ok(Some(_)) => {
+                        return PretoolOutcome::Deny(build_decision(&tool_name, &canonical));
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        return PretoolOutcome::Fail(format!("permissions resolve failed: {err}"));
+                    }
+                }
+            }
+            PretoolOutcome::SilentAllow
         }
         ToolTarget::BashCommand { command } => {
             // cli_allowed is a folder policy keyed off the session cwd;
@@ -183,6 +216,12 @@ fn extract_target(event: &PreToolUseEvent) -> Result<ToolTarget, String> {
         }),
         _ => Ok(ToolTarget::NoCheck),
     }
+}
+
+/// `Grep` and `Glob` walk their `path` root recursively; every other gated
+/// Path tool touches only the exact path named.
+fn is_search_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "Glob" | "Grep")
 }
 
 fn required_path(input: &Value, key: &str, tool: &str) -> Result<PathBuf, String> {
@@ -301,6 +340,62 @@ fn realm_root_for(resolved: &ResolvedPermissions, candidate: &Path) -> PathBuf {
     )
 }
 
+/// `Some` when `candidate` is an ancestor of (or equal to) a trusted root
+/// declared by the realm resolved *from the candidate itself*.
+/// [`resolve_for_target`] deliberately walks up from the candidate's parent,
+/// so a candidate that is a realm root never observes its own
+/// `.remargin.yaml`; resolving from the candidate directly is the only way to
+/// see a trusted root nested beneath it. `path_is_restricted` (the normal,
+/// verb-independent check) already covers every candidate at or below a
+/// trusted root, so this is consulted only for the complementary ancestor
+/// case.
+///
+/// Documented blind spot, out of scope: a candidate ABOVE the realm root
+/// (`rm -rf ~/src` wiping a realm at `~/src/vault`) is undetectable -- the
+/// upward walk from the candidate never reaches the realm's `.remargin.yaml`,
+/// which lives below it. Only candidates at or below the realm root are
+/// covered -- the same reach the retired projected deny rules had.
+fn matching_trusted_root_ancestor(
+    system: &dyn System,
+    candidate: &Path,
+) -> Result<Option<AncestorMatch>> {
+    let resolved = resolve_permissions(system, candidate)?;
+    Ok(resolved.trusted_roots.iter().find_map(|entry| {
+        let anchor = trusted_root_anchor(entry);
+        word_covers_root(candidate, anchor).then(|| AncestorMatch {
+            realm_root: entry
+                .source_file
+                .parent()
+                .unwrap_or(&entry.source_file)
+                .to_path_buf(),
+            trusted_root: anchor.to_path_buf(),
+        })
+    }))
+}
+
+/// `true` when `word`'s components are a prefix (equal length or shorter) of
+/// the trusted-root `anchor`'s components -- `word` is an ancestor of, or
+/// equal to, `anchor`. The mirror of [`root_covers_word`], which asks the
+/// opposite (the anchor is a prefix of the word). Component comparison is the
+/// same glob-aware match, so a word whose glob metacharacters sit *below* the
+/// realm root (`/r/a*` onto a deeper root `/r/a/secret`) is caught without
+/// touching disk. A glob at the realm-root level (`/r*`) is not: resolving the
+/// governing realm walks literal parent components, so `/r*` never reaches
+/// `/r/.remargin.yaml`. Literal ancestor matching is the guaranteed scope.
+fn word_covers_root(word: &Path, anchor: &Path) -> bool {
+    let word_components: Vec<&OsStr> = word.components().map(Component::as_os_str).collect();
+    let anchor_components: Vec<&OsStr> = anchor.components().map(Component::as_os_str).collect();
+    if word_components.len() > anchor_components.len() {
+        return false;
+    }
+    word_components
+        .iter()
+        .zip(&anchor_components)
+        .all(|(word_component, anchor_component)| {
+            component_matches(word_component, anchor_component)
+        })
+}
+
 /// Parse `command` into simple commands, resolve every path-shaped word
 /// against the realm that governs it, and deny the first one that lands
 /// inside a protected realm — regardless of verb. The verb is no longer
@@ -352,7 +447,17 @@ fn evaluate_simple_command(
         return None;
     }
 
+    let destructive_verb = verb.is_some_and(is_ancestor_destructive_verb);
+    // A redirect operator (`>`, `>>`, `2>`) makes the following word a write
+    // target; carried across tokens so `> /r` and glued `>/r` both register.
+    let mut redirect_pending = false;
     for (idx, token) in tokens.iter().enumerate() {
+        let redirect_target = redirect_pending || token_has_glued_redirect(token);
+        let token_is_operator = is_redirect_operator(token);
+        redirect_pending = token_is_operator;
+        if token_is_operator {
+            continue;
+        }
         let is_argument = verb_idx.is_some_and(|boundary| idx > boundary);
         for run in path_runs(token) {
             let is_candidate = has_path_evidence(run) || (is_argument && *cd_active);
@@ -377,6 +482,27 @@ fn evaluate_simple_command(
                     tokens,
                     verb_idx,
                 )));
+            }
+            // Ancestor gap: the word is not itself at/below a trusted root, but
+            // a destructive verb or a redirect write on a word at or above one
+            // would reach into the protected subtree. Reads (`cat`, `ls`) of an
+            // ancestor stay allowed -- only the destructive set gates here.
+            if destructive_verb || redirect_target {
+                match matching_trusted_root_ancestor(system, &candidate) {
+                    Ok(Some(found)) => {
+                        return Some(PretoolOutcome::Deny(build_ancestor_destructive_decision(
+                            &candidate.display().to_string(),
+                            &found.trusted_root,
+                            &found.realm_root,
+                        )));
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        return Some(PretoolOutcome::Fail(format!(
+                            "permissions resolve failed: {err}"
+                        )));
+                    }
+                }
             }
         }
     }
@@ -555,6 +681,38 @@ fn is_env_assignment(token: &str) -> bool {
 /// Glob metacharacters (`*`, `?`, `[`, `]`) are kept in the run.
 fn path_runs(token: &str) -> impl Iterator<Item = &str> {
     token.split(is_run_break).filter(|run| !run.is_empty())
+}
+
+/// Byte length of a leading shell redirection operator on `token`: optional
+/// file-descriptor digits or `&`, then `>` or `>>`. `>`, `>>`, `2>`, `1>>`,
+/// `&>` all match; a plain path never does. Input redirects (`<`) never write
+/// and so are not matched.
+fn redirect_operator_len(token: &str) -> Option<usize> {
+    let bytes = token.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() && (bytes[idx].is_ascii_digit() || bytes[idx] == b'&') {
+        idx += 1;
+    }
+    if bytes.get(idx) != Some(&b'>') {
+        return None;
+    }
+    idx += 1;
+    if bytes.get(idx) == Some(&b'>') {
+        idx += 1;
+    }
+    Some(idx)
+}
+
+/// The whole token is a redirect operator (`>`, `2>>`), so the next token is
+/// the write target.
+fn is_redirect_operator(token: &str) -> bool {
+    redirect_operator_len(token) == Some(token.len())
+}
+
+/// The token glues a redirect operator onto its target (`>/r`, `2>>/r`), so
+/// the token's own path runs are the write target.
+fn token_has_glued_redirect(token: &str) -> bool {
+    redirect_operator_len(token).is_some_and(|len| len < token.len())
 }
 
 const fn is_run_break(c: char) -> bool {
@@ -798,6 +956,10 @@ fn build_bash_decision(
     }
 }
 
+fn is_ancestor_destructive_verb(verb: &str) -> bool {
+    ANCESTOR_DESTRUCTIVE_VERBS.contains(&verb)
+}
+
 /// Per-verb redirect, with the blocked command's own arguments carried into
 /// the exact replacement op so the next call is a copy-paste. `None` means
 /// the verb has no remargin equivalent — the caller emits the realm-scoped
@@ -875,6 +1037,34 @@ fn no_equivalent_message(matched_path: &str, realm_root: &Path) -> String {
          rooted at {realm}. This kind of work does not belong inside the realm -- it belongs \
          outside {realm}, and there is no remargin operation that performs it."
     )
+}
+
+/// Deny message for a destructive command (or redirect write) whose target
+/// sits at or above a trusted root. Names the target, the managed subtree it
+/// would reach, and the realm -- then rules the work out rather than offering
+/// a bogus single-file redirect, since no remargin op deletes a realm root or
+/// its subtree wholesale.
+fn build_ancestor_destructive_decision(
+    target: &str,
+    trusted_root: &Path,
+    realm_root: &Path,
+) -> Decision {
+    let root = trusted_root.display();
+    let realm = realm_root.display();
+    let reason = format!(
+        "This shell command targets {target}, which sits at or above the remargin-managed subtree \
+         rooted at {root} inside the realm at {realm}. A destructive operation on {target} would \
+         reach into and damage that managed subtree, and no remargin operation deletes the realm \
+         wholesale. Operate on specific managed paths with the mcp__remargin__* tools, or do this \
+         work outside {realm}."
+    );
+    Decision {
+        hook_specific_output: DecisionInner {
+            hook_event_name: "PreToolUse",
+            permission_decision: PermissionDecision::Deny,
+            permission_decision_reason: reason,
+        },
+    }
 }
 
 /// Arguments of a simple command that are not option flags — the words after

@@ -200,15 +200,16 @@ fn bash_per_realm_extra_verb_triggers_check() {
 }
 
 /// Test 11: `Glob` with only a `pattern` (no `path`) resolves the search
-/// root to the event cwd. Here cwd `/r` sits above the trusted root
-/// `/r/secret`, so the resolved root is unrestricted → `SilentAllow`. The
-/// missing optional `path` must not fail-closed.
+/// root to the event cwd `/r`, a strict ancestor of the trusted root
+/// `/r/secret`. A recursive glob from `/r` sweeps the protected subtree, so
+/// it denies with the `ls` redirect. The missing optional `path` still must
+/// not fail-closed — it produces a decision, not a `Fail`.
 #[test]
-fn glob_no_path_resolves_cwd_outside_root_silent_allows() {
+fn glob_no_path_resolves_cwd_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json("Glob", "/r", &json!({ "pattern": "**/*.md" }));
-    let outcome = pretool(&system, &stdin);
-    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(deny_reason(&decision).contains("mcp__remargin__ls"));
 }
 
 /// Test 12: unknown `tool_name` → `SilentAllow`.
@@ -267,14 +268,15 @@ fn glob_on_restricted_path_denies() {
 }
 
 /// Widened 4: `Grep` with no `path` resolves the search root to the event
-/// cwd. cwd `/r` sits above the trusted root, so the resolved root is
-/// unrestricted → `SilentAllow`; the missing optional field never fails.
+/// cwd `/r`, a strict ancestor of the trusted root. A recursive grep from
+/// `/r` sweeps the protected subtree, so it denies with the `search`
+/// redirect; the missing optional field yields a decision, never a `Fail`.
 #[test]
-fn grep_no_path_resolves_cwd_outside_root_silent_allows() {
+fn grep_no_path_resolves_cwd_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json("Grep", "/r", &json!({ "pattern": "foo" }));
-    let outcome = pretool(&system, &stdin);
-    assert_eq!(outcome, PretoolOutcome::SilentAllow);
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(deny_reason(&decision).contains("mcp__remargin__search"));
 }
 
 /// Widened 4b: `Grep` with no `path` under a wildcard realm resolves the
@@ -1588,4 +1590,233 @@ fn normal_realm_resolvable_path_unchanged() {
 
     let allowed = event_json("Read", "/r", &json!({ "file_path": "/r/public/a.md" }));
     assert_eq!(pretool(&system, &allowed), PretoolOutcome::SilentAllow);
+}
+
+// ---------------------------------------------------------------------
+// Ancestor gap: a candidate that is a strict ANCESTOR of a trusted root
+// (the realm at `/r`, trusted root `/r/secret`, target `/r`) is not
+// at/below the root, so `path_is_restricted` alone leaves it allowed.
+// The Bash branch denies it for the destructive verb set only (reads of
+// an ancestor stay allowed); the Grep/Glob branch denies it because a
+// recursive search from the ancestor sweeps the protected subtree.
+// ---------------------------------------------------------------------
+
+/// `rm /r` targets a strict ancestor of `/r/secret`; a destructive verb on
+/// the ancestor reaches the subtree → `Deny`.
+#[test]
+fn bash_rm_ancestor_of_root_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// `rm -rf /r` — the recursive-force flags do not change the analysis; the
+/// ancestor word still denies.
+#[test]
+fn bash_rm_rf_ancestor_of_root_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm -rf /r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// `ls /r` reads the ancestor directory; reads are not destructive, so the
+/// ancestor stays allowed → `SilentAllow`.
+#[test]
+fn bash_ls_ancestor_of_root_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "ls /r" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// `cat /r` reads the ancestor; a non-destructive verb never denies an
+/// ancestor → `SilentAllow`.
+#[test]
+fn bash_cat_ancestor_of_root_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "cat /r" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// `rm /r/other` targets a sibling of the trusted root, not an ancestor of
+/// it, so removing it cannot reach `/r/secret` → `SilentAllow`.
+#[test]
+fn bash_rm_sibling_of_root_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/other" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// `mv /r /tmp/x` — the ancestor is the move source; relocating it moves the
+/// protected subtree → `Deny`.
+#[test]
+fn bash_mv_ancestor_source_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "mv /r /tmp/x" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// `mv /tmp/x /r` — the ancestor is the move destination; every path word is
+/// checked, so the ancestor destination denies → `Deny`.
+#[test]
+fn bash_mv_ancestor_destination_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "mv /tmp/x /r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// A redirect write (`>`) to the ancestor is the non-verb member of the
+/// destructive set → `Deny`, even though the verb (`echo`) reads nothing.
+#[test]
+fn bash_redirect_write_to_ancestor_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "echo x > /r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// A glued redirect (`>>/r`) is detected the same way → `Deny`.
+#[test]
+fn bash_glued_append_redirect_to_ancestor_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "echo x >>/r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// Reading the ancestor and redirecting the output OUTSIDE the realm writes
+/// nothing into the realm → `SilentAllow`; the redirect target `/tmp/x` is
+/// unmanaged and `/r` is only read.
+#[test]
+fn bash_read_ancestor_redirect_outside_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "cat /r > /tmp/x" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// The ancestor deny message names the target, the managed subtree, and the
+/// realm, and rules the work out -- it never offers a bogus single-file
+/// `mcp__remargin__rm path=/r` redirect for a directory that is not a
+/// managed file.
+#[test]
+fn bash_ancestor_deny_message_names_realm_no_false_redirect() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    let reason = deny_reason(&decision);
+    assert!(reason.contains("/r"), "reason: {reason}");
+    assert!(reason.contains("managed subtree"), "reason: {reason}");
+    assert!(reason.contains("outside"), "reason: {reason}");
+    assert!(
+        !reason.contains("mcp__remargin__rm path="),
+        "reason offers a false single-file redirect: {reason}",
+    );
+}
+
+/// A glob-carrying ancestor word whose metacharacter sits below the realm
+/// root (`/r/a*`, realm `/r`, trusted root `/r/a/secret`) still resolves the
+/// realm and is matched glob-aware → `Deny`. A glob at the realm-root level
+/// (`/r*`) is out of scope — resolving the realm walks literal components.
+#[test]
+fn bash_glob_below_root_ancestor_word_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("a/secret"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm -rf /r/a*" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// `Grep path=/r` — a search root that is a strict ancestor of the trusted
+/// root sweeps the subtree → `Deny` with the `search` redirect.
+#[test]
+fn grep_ancestor_path_denies_with_search() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Grep", "/r", &json!({ "pattern": "foo", "path": "/r" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(deny_reason(&decision).contains("mcp__remargin__search"));
+}
+
+/// `Glob path=/r` — same ancestor search root → `Deny` with the `ls`
+/// redirect.
+#[test]
+fn glob_ancestor_path_denies_with_ls() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Glob", "/r", &json!({ "pattern": "**/*.md", "path": "/r" }));
+    let decision = expect_deny(pretool(&system, &stdin));
+    assert!(deny_reason(&decision).contains("mcp__remargin__ls"));
+}
+
+/// `Grep path=/r/other` — a sibling of the trusted root, not an ancestor, so
+/// the recursive search cannot reach `/r/secret` → `SilentAllow`.
+#[test]
+fn grep_sibling_path_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json(
+        "Grep",
+        "/r",
+        &json!({ "pattern": "foo", "path": "/r/other" }),
+    );
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// `Read file_path=/r/file.md` — an unprotected file directly under the
+/// ancestor realm root. `Read` touches only the named path, never a subtree,
+/// so the ancestor rule does not apply → `SilentAllow`, unchanged.
+#[test]
+fn read_ancestor_realm_file_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Read", "/r", &json!({ "file_path": "/r/file.md" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+// ---------------------------------------------------------------------
+// Wildcard-root realm sanity. Under a `*` realm the trusted root IS the
+// realm root, so nothing at/below it changes (every managed subpath still
+// denies verb-independently). The realm root itself has no strict ancestor
+// inside the realm, but destroying it destroys the whole realm -- so a
+// destructive verb on the wildcard realm root denies for the same reason
+// (and by the same at-or-above match) as an absolute realm's root, while a
+// read of it stays allowed. Pins the decision Eduardo left open.
+// ---------------------------------------------------------------------
+
+/// `rm /r` under a wildcard realm rooted at `/r` destroys the entire realm →
+/// `Deny`, consistent with the absolute-root case.
+#[test]
+fn bash_rm_wildcard_realm_root_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// `ls /r` under a wildcard realm rooted at `/r` only reads the realm root →
+/// `SilentAllow`; reads of the root are never destructive.
+#[test]
+fn bash_ls_wildcard_realm_root_silent_allows() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "ls /r" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
+}
+
+/// `Grep path=/r` under a wildcard realm rooted at `/r` recursively sweeps
+/// the whole realm → `Deny`.
+#[test]
+fn grep_wildcard_realm_root_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Grep", "/r", &json!({ "pattern": "foo", "path": "/r" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// `rm /r/x.md` under a wildcard realm still denies through the normal,
+/// verb-independent at/below path -- the ancestor work does not disturb it.
+#[test]
+fn bash_rm_wildcard_subpath_still_denies() {
+    let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
+    let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/x.md" }));
+    assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
+}
+
+/// The documented blind spot: a candidate ABOVE the realm root cannot be
+/// detected by the upward walk (the realm's `.remargin.yaml` lives below the
+/// candidate), so `rm /parent` where the realm is at `/parent/realm` stays a
+/// `SilentAllow`. Pins the limitation so a future reader sees it is by design.
+#[test]
+fn bash_rm_above_realm_root_undetected_silent_allows() {
+    let system = mock_with(&[("/parent/realm/.remargin.yaml", &restrict_yaml("secret"))]);
+    let stdin = event_json("Bash", "/x", &json!({ "command": "rm -rf /parent" }));
+    assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
