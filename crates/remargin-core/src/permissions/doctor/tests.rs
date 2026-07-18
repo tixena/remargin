@@ -848,3 +848,160 @@ fn identity_findings_render_and_serialize() {
         "prompt names each remedy: {prompt}",
     );
 }
+
+// --- ConfigSchemaLint (permissions-schema drift across the realm tree)
+//     unit tests ---
+
+fn schema_lint_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
+    report
+        .findings
+        .iter()
+        .filter(|f| f.kind == FindingKind::ConfigSchemaLint)
+        .collect()
+}
+
+/// Scenario 1: a `.remargin.yaml` with a YAML syntax error in the parent
+/// walk yields one `ConfigSchemaLint` (Warning) naming the file, with a
+/// remedy pointing at the schema in that file.
+#[test]
+fn schema_lint_flags_yaml_syntax_error() {
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", "permissions:\n  deny_ops: [oops\n"),
+    ]);
+    let report = run_at_r(&system);
+    let lints = schema_lint_findings(&report);
+    assert_eq!(lints.len(), 1, "expected one schema lint: {report:#?}");
+    let finding = lints[0];
+    assert_eq!(finding.severity, Severity::Warning);
+    assert!(
+        finding.message.contains("/r/.remargin.yaml"),
+        "message names the file: {}",
+        finding.message,
+    );
+    assert!(
+        finding.remedy.contains("Fix the permissions schema")
+            && finding.remedy.contains("/r/.remargin.yaml"),
+        "remedy names the fix and file: {}",
+        finding.remedy,
+    );
+}
+
+/// Scenario 2: an unknown key under `permissions:` (serde rejects unknown
+/// fields) yields one `ConfigSchemaLint` carrying the parser diagnostic
+/// with the offending field name.
+#[test]
+fn schema_lint_flags_unknown_permissions_key() {
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", "permissions:\n  deny_op: []\n"),
+    ]);
+    let report = run_at_r(&system);
+    let lints = schema_lint_findings(&report);
+    assert_eq!(lints.len(), 1, "expected one schema lint: {report:#?}");
+    assert!(
+        lints[0].message.contains("unknown field") && lints[0].message.contains("deny_op"),
+        "message carries the parser diagnostic: {}",
+        lints[0].message,
+    );
+}
+
+/// Scenario 3: a `deny_ops` entry carrying the legacy `to:` field yields a
+/// `ConfigSchemaLint` with the migration hint. The same input also fails
+/// serde (the entry rejects the unknown `to:`), so a second parse-error
+/// schema lint accompanies it — the migration hint is asserted by
+/// presence, matching the standalone lint's behavior.
+#[test]
+fn schema_lint_flags_legacy_to_field() {
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        (
+            "/r/.remargin.yaml",
+            "permissions:\n  deny_ops:\n    - path: .\n      ops: [purge]\n      to: [eduardo-burgos]\n",
+        ),
+    ]);
+    let report = run_at_r(&system);
+    let lints = schema_lint_findings(&report);
+    assert!(
+        lints
+            .iter()
+            .any(|f| f.message.contains("legacy `to:`") && f.message.contains("exceptions")),
+        "expected the migration-recipe schema lint: {report:#?}",
+    );
+}
+
+/// Scenario 4: an out-of-realm `trusted_roots` entry is reported once — by
+/// the dedicated `TrustedRootEscape` check — and NOT duplicated as a
+/// `ConfigSchemaLint`, since both consult the same escape detector.
+#[test]
+fn schema_lint_does_not_duplicate_trusted_root_escape() {
+    let yaml = "permissions:\n  trusted_roots:\n    - path: /other/secret\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+    ]);
+    let report = run_at_r(&system);
+    assert_eq!(
+        findings_of_kind(&report, &FindingKind::TrustedRootEscape).len(),
+        1,
+        "exactly one escape finding: {report:#?}",
+    );
+    assert!(
+        schema_lint_findings(&report).is_empty(),
+        "escape must not be duplicated as a schema lint: {report:#?}",
+    );
+}
+
+/// Scenario 5: a clean realm tree with valid configs produces zero
+/// `ConfigSchemaLint` findings.
+#[test]
+fn schema_lint_clean_tree_has_no_findings() {
+    let yaml = "permissions:\n  deny_ops:\n    - path: src/secret\n      ops: [purge, delete]\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+    ]);
+    let report = run_at_r(&system);
+    assert!(
+        schema_lint_findings(&report).is_empty(),
+        "valid config yields no schema lint: {report:#?}",
+    );
+}
+
+/// The new kind serializes to its `snake_case` wire name, round-trips
+/// through JSON, renders as WARNING in text, and contributes one
+/// prompt-mode instruction.
+#[test]
+fn config_schema_lint_serializes_and_renders() {
+    let report = DoctorReport {
+        findings: vec![DoctorFinding {
+            kind: FindingKind::ConfigSchemaLint,
+            message: String::from("/r/.remargin.yaml (line 2, col 3): unknown field `deny_op`"),
+            remedy: String::from("Fix the permissions schema in /r/.remargin.yaml."),
+            severity: Severity::Warning,
+        }],
+        hook_installed: true,
+        session_guard_installed: true,
+        project_settings_file: PathBuf::from("/r/.claude/settings.json"),
+        user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
+    };
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(
+        json.contains("config_schema_lint"),
+        "wire name present: {json}",
+    );
+    let parsed: DoctorReport = serde_json::from_str(&json).unwrap();
+    assert_eq!(report, parsed);
+
+    let text = render_doctor_text(&report, false);
+    assert!(
+        text.contains("[WARNING]") && text.contains("unknown field"),
+        "text renders the schema lint as WARNING: {text}",
+    );
+
+    let prompt = render_doctor_prompt(&report);
+    assert!(
+        prompt.contains("Fix the permissions schema"),
+        "prompt names the remedy: {prompt}",
+    );
+}

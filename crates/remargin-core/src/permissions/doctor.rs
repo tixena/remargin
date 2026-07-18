@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::identity::IdentityFlags;
 use crate::config::permissions::resolve::{
-    TrustedRootEscape, find_trusted_root_escapes, resolve_permissions,
+    PermissionsLintError, TrustedRootEscape, find_trusted_root_escapes,
+    lint_permissions_in_parents, resolve_permissions,
 };
 use crate::config::{Mode, ResolvedConfig};
 use crate::parser::AuthorType;
@@ -49,6 +50,14 @@ pub enum FindingKind {
     /// primary SSH directory (`~/.ssh`) — the agent can read and sign
     /// with the human's keys, a privilege-boundary violation.
     AgentKeyUnderUserSsh,
+    /// A `.remargin.yaml` in the realm's parent walk fails the
+    /// permissions schema: a YAML syntax error, an unknown key under
+    /// `permissions:`, an unknown op name, or the retired legacy `to:`
+    /// field on a `deny_ops` entry. Names the file, the parser location
+    /// when one was surfaced, and the raw diagnostic. `trusted_roots`
+    /// escapes are excluded — they carry their own
+    /// [`FindingKind::TrustedRootEscape`].
+    ConfigSchemaLint,
     /// The `PreToolUse` hook (`remargin claude pretool`) is absent from
     /// both user-scope and project-scope settings files. No CLI or
     /// native-tool enforcement is active for any managed path in the
@@ -228,7 +237,22 @@ pub fn run_doctor(
     let has_escape = !escapes.is_empty();
     findings.extend(escapes.iter().map(trusted_root_escape_finding));
 
-    if !has_escape {
+    // Schema lint reads configs via `lint_permissions_in_parents`, which
+    // never resolves or bails, so it is safe on a malformed config — and it
+    // must run before the resolve-dependent checks so a parse/schema fault
+    // is named here rather than swallowed by their fail-closed `?`. Escapes
+    // are filtered out (they own `TrustedRootEscape` above), so a non-empty
+    // result means a fault that also makes `resolve_permissions` bail.
+    let schema_lints = config_schema_lint_findings(system, cwd)?;
+    let config_resolves = schema_lints.is_empty();
+    findings.extend(schema_lints);
+
+    // Leftover and identity both walk `resolve_permissions` /
+    // `ResolvedConfig::resolve`, which fail closed on an out-of-realm root
+    // and bail on any parse/schema fault. Run them only when the config is
+    // clean on both counts, so doctor names the misconfig above instead of
+    // crashing on the very error it exists to explain.
+    if !has_escape && config_resolves {
         // Drift lives where the retired projection wrote: restrict emitted
         // rules into settings.local.json, so that file is scanned alongside
         // the hook-scope files.
@@ -242,10 +266,6 @@ pub fn run_doctor(
             cwd,
             &settings_files,
         )?);
-        // Same guard as the leftover check: resolving the realm's identity
-        // walks `resolve_trusted_roots_for_cwd`, which fails closed on an
-        // out-of-realm anchor. Running only when there is no escape keeps
-        // doctor from crashing on the error the escape finding already names.
         findings.extend(identity_key_findings(system, cwd)?);
     }
 
@@ -336,6 +356,45 @@ fn trusted_root_escape_finding(escape: &TrustedRootEscape) -> DoctorFinding {
         ),
         severity: Severity::Warning,
     }
+}
+
+/// One [`FindingKind::ConfigSchemaLint`] per permissions-schema fault in
+/// the realm's parent walk, reusing [`lint_permissions_in_parents`]
+/// verbatim so there is a single parse path. `trusted_roots` escapes are
+/// dropped here: [`find_trusted_root_escapes`] feeds the dedicated
+/// [`FindingKind::TrustedRootEscape`] and the lint arm emits the same
+/// `escape.message()` string, so message-equality de-dup is exact — a
+/// realm with an out-of-realm root shows one escape finding, not two.
+fn config_schema_lint_findings(system: &dyn System, cwd: &Path) -> Result<Vec<DoctorFinding>> {
+    let escape_messages: HashSet<String> = find_trusted_root_escapes(system, cwd)?
+        .iter()
+        .map(TrustedRootEscape::message)
+        .collect();
+    Ok(lint_permissions_in_parents(system, cwd)?
+        .into_iter()
+        .filter(|err| !escape_messages.contains(&err.message))
+        .map(|err| DoctorFinding {
+            kind: FindingKind::ConfigSchemaLint,
+            message: schema_lint_message(&err),
+            remedy: format!(
+                "Fix the permissions schema in {}.",
+                err.source_file.display()
+            ),
+            severity: Severity::Warning,
+        })
+        .collect())
+}
+
+/// The source file, the parser's location when it surfaced one, then the
+/// raw diagnostic.
+fn schema_lint_message(err: &PermissionsLintError) -> String {
+    let location = match (err.line, err.column) {
+        (Some(line), Some(col)) => format!(" (line {line}, col {col})"),
+        (Some(line), None) => format!(" (line {line})"),
+        (None, Some(col)) => format!(" (col {col})"),
+        (None, None) => String::new(),
+    };
+    format!("{}{location}: {}", err.source_file.display(), err.message)
 }
 
 fn leftover_finding(rule: &str, file: &Path, reason: &LeftoverReason) -> DoctorFinding {
