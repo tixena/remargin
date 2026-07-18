@@ -13,11 +13,23 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
+use serde_json::{Value, json};
 
 use tixschema::model_schema;
 
 use crate::document::allowlist;
 use crate::parser;
+
+/// Compact match-row column names for the base (no-context) arity.
+///
+/// Emitted once per response in the envelope's `match_cols` header;
+/// [`to_compact_row`] fills the positions in this order. `comment_id`
+/// is `null` for body matches.
+pub const MATCH_COLS: [&str; 4] = ["line", "location", "text", "comment_id"];
+
+/// [`MATCH_COLS`] widened with `before` / `after` (both string arrays),
+/// selected when context lines were requested.
+pub const MATCH_COLS_CTX: [&str; 6] = ["line", "location", "text", "comment_id", "before", "after"];
 
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]
@@ -43,6 +55,7 @@ pub enum MatchLocation {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
+#[model_schema]
 pub enum SearchHitLocation {
     Body,
     Comment,
@@ -51,22 +64,6 @@ pub enum SearchHitLocation {
 /// A compiled pattern matcher (wraps a `Regex`).
 struct Matcher {
     regex: Regex,
-}
-
-/// MCP `search` output row (lowercase `location`, empty fields omitted).
-#[derive(Debug, Serialize)]
-#[non_exhaustive]
-pub struct SearchHit {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub after: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub before: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment_id: Option<String>,
-    pub line: usize,
-    pub location: SearchHitLocation,
-    pub path: String,
-    pub text: String,
 }
 
 /// A single search match.
@@ -111,6 +108,31 @@ pub struct SearchResults {
     pub total: usize,
 }
 
+/// One compact match row: `[line, location, text, comment_id]`.
+///
+/// Only the base (4-column) arity is codegen'd; with context the row
+/// widens with `before` / `after` at runtime, and the self-describing
+/// `match_cols` header covers the widened shape. `location` keeps the MCP
+/// lowercase convention (`body` / `comment`), NOT the CLI's `PascalCase`;
+/// `comment_id` serializes `null` for body matches.
+#[model_schema(name = "CompactMatchRow")]
+pub type CompactMatchRow = (usize, SearchHitLocation, String, Option<String>);
+
+/// Schema anchor for one compact per-file match group.
+///
+/// Mirrors the runtime `{path, matches}` shape but its `matches` are
+/// positional [`CompactMatchRow`]s. Exists so xtask emits the TS / Zod
+/// types the LLM consumer reads; the runtime builds the shape in
+/// [`group_compact`] and the enclosing envelope (`total`, `match_cols`,
+/// `effective_limit`, `files`) is assembled by each surface.
+#[model_schema]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct CompactFileMatches {
+    pub matches: Vec<CompactMatchRow>,
+    pub path: PathBuf,
+}
+
 /// Options for a search operation.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -141,25 +163,6 @@ pub enum SearchScope {
     Body,
     /// Search only comment content.
     Comments,
-}
-
-impl SearchHit {
-    #[must_use]
-    pub fn from_match(m: &SearchMatch) -> Self {
-        let location = match m.location {
-            MatchLocation::Body => SearchHitLocation::Body,
-            MatchLocation::Comment => SearchHitLocation::Comment,
-        };
-        Self {
-            after: m.after.clone(),
-            before: m.before.clone(),
-            comment_id: m.comment_id.clone(),
-            line: m.line,
-            location,
-            path: m.path.display().to_string(),
-            text: m.text.clone(),
-        }
-    }
 }
 
 impl Matcher {
@@ -224,6 +227,73 @@ impl SearchOptions {
         self.scope = scope;
         self
     }
+}
+
+/// Column header naming the [`to_compact_row`] positions, widened when
+/// context lines were requested.
+#[must_use]
+pub const fn match_cols(with_context: bool) -> &'static [&'static str] {
+    if with_context {
+        &MATCH_COLS_CTX
+    } else {
+        &MATCH_COLS
+    }
+}
+
+/// Project one verbose [`SearchMatch`] onto its compact positional row.
+///
+/// `before` / `after` are appended only when context lines were requested;
+/// `location` is lowercased to the MCP convention and `comment_id`
+/// serializes `null` for body matches.
+#[must_use]
+pub fn to_compact_row(m: &SearchMatch, with_context: bool) -> Value {
+    let location = match m.location {
+        MatchLocation::Body => SearchHitLocation::Body,
+        MatchLocation::Comment => SearchHitLocation::Comment,
+    };
+    let mut row = vec![
+        json!(m.line),
+        json!(location),
+        json!(m.text),
+        json!(m.comment_id),
+    ];
+    if with_context {
+        row.push(json!(m.before));
+        row.push(json!(m.after));
+    }
+    Value::Array(row)
+}
+
+/// Group a page of matches by file into the compact `files` array.
+///
+/// `path` is stated once per file; a file's rows are contiguous and files
+/// appear in order of their first match within the page. A single pass
+/// suffices because the scan already emits a file's matches consecutively
+/// — this preserves that order rather than re-sorting.
+#[must_use]
+pub fn group_compact(matches: &[SearchMatch], with_context: bool) -> Vec<Value> {
+    let mut files: Vec<Value> = Vec::new();
+    for m in matches {
+        let path = m.path.display().to_string();
+        let row = to_compact_row(m, with_context);
+        let continues = files
+            .last()
+            .and_then(|f| f.get("path"))
+            .and_then(Value::as_str)
+            .is_some_and(|p| p == path);
+        if continues {
+            if let Some(arr) = files
+                .last_mut()
+                .and_then(|f| f.get_mut("matches"))
+                .and_then(Value::as_array_mut)
+            {
+                arr.push(row);
+            }
+        } else {
+            files.push(json!({ "path": path, "matches": [row] }));
+        }
+    }
+    files
 }
 
 /// Search across markdown documents in a directory tree.

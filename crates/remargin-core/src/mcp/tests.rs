@@ -251,6 +251,16 @@ fn needle_doc(n: usize) -> String {
     doc
 }
 
+/// Count compact match rows across every file group in a `search` result.
+fn compact_row_count(result: &Value) -> usize {
+    result["files"].as_array().map_or(0, |files| {
+        files
+            .iter()
+            .map(|f| f["matches"].as_array().map_or(0, Vec::len))
+            .sum()
+    })
+}
+
 /// Extract the text content from an MCP tool result.
 fn extract_tool_text(response: &Value) -> Value {
     let result = &response["result"];
@@ -582,17 +592,33 @@ fn search_finds_text_in_document() {
         }),
     );
 
-    let result = extract_tool_text(&response);
-    let matches = result["matches"].as_array().unwrap();
-    assert_eq!(matches.len(), 1_usize);
-    assert_eq!(matches[0]["line"], 3_i32);
-    assert_eq!(matches[0]["location"], "body");
+    // Compact grouped shape, minified: no top-level `matches`; rows are
+    // positional [line, location, text, comment_id] grouped by file.
+    let raw = extract_tool_raw_text(&response);
     assert!(
-        matches[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("notification")
+        !raw.contains('\n'),
+        "compact payload must be minified: {raw}"
     );
+
+    let result = extract_tool_text(&response);
+    let cols = result["match_cols"].as_array().unwrap();
+    assert_eq!(cols.len(), 4_usize);
+    assert_eq!(cols[0], "line");
+    assert_eq!(cols[1], "location");
+    assert_eq!(cols[2], "text");
+    assert_eq!(cols[3], "comment_id");
+
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1_usize);
+    assert_eq!(files[0]["path"].as_str().unwrap(), "doc.md");
+    let rows = files[0]["matches"].as_array().unwrap();
+    assert_eq!(rows.len(), 1_usize);
+    let row = rows[0].as_array().unwrap();
+    assert_eq!(row[0], 3_i32);
+    assert_eq!(row[1], "body");
+    assert!(row[2].as_str().unwrap().contains("notification"));
+    // Body match: the comment_id column is null, not omitted.
+    assert!(row[3].is_null(), "body comment_id must be null: {row:?}");
 }
 
 #[test]
@@ -625,12 +651,15 @@ fn search_limit_offset_envelope_carries_total() {
     );
 
     let result = extract_tool_text(&response);
-    let matches = result["matches"].as_array().unwrap();
-    assert_eq!(matches.len(), 2_usize);
+    // Single file: the page's two rows land in one file group.
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1_usize);
+    let rows = files[0]["matches"].as_array().unwrap();
+    assert_eq!(rows.len(), 2_usize);
     // The full corpus has five matches even though the page shows two.
     assert_eq!(result["total"], 5_i32);
     // Offset 1 skips the first needle; the page starts at line 4.
-    assert_eq!(matches[0]["line"], 4_i32);
+    assert_eq!(rows[0].as_array().unwrap()[0], 4_i32);
 }
 
 #[test]
@@ -651,7 +680,7 @@ fn report_spill_infers_size_from_last_result() {
         &search_request("needle", None),
     );
     let result = extract_tool_text(&response);
-    assert_eq!(result["matches"].as_array().unwrap().len(), 100_usize);
+    assert_eq!(compact_row_count(&result), 100_usize);
     assert!(result.get("effective_limit").is_none());
     let learned = session.last_response_size;
     assert!(learned > 0);
@@ -750,7 +779,7 @@ fn search_page_sized_under_cap() {
         &mut tight,
         &search_request("needle", None),
     ));
-    let tight_n = tight_page["matches"].as_array().unwrap().len();
+    let tight_n = compact_row_count(&tight_page);
     assert_eq!(tight_page["total"].as_u64().unwrap(), 100_u64);
     assert!((1..100).contains(&tight_n));
     assert_eq!(
@@ -774,7 +803,7 @@ fn search_page_sized_under_cap() {
         &mut loose,
         &search_request("needle", None),
     ));
-    let loose_n = loose_page["matches"].as_array().unwrap().len();
+    let loose_n = compact_row_count(&loose_page);
     assert_eq!(loose_page["total"].as_u64().unwrap(), 100_u64);
     assert!(loose_n > tight_n);
 
@@ -788,9 +817,100 @@ fn search_page_sized_under_cap() {
         &mut caller,
         &search_request("needle", Some(3)),
     ));
-    assert_eq!(bounded["matches"].as_array().unwrap().len(), 3_usize);
+    assert_eq!(compact_row_count(&bounded), 3_usize);
     assert!(bounded.get("effective_limit").is_none());
     assert_eq!(bounded["total"].as_u64().unwrap(), 100_u64);
+}
+
+#[test]
+fn search_compact_groups_matches_by_file_in_page_order() {
+    let base = Path::new("/docs");
+    // Two files; walk order is sorted (a.md, b.md), which is also the
+    // first-match order for this scan.
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), b"needle one\nneedle two\n")
+        .unwrap()
+        .with_file(Path::new("/docs/b.md"), b"needle three\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(&system, base, &config, &search_request("needle", None));
+    let result = extract_tool_text(&response);
+
+    let files = result["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2_usize, "one group per file: {result}");
+    // Path stated once per file, files in first-match order, rows contiguous.
+    assert_eq!(files[0]["path"].as_str().unwrap(), "a.md");
+    assert_eq!(files[0]["matches"].as_array().unwrap().len(), 2_usize);
+    assert_eq!(files[1]["path"].as_str().unwrap(), "b.md");
+    assert_eq!(files[1]["matches"].as_array().unwrap().len(), 1_usize);
+    // total counts every match across the corpus.
+    assert_eq!(result["total"].as_u64().unwrap(), 3_u64);
+    // The base header is the 4-column arity (no context requested).
+    assert_eq!(result["match_cols"].as_array().unwrap().len(), 4_usize);
+}
+
+#[test]
+fn search_compact_context_widens_rows_and_cols() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(
+        base,
+        "doc.md",
+        "line a\nline b\nTARGET here\nline d\nline e\n",
+    );
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "search",
+                "arguments": { "pattern": "TARGET", "context": 2_i32 }
+            }
+        }),
+    );
+    let result = extract_tool_text(&response);
+
+    // The header widens to six columns, before / after last.
+    let cols = result["match_cols"].as_array().unwrap();
+    assert_eq!(cols.len(), 6_usize);
+    assert_eq!(cols[4], "before");
+    assert_eq!(cols[5], "after");
+
+    let row = result["files"][0]["matches"][0].as_array().unwrap();
+    // Row widens to a 6-tuple; before / after are string arrays.
+    assert_eq!(row.len(), 6_usize);
+    assert_eq!(row[1], "body");
+    assert!(row[3].is_null(), "body comment_id null: {row:?}");
+    assert_eq!(
+        row[4].as_array().unwrap(),
+        &vec![json!("line a"), json!("line b")]
+    );
+    assert_eq!(
+        row[5].as_array().unwrap(),
+        &vec![json!("line d"), json!("line e")]
+    );
+}
+
+#[test]
+fn search_compact_comment_match_carries_comment_id() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+
+    // "Original" appears only inside the comment block (id `aaa`).
+    let response = call(&system, base, &config, &search_request("Original", None));
+    let result = extract_tool_text(&response);
+
+    let row = result["files"][0]["matches"][0].as_array().unwrap();
+    assert_eq!(row[1], "comment");
+    // comment_id is populated (non-null) for a comment-scoped match.
+    assert_eq!(row[3].as_str().unwrap(), "aaa");
 }
 
 #[test]

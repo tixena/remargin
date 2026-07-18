@@ -112,11 +112,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "mirrors cmd_plan PlanAction dispatch (plan mv/cp each add a 4-line src/dst/force unwrap)",
         ),
     );
-    // MCP: search handler extracts eight optional filter fields.
-    m.insert(
-        "handle_search",
-        (60, "extracts SearchOptions from tool params"),
-    );
     // CLI: get adapter splits json+line-numbers from the default
     // path, both branches threading the trusted_roots slice through
     // the resolved-config-aware document::get. The split

@@ -642,7 +642,7 @@ remargin [OPTIONS] <COMMAND>
 | Command | Description |
 |---------|-------------|
 | `query` | Search across documents for comments (filter by `--pending`, `--pending-for`, `--pending-for-me`, `--pending-broadcast`, `--author`, `--since`, `--comment-id`, `--kind`; `--expanded` for inline comment details; `--json --compact` for a minified columnar payload, `--include-integrity` to add checksum/signature columns — see [Compact output](#compact-output)) |
-| `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`) |
+| `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`; `--json --compact` for a minified grouped columnar payload — see [Compact output](#compact-output)) |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
 | `activity` | Show what changed since a cutoff (caller's last action by default) — see [Tracking change](#tracking-change) |
@@ -703,7 +703,7 @@ Returns a projection of any mutating op (`ack`, `batch`, `comment`, `cp`, `delet
 | `--key <PATH>` | Path to Ed25519 signing key |
 | `--assets-dir <PATH>` | Assets directory path |
 | `--json` | Output as JSON |
-| `--compact` | Compact columnar JSON, minified. Requires `--json`; supported by `get`, `query`, and `activity` today (see [Compact output](#compact-output)) |
+| `--compact` | Compact columnar JSON, minified. Requires `--json`; supported by `get`, `query`, `activity`, and `search` today (see [Compact output](#compact-output)) |
 | `--verbose` | Enable tracing output |
 
 > To preview a mutating op without writing, use `remargin plan <op>`. The per-op `--dry-run` flag was removed in favour of the uniform `plan` projection.
@@ -726,6 +726,13 @@ Returns a projection of any mutating op (`ack`, `batch`, `comment`, `cp`, `delet
 
 - Shape: `{cutoff_explicit, newest_ts_overall, change_cols, files}`, where each file is `{path, newest_ts, cutoff_applied?, changes}`.
 - **`changes`** rows are positional arrays named once by the envelope's `change_cols` header: `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. One uniform 9-column shape serves all three kinds; `kind` is `ack` / `comment` / `sandbox`. Columns a kind lacks are `null`: acks / sandboxes null the comment-only columns (`line_start`, `line_end`, `reply_to`) and their `to`; sandboxes also null `comment_id`. `to` is `[]` for a broadcast comment (vs `null` for the not-applicable acks / sandboxes). Timestamps keep full fidelity.
+
+`remargin search <pattern> --json --compact` emits the same token-lean, minified variant of the `search` payload the MCP `search` tool returns unconditionally. Plain `--json` is unchanged (flat `SearchMatch` objects with PascalCase `location`).
+
+- Shape: `{total, match_cols, files}` (plus `effective_limit` when a page was clamped), where each file is `{path, matches}`.
+- Matches are grouped by file so `path` is stated once; files appear in first-match order and a file's rows are contiguous. Each match is a positional row named once by the envelope's `match_cols` header: `["line", "location", "text", "comment_id"]`. `location` is lowercase `body` / `comment`; `comment_id` is `null` for body matches.
+- With `--context` / `-C` > 0 the rows widen to `["line", "location", "text", "comment_id", "before", "after"]` (`before` / `after` are string arrays) and `match_cols` reflects the widened arity.
+- `total` is the exact corpus match count. On the MCP surface a page auto-sized under the session spill cap carries `effective_limit`; page by advancing the `offset` request param.
 
 ## Tracking change
 

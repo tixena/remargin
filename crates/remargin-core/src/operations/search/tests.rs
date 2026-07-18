@@ -4,11 +4,13 @@ use core::fmt::Write as _;
 use std::path::Path;
 
 use os_shim::mock::MockSystem;
+use serde_json::json;
 
 use crate::parser;
 
 use super::{
-    LineAttribution, MatchLocation, SearchOptions, SearchScope, build_line_attribution, search,
+    LineAttribution, MatchLocation, SearchOptions, SearchScope, build_line_attribution,
+    group_compact, match_cols, search, to_compact_row,
 };
 
 /// Build minimal search options for a literal pattern.
@@ -498,4 +500,77 @@ fn offset_without_limit_returns_tail() {
     assert_eq!(results.matches.len(), 20);
     assert_eq!(results.total, 320);
     assert_eq!(results.matches[0].text, "needle line 301");
+}
+
+#[test]
+fn compact_body_row_is_lowercase_with_null_comment_id() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), b"the needle here\n")
+        .unwrap();
+    let results = search(&system, base, base, &literal_opts("needle")).unwrap();
+
+    let row = to_compact_row(&results.matches[0], false);
+    let arr = row.as_array().unwrap();
+    // Base 4-tuple: [line, location, text, comment_id]; body -> lowercase
+    // `body` and a null comment_id column (present, not omitted).
+    assert_eq!(arr.len(), 4);
+    assert_eq!(arr[0], json!(1_i32));
+    assert_eq!(arr[1], json!("body"));
+    assert_eq!(arr[2], json!("the needle here"));
+    assert!(arr[3].is_null());
+    assert_eq!(match_cols(false).len(), 4);
+}
+
+#[test]
+fn compact_row_widens_with_context() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), b"one\nneedle\ntwo\n")
+        .unwrap();
+    let opts = literal_opts("needle").context_lines(1);
+    let results = search(&system, base, base, &opts).unwrap();
+
+    let row = to_compact_row(&results.matches[0], true);
+    let arr = row.as_array().unwrap();
+    // Context appends before / after string arrays -> 6-tuple.
+    assert_eq!(arr.len(), 6);
+    assert_eq!(arr[4], json!(["one"]));
+    assert_eq!(arr[5], json!(["two"]));
+    assert_eq!(match_cols(true).len(), 6);
+}
+
+#[test]
+fn compact_comment_row_carries_comment_id() {
+    let base = Path::new("/docs");
+    let doc = format!("# Title\n\n{}", remargin_block("cid1", "the needle here"));
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), doc.as_bytes())
+        .unwrap();
+    let results = search(&system, base, base, &literal_opts("needle")).unwrap();
+
+    let row = to_compact_row(&results.matches[0], false);
+    let arr = row.as_array().unwrap();
+    assert_eq!(arr[1], json!("comment"));
+    assert_eq!(arr[3], json!("cid1"));
+}
+
+#[test]
+fn group_compact_preserves_page_order_and_contiguity() {
+    let base = Path::new("/docs");
+    // Walk order is sorted (a.md, b.md), which is also first-match order.
+    let system = MockSystem::new()
+        .with_file(Path::new("/docs/a.md"), b"needle 1\nneedle 2\n")
+        .unwrap()
+        .with_file(Path::new("/docs/b.md"), b"needle 3\n")
+        .unwrap();
+    let results = search(&system, base, base, &literal_opts("needle")).unwrap();
+
+    let files = group_compact(&results.matches, false);
+    assert_eq!(files.len(), 2);
+    // path stated once per file; files in first-match order; rows contiguous.
+    assert_eq!(files[0]["path"], json!("a.md"));
+    assert_eq!(files[0]["matches"].as_array().unwrap().len(), 2);
+    assert_eq!(files[1]["path"], json!("b.md"));
+    assert_eq!(files[1]["matches"].as_array().unwrap().len(), 1);
 }

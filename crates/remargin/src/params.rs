@@ -152,12 +152,22 @@ pub struct QueryParams<'cmd> {
     pub since: Option<&'cmd str>,
 }
 
+/// How `search` renders its result. Mutually-exclusive successor to the
+/// previous `json_mode` bool. `Compact` and `Json` both emit JSON;
+/// `Compact` adds the grouped columnar minified shape. `Text` is the
+/// human match listing.
+pub enum SearchOutputMode {
+    Compact,
+    Json,
+    Text,
+}
+
 pub struct SearchParams<'cmd> {
     pub context: usize,
     pub ignore_case: bool,
-    pub json_mode: bool,
     pub limit: Option<usize>,
     pub offset: usize,
+    pub output: SearchOutputMode,
     pub path: &'cmd str,
     pub pattern: &'cmd str,
     pub regex: bool,

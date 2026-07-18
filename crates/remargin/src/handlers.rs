@@ -28,8 +28,8 @@ use crate::obsidian;
 use crate::params::{
     AckParams, ActivityOutputMode, ActivityParams, CommentParams, CpParams, EditParams,
     GetImageParams, GetParams, MvParams, PromptSetParams, QueryOutputMode, QueryParams,
-    QueryPendingFilters, ReactParams, ReplaceParams, RestrictParams, SearchParams, SignParams,
-    WriteParams,
+    QueryPendingFilters, ReactParams, ReplaceParams, RestrictParams, SearchOutputMode,
+    SearchParams, SignParams, WriteParams,
 };
 use crate::render;
 use crate::{
@@ -1841,12 +1841,29 @@ pub fn cmd_search(
 
     let results = search::search(system, cwd, &target, &options)?;
 
-    if params.json_mode {
-        return print_output(
-            sinks,
-            true,
-            &json!({ "matches": results.matches, "total": results.total }),
-        );
+    match params.output {
+        SearchOutputMode::Compact => {
+            // Compact columnar shape, minified — matches the MCP `search`
+            // contract. Verbose `--json` (below) stays byte-identical.
+            let with_context = params.context > 0;
+            let files = search::group_compact(&results.matches, with_context);
+            return out_json_min(
+                sinks,
+                &json!({
+                    "total": results.total,
+                    "match_cols": search::match_cols(with_context),
+                    "files": files,
+                }),
+            );
+        }
+        SearchOutputMode::Json => {
+            return print_output(
+                sinks,
+                true,
+                &json!({ "matches": results.matches, "total": results.total }),
+            );
+        }
+        SearchOutputMode::Text => {}
     }
 
     for m in &results.matches {

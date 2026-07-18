@@ -20,7 +20,7 @@ use crate::io::{
 use crate::params::{
     AckParams, ActivityOutputMode, ActivityParams, CommentParams, CpParams, EditParams,
     GetImageParams, GetOutputMode, GetParams, MvParams, PromptSetParams, ReactParams,
-    ReplaceParams, RestrictParams, SearchParams, SignParams, WriteParams,
+    ReplaceParams, RestrictParams, SearchOutputMode, SearchParams, SignParams, WriteParams,
 };
 use crate::{
     AssetsArgs, ClaudeAction, Cli, Commands, IdentityArgs, OutputArgs, PermissionsAction,
@@ -158,14 +158,16 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
 /// Reject `--compact` on subcommands that do not emit the compact
 /// columnar contract. `OutputArgs` is flattened everywhere, so a single
 /// gate here keeps the flag from being silently ignored. `get`, `query`,
-/// and `activity` wire compact today; the follow-up search task extends
-/// the allow-set.
+/// `activity`, and `search` wire compact today.
 fn reject_unsupported_compact(cmd: &Commands) -> Result<()> {
     let compact = subcommand_output(cmd).is_some_and(|o| o.compact);
     if compact
         && !matches!(
             cmd,
-            Commands::Activity { .. } | Commands::Get { .. } | Commands::Query { .. }
+            Commands::Activity { .. }
+                | Commands::Get { .. }
+                | Commands::Query { .. }
+                | Commands::Search { .. }
         )
     {
         bail!("--compact is not supported for this subcommand");
@@ -1489,12 +1491,20 @@ fn handle_search(
     else {
         bail!("internal: handle_search called with wrong subcommand");
     };
+    // clap enforces `--compact` requires `--json`, so compact implies json.
+    let output = if output_args.compact {
+        SearchOutputMode::Compact
+    } else if output_args.json {
+        SearchOutputMode::Json
+    } else {
+        SearchOutputMode::Text
+    };
     let s = SearchParams {
         context: *context,
         ignore_case: *ignore_case,
-        json_mode: output_args.json,
         limit: *limit,
         offset: *offset,
+        output,
         path: path.as_str(),
         pattern: pattern.as_str(),
         regex: *regex,

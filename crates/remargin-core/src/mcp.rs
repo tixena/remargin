@@ -964,7 +964,16 @@ fn desc_get_image() -> ToolDesc {
 fn desc_search() -> ToolDesc {
     ToolDesc {
         name: "search",
-        description: "Search across documents for text matches",
+        description: "Search across documents for text matches. Returns a compact, minified \
+             columnar payload: `{total, match_cols, files}` (plus `effective_limit` when a \
+             page was clamped), where each file is `{path, matches}` and every match is a \
+             positional row named by `match_cols` (`[line, location, text, comment_id]`). \
+             Matches are grouped by file so `path` is stated once and files appear in \
+             first-match order. `location` is `body` / `comment`; `comment_id` is `null` for \
+             body matches. With `context` > 0 the rows widen to \
+             `[line, location, text, comment_id, before, after]` (before / after being string \
+             arrays) and `match_cols` reflects it. `total` is the exact corpus match count; a \
+             bounded page carries `effective_limit`, so advance `offset` to page for the rest.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -1272,10 +1281,9 @@ fn tool_result_success_min(content: &Value) -> Value {
 }
 
 /// Tools whose success payload is the compact columnar contract, wrapped
-/// minified. `get`, `query`, and `activity` today; the follow-up search
-/// task extends this set.
+/// minified: `activity`, `get`, `query`, and `search`.
 fn tool_emits_minified(tool_name: &str) -> bool {
-    matches!(tool_name, "activity" | "get" | "query")
+    matches!(tool_name, "activity" | "get" | "query" | "search")
 }
 
 /// Build an MCP tool result (error).
@@ -2794,69 +2802,83 @@ fn handle_search(
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let pattern = required_str(params, "pattern")?;
-    let path_str = optional_str(params, "path").unwrap_or(".");
-    let target = base_dir.join(path_str);
-    let regex = optional_bool(params, "regex");
-    let ignore_case = optional_bool(params, "ignore_case");
-    let context = optional_usize(params, "context").unwrap_or(0);
-    let limit = optional_usize(params, "limit");
-    let offset = optional_usize(params, "offset").unwrap_or(0);
-
+    let target = base_dir.join(optional_str(params, "path").unwrap_or("."));
     let scope = match optional_str(params, "scope").unwrap_or("all") {
         "body" => search::SearchScope::Body,
         "comments" => search::SearchScope::Comments,
         _ => search::SearchScope::All,
     };
-
     let options = search::SearchOptions::new(String::from(pattern))
-        .context_lines(context)
-        .ignore_case(ignore_case)
-        .limit(limit)
-        .offset(offset)
-        .regex(regex)
+        .context_lines(optional_usize(params, "context").unwrap_or(0))
+        .ignore_case(optional_bool(params, "ignore_case"))
+        .limit(optional_usize(params, "limit"))
+        .offset(optional_usize(params, "offset").unwrap_or(0))
+        .regex(optional_bool(params, "regex"))
         .scope(scope);
 
     let results = search::search(system, base_dir, &target, &options)?;
+    // Compact columnar shape, hardcoded on the MCP surface; serialized minified
+    // by `tool_result_success_min`.
+    Ok(search_compact_envelope(
+        &results,
+        spill_cap,
+        options.context_lines > 0,
+    ))
+}
 
-    let window = results
+/// Assemble the compact grouped `search` envelope from a page of results.
+///
+/// Builds the flat compact rows, clamps them against `spill_cap` (measuring
+/// the emitted minified bytes), then groups the survivors by file. The
+/// caller's own `limit` already bounded the window; the cap only narrows it
+/// further. `effective_limit` is added only when the clamp trimmed the page —
+/// its presence tells the agent to advance `offset` for the rest, and `total`
+/// says how many remain.
+fn search_compact_envelope(
+    results: &search::SearchResults,
+    spill_cap: usize,
+    with_context: bool,
+) -> Value {
+    let rows: Vec<Value> = results
         .matches
         .iter()
-        .map(|m| serde_json::to_value(search::SearchHit::from_match(m)))
-        .collect::<Result<Vec<Value>, _>>()?;
+        .map(|m| search::to_compact_row(m, with_context))
+        .collect();
+    let (kept, effective_limit) = size_search_page(rows, spill_cap);
+    let files = search::group_compact(&results.matches[..kept.len()], with_context);
 
-    // The caller's own `limit` already bounded the window; the cap only ever
-    // narrows it further, never widens past what the caller asked for. When
-    // the cap clamps below the window, `effective_limit` is surfaced so the
-    // agent knows this is a bounded page and can offset for the rest — `total`
-    // already tells it how many remain.
-    let (matches, effective_limit) = size_search_page(window, spill_cap);
-
-    let mut envelope = json!({ "matches": matches, "total": results.total });
+    let mut envelope = json!({
+        "total": results.total,
+        "match_cols": search::match_cols(with_context),
+        "files": files,
+    });
     if let Some(effective) = effective_limit
         && let Some(obj) = envelope.as_object_mut()
     {
         obj.insert(String::from("effective_limit"), Value::from(effective));
     }
-    Ok(envelope)
+    envelope
 }
 
 /// Trim a search page so its emitted size stays under `spill_cap`.
 ///
-/// Greedily keeps hits while the running serialized size stays within the cap
-/// (minus a margin for the envelope and pretty-print indentation). Always
-/// keeps at least one hit when the window is non-empty, so a single oversized
-/// match can never livelock paging. Returns `Some(effective_limit)` only when
-/// the cap forced fewer rows than the window carried — that clamp is the
-/// signal the agent should page for the rest. `spill_cap` is a self-consistent
-/// byte proxy for the client's token limit, not an equivalent.
+/// Greedily keeps rows while the running serialized size stays within the cap
+/// (minus a margin for the envelope). The rows are the COMPACT columnar rows
+/// the agent receives, measured minified — so the clamp counts the emitted
+/// bytes, not the old verbose shape. Always keeps at least one row when the
+/// window is non-empty, so a single oversized match can never livelock paging.
+/// Returns `Some(effective_limit)` only when the cap forced fewer rows than
+/// the window carried — that clamp is the signal the agent should page for the
+/// rest. `spill_cap` is a self-consistent byte proxy for the client's token
+/// limit, not an equivalent.
 fn size_search_page(window: Vec<Value>, spill_cap: usize) -> (Vec<Value>, Option<usize>) {
     let window_len = window.len();
     let budget = spill_cap.saturating_sub(spill_cap / SPILL_MARGIN_DIVISOR);
     let mut running = 0_usize;
     let mut kept = 0_usize;
-    for hit in &window {
-        let size = serde_json::to_string_pretty(hit).map_or(usize::MAX, |s| s.len());
-        // Admit the first hit unconditionally; a lone oversized match must
+    for row in &window {
+        let size = serde_json::to_string(row).map_or(usize::MAX, |s| s.len());
+        // Admit the first row unconditionally; a lone oversized match must
         // still ship or the caller can never page past it.
         if kept > 0 && running.saturating_add(size) > budget {
             break;
