@@ -1216,3 +1216,137 @@ fn stale_sandbox_serializes_and_renders() {
         "prompt names the remedy: {prompt}",
     );
 }
+
+// --- TrustedRootMissing (contained but absent anchor) unit tests ---
+
+/// A `trusted_roots` entry that stays inside its realm but resolves to a
+/// path that does not exist yields one `TrustedRootMissing` naming the
+/// resolved anchor and the declaring `.remargin.yaml`. It is not an escape.
+#[test]
+fn trusted_root_missing_flags_contained_but_absent_anchor() {
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+    ]);
+    let report = run_at_r(&system);
+    let missing = findings_of_kind(&report, &FindingKind::TrustedRootMissing);
+    assert_eq!(
+        missing.len(),
+        1,
+        "expected one missing finding: {report:#?}"
+    );
+    assert_eq!(missing[0].severity, Severity::Warning);
+    assert!(
+        missing[0].message.contains("/r/src/secret")
+            && missing[0].message.contains("/r/.remargin.yaml")
+            && missing[0].message.contains("does not exist"),
+        "message names the anchor and declaring file: {}",
+        missing[0].message,
+    );
+    assert!(
+        findings_of_kind(&report, &FindingKind::TrustedRootEscape).is_empty(),
+        "a contained entry is not an escape: {report:#?}",
+    );
+}
+
+/// The same entry resolving to a directory that exists yields no
+/// `TrustedRootMissing` and a clean report.
+#[test]
+fn trusted_root_existing_anchor_has_no_finding() {
+    let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+    ])
+    .with_dir(Path::new("/r/src/secret"))
+    .unwrap();
+    let report = run_at_r(&system);
+    assert!(
+        findings_of_kind(&report, &FindingKind::TrustedRootMissing).is_empty(),
+        "an existing anchor must not fire: {report:#?}",
+    );
+    assert!(report.is_clean(), "expected clean report: {report:#?}");
+}
+
+/// A wildcard root anchors at the declaring realm's own directory, which
+/// exists by construction, so it never reports missing.
+#[test]
+fn trusted_root_wildcard_never_reports_missing() {
+    let yaml = "permissions:\n  trusted_roots:\n    - path: \"*\"\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+    ]);
+    let report = run_at_r(&system);
+    assert!(
+        findings_of_kind(&report, &FindingKind::TrustedRootMissing).is_empty(),
+        "wildcard anchors at the extant realm root: {report:#?}",
+    );
+    assert!(report.is_clean(), "expected clean report: {report:#?}");
+}
+
+/// An out-of-realm entry is reported once — as `TrustedRootEscape` — and
+/// the existence pass is gated off, so no `TrustedRootMissing` is added for
+/// the same misconfig.
+#[test]
+fn trusted_root_missing_skipped_when_escape_present() {
+    let yaml = "permissions:\n  trusted_roots:\n    - path: /other/secret\n";
+    let system = mock_with_files(&[
+        ("/home/u/.claude/settings.json", &hook_settings_json()),
+        ("/r/.remargin.yaml", yaml),
+    ]);
+    let report = run_at_r(&system);
+    assert_eq!(
+        findings_of_kind(&report, &FindingKind::TrustedRootEscape).len(),
+        1,
+        "escape is reported: {report:#?}",
+    );
+    assert!(
+        findings_of_kind(&report, &FindingKind::TrustedRootMissing).is_empty(),
+        "existence pass is gated behind !has_escape: {report:#?}",
+    );
+}
+
+/// The new kind serializes to its `snake_case` wire name, round-trips
+/// through JSON, renders as WARNING in text, and contributes one
+/// prompt-mode instruction.
+#[test]
+fn trusted_root_missing_serializes_and_renders() {
+    let report = DoctorReport {
+        findings: vec![DoctorFinding {
+            kind: FindingKind::TrustedRootMissing,
+            message: String::from(
+                "trusted_roots entry in /r/.remargin.yaml resolves to /r/src/secret, which does \
+                 not exist. It protects nothing.",
+            ),
+            remedy: String::from(
+                "Point the entry at an existing path, or drop it from /r/.remargin.yaml.",
+            ),
+            severity: Severity::Warning,
+        }],
+        hook_installed: true,
+        session_guard_installed: true,
+        project_settings_file: PathBuf::from("/r/.claude/settings.json"),
+        user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
+    };
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(
+        json.contains("trusted_root_missing"),
+        "wire name present: {json}",
+    );
+    let parsed: DoctorReport = serde_json::from_str(&json).unwrap();
+    assert_eq!(report, parsed);
+
+    let text = render_doctor_text(&report, false);
+    assert!(
+        text.contains("[WARNING]") && text.contains("/r/src/secret"),
+        "text renders the missing root as WARNING: {text}",
+    );
+
+    let prompt = render_doctor_prompt(&report);
+    assert!(
+        prompt.contains("Point the entry at an existing path"),
+        "prompt names the remedy: {prompt}",
+    );
+}

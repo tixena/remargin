@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::identity::IdentityFlags;
 use crate::config::permissions::resolve::{
-    PermissionsLintError, TrustedRootEscape, find_trusted_root_escapes,
-    lint_permissions_in_parents, resolve_permissions,
+    PermissionsLintError, ResolvedTrustedRoot, TrustedRootEscape, find_trusted_root_escapes,
+    lint_permissions_in_parents, resolve_permissions, trusted_root_anchor,
 };
 use crate::config::{Mode, ResolvedConfig};
 use crate::operations::sandbox;
@@ -95,6 +95,12 @@ pub enum FindingKind {
     /// it. Fail-closed at resolve time; doctor names the file, the entry,
     /// and the resolved anchor so it can be moved back inside the realm.
     TrustedRootEscape,
+    /// A `trusted_roots` entry that stays inside its realm (so not a
+    /// [`FindingKind::TrustedRootEscape`]) but resolves to a path absent
+    /// on disk — a moved or deleted target. The root then protects
+    /// nothing; doctor names the resolved anchor and the declaring
+    /// `.remargin.yaml` so it can be repointed or dropped.
+    TrustedRootMissing,
 }
 
 /// A single diagnostic finding from a doctor check.
@@ -277,6 +283,7 @@ pub fn run_doctor(
         )?);
         findings.extend(identity_key_findings(system, cwd)?);
         findings.extend(stale_sandbox_findings(system, cwd)?);
+        findings.extend(trusted_root_missing_findings(system, cwd)?);
     }
 
     Ok(DoctorReport {
@@ -363,6 +370,44 @@ fn trusted_root_escape_finding(escape: &TrustedRootEscape) -> DoctorFinding {
             escape.source_file.display(),
             escape.realm_dir.display(),
             escape.anchor.display(),
+        ),
+        severity: Severity::Warning,
+    }
+}
+
+/// One [`FindingKind::TrustedRootMissing`] per resolved trusted root whose
+/// anchor does not exist on disk.
+///
+/// Reuses the resolver the escape and leftover checks already walk, so the
+/// resolved anchor set has a single source of truth. Runs only behind the
+/// escape gate (see the caller), so every anchor here is already inside its
+/// realm — an absent anchor is a moved or deleted target, never a
+/// containment escape. A wildcard root anchors at the declaring realm's own
+/// directory, which exists by construction, so it never fires; only an
+/// explicit path pointing at a vanished target does.
+fn trusted_root_missing_findings(system: &dyn System, cwd: &Path) -> Result<Vec<DoctorFinding>> {
+    let resolved = resolve_permissions(system, cwd)?;
+    let mut findings = Vec::new();
+    for root in &resolved.trusted_roots {
+        let anchor = trusted_root_anchor(root);
+        if !system.exists(anchor)? {
+            findings.push(trusted_root_missing_finding(root, anchor));
+        }
+    }
+    Ok(findings)
+}
+
+fn trusted_root_missing_finding(root: &ResolvedTrustedRoot, anchor: &Path) -> DoctorFinding {
+    DoctorFinding {
+        kind: FindingKind::TrustedRootMissing,
+        message: format!(
+            "trusted_roots entry in {} resolves to {}, which does not exist. It protects nothing.",
+            root.source_file.display(),
+            anchor.display(),
+        ),
+        remedy: format!(
+            "Point the entry at an existing path, or drop it from {}.",
+            root.source_file.display(),
         ),
         severity: Severity::Warning,
     }
