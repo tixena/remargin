@@ -19,9 +19,12 @@ use anyhow::Result;
 use os_shim::System;
 use serde::{Deserialize, Serialize};
 
+use crate::config::identity::IdentityFlags;
 use crate::config::permissions::resolve::{
     TrustedRootEscape, find_trusted_root_escapes, resolve_permissions,
 };
+use crate::config::{Mode, ResolvedConfig};
+use crate::parser::AuthorType;
 use crate::permissions::claude_sync::{self, RuleSet, canonicalize_rule, hook_covered_rules};
 use crate::permissions::pretool_install::{self, TestOutcome};
 use crate::permissions::session_guard_install::{self, TestOutcome as GuardTestOutcome};
@@ -42,11 +45,20 @@ pub enum Severity {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum FindingKind {
+    /// An agent identity whose resolved key path lives under the user's
+    /// primary SSH directory (`~/.ssh`) — the agent can read and sign
+    /// with the human's keys, a privilege-boundary violation.
+    AgentKeyUnderUserSsh,
     /// The `PreToolUse` hook (`remargin claude pretool`) is absent from
     /// both user-scope and project-scope settings files. No CLI or
     /// native-tool enforcement is active for any managed path in the
     /// realm. All subsequent checks are skipped.
     HookMissing,
+    /// Strict-mode realm whose resolved signing key does not point at an
+    /// existing, readable file. Identity resolution admits a set-but-
+    /// broken `key:`; the failure otherwise surfaces only inside a later
+    /// sign/write op as a confusing I/O error.
+    IdentityKeyUnresolvable,
     /// A static `permissions.deny` rule in a settings file is drift the
     /// hook has made redundant: either a path rule in
     /// [`hook_covered_rules`] for this realm (now enforced by the
@@ -230,6 +242,11 @@ pub fn run_doctor(
             cwd,
             &settings_files,
         )?);
+        // Same guard as the leftover check: resolving the realm's identity
+        // walks `resolve_trusted_roots_for_cwd`, which fails closed on an
+        // out-of-realm anchor. Running only when there is no escape keeps
+        // doctor from crashing on the error the escape finding already names.
+        findings.extend(identity_key_findings(system, cwd)?);
     }
 
     Ok(DoctorReport {
@@ -341,6 +358,109 @@ fn leftover_finding(rule: &str, file: &Path, reason: &LeftoverReason) -> DoctorF
         remedy: format!(
             "Remove the deny rule `{rule}` from the permissions.deny array in {}.",
             file.display()
+        ),
+        severity: Severity::Warning,
+    }
+}
+
+/// Read-only diagnostics over the realm's resolved signing identity.
+///
+/// Two failure modes that pass identity resolution but bite at op time:
+/// a strict-mode `key:` that is set but points at no readable file, and an
+/// agent identity whose key resolves under the user's `~/.ssh`. The
+/// `key:`-is-`None` case is deliberately not reported — that is already a
+/// hard `validate_identity` error, surfaced when the config resolves.
+fn identity_key_findings(system: &dyn System, cwd: &Path) -> Result<Vec<DoctorFinding>> {
+    let config = ResolvedConfig::resolve(system, cwd, &IdentityFlags::default(), None)?;
+    let mut findings = Vec::new();
+    let (Some(identity), Some(key_path)) = (config.identity.as_deref(), config.key_path.as_deref())
+    else {
+        return Ok(findings);
+    };
+
+    if config.mode == Mode::Strict && !key_is_readable(system, key_path) {
+        findings.push(identity_key_unresolvable_finding(
+            identity,
+            key_path,
+            config.source_path.as_deref(),
+        ));
+    }
+
+    if identity_is_agent(&config, identity) && key_under_user_ssh(system, key_path) {
+        findings.push(agent_key_under_ssh_finding(identity, key_path));
+    }
+
+    Ok(findings)
+}
+
+/// A key is usable only when it reads back as a file. Mirrors the
+/// `read_to_string` probe the config loader uses, so a missing file and an
+/// unreadable one collapse to the same "not a readable file" verdict.
+fn key_is_readable(system: &dyn System, key_path: &Path) -> bool {
+    system.read_to_string(key_path).is_ok()
+}
+
+/// The active identity is an agent. The registry participant's `type:` is
+/// authoritative when the realm carries a registry; otherwise the config's
+/// own `type:` decides (open realms need no registry).
+fn identity_is_agent(config: &ResolvedConfig, identity: &str) -> bool {
+    if let Some(registry) = &config.registry
+        && let Some(participant) = registry.participants.get(identity)
+    {
+        return participant.author_type == "agent";
+    }
+    matches!(config.author_type, Some(AuthorType::Agent))
+}
+
+/// `key_path` lives at or below the user's primary SSH directory. `~/.ssh`
+/// is derived from `HOME` the same way `key:` resolution derives it, so a
+/// non-standard home resolves identically; a missing `HOME` means there is
+/// no `~/.ssh` to compare against.
+fn key_under_user_ssh(system: &dyn System, key_path: &Path) -> bool {
+    let Ok(home) = system.env_var("HOME") else {
+        return false;
+    };
+    key_path.starts_with(PathBuf::from(home).join(".ssh"))
+}
+
+fn identity_key_unresolvable_finding(
+    identity: &str,
+    key_path: &Path,
+    source_path: Option<&Path>,
+) -> DoctorFinding {
+    let declared_in = source_path.map_or_else(
+        || String::from("its `.remargin.yaml`"),
+        |path| format!("declared in {}", path.display()),
+    );
+    let remedy_where = source_path.map_or_else(
+        || String::from("the realm's `.remargin.yaml`"),
+        |path| path.display().to_string(),
+    );
+    DoctorFinding {
+        kind: FindingKind::IdentityKeyUnresolvable,
+        message: format!(
+            "Identity `{identity}` runs in strict mode but its signing key `{}` ({declared_in}) \
+             is not a readable file. Signing and writes will fail.",
+            key_path.display(),
+        ),
+        remedy: format!(
+            "Fix the `key:` path in {remedy_where} or pass --key pointing at a readable key file."
+        ),
+        severity: Severity::Warning,
+    }
+}
+
+fn agent_key_under_ssh_finding(identity: &str, key_path: &Path) -> DoctorFinding {
+    DoctorFinding {
+        kind: FindingKind::AgentKeyUnderUserSsh,
+        message: format!(
+            "Agent identity `{identity}`'s key `{}` lives under your ~/.ssh — the agent can sign \
+             with your personal keys.",
+            key_path.display(),
+        ),
+        remedy: String::from(
+            "Move the agent's key out of ~/.ssh and update the `key:` field in the realm's \
+             `.remargin.yaml`.",
         ),
         severity: Severity::Warning,
     }

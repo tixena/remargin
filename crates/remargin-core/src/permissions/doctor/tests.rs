@@ -593,3 +593,258 @@ fn render_prompt_clean_says_nothing_to_do() {
         "clean prompt must list no steps: {out}"
     );
 }
+
+// --- identity / key resolvability (IdentityKeyUnresolvable,
+//     AgentKeyUnderUserSsh) unit tests ---
+
+fn strict_agent_registry() -> &'static str {
+    "participants:\n  agent1:\n    type: agent\n    status: active\n"
+}
+
+/// Hook installed in user-scope and `HOME` set, so `~/.ssh` derivation and
+/// plain-name `key:` resolution behave as they do in a real run. Extra
+/// realm files (`.remargin.yaml`, registry, key files) are layered on top.
+fn identity_mock(files: &[(&str, &str)]) -> MockSystem {
+    let mut system = MockSystem::new()
+        .with_dir(Path::new("/r"))
+        .unwrap()
+        .with_dir(Path::new("/r/.claude"))
+        .unwrap()
+        .with_env("HOME", "/home/u")
+        .unwrap()
+        .with_file(
+            Path::new("/home/u/.claude/settings.json"),
+            hook_settings_json().as_bytes(),
+        )
+        .unwrap();
+    for (path, body) in files {
+        system = system.with_file(Path::new(path), body.as_bytes()).unwrap();
+    }
+    system
+}
+
+fn findings_of_kind<'report>(
+    report: &'report DoctorReport,
+    kind: &FindingKind,
+) -> Vec<&'report DoctorFinding> {
+    report.findings.iter().filter(|f| &f.kind == kind).collect()
+}
+
+fn strict_agent_yaml(key: &str) -> String {
+    format!("mode: strict\ntype: agent\nidentity: agent1\nkey: {key}\n")
+}
+
+fn run_at_r(system: &MockSystem) -> DoctorReport {
+    run_doctor(
+        system,
+        Path::new("/r"),
+        Path::new("/home/u/.claude/settings.json"),
+    )
+    .unwrap()
+}
+
+/// Scenario 1: strict realm whose `key:` is set but points at no file →
+/// one `IdentityKeyUnresolvable` naming the identity, key, and config.
+#[test]
+fn strict_missing_key_reports_identity_key_unresolvable() {
+    let system = identity_mock(&[
+        ("/r/.remargin.yaml", &strict_agent_yaml("/r/keys/agent")),
+        ("/r/.remargin-registry.yaml", strict_agent_registry()),
+    ]);
+    let report = run_at_r(&system);
+    let found = findings_of_kind(&report, &FindingKind::IdentityKeyUnresolvable);
+    assert_eq!(found.len(), 1, "expected one finding: {report:#?}");
+    let finding = found[0];
+    assert_eq!(finding.severity, Severity::Warning);
+    assert!(
+        finding.message.contains("agent1")
+            && finding.message.contains("/r/keys/agent")
+            && finding.message.contains("/r/.remargin.yaml"),
+        "message names identity, key, and config: {}",
+        finding.message,
+    );
+    assert!(
+        findings_of_kind(&report, &FindingKind::AgentKeyUnderUserSsh).is_empty(),
+        "key is not under ~/.ssh: {report:#?}",
+    );
+}
+
+/// Scenario 2: strict realm whose `key:` resolves to a path that exists
+/// but does not read back as a file (a directory here) → still one
+/// `IdentityKeyUnresolvable`. Proves the probe checks readability, not
+/// mere existence.
+#[test]
+fn strict_present_but_unreadable_key_reports_identity_key_unresolvable() {
+    let system = identity_mock(&[
+        ("/r/.remargin.yaml", &strict_agent_yaml("/r/keys/agentdir")),
+        ("/r/.remargin-registry.yaml", strict_agent_registry()),
+    ])
+    .with_dir(Path::new("/r/keys/agentdir"))
+    .unwrap();
+    let report = run_at_r(&system);
+    assert_eq!(
+        findings_of_kind(&report, &FindingKind::IdentityKeyUnresolvable).len(),
+        1,
+        "present-but-unreadable key must still flag: {report:#?}",
+    );
+}
+
+/// Scenario 3: strict realm whose `key:` points at a readable file → no
+/// identity finding.
+#[test]
+fn strict_readable_key_has_no_finding() {
+    let system = identity_mock(&[
+        ("/r/.remargin.yaml", &strict_agent_yaml("/r/keys/agent")),
+        ("/r/.remargin-registry.yaml", strict_agent_registry()),
+        ("/r/keys/agent", "PRIVATE KEY"),
+    ]);
+    let report = run_at_r(&system);
+    assert!(
+        findings_of_kind(&report, &FindingKind::IdentityKeyUnresolvable).is_empty()
+            && findings_of_kind(&report, &FindingKind::AgentKeyUnderUserSsh).is_empty(),
+        "readable key in-realm is clean: {report:#?}",
+    );
+}
+
+/// Scenario 4: open mode with a missing key → the strict-only readability
+/// check does not fire.
+#[test]
+fn open_mode_missing_key_has_no_finding() {
+    let yaml = "mode: open\ntype: agent\nidentity: agent1\nkey: /r/keys/missing\n";
+    let system = identity_mock(&[("/r/.remargin.yaml", yaml)]);
+    let report = run_at_r(&system);
+    assert!(
+        findings_of_kind(&report, &FindingKind::IdentityKeyUnresolvable).is_empty(),
+        "strict-only check must not fire in open mode: {report:#?}",
+    );
+}
+
+/// Scenario 5: an agent identity whose `key:` resolves under the user's
+/// `~/.ssh` → one `AgentKeyUnderUserSsh` naming the identity and key.
+#[test]
+fn agent_key_under_user_ssh_reports_finding() {
+    let yaml = "mode: open\ntype: agent\nidentity: agent1\nkey: id_ed25519\n";
+    let system = identity_mock(&[
+        ("/r/.remargin.yaml", yaml),
+        ("/home/u/.ssh/id_ed25519", "PRIVATE KEY"),
+    ]);
+    let report = run_at_r(&system);
+    let found = findings_of_kind(&report, &FindingKind::AgentKeyUnderUserSsh);
+    assert_eq!(found.len(), 1, "expected one finding: {report:#?}");
+    let finding = found[0];
+    assert_eq!(finding.severity, Severity::Warning);
+    assert!(
+        finding.message.contains("agent1") && finding.message.contains("/home/u/.ssh/id_ed25519"),
+        "message names identity and key: {}",
+        finding.message,
+    );
+    assert!(
+        finding.remedy.contains("~/.ssh"),
+        "remedy points out of ~/.ssh: {}",
+        finding.remedy,
+    );
+    assert!(
+        findings_of_kind(&report, &FindingKind::IdentityKeyUnresolvable).is_empty(),
+        "open mode: no strict readability finding: {report:#?}",
+    );
+}
+
+/// Scenario 6: a human identity whose `key:` lives under `~/.ssh` → no
+/// finding (`~/.ssh` is the expected home for a human key).
+#[test]
+fn human_key_under_user_ssh_has_no_finding() {
+    let yaml = "mode: open\ntype: human\nidentity: human1\nkey: id_ed25519\n";
+    let system = identity_mock(&[
+        ("/r/.remargin.yaml", yaml),
+        ("/home/u/.ssh/id_ed25519", "PRIVATE KEY"),
+    ]);
+    let report = run_at_r(&system);
+    assert!(
+        findings_of_kind(&report, &FindingKind::AgentKeyUnderUserSsh).is_empty(),
+        "~/.ssh is the expected home for a human key: {report:#?}",
+    );
+}
+
+/// Scenario 7: the hook is absent → the report leads with `HookMissing`
+/// and every later check, including the identity/key check, is skipped.
+#[test]
+fn hook_missing_skips_identity_key_check() {
+    let system = MockSystem::new()
+        .with_dir(Path::new("/r"))
+        .unwrap()
+        .with_dir(Path::new("/r/.claude"))
+        .unwrap()
+        .with_env("HOME", "/home/u")
+        .unwrap()
+        .with_file(
+            Path::new("/r/.remargin.yaml"),
+            strict_agent_yaml("/r/keys/agent").as_bytes(),
+        )
+        .unwrap()
+        .with_file(
+            Path::new("/r/.remargin-registry.yaml"),
+            strict_agent_registry().as_bytes(),
+        )
+        .unwrap();
+    let report = run_at_r(&system);
+    assert!(!report.hook_installed);
+    assert_eq!(report.findings.len(), 1, "only HookMissing: {report:#?}");
+    assert_eq!(report.findings[0].kind, FindingKind::HookMissing);
+    assert!(
+        findings_of_kind(&report, &FindingKind::IdentityKeyUnresolvable).is_empty(),
+        "identity check must be skipped when the hook is missing: {report:#?}",
+    );
+}
+
+/// The new kinds serialize to their `snake_case` wire names, round-trip
+/// through JSON, render as WARNING in text, and each contributes one
+/// prompt-mode instruction.
+#[test]
+fn identity_findings_render_and_serialize() {
+    let report = DoctorReport {
+        findings: vec![
+            DoctorFinding {
+                kind: FindingKind::IdentityKeyUnresolvable,
+                message: String::from("agent1 signing key is not a readable file"),
+                remedy: String::from("Fix the key: path in /r/.remargin.yaml"),
+                severity: Severity::Warning,
+            },
+            DoctorFinding {
+                kind: FindingKind::AgentKeyUnderUserSsh,
+                message: String::from("agent1 key lives under ~/.ssh"),
+                remedy: String::from("Move the agent's key out of ~/.ssh"),
+                severity: Severity::Warning,
+            },
+        ],
+        hook_installed: true,
+        session_guard_installed: true,
+        project_settings_file: PathBuf::from("/r/.claude/settings.json"),
+        user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
+    };
+
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(
+        json.contains("identity_key_unresolvable") && json.contains("agent_key_under_user_ssh"),
+        "wire names present: {json}",
+    );
+    let parsed: DoctorReport = serde_json::from_str(&json).unwrap();
+    assert_eq!(report, parsed);
+
+    let text = render_doctor_text(&report, false);
+    assert_eq!(
+        text.matches("[WARNING]").count(),
+        2,
+        "both findings labelled WARNING: {text}",
+    );
+
+    let prompt = render_doctor_prompt(&report);
+    assert!(
+        prompt.contains("1.") && prompt.contains("2."),
+        "prompt: {prompt}"
+    );
+    assert!(
+        prompt.contains("Fix the key: path in /r/.remargin.yaml")
+            && prompt.contains("Move the agent's key out of ~/.ssh"),
+        "prompt names each remedy: {prompt}",
+    );
+}
