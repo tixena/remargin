@@ -1,3 +1,9 @@
+# Cargo features the quality gate turns on beyond crate defaults. The
+# `session` feature (remargin-core) is off by default so a shipped/installed
+# binary stays lean and dep-free; the gate enables it here so the `session:`
+# config-block code and its tests are actually compiled, linted, and run.
+gate_features := "remargin-core/session"
+
 # Default: list recipes.
 default:
     @just --list
@@ -11,7 +17,7 @@ generate-types:
 lint: lint-rust lint-ts
 
 lint-rust:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --all-targets --features {{gate_features}} -- -D warnings
     cargo fmt --check
 
 lint-ts:
@@ -22,7 +28,7 @@ lint-ts:
 build: build-rust build-ts
 
 build-rust:
-    cargo build
+    cargo build --features {{gate_features}}
 
 build-ts: generate-types
     pnpm -C packages/remargin-obsidian build
@@ -36,7 +42,7 @@ build-cli-obsidian:
 
 # Run the Rust test suite.
 test:
-    cargo test
+    cargo test --features {{gate_features}}
 
 # Generate code coverage report (requires cargo-llvm-cov)
 test-coverage:

@@ -17,6 +17,9 @@ unrestricted = []
 # cfg(feature = "...") checks successfully in this crate's scope.
 zod = []
 jsonschema = []
+# Optional `session:` config block (SessionConfig + humantime duration
+# parsing). Off by default so the default build stays feature-free.
+session = ["dep:humantime"]
 
 [dependencies]
 # YAML / JSON processing
@@ -56,6 +59,9 @@ rand.workspace = true
 
 # Regex (text search)
 regex.workspace = true
+
+# Human-friendly duration parsing for the `session:` block (session feature).
+humantime = { workspace = true, optional = true }
 
 # Logging
 tracing.workspace = true

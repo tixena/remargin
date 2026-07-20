@@ -8,6 +8,8 @@ pub mod system_prompt;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "session")]
+use core::time::Duration;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
@@ -44,6 +46,13 @@ pub struct Config {
     /// only.
     #[serde(default)]
     pub permissions: Permissions,
+    /// Per-agent `remargin session launch` parameters. Gated behind the
+    /// `session` feature and absent from the default build; a
+    /// `.remargin.yaml` with no `session:` block parses to `None`, and
+    /// with the feature off the key is ignored entirely.
+    #[cfg(feature = "session")]
+    #[serde(default)]
+    pub session: Option<SessionConfig>,
     /// Optional folder-scoped system prompt for AI runs over docs in
     /// this realm. Resolved by walking parents via
     /// [`system_prompt::resolve_system_prompt`]; identity-free.
@@ -66,6 +75,65 @@ pub struct SystemPrompt {
     /// The literal prompt body. Written verbatim into the AI payload
     /// by the caller — this loader does no templating.
     pub prompt: String,
+}
+
+/// Per-agent session parameters for `remargin session launch`.
+///
+/// Optional block; `loop_interval` and `goal` are required to *launch*
+/// (enforced in the launch-spec builder, task 84), not to parse. Gated
+/// behind the `session` feature.
+#[cfg(feature = "session")]
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct SessionConfig {
+    /// Optional per-session resource caps. Absent = no cap.
+    #[serde(default)]
+    pub budget: Option<Budget>,
+    /// Optional Claude backend parameters (`model`, `effort`).
+    #[serde(default)]
+    pub claude: Option<ClaudeParams>,
+    /// `/goal` stop condition passed to the backend.
+    pub goal: Option<String>,
+    /// `/loop` cadence as a duration string (`30s`, `5min`, `1h`).
+    /// Stored raw; parsed via [`SessionConfig::loop_duration`].
+    #[serde(rename = "loop")]
+    pub loop_interval: Option<String>,
+}
+
+/// Claude backend parameters declared under `session.claude`.
+#[cfg(feature = "session")]
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct ClaudeParams {
+    pub effort: Option<String>,
+    pub model: Option<String>,
+}
+
+/// Per-session resource caps declared under `session.budget`. An absent
+/// field (or an absent `budget:` block) means "no cap".
+#[cfg(feature = "session")]
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct Budget {
+    pub max_turns: Option<u32>,
+    pub tokens: Option<u64>,
+}
+
+#[cfg(feature = "session")]
+impl SessionConfig {
+    /// Parse `loop_interval` into a `Duration`. `Ok(None)` when unset.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the offending value when `loop_interval`
+    /// is set but not a valid duration string; the caller adds the
+    /// identity context (task 84). Never panics.
+    pub fn loop_duration(&self) -> Result<Option<Duration>> {
+        self.loop_interval
+            .as_deref()
+            .map(parse_loop_interval)
+            .transpose()
+    }
 }
 
 /// Enforcement mode for the participant registry.
@@ -456,6 +524,14 @@ struct WalkedIdentityFields {
 
 fn default_assets_dir() -> String {
     String::from("assets")
+}
+
+/// Parse a `loop:` duration string (`30s`, `5min`, `1h`, `500ms`) via
+/// `humantime`. The error names the bad value so a launch-time failure
+/// (task 84) is attributable to the config that declared it.
+#[cfg(feature = "session")]
+fn parse_loop_interval(s: &str) -> Result<Duration> {
+    humantime::parse_duration(s).with_context(|| format!("invalid loop interval {s:?}"))
 }
 
 /// Walk-based fallback used by [`ResolvedConfig::resolve`] when no

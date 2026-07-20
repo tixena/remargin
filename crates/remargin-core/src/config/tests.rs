@@ -1,17 +1,36 @@
 //! Tests for the config and registry loader.
 
+#[cfg(feature = "session")]
+use core::time::Duration;
 use std::path::Path;
 
 use os_shim::mock::MockSystem;
 
 use crate::parser::AuthorType;
 
+#[cfg(feature = "session")]
+use super::Config;
 use super::identity::IdentityFlags;
 use super::registry::RegistryParticipantStatus;
 use super::{
     Mode, ResolvedConfig, load_config, load_config_filtered, load_registry, resolve_key_path,
     resolve_mode,
 };
+
+#[cfg(feature = "session")]
+const FULL_SESSION_YAML: &str = "\
+identity: finance_agent
+key: ~/.remargin/keys/finance
+mode: strict
+system_prompt:
+  name: Finance
+  prompt: \"You are the finance agent. Process your pending sandbox work.\"
+session:
+  loop: 30s
+  goal: \"process pending work; stop when the sandbox is empty\"
+  claude: { model: claude-opus-4-8, effort: high }
+  budget: { max_turns: 20, tokens: 200000 }
+";
 
 fn minimal_config_yaml(identity: &str) -> String {
     format!("identity: {identity}\n")
@@ -934,4 +953,66 @@ fn doc_realm_open_replaces_caller_strict_mode() {
         "the file's realm declares open; the caller's stricter context \
          must not replace the realm's mode - realm is the source of truth"
     );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_full_block_parses() {
+    let cfg: Config = serde_yaml::from_str(FULL_SESSION_YAML).unwrap();
+    let s = cfg.session.as_ref().unwrap();
+    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_secs(30)));
+    assert_eq!(
+        s.goal.as_deref(),
+        Some("process pending work; stop when the sandbox is empty")
+    );
+    let claude = s.claude.as_ref().unwrap();
+    assert_eq!(claude.model.as_deref(), Some("claude-opus-4-8"));
+    assert_eq!(claude.effort.as_deref(), Some("high"));
+    let budget = s.budget.as_ref().unwrap();
+    assert_eq!(budget.max_turns, Some(20));
+    assert_eq!(budget.tokens, Some(200_000));
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_minimal_block_defaults_claude_and_budget_to_none() {
+    let cfg: Config = serde_yaml::from_str("session:\n  loop: 5min\n  goal: x\n").unwrap();
+    let s = cfg.session.as_ref().unwrap();
+    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_secs(300)));
+    assert_eq!(s.goal.as_deref(), Some("x"));
+    assert!(s.claude.is_none());
+    assert!(s.budget.is_none());
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_absent_parses_to_none() {
+    let cfg: Config = serde_yaml::from_str("identity: bob\n").unwrap();
+    assert!(cfg.session.is_none());
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_malformed_loop_is_attributable_error_not_panic() {
+    let cfg: Config = serde_yaml::from_str("session:\n  loop: banana\n  goal: x\n").unwrap();
+    let err = cfg.session.as_ref().unwrap().loop_duration().unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("banana"),
+        "error must name the bad value, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_budget_omitted_is_none_and_partial_claude_allowed() {
+    let cfg: Config =
+        serde_yaml::from_str("session:\n  loop: 1h\n  goal: x\n  claude: { effort: high }\n")
+            .unwrap();
+    let s = cfg.session.as_ref().unwrap();
+    assert!(s.budget.is_none());
+    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_secs(3600)));
+    let claude = s.claude.as_ref().unwrap();
+    assert!(claude.model.is_none());
+    assert_eq!(claude.effort.as_deref(), Some("high"));
 }

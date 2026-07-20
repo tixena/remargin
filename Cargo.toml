@@ -54,6 +54,9 @@ rand = "0.10"
 # Regex (text search)
 regex = "1"
 
+# Human-friendly duration parsing (session: loop interval; `session` feature)
+humantime = "2"
+
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
