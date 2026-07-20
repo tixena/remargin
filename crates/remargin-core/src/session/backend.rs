@@ -73,7 +73,10 @@ impl SessionBackend for ClaudeBackend {
         argv.push("-n".to_owned());
         argv.push(spec.identity.clone());
         argv.push("--permission-mode".to_owned());
-        argv.push("acceptEdits".to_owned());
+        // `auto`, not `acceptEdits`: an unattended loop agent must be able to
+        // call the remargin MCP tools without stalling on a prompt, and
+        // `acceptEdits` only auto-approves file edits, not MCP tool calls.
+        argv.push("auto".to_owned());
         // `budget.max_turns` is folded into the `/goal` seed line by
         // `seed_inputs`; `budget.tokens` has no interactive `claude` flag
         // (`--max-budget-usd`/`--max-turns` are `--print`-mode only), so it

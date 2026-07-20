@@ -363,7 +363,7 @@ fn claude_launch_command_uses_task81_invocation() {
     assert_eq!(flag_value(&argv, "--model"), Some("claude-opus-4-8"));
     assert_eq!(flag_value(&argv, "--effort"), Some("high"));
     assert_eq!(flag_value(&argv, "-n"), Some("finance"));
-    assert_eq!(flag_value(&argv, "--permission-mode"), Some("acceptEdits"));
+    assert_eq!(flag_value(&argv, "--permission-mode"), Some("auto"));
     // Interactive launch only -- never headless `claude -p`/`--print`.
     assert!(!argv.iter().any(|arg| arg == "-p" || arg == "--print"));
     // Budget has no interactive claude flag; none is invented.

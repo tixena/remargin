@@ -232,10 +232,7 @@ fn print_emits_launch_command_and_seed_lines() {
         "argv: {stdout}"
     );
     assert!(stdout.contains("--strict-mcp-config"), "argv: {stdout}");
-    assert!(
-        stdout.contains("--permission-mode acceptEdits"),
-        "argv: {stdout}"
-    );
+    assert!(stdout.contains("--permission-mode auto"), "argv: {stdout}");
     assert!(!stdout.contains(" -p "), "must not be headless: {stdout}");
     // Seed lines are typed into the session, not passed as flags.
     assert!(stdout.contains("/loop 30s"), "loop seed: {stdout}");
