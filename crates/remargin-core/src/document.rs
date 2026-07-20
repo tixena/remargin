@@ -509,6 +509,25 @@ pub fn get(
     }
 }
 
+/// Normalize an (optional start, optional end) pair into an inclusive
+/// 1-indexed line window.
+///
+/// A lone bound yields a half-open range: a lone `start` is a tail to EOF
+/// (the slicer clamps `end` past EOF), a lone `end` is a head from line 1.
+/// Neither bound means "whole document".
+#[must_use]
+pub const fn resolve_line_window(
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Option<(usize, usize)> {
+    match (start, end) {
+        (Some(s), Some(e)) => Some((s, e)),
+        (Some(s), None) => Some((s, usize::MAX)),
+        (None, Some(e)) => Some((1, e)),
+        (None, None) => None,
+    }
+}
+
 /// Shared `get` core that returns body text **and** the outbound links in
 /// the same window.
 ///

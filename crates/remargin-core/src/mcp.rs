@@ -2138,10 +2138,7 @@ fn handle_get(
         return Ok(binary_resource_result(&payload));
     }
 
-    let lines = match (start_line, end_line) {
-        (Some(start), Some(end)) => Some((start, end)),
-        _ => None,
-    };
+    let lines = document::resolve_line_window(start_line, end_line);
 
     let result = document::get_with_links(
         system,

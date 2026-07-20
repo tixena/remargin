@@ -559,10 +559,7 @@ pub fn cmd_get(
         bail!("--out requires --binary");
     }
 
-    let lines = match (gp.start, gp.end) {
-        (Some(s), Some(e)) => Some((s, e)),
-        _ => None,
-    };
+    let lines = document::resolve_line_window(gp.start, gp.end);
 
     if gp.output.is_json() && gp.line_numbers {
         let result = document::get_with_links(

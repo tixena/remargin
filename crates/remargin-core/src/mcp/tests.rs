@@ -1188,6 +1188,76 @@ fn get_compact_no_line_numbers_minified() {
     assert!(result["elapsed_ms"].is_number());
 }
 
+#[test]
+fn get_lone_start_line_returns_tail_not_whole_file() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(base.join("notes.md"), b"one\ntwo\nthree\nfour\nfive\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get",
+                "arguments": { "path": "notes.md", "start_line": 3_i32, "line_numbers": true }
+            }
+        }),
+    );
+
+    let result: Value = serde_json::from_str(&extract_tool_raw_text(&response)).unwrap();
+    assert_eq!(
+        result["start_line"], 3_i32,
+        "tail must start at requested line"
+    );
+    let lines = result["lines"].as_array().unwrap();
+    assert_eq!(lines[0], "three");
+    assert!(
+        !lines.iter().any(|l| l == "one" || l == "two"),
+        "lone start_line must drop the head, got {lines:?}"
+    );
+}
+
+#[test]
+fn get_lone_end_line_returns_head_not_whole_file() {
+    let base = Path::new("/docs");
+    let system = MockSystem::new()
+        .with_file(base.join("notes.md"), b"one\ntwo\nthree\nfour\nfive\n")
+        .unwrap();
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1_i32,
+            "method": "tools/call",
+            "params": {
+                "name": "get",
+                "arguments": { "path": "notes.md", "end_line": 2_i32, "line_numbers": true }
+            }
+        }),
+    );
+
+    let result: Value = serde_json::from_str(&extract_tool_raw_text(&response)).unwrap();
+    assert_eq!(result["start_line"], 1_i32);
+    let lines = result["lines"].as_array().unwrap();
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l == "three" || l == "four" || l == "five"),
+        "lone end_line must drop the tail, got {lines:?}"
+    );
+}
+
 /// The `elapsed_ms` injector re-serializes with the payload's own style: a
 /// minified compact `get` stays minified; a pretty tool (`metadata`) stays
 /// pretty. Both keep their injected `elapsed_ms`.

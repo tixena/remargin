@@ -563,6 +563,15 @@ fn get_with_lines() {
 }
 
 #[test]
+fn resolve_line_window_supports_half_open_ranges() {
+    use crate::document::resolve_line_window;
+    assert_eq!(resolve_line_window(Some(3), Some(5)), Some((3, 5)));
+    assert_eq!(resolve_line_window(Some(3), None), Some((3, usize::MAX)));
+    assert_eq!(resolve_line_window(None, Some(5)), Some((1, 5)));
+    assert_eq!(resolve_line_window(None, None), None);
+}
+
+#[test]
 fn get_escape_attempt() {
     let system = MockSystem::new()
         .with_current_dir("/project")
