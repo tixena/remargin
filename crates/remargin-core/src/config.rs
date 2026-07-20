@@ -23,7 +23,7 @@ use crate::parser::AuthorType;
 use crate::path::expand_path;
 use crate::permissions::op_guard::CallerInfo;
 
-const CONFIG_FILENAME: &str = ".remargin.yaml";
+pub(crate) const CONFIG_FILENAME: &str = ".remargin.yaml";
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
 
 /// Parsed contents of a `.remargin.yaml` file.
