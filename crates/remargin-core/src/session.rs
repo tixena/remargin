@@ -6,6 +6,7 @@
 //! fan-out that `remargin session launch` needs. Gated behind the
 //! `session` Cargo feature; absent from the default build.
 
+pub mod backend;
 pub mod discovery;
 pub mod spec;
 

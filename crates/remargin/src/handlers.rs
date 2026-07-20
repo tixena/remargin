@@ -71,7 +71,11 @@ use remargin_core::permissions::session_guard_install;
 use remargin_core::permissions::unprotect as permissions_unprotect;
 use remargin_core::responses;
 #[cfg(feature = "session")]
+use remargin_core::session::backend::resolve_backend;
+#[cfg(feature = "session")]
 use remargin_core::session::discovery::{DiscoveredSession, discover_sessions};
+#[cfg(feature = "session")]
+use remargin_core::session::spec::build_launch_spec;
 use remargin_core::writer::InsertPosition;
 
 const fn author_type_str(at: &parser::AuthorType) -> &'static str {
@@ -2585,6 +2589,7 @@ pub fn cmd_session(
     action: &SessionAction,
 ) -> Result<()> {
     let SessionAction::Launch {
+        backend,
         dry_run,
         identity,
         output_args,
@@ -2599,9 +2604,69 @@ pub fn cmd_session(
         return render_dry_run(sinks, cwd, &sessions, output_args.json);
     }
     if *print {
-        bail!("`--print` arrives with task 85");
+        return render_session_print(sinks, backend, &sessions);
     }
     bail!("launch is not available yet -- run with --dry-run");
+}
+
+/// Print each discovered identity's launch plan and spawn nothing.
+///
+/// The resolved backend renders the interactive launch argv (shown as a
+/// runnable `cd <cwd> && <argv>`) plus the `/loop` + `/goal` seed lines to
+/// type into the running session. Each spec is built through
+/// [`build_launch_spec`], so a missing `loop`/`goal` surfaces the task-84
+/// error here rather than printing a broken command. Nothing is launched
+/// and no send-keys happen: `--print` only prints.
+#[cfg(feature = "session")]
+fn render_session_print(
+    sinks: &mut IoSinks<'_>,
+    backend_name: &str,
+    sessions: &[DiscoveredSession],
+) -> Result<()> {
+    let backend = resolve_backend(backend_name)?;
+    for session in sessions {
+        let spec = build_launch_spec(session)?;
+        let launch = backend.launch_command(&spec)?;
+        out(sinks, &format!("# {}", spec.identity))?;
+        out(
+            sinks,
+            &format!(
+                "cd {} && {}",
+                shell_quote(&spec.cwd.to_string_lossy()),
+                shell_join(&launch)
+            ),
+        )?;
+        out(sinks, "# seed inputs (type into the running session):")?;
+        for line in backend.seed_inputs(&spec) {
+            out(sinks, &format!("  {line}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// POSIX single-quote a shell word, leaving it bare when it holds only
+/// safe characters. Display-only -- the printed command is for task 86 (or
+/// a human) to run; `--print` spawns nothing.
+#[cfg(feature = "session")]
+fn shell_quote(word: &str) -> String {
+    let safe = !word.is_empty()
+        && word
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_./:=@%+,".contains(&byte));
+    if safe {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
+}
+
+/// Shell-quote each argv element and join with spaces into one command line.
+#[cfg(feature = "session")]
+fn shell_join(argv: &[String]) -> String {
+    argv.iter()
+        .map(|word| shell_quote(word))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A session is launchable only once both its `loop` cadence and `goal`

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use os_shim::mock::MockSystem;
 
+use super::backend::{ClaudeBackend, SessionBackend as _, resolve_backend};
 use super::discovery::{DiscoveredSession, discover_sessions};
 use super::spec::build_launch_spec;
 
@@ -334,4 +335,109 @@ fn mcp_server_spec_scopes_to_cwd_and_identity() {
     assert_eq!(spec.mcp.base_dir.as_path(), Path::new("/demo/finance"));
     assert_eq!(spec.mcp.identity, "finance");
     assert_eq!(spec.mcp.argv, ["remargin", "mcp"]);
+}
+
+// --- Claude backend (task 85) --------------------------------------------
+
+/// The argv value immediately following `flag`, if present.
+fn flag_value<'argv>(argv: &'argv [String], flag: &str) -> Option<&'argv str> {
+    argv.iter()
+        .position(|arg| arg == flag)
+        .and_then(|index| argv.get(index + 1))
+        .map(String::as_str)
+}
+
+#[test]
+fn claude_launch_command_uses_task81_invocation() {
+    let system = launch_demo_tree();
+    let spec = build_launch_spec(&discovered(&system, "finance")).unwrap();
+
+    let argv = ClaudeBackend.launch_command(&spec).unwrap();
+
+    assert_eq!(argv.first().map(String::as_str), Some("claude"));
+    assert_eq!(
+        flag_value(&argv, "--append-system-prompt"),
+        Some(spec.prompt.as_str())
+    );
+    assert!(argv.iter().any(|arg| arg == "--strict-mcp-config"));
+    assert_eq!(flag_value(&argv, "--model"), Some("claude-opus-4-8"));
+    assert_eq!(flag_value(&argv, "--effort"), Some("high"));
+    assert_eq!(flag_value(&argv, "-n"), Some("finance"));
+    assert_eq!(flag_value(&argv, "--permission-mode"), Some("acceptEdits"));
+    // Interactive launch only -- never headless `claude -p`/`--print`.
+    assert!(!argv.iter().any(|arg| arg == "-p" || arg == "--print"));
+    // Budget has no interactive claude flag; none is invented.
+    assert!(
+        !argv
+            .iter()
+            .any(|arg| arg == "--max-turns" || arg == "--max-budget-usd")
+    );
+}
+
+#[test]
+fn claude_launch_command_carries_scoped_mcp_config() {
+    let system = launch_demo_tree();
+    let spec = build_launch_spec(&discovered(&system, "finance")).unwrap();
+
+    let argv = ClaudeBackend.launch_command(&spec).unwrap();
+    let mcp = flag_value(&argv, "--mcp-config").unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(mcp).unwrap();
+
+    assert_eq!(parsed["mcpServers"]["remargin"]["command"], "remargin");
+    assert_eq!(parsed["mcpServers"]["remargin"]["args"][0], "mcp");
+}
+
+#[test]
+fn claude_launch_command_omits_model_and_effort_when_absent() {
+    let system = launch_demo_tree();
+    let spec = build_launch_spec(&discovered(&system, "ops")).unwrap();
+
+    let argv = ClaudeBackend.launch_command(&spec).unwrap();
+
+    assert!(!argv.iter().any(|arg| arg == "--model"));
+    assert!(!argv.iter().any(|arg| arg == "--effort"));
+    assert_eq!(flag_value(&argv, "-n"), Some("ops"));
+}
+
+#[test]
+fn claude_seed_inputs_fold_max_turns_into_goal() {
+    let system = launch_demo_tree();
+    let spec = build_launch_spec(&discovered(&system, "finance")).unwrap();
+
+    let seeds = ClaudeBackend.seed_inputs(&spec);
+
+    assert_eq!(
+        seeds,
+        [
+            "/loop 30s".to_owned(),
+            "/goal process pending work; stop when the sandbox is empty \
+             or stop after 40 turns"
+                .to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn claude_seed_inputs_without_budget_is_plain_goal() {
+    let system = launch_demo_tree();
+    let spec = build_launch_spec(&discovered(&system, "ops")).unwrap();
+
+    let seeds = ClaudeBackend.seed_inputs(&spec);
+
+    assert_eq!(
+        seeds,
+        [
+            "/loop 1h".to_owned(),
+            "/goal keep the queue empty".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn resolve_backend_known_and_unknown() {
+    assert_eq!(resolve_backend("claude").unwrap().name(), "claude");
+
+    let err = resolve_backend("bogus").err().unwrap().to_string();
+    assert!(err.contains("bogus"), "names the offender: {err}");
+    assert!(err.contains("claude"), "lists known backends: {err}");
 }
