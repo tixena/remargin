@@ -123,18 +123,97 @@ fn dry_run_identity_filter_restricts_rows() {
     );
 }
 
+/// A bare launch that names an unknown multiplexer must fail on the flag
+/// before touching any session — and, crucially, without spawning tmux
+/// (which the gate must never do).
 #[test]
-fn bare_launch_reports_not_available() {
+fn bare_launch_rejects_unknown_multiplexer() {
     let system = launchable_tree();
+    let action = SessionAction::Launch {
+        backend: String::from("claude"),
+        dry_run: false,
+        identity: Vec::new(),
+        multiplexer: String::from("screen"),
+        output_args: OutputArgs {
+            compact: false,
+            json: false,
+            verbose: false,
+        },
+        print: false,
+    };
+    let (result, stdout) = run(&system, "/demo", &action);
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("screen"),
+        "names the offender: {err:#}"
+    );
+    assert!(
+        format!("{err:#}").contains("tmux") && format!("{err:#}").contains("zellij"),
+        "lists allowed values: {err:#}"
+    );
+    assert!(stdout.is_empty(), "no output on a flag error: {stdout}");
+}
+
+/// zellij is parsed but its launch path is gated pending a follow-up; a bare
+/// `--multiplexer zellij` launch surfaces that clearly, spawning nothing.
+#[test]
+fn bare_launch_zellij_is_gated_pending() {
+    let system = launchable_tree();
+    let action = SessionAction::Launch {
+        backend: String::from("claude"),
+        dry_run: false,
+        identity: Vec::new(),
+        multiplexer: String::from("zellij"),
+        output_args: OutputArgs {
+            compact: false,
+            json: false,
+            verbose: false,
+        },
+        print: false,
+    };
+    let (result, _stdout) = run(&system, "/demo", &action);
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("zellij support pending"),
+        "clear pending message: {err:#}"
+    );
+}
+
+/// A bare (real) launch builds every identity's spec first, so a missing
+/// `goal` surfaces the task-84 error before any multiplexer command is
+/// spawned. This keeps the launch branch under test without a real tmux.
+#[test]
+fn bare_launch_surfaces_task84_error_before_spawning() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/demo/.remargin.yaml"),
+            b"identity: root_agent\nsession:\n  loop: 30s\n",
+        )
+        .unwrap();
     let (result, stdout) = run(&system, "/demo", &launch(false, false, Vec::new(), false));
     let err = result.unwrap_err();
     assert!(
-        format!("{err:#}").contains("not available yet"),
-        "message: {err:#}"
+        format!("{err:#}").contains("`goal` is required"),
+        "task-84 error surfaces: {err:#}"
     );
     assert!(
         stdout.is_empty(),
-        "bare launch must not print a table: {stdout}"
+        "nothing printed before the error: {stdout}"
+    );
+}
+
+/// A bare launch with no discovered identity bails clearly rather than
+/// spawning an empty session.
+#[test]
+fn bare_launch_no_identities_bails() {
+    let system = MockSystem::new()
+        .with_file(Path::new("/demo/.remargin.yaml"), b"mode: open\n")
+        .unwrap();
+    let (result, _stdout) = run(&system, "/demo", &launch(false, false, Vec::new(), false));
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("no launchable identities"),
+        "clear empty message: {err:#}"
     );
 }
 
@@ -207,6 +286,20 @@ fn print_unknown_backend_lists_known() {
     assert!(
         format!("{err:#}").contains("claude"),
         "lists known: {err:#}"
+    );
+}
+
+/// The launch path must write no PID/registry file (discussion decisions 3
+/// & 5). Scan the handler source and assert it never references a
+/// `.remargin/sessions/` path.
+#[test]
+fn launch_handler_writes_no_session_registry_path() {
+    use std::fs;
+
+    let src = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/handlers.rs")).unwrap();
+    assert!(
+        !src.contains(".remargin/sessions"),
+        "the launch handler must not write a session registry file"
     );
 }
 

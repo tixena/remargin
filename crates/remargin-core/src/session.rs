@@ -8,6 +8,7 @@
 
 pub mod backend;
 pub mod discovery;
+pub mod multiplexer;
 pub mod spec;
 
 #[cfg(test)]

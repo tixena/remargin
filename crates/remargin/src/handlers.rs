@@ -75,6 +75,10 @@ use remargin_core::session::backend::resolve_backend;
 #[cfg(feature = "session")]
 use remargin_core::session::discovery::{DiscoveredSession, discover_sessions};
 #[cfg(feature = "session")]
+use remargin_core::session::multiplexer::{
+    Multiplexer, Tab, launch_into_multiplexer, session_name,
+};
+#[cfg(feature = "session")]
 use remargin_core::session::spec::build_launch_spec;
 use remargin_core::writer::InsertPosition;
 
@@ -2576,11 +2580,12 @@ pub fn cmd_mcp(
     }
 }
 
-/// Discover sessions under `cwd` and render the launch plan.
+/// Discover sessions under `cwd` and either render the launch plan
+/// (`--dry-run` / `--print`) or launch it.
 ///
-/// This task ships only the read-only `--dry-run` slice. A bare
-/// `session launch` (no `--dry-run`, no `--print`) reports that launch is
-/// not yet available rather than spawning anything.
+/// A bare `session launch` (no `--dry-run`, no `--print`) launches one
+/// interactive session per discovered identity into a new named multiplexer
+/// session via [`render_session_launch`].
 #[cfg(feature = "session")]
 pub fn cmd_session(
     sinks: &mut IoSinks<'_>,
@@ -2592,9 +2597,9 @@ pub fn cmd_session(
         backend,
         dry_run,
         identity,
+        multiplexer,
         output_args,
         print,
-        ..
     } = action;
     let mut sessions = discover_sessions(system, cwd)?;
     if !identity.is_empty() {
@@ -2606,7 +2611,49 @@ pub fn cmd_session(
     if *print {
         return render_session_print(sinks, backend, &sessions);
     }
-    bail!("launch is not available yet -- run with --dry-run");
+    render_session_launch(sinks, cwd, backend, multiplexer, &sessions)
+}
+
+/// Launch one interactive session per discovered identity into a new named
+/// multiplexer session, print its name and an attach hint, and exit.
+///
+/// Each identity's spec is built through [`build_launch_spec`] (a missing
+/// `loop`/`goal` surfaces the task-84 error), rendered by the resolved
+/// backend into an interactive launch argv plus the `/loop` + `/goal` seed
+/// lines, and carried as a [`Tab`]. remargin only starts the session: it
+/// writes no PID/registry file and never supervises what it launched.
+#[cfg(feature = "session")]
+fn render_session_launch(
+    sinks: &mut IoSinks<'_>,
+    cwd: &Path,
+    backend_name: &str,
+    multiplexer: &str,
+    sessions: &[DiscoveredSession],
+) -> Result<()> {
+    let mux = Multiplexer::parse(multiplexer)?;
+    if sessions.is_empty() {
+        bail!("no launchable identities under {}", cwd.display());
+    }
+    let backend = resolve_backend(backend_name)?;
+    let mut tabs = Vec::with_capacity(sessions.len());
+    for session in sessions {
+        let spec = build_launch_spec(session)?;
+        let launch = backend.launch_command(&spec)?;
+        let seeds = backend.seed_inputs(&spec);
+        tabs.push(Tab::new(spec.identity, spec.cwd, launch, seeds));
+    }
+    let name = session_name(cwd, chrono::Utc::now());
+    launch_into_multiplexer(mux, &name, &tabs)?;
+    out(
+        sinks,
+        &format!(
+            "Launched {count} session(s) in {mux_name} session: {name}",
+            count = tabs.len(),
+            mux_name = mux.name(),
+        ),
+    )?;
+    out(sinks, &format!("Attach with:  {}", mux.attach_hint(&name)))?;
+    Ok(())
 }
 
 /// Print each discovered identity's launch plan and spawn nothing.
