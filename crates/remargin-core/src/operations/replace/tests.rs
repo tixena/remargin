@@ -457,6 +457,82 @@ fn idempotent_rerun() {
     assert_eq!(second.total_replacements, 0);
 }
 
+// Scenario 15: a literal pattern that straddles an ordinary code-fence
+// boundary (prose -> fence) matches and is replaced. The parser emits
+// prose and each ordinary fence as separate adjacent `Body` segments;
+// replace coalesces those runs so the matcher sees contiguous body text.
+#[test]
+fn replace_matches_pattern_spanning_a_code_fence() {
+    let system = system_with("/project/doc.md", "before\n\n```bash\ncmd\n```\nafter\n");
+    let report = replace(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &opts("before\n\n```bash", "BEFORE\n\n```bash"),
+        &open_config(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        report.total_replacements, 1,
+        "cross-fence pattern must match"
+    );
+    let after = read(&system, "/project/doc.md");
+    assert!(after.contains("BEFORE\n\n```bash\ncmd\n```"));
+}
+
+// Scenario 16: invariant guard — a pattern that straddles a ```remargin
+// comment block must NOT match, even after ordinary fences are coalesced.
+// Comment segments stay hard boundaries a match can never cross.
+#[test]
+fn replace_still_refuses_to_cross_a_remargin_comment_block() {
+    let comment = remargin_block("a1", "hi");
+    let body = format!("before\n\n{comment}after\n");
+    let system = system_with("/project/doc.md", &body);
+    let before = read(&system, "/project/doc.md");
+
+    let report = replace(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &opts("before\n\n```remargin", "X"),
+        &open_config(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        report.total_replacements, 0,
+        "must not match across a comment block"
+    );
+    assert_eq!(read(&system, "/project/doc.md"), before);
+}
+
+// Scenario 17: a replace whose pattern is absent leaves the file
+// byte-identical — guards the coalesce reassembly across interleaved
+// prose and multiple ordinary fences.
+#[test]
+fn absent_pattern_leaves_file_byte_identical() {
+    let system = system_with(
+        "/project/doc.md",
+        "before\n\n```bash\ncmd\n```\n\n```yaml\nk: v\n```\nafter\n",
+    );
+    let before = read(&system, "/project/doc.md");
+
+    let report = replace(
+        &system,
+        Path::new("/project"),
+        Path::new("doc.md"),
+        &opts("this pattern does not exist", "x"),
+        &open_config(),
+    )
+    .unwrap();
+
+    assert_eq!(report.total_replacements, 0);
+    assert_eq!(report.files_changed, 0);
+    assert!(!report.files[0].changed);
+    assert_eq!(read(&system, "/project/doc.md"), before);
+}
+
 // An empty pattern is rejected up front.
 #[test]
 fn empty_pattern_rejected() {

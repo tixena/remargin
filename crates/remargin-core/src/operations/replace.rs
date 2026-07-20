@@ -305,21 +305,39 @@ fn try_replace_one(
         .with_context(|| format!("reading {}", resolved.display()))?;
     let doc = parser::parse(&content).context("parsing document")?;
 
-    // Body-only substitution: rewrite every `Body` payload, copy every
-    // `Comment` through untouched. Reassembly is via `to_markdown()`,
-    // consistent with every other mutating command (Design Decision 4).
+    // Body-only substitution: coalesce runs of adjacent `Body` segments
+    // into one string so the matcher sees contiguous body text across the
+    // artificial splits the parser makes at ordinary code fences. Every
+    // `Comment` is a hard boundary — it flushes the current run and is
+    // copied through untouched, so a match can never cross a comment
+    // block. Body slices are raw source concatenated verbatim, so this is
+    // pure string joining and the `to_markdown()` round-trip stays
+    // byte-identical (Design Decisions 1 & 2).
     let mut segments: Vec<Segment> = Vec::with_capacity(doc.segments.len());
     let mut replacements = 0_usize;
+    let mut body_run = String::new();
     for seg in doc.segments {
         match seg {
-            Segment::Body(text) => {
-                let (rewritten, count) = matcher.apply(&text, &options.replacement, !options.regex);
-                replacements += count;
-                segments.push(Segment::Body(rewritten));
+            Segment::Body(text) => body_run.push_str(&text),
+            Segment::Comment(cm) => {
+                flush_body_run(
+                    &mut body_run,
+                    matcher,
+                    options,
+                    &mut segments,
+                    &mut replacements,
+                );
+                segments.push(Segment::Comment(cm));
             }
-            Segment::Comment(cm) => segments.push(Segment::Comment(cm)),
         }
     }
+    flush_body_run(
+        &mut body_run,
+        matcher,
+        options,
+        &mut segments,
+        &mut replacements,
+    );
 
     // No body match: the file is untouched (a comment-only match can
     // never reach the body substitution above), so report a no-op
@@ -342,4 +360,24 @@ fn try_replace_one(
 
     let outcome = document::commit_markdown(system, config, resolved, &new_content, false)?;
     Ok((replacements, !outcome.noop))
+}
+
+/// Substitute over one coalesced run of body text, pushing the rewritten
+/// run as a single [`Segment::Body`] and accumulating the match count.
+/// An empty run pushes nothing so the reassembled document stays
+/// byte-identical; the run buffer is cleared for the next one.
+fn flush_body_run(
+    body_run: &mut String,
+    matcher: &Matcher,
+    options: &ReplaceOptions,
+    segments: &mut Vec<Segment>,
+    replacements: &mut usize,
+) {
+    if body_run.is_empty() {
+        return;
+    }
+    let (rewritten, count) = matcher.apply(body_run, &options.replacement, !options.regex);
+    *replacements += count;
+    segments.push(Segment::Body(rewritten));
+    body_run.clear();
 }
