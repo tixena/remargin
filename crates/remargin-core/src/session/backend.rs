@@ -78,9 +78,9 @@ impl SessionBackend for ClaudeBackend {
         // `acceptEdits` only auto-approves file edits, not MCP tool calls.
         argv.push("auto".to_owned());
         // `budget.max_turns` is folded into the `/goal` seed line by
-        // `seed_inputs`; `budget.tokens` has no interactive `claude` flag
-        // (`--max-budget-usd`/`--max-turns` are `--print`-mode only), so it
-        // is carried in the spec but renders nothing here.
+        // `seed_inputs`; interactive `claude` has no budget flags
+        // (`--max-budget-usd`/`--max-turns` are `--print`-mode only), which
+        // is why the `Budget` schema carries no token cap.
         Ok(argv)
     }
 

@@ -111,12 +111,17 @@ pub struct ClaudeParams {
 
 /// Per-session resource caps declared under `session.budget`. An absent
 /// field (or an absent `budget:` block) means "no cap".
+///
+/// Unknown keys are rejected, not ignored: `tokens` was removed from this
+/// schema because no backend can enforce a token cap (interactive `claude`
+/// has no token-budget flag), and a config still carrying it must fail
+/// loudly rather than parse to a cap that never applies.
 #[cfg(feature = "session")]
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct Budget {
     pub max_turns: Option<u32>,
-    pub tokens: Option<u64>,
 }
 
 #[cfg(feature = "session")]

@@ -414,7 +414,7 @@ session:
   loop: 30s                                                       # required — /loop cadence (a duration: 30s, 5min, 1h)
   goal: "process pending work; stop when the sandbox is empty"    # required — the /goal stop condition
   claude: { model: claude-opus-4-8, effort: high }                # optional — backend model + effort
-  budget: { max_turns: 20, tokens: 200000 }                       # optional — omit for no cap (e.g. local models)
+  budget: { max_turns: 20 }                                       # optional — omit for no cap (e.g. local models)
 ```
 
 ### Commands and flags
@@ -596,7 +596,7 @@ session:
   loop: 30s                                                     # required — /loop cadence (30s, 5min, 1h, …)
   goal: "process pending work; stop when the sandbox is empty"  # required — the /goal stop condition
   claude: { model: claude-opus-4-8, effort: high }              # optional — backend model + effort
-  budget: { max_turns: 20, tokens: 200000 }                     # optional — omit for no cap
+  budget: { max_turns: 20 }                                     # optional — omit for no cap
 ```
 
 ### `.remargin-registry.yaml` — participant registry

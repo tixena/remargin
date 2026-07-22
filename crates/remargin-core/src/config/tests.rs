@@ -29,7 +29,7 @@ session:
   loop: 30s
   goal: \"process pending work; stop when the sandbox is empty\"
   claude: { model: claude-opus-4-8, effort: high }
-  budget: { max_turns: 20, tokens: 200000 }
+  budget: { max_turns: 20 }
 ";
 
 fn minimal_config_yaml(identity: &str) -> String {
@@ -970,7 +970,6 @@ fn session_full_block_parses() {
     assert_eq!(claude.effort.as_deref(), Some("high"));
     let budget = s.budget.as_ref().unwrap();
     assert_eq!(budget.max_turns, Some(20));
-    assert_eq!(budget.tokens, Some(200_000));
 }
 
 #[cfg(feature = "session")]
@@ -1000,6 +999,24 @@ fn session_malformed_loop_is_attributable_error_not_panic() {
     assert!(
         msg.contains("banana"),
         "error must name the bad value, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_budget_tokens_is_rejected_not_ignored() {
+    // `tokens` was dropped from the schema because no backend can enforce a
+    // token cap. A config still carrying it must fail to parse with an error
+    // naming the field — silently ignoring it would recreate the same
+    // silent no-op the removal exists to kill.
+    let err = serde_yaml::from_str::<Config>(
+        "session:\n  loop: 30s\n  goal: x\n  budget: { max_turns: 20, tokens: 200000 }\n",
+    )
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("tokens"),
+        "error must name the rejected field, got: {msg}"
     );
 }
 
