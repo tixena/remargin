@@ -32,6 +32,27 @@ session:
   budget: { max_turns: 20 }
 ";
 
+#[cfg(feature = "session")]
+const SESSIONS_MANIFEST_YAML: &str = "\
+identity: eval_workspace
+sessions:
+  default: evaluation
+  evaluation:
+    agents:
+      - path: ./product
+        goal: \"evaluate the feature brief; stop when eduardo-burgos declares the evaluation closed\"
+        loop: 2m
+      - path: ~/src/tixena/prodoctivity/notes/agents/researcher
+        goal: \"research prior art for the feature; stop when the evaluation closes\"
+  implementation:
+    agents:
+      - path: ~/src/tixena/prodoctivity/repo
+        goal: \"process the staged work orders; stop when the sandbox is empty\"
+        loop: 10m
+        claude: { model: claude-opus-4-8, effort: high }
+        budget: { max_turns: 20 }
+";
+
 fn minimal_config_yaml(identity: &str) -> String {
     format!("identity: {identity}\n")
 }
@@ -1032,4 +1053,131 @@ fn session_budget_omitted_is_none_and_partial_claude_allowed() {
     let claude = s.claude.as_ref().unwrap();
     assert!(claude.model.is_none());
     assert_eq!(claude.effort.as_deref(), Some("high"));
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_full_manifest_parses() {
+    let cfg: Config = serde_yaml::from_str(SESSIONS_MANIFEST_YAML).unwrap();
+    let manifest = cfg.sessions.as_ref().unwrap();
+    assert_eq!(manifest.default.as_deref(), Some("evaluation"));
+    assert_eq!(manifest.sessions.len(), 2);
+
+    let evaluation = &manifest.sessions["evaluation"];
+    assert_eq!(evaluation.agents.len(), 2);
+    assert_eq!(evaluation.agents[0].path, "./product");
+    assert_eq!(evaluation.agents[0].loop_interval.as_deref(), Some("2m"));
+    assert!(evaluation.agents[0].goal.is_some());
+    assert!(evaluation.agents[1].loop_interval.is_none());
+    assert!(evaluation.agents[1].claude.is_none());
+
+    let implementation = &manifest.sessions["implementation"];
+    assert_eq!(implementation.agents.len(), 1);
+    let entry = &implementation.agents[0];
+    assert_eq!(entry.loop_interval.as_deref(), Some("10m"));
+    let claude = entry.claude.as_ref().unwrap();
+    assert_eq!(claude.model.as_deref(), Some("claude-opus-4-8"));
+    assert_eq!(claude.effort.as_deref(), Some("high"));
+    assert_eq!(entry.budget.as_ref().unwrap().max_turns, Some(20));
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_default_names_undefined_session_fails() {
+    let err = serde_yaml::from_str::<Config>(
+        "sessions:\n  default: nope\n  a:\n    agents:\n      - path: ./x\n",
+    )
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("nope"),
+        "error must name the bad default target, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_session_named_default_is_reserved() {
+    let err =
+        serde_yaml::from_str::<Config>("sessions:\n  default:\n    agents:\n      - path: ./x\n")
+            .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("reserved"),
+        "error must flag the reserved `default` key, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_unknown_key_in_agent_entry_fails() {
+    let err = serde_yaml::from_str::<Config>(
+        "sessions:\n  a:\n    agents:\n      - path: ./x\n        gaol: typo\n",
+    )
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("gaol"),
+        "error must name the unknown field, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_unknown_key_in_session_def_fails() {
+    let err = serde_yaml::from_str::<Config>(
+        "sessions:\n  a:\n    agents:\n      - path: ./x\n    extra: nope\n",
+    )
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("extra"),
+        "error must name the unknown field, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_unknown_key_in_session_block_fails() {
+    let err = serde_yaml::from_str::<Config>("session:\n  goal: x\n  lop: 5m\n").unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("lop"),
+        "error must name the unknown field, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn session_unknown_key_in_claude_fails() {
+    let err =
+        serde_yaml::from_str::<Config>("session:\n  goal: x\n  loop: 5m\n  claude: { modle: m }\n")
+            .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("modle"),
+        "error must name the unknown field, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_empty_map_fails() {
+    let err = serde_yaml::from_str::<Config>("sessions: {}\n").unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("no sessions"),
+        "error must flag the empty manifest, got: {msg}"
+    );
+}
+
+#[cfg(feature = "session")]
+#[test]
+fn sessions_empty_agents_list_fails() {
+    let err = serde_yaml::from_str::<Config>("sessions:\n  a:\n    agents: []\n").unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("empty") && msg.contains("agents"),
+        "error must flag the empty agents list, got: {msg}"
+    );
 }

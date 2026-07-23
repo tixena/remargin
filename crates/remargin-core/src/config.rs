@@ -9,6 +9,11 @@ pub mod system_prompt;
 mod tests;
 
 #[cfg(feature = "session")]
+extern crate alloc;
+
+#[cfg(feature = "session")]
+use alloc::collections::BTreeMap;
+#[cfg(feature = "session")]
 use core::time::Duration;
 use std::path::{Path, PathBuf};
 
@@ -53,6 +58,12 @@ pub struct Config {
     #[cfg(feature = "session")]
     #[serde(default)]
     pub session: Option<SessionConfig>,
+    /// Named session definitions for `remargin session launch <name>`.
+    /// Gated behind the `session` feature; absent = downward discovery
+    /// only (same gating as [`Config::session`]).
+    #[cfg(feature = "session")]
+    #[serde(default)]
+    pub sessions: Option<SessionsManifest>,
     /// Optional folder-scoped system prompt for AI runs over docs in
     /// this realm. Resolved by walking parents via
     /// [`system_prompt::resolve_system_prompt`]; identity-free.
@@ -85,6 +96,7 @@ pub struct SystemPrompt {
 #[cfg(feature = "session")]
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct SessionConfig {
     /// Optional per-session resource caps. Absent = no cap.
     #[serde(default)]
@@ -104,6 +116,7 @@ pub struct SessionConfig {
 #[cfg(feature = "session")]
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct ClaudeParams {
     pub effort: Option<String>,
     pub model: Option<String>,
@@ -122,6 +135,105 @@ pub struct ClaudeParams {
 #[serde(deny_unknown_fields)]
 pub struct Budget {
     pub max_turns: Option<u32>,
+}
+
+/// The `sessions:` block: named session definitions plus a `default`
+/// pointer.
+///
+/// `default` is a RESERVED key — its value is a string naming one of the
+/// defined sessions, so a session cannot itself be named `default`. Parsed
+/// by a hand-written [`Deserialize`] because the block mixes one
+/// string-valued reserved key with map-valued session names.
+#[cfg(feature = "session")]
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SessionsManifest {
+    /// Session a bare `remargin session launch` uses. Validated to name a
+    /// defined session at parse time.
+    pub default: Option<String>,
+    /// Named session definitions, name -> definition.
+    pub sessions: BTreeMap<String, SessionDef>,
+}
+
+/// One named session: the roster of agent folders it launches.
+#[cfg(feature = "session")]
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+#[serde(deny_unknown_fields)]
+pub struct SessionDef {
+    /// Non-empty; emptiness is rejected in `SessionsManifest`'s deserialize.
+    pub agents: Vec<AgentEntry>,
+}
+
+/// One agent folder in a roster. `path` is required; every other field,
+/// when set, wins over the same-named field of the target folder's own
+/// `session:` block (consumed by the fleet resolver, task 93).
+#[cfg(feature = "session")]
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+#[serde(deny_unknown_fields)]
+pub struct AgentEntry {
+    #[serde(default)]
+    pub budget: Option<Budget>,
+    #[serde(default)]
+    pub claude: Option<ClaudeParams>,
+    #[serde(default)]
+    pub goal: Option<String>,
+    /// Raw duration string (`30s`, `5min`, `1h`), parsed late like
+    /// [`SessionConfig::loop_interval`].
+    #[serde(rename = "loop", default)]
+    pub loop_interval: Option<String>,
+    pub path: String,
+}
+
+#[cfg(feature = "session")]
+impl<'de> serde::Deserialize<'de> for SessionsManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let raw = BTreeMap::<String, serde_yaml::Value>::deserialize(deserializer)?;
+        let mut default = None;
+        let mut sessions = BTreeMap::new();
+        for (name, value) in raw {
+            if name == "default" {
+                let Some(target) = value.as_str() else {
+                    return Err(D::Error::custom(
+                        "`sessions.default` is reserved: its value must be a string naming a defined session",
+                    ));
+                };
+                default = Some(target.to_owned());
+            } else {
+                let def = SessionDef::deserialize(value).map_err(D::Error::custom)?;
+                if def.agents.is_empty() {
+                    return Err(D::Error::custom(format!(
+                        "session {name:?} defines an empty `agents` list"
+                    )));
+                }
+                sessions.insert(name, def);
+            }
+        }
+        if sessions.is_empty() {
+            return Err(D::Error::custom("`sessions:` defines no sessions"));
+        }
+        if let Some(target) = &default
+            && !sessions.contains_key(target)
+        {
+            return Err(D::Error::custom(format!(
+                "`sessions.default` names {target:?}, which is not a defined session"
+            )));
+        }
+        Ok(Self { default, sessions })
+    }
+
+    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        *place = Self::deserialize(deserializer)?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "session")]
