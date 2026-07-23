@@ -82,9 +82,63 @@ fn dry_run_flags_missing_goal_and_exits_nonzero() {
         )
         .unwrap();
     let (result, stdout) = run(&system, "/demo", &launch(true, false, Vec::new(), false));
-    assert!(result.is_err(), "a missing goal must exit non-zero");
+    let err = result.unwrap_err();
     assert!(stdout.contains("MISSING goal"), "flag missing: {stdout}");
     assert!(stdout.contains("1 not launchable"), "summary: {stdout}");
+    assert!(stdout.contains("missing goal"), "summary wording: {stdout}");
+    assert!(
+        !stdout.contains("loop/goal"),
+        "no stale loop/goal wording: {stdout}"
+    );
+    assert!(
+        format!("{err:#}").contains("missing goal"),
+        "bail wording names goal only: {err:#}"
+    );
+}
+
+/// A goal-only session (no `loop`) is launchable: the builder defaults the
+/// cadence to `5m`, and the dry-run loop cell says so rather than flagging a
+/// missing value.
+#[test]
+fn dry_run_defaulted_loop_renders_5m_default() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/demo/.remargin.yaml"),
+            b"identity: finance\nsession:\n  goal: process pending work\n",
+        )
+        .unwrap();
+    let (result, stdout) = run(&system, "/demo", &launch(true, false, Vec::new(), false));
+    result.unwrap();
+    assert!(
+        stdout.contains("5m (default)"),
+        "loop cell defaults: {stdout}"
+    );
+    assert!(
+        !stdout.contains("MISSING loop"),
+        "absent loop is not a blocker: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 identities; all launchable."),
+        "goal-only session is launchable: {stdout}"
+    );
+}
+
+/// The `--json` output agrees with the table: a defaulted loop reports
+/// `5m (default)` and the entry is launchable.
+#[test]
+fn dry_run_json_defaulted_loop_reports_5m_default() {
+    let system = MockSystem::new()
+        .with_file(
+            Path::new("/demo/.remargin.yaml"),
+            b"identity: finance\nsession:\n  goal: process pending work\n",
+        )
+        .unwrap();
+    let (result, stdout) = run(&system, "/demo", &launch(true, false, Vec::new(), true));
+    result.unwrap();
+    let parsed: Value = serde_json::from_str(&stdout).unwrap();
+    let entry = &parsed.as_array().unwrap()[0];
+    assert_eq!(entry["loop"], Value::String(String::from("5m (default)")));
+    assert_eq!(entry["launchable"], Value::Bool(true));
 }
 
 #[test]

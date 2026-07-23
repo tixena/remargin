@@ -401,7 +401,7 @@ The workflow is: a human stages work (drops a file into an identity's sandbox, l
 
 ### The `session:` block
 
-Each agent's `.remargin.yaml` declares its launch parameters in an optional `session:` block. `loop` and `goal` are **required to launch** (a session missing either fails to build); the rest is optional.
+Each agent's `.remargin.yaml` declares its launch parameters in an optional `session:` block. `goal` is **required to launch** (a session missing it fails to build); `loop` is optional and defaults to `5m`; the rest is optional.
 
 ```yaml
 identity: finance_agent
@@ -411,7 +411,7 @@ system_prompt:
   name: Finance
   prompt: "You are the finance agent. Process your pending sandbox work."
 session:
-  loop: 30s                                                       # required — /loop cadence (a duration: 30s, 5min, 1h)
+  loop: 30s                                                       # optional — /loop cadence (a duration: 30s, 5min, 1h); defaults to 5m
   goal: "process pending work; stop when the sandbox is empty"    # required — the /goal stop condition
   claude: { model: claude-opus-4-8, effort: high }                # optional — backend model + effort
   budget: { max_turns: 20 }                                       # optional — omit for no cap (e.g. local models)
@@ -427,7 +427,7 @@ remargin session launch --multiplexer herdr      # force a specific multiplexer 
 remargin session launch --identity finance,ops   # only these identities
 ```
 
-- **`--dry-run`** walks the tree and prints one row per discovered identity — identity, folder, resolved prompt, `loop`, `goal`, scope — flags any identity missing a required `loop` or `goal`, and exits non-zero when any are unlaunchable. It spawns nothing.
+- **`--dry-run`** walks the tree and prints one row per discovered identity — identity, folder, resolved prompt, `loop`, `goal`, scope — shows the defaulted `5m (default)` cadence for any identity that omits `loop`, flags any missing a required `goal`, and exits non-zero when any are unlaunchable. It spawns nothing.
 - **`--print`** emits the exact per-identity launch commands (as runnable `cd <folder> && claude …` lines) and starts nothing — for wiring the sessions into your own setup.
 - **`--multiplexer herdr|tmux`** picks the multiplexer. Unset means auto: herdr when its server is reachable, else tmux. An explicit value always wins.
 - **`--identity a,b`** restricts discovery to the named identities (comma-separated).
@@ -589,11 +589,11 @@ ignore:
 
 ### `session:` block — per-agent launch parameters
 
-Consumed by [`remargin session launch`](#session-launch-multi-agent-orchestration). Declares how this folder's identity is launched as a looping Claude session. `loop` and `goal` are required to launch; `claude` and `budget` are optional. The block only parses (and the `session launch` command only exists) when remargin is built with the `session` feature.
+Consumed by [`remargin session launch`](#session-launch-multi-agent-orchestration). Declares how this folder's identity is launched as a looping Claude session. `goal` is required to launch; `loop` is optional and defaults to `5m`; `claude` and `budget` are optional. The block only parses (and the `session launch` command only exists) when remargin is built with the `session` feature.
 
 ```yaml
 session:
-  loop: 30s                                                     # required — /loop cadence (30s, 5min, 1h, …)
+  loop: 30s                                                     # optional — /loop cadence (30s, 5min, 1h, …); defaults to 5m
   goal: "process pending work; stop when the sandbox is empty"  # required — the /goal stop condition
   claude: { model: claude-opus-4-8, effort: high }              # optional — backend model + effort
   budget: { max_turns: 20 }                                     # optional — omit for no cap

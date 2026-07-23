@@ -5,8 +5,8 @@
 //! interactive `claude` session: its working directory, a `remargin mcp`
 //! server scoped to that directory + identity, the composed system prompt,
 //! and the backend params (model / effort / budget). This is also where
-//! `loop` and `goal` graduate from optional config fields to hard launch
-//! requirements — a session missing either fails to build.
+//! `goal` graduates from an optional config field to a hard launch
+//! requirement, and `loop` picks up its [`DEFAULT_LOOP`] cadence when unset.
 //!
 //! Pure builder: it composes and validates, it never spawns a process or
 //! writes to disk. The `/loop` interval and `/goal` condition are kept as
@@ -22,7 +22,12 @@ use anyhow::{Context as _, Result};
 
 use super::discovery::DiscoveredSession;
 use crate::config::Budget;
+use crate::config::SessionConfig;
 use crate::config::system_prompt::ResolvedSystemPrompt;
+
+/// `/loop` cadence used when neither the agent's `session:` block nor a
+/// manifest entry declares one. Settled default: 5 minutes.
+pub const DEFAULT_LOOP: Duration = Duration::from_secs(300);
 
 /// The standard remargin operating rules folded into every launched
 /// session's system prompt, below the resolved `system_prompt:` body.
@@ -70,7 +75,7 @@ pub struct SessionLaunchSpec {
     pub goal: String,
     /// Identity governing this session.
     pub identity: String,
-    /// `/loop` cadence — required, validated at build time.
+    /// `/loop` cadence — the declared value, or [`DEFAULT_LOOP`] when unset.
     pub loop_interval: Duration,
     /// The scoped `remargin mcp` server to bring up.
     pub mcp: McpServerSpec,
@@ -85,31 +90,24 @@ pub struct SessionLaunchSpec {
 
 /// Assemble and validate the launch spec for one discovered session.
 ///
-/// `loop` and `goal` are required here: this is the authoritative
-/// enforcement behind task 83's soft dry-run flag. `budget == None` passes
-/// through as "no cap"; `model` / `effort` flow from `session.claude`.
+/// `goal` is the one hard launch requirement: this is the authoritative
+/// enforcement behind task 83's soft dry-run flag. `loop` defaults to
+/// [`DEFAULT_LOOP`] when unset, so an absent `session:` block is treated as
+/// an empty one and fails naming `goal`. `budget == None` passes through as
+/// "no cap"; `model` / `effort` flow from `session.claude`.
 ///
 /// # Errors
 ///
 /// Returns an error naming the identity and the offending field when the
-/// session has no `session:` block, its `loop` is unset or unparseable, or
-/// its `goal` is unset.
+/// session's `loop` is set but unparseable, or its `goal` is unset.
 pub fn build_launch_spec(session: &DiscoveredSession) -> Result<SessionLaunchSpec> {
-    let s = session.session.as_ref().with_context(|| {
-        format!(
-            "identity {:?}: no `session:` block — cannot launch",
-            session.identity
-        )
-    })?;
+    // An absent block is an empty block: `goal` is the one hard requirement.
+    let empty = SessionConfig::default();
+    let s = session.session.as_ref().unwrap_or(&empty);
     let loop_interval = s
         .loop_duration()
         .with_context(|| format!("identity {:?}: bad `loop`", session.identity))?
-        .with_context(|| {
-            format!(
-                "identity {:?}: `loop` is required to launch",
-                session.identity
-            )
-        })?;
+        .unwrap_or(DEFAULT_LOOP);
     let goal = s.goal.clone().with_context(|| {
         format!(
             "identity {:?}: `goal` is required to launch",

@@ -249,17 +249,18 @@ fn build_launch_spec_composes_full_session() {
 }
 
 #[test]
-fn build_launch_spec_missing_loop_is_hard_error() {
+fn build_launch_spec_missing_loop_defaults_to_5m() {
     let system = launch_demo_tree();
-    let mut broken = discovered(&system, "finance");
-    broken.session.as_mut().unwrap().loop_interval = None;
+    let mut goal_only = discovered(&system, "finance");
+    goal_only.session.as_mut().unwrap().loop_interval = None;
 
-    let err = build_launch_spec(&broken).unwrap_err().to_string();
+    let spec = build_launch_spec(&goal_only).unwrap();
 
-    assert!(err.contains("finance"), "error names the identity: {err}");
+    assert_eq!(spec.loop_interval, Duration::from_secs(300));
     assert!(
-        err.contains("`loop` is required"),
-        "error names loop: {err}"
+        spec.prompt.contains("/loop 5m"),
+        "defaulted cadence framed as 5m: {}",
+        spec.prompt
     );
 }
 
@@ -306,8 +307,8 @@ fn build_launch_spec_missing_session_block_is_hard_error() {
         "error names the identity: {err}"
     );
     assert!(
-        err.contains("no `session:` block"),
-        "error flags the missing block: {err}"
+        err.contains("`goal` is required"),
+        "an absent block is an empty block: goal is the one hard requirement: {err}"
     );
 }
 
@@ -431,6 +432,18 @@ fn claude_seed_inputs_without_budget_is_plain_goal() {
             "/goal keep the queue empty".to_owned()
         ]
     );
+}
+
+#[test]
+fn claude_seed_inputs_uses_5m_default_when_loop_absent() {
+    let system = launch_demo_tree();
+    let mut goal_only = discovered(&system, "ops");
+    goal_only.session.as_mut().unwrap().loop_interval = None;
+
+    let spec = build_launch_spec(&goal_only).unwrap();
+    let seeds = ClaudeBackend.seed_inputs(&spec);
+
+    assert_eq!(seeds[0], "/loop 5m");
 }
 
 #[test]

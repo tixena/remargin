@@ -2719,9 +2719,8 @@ fn shell_join(argv: &[String]) -> String {
         .join(" ")
 }
 
-/// A session is launchable only once both its `loop` cadence and `goal`
-/// stop-condition are declared; the launch builder (task 84) hard-enforces
-/// this, dry-run only flags it.
+/// The raw `loop` cadence a session declared, if any. An absent `loop` is
+/// not a launch blocker: the launch builder (task 84) defaults it to `5m`.
 #[cfg(feature = "session")]
 fn session_loop(session: &DiscoveredSession) -> Option<&str> {
     session.session.as_ref()?.loop_interval.as_deref()
@@ -2732,9 +2731,21 @@ fn session_goal(session: &DiscoveredSession) -> Option<&str> {
     session.session.as_ref()?.goal.as_deref()
 }
 
+/// The dry-run `loop` cell: the declared cadence, or `5m (default)` when the
+/// session left `loop` unset (the builder's default). Both output modes use
+/// it so the table and `--json` agree.
+#[cfg(feature = "session")]
+fn session_loop_cell(session: &DiscoveredSession) -> String {
+    session_loop(session).map_or_else(|| String::from("5m (default)"), String::from)
+}
+
+/// A session is launchable once its `goal` stop-condition is declared;
+/// `loop` defaults to `5m` when absent, so only a missing `goal` blocks a
+/// launch. The launch builder (task 84) hard-enforces this; dry-run only
+/// flags it.
 #[cfg(feature = "session")]
 fn session_launchable(session: &DiscoveredSession) -> bool {
-    session_loop(session).is_some() && session_goal(session).is_some()
+    session_goal(session).is_some()
 }
 
 /// Render the discovered sessions as a table (or `--json` array), flagging
@@ -2760,7 +2771,7 @@ fn render_dry_run(
             format!("{} identities; all launchable.", sessions.len())
         } else {
             format!(
-                "{} identities; {not_launchable} not launchable (missing loop/goal).",
+                "{} identities; {not_launchable} not launchable (missing goal).",
                 sessions.len()
             )
         };
@@ -2768,7 +2779,7 @@ fn render_dry_run(
     }
 
     if not_launchable > 0 {
-        bail!("{not_launchable} session(s) not launchable (missing loop/goal)");
+        bail!("{not_launchable} session(s) not launchable (missing goal)");
     }
     Ok(())
 }
@@ -2780,15 +2791,16 @@ fn session_json(session: &DiscoveredSession, cwd: &Path) -> Value {
         "identity": session.identity,
         "folder": display_path(&session.folder, cwd),
         "prompt": session.system_prompt.name,
-        "loop": session_loop(session),
+        "loop": session_loop_cell(session),
         "goal": session_goal(session),
         "scope": display_path(&session.scope_root, cwd),
         "launchable": session_launchable(session),
     })
 }
 
-/// The six text cells for one session's row, missing `loop`/`goal` rendered
-/// as `MISSING loop` / `MISSING goal` flags.
+/// The six text cells for one session's row: an absent `loop` renders as
+/// `5m (default)` (the builder's default cadence), a missing `goal` as the
+/// `MISSING goal` flag.
 #[cfg(feature = "session")]
 fn session_cells(session: &DiscoveredSession, cwd: &Path) -> Vec<String> {
     let prompt = if session.system_prompt.is_default {
@@ -2800,7 +2812,7 @@ fn session_cells(session: &DiscoveredSession, cwd: &Path) -> Vec<String> {
         session.identity.clone(),
         display_path(&session.folder, cwd),
         prompt,
-        session_loop(session).map_or_else(|| String::from("MISSING loop"), String::from),
+        session_loop_cell(session),
         session_goal(session).map_or_else(|| String::from("MISSING goal"), String::from),
         display_path(&session.scope_root, cwd),
     ]

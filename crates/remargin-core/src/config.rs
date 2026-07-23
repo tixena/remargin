@@ -90,11 +90,11 @@ pub struct SystemPrompt {
 
 /// Per-agent session parameters for `remargin session launch`.
 ///
-/// Optional block; `loop_interval` and `goal` are required to *launch*
-/// (enforced in the launch-spec builder, task 84), not to parse. Gated
-/// behind the `session` feature.
+/// Optional block; `goal` is required to *launch* (enforced in the
+/// launch-spec builder, task 84), `loop` defaults to `5m` when unset, and
+/// none of it is required to parse. Gated behind the `session` feature.
 #[cfg(feature = "session")]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
