@@ -3,6 +3,7 @@ name = "xtask"
 description = "Internal developer tooling for the remargin workspace"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true

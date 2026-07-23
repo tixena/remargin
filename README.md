@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.15-7F6DF2.svg)](Cargo.toml)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://rustup.rs)
+[![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://rustup.rs)
 [![Made by Tixena Labs](https://img.shields.io/badge/made_by-Tixena_Labs-7F6DF2.svg)](https://tixenalabs.com/)
 
 > A communication protocol for humans and AI agents — and between agents themselves.
@@ -175,7 +175,7 @@ remargin query . --pending-for-me --pretty
 
 ### Install from the GitHub repo (recommended)
 
-Requires [Rust](https://rustup.rs/) 1.85+.
+Requires [Rust](https://rustup.rs/) 1.91+.
 
 ```bash
 cargo install --git https://github.com/tixena/remargin
