@@ -305,14 +305,8 @@ fn try_replace_one(
         .with_context(|| format!("reading {}", resolved.display()))?;
     let doc = parser::parse(&content).context("parsing document")?;
 
-    // Body-only substitution: coalesce runs of adjacent `Body` segments
-    // into one string so the matcher sees contiguous body text across the
-    // artificial splits the parser makes at ordinary code fences. Every
-    // `Comment` is a hard boundary — it flushes the current run and is
-    // copied through untouched, so a match can never cross a comment
-    // block. Body slices are raw source concatenated verbatim, so this is
-    // pure string joining and the `to_markdown()` round-trip stays
-    // byte-identical (Design Decisions 1 & 2).
+    // Coalesce adjacent `Body` segments so a match can span the parser's
+    // splits at ordinary code fences; a `Comment` stays a hard boundary.
     let mut segments: Vec<Segment> = Vec::with_capacity(doc.segments.len());
     let mut replacements = 0_usize;
     let mut body_run = String::new();

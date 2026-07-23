@@ -6,7 +6,6 @@ resolver = "2"
 [workspace.package]
 version = "0.1.15"
 edition = "2024"
-# Floor set by Duration::from_mins/from_hours (stable 1.91.0).
 rust-version = "1.91"
 authors = ["Eduardo Burgos <eduardo@tixena.com>"]
 license = "MIT"
