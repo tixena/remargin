@@ -27,7 +27,7 @@ use crate::config::system_prompt::ResolvedSystemPrompt;
 
 /// `/loop` cadence used when neither the agent's `session:` block nor a
 /// manifest entry declares one. Settled default: 5 minutes.
-pub const DEFAULT_LOOP: Duration = Duration::from_secs(300);
+pub const DEFAULT_LOOP: Duration = Duration::from_mins(5);
 
 /// The standard remargin operating rules folded into every launched
 /// session's system prompt, below the resolved `system_prompt:` body.

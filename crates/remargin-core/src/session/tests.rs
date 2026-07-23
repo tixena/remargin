@@ -257,7 +257,7 @@ fn build_launch_spec_missing_loop_defaults_to_5m() {
 
     let spec = build_launch_spec(&goal_only).unwrap();
 
-    assert_eq!(spec.loop_interval, Duration::from_secs(300));
+    assert_eq!(spec.loop_interval, Duration::from_mins(5));
     assert!(
         spec.prompt.contains("/loop 5m"),
         "defaulted cadence framed as 5m: {}",
@@ -323,7 +323,7 @@ fn build_launch_spec_without_budget_or_claude_has_no_caps() {
     assert!(spec.budget.is_none());
     assert!(spec.model.is_none());
     assert!(spec.effort.is_none());
-    assert_eq!(spec.loop_interval, Duration::from_secs(3600));
+    assert_eq!(spec.loop_interval, Duration::from_hours(1));
 }
 
 #[test]

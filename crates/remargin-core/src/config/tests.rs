@@ -998,7 +998,7 @@ fn session_full_block_parses() {
 fn session_minimal_block_defaults_claude_and_budget_to_none() {
     let cfg: Config = serde_yaml::from_str("session:\n  loop: 5min\n  goal: x\n").unwrap();
     let s = cfg.session.as_ref().unwrap();
-    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_secs(300)));
+    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_mins(5)));
     assert_eq!(s.goal.as_deref(), Some("x"));
     assert!(s.claude.is_none());
     assert!(s.budget.is_none());
@@ -1049,7 +1049,7 @@ fn session_budget_omitted_is_none_and_partial_claude_allowed() {
             .unwrap();
     let s = cfg.session.as_ref().unwrap();
     assert!(s.budget.is_none());
-    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_secs(3600)));
+    assert_eq!(s.loop_duration().unwrap(), Some(Duration::from_hours(1)));
     let claude = s.claude.as_ref().unwrap();
     assert!(claude.model.is_none());
     assert_eq!(claude.effort.as_deref(), Some("high"));
