@@ -12,12 +12,36 @@ use crate::handlers::cmd_session;
 use crate::io::IoSinks;
 use crate::{Cli, OutputArgs, SessionAction};
 
-fn launch(dry_run: bool, print: bool, identity: Vec<String>, json: bool) -> SessionAction {
+/// The `./product` entry's own config: a launchable `session:` block the
+/// manifest entry overrides (`entry goal` / `2m` win over these).
+const CANONICAL_PRODUCT: &[u8] = b"identity: product\nsession:\n  goal: own goal\n  loop: 30s\n";
+
+/// The `/lib/researcher` entry's own config: no manifest override rides on it,
+/// so its `session:` block is what launches.
+const CANONICAL_RESEARCHER: &[u8] = b"identity: researcher\nsession:\n  goal: research goal\n";
+
+/// `/ws` config for the canonical manifest tree: its own `ws_root` identity
+/// and a `session:` block, plus a `sessions:` manifest whose `evaluation`
+/// session rosters a `./product` entry (goal+loop overrides) and an
+/// absolute-path `/lib/researcher` entry, and whose `broken` session points at
+/// a missing folder. `default: evaluation` makes a bare launch resolve it.
+const WS_MANIFEST: &[u8] = b"identity: ws_root\nsession:\n  goal: root goal\nsessions:\n  default: evaluation\n  evaluation:\n    agents:\n      - path: ./product\n        goal: entry goal\n        loop: 2m\n      - path: /lib/researcher\n  broken:\n    agents:\n      - path: ./missing\n";
+
+/// Build a `session launch` action over the mock `tmux` multiplexer. `name`
+/// selects a manifest session when `Some`; `None` is a bare launch. All modes
+/// (dry-run, print, real launch) are reachable through the knobs.
+fn session_launch(
+    name: Option<&str>,
+    dry_run: bool,
+    print: bool,
+    identity: Vec<String>,
+    json: bool,
+) -> SessionAction {
     SessionAction::Launch {
         dry_run,
         identity,
         multiplexer: Some(String::from("tmux")),
-        name: None,
+        name: name.map(String::from),
         output_args: OutputArgs {
             compact: false,
             json,
@@ -27,21 +51,14 @@ fn launch(dry_run: bool, print: bool, identity: Vec<String>, json: bool) -> Sess
     }
 }
 
+fn launch(dry_run: bool, print: bool, identity: Vec<String>, json: bool) -> SessionAction {
+    session_launch(None, dry_run, print, identity, json)
+}
+
 /// Like [`launch`], but names a manifest session. Always a `--dry-run` so the
 /// resolved fleet is rendered without spawning a multiplexer.
 fn launch_named(name: &str, identity: Vec<String>) -> SessionAction {
-    SessionAction::Launch {
-        dry_run: true,
-        identity,
-        multiplexer: Some(String::from("tmux")),
-        name: Some(String::from(name)),
-        output_args: OutputArgs {
-            compact: false,
-            json: false,
-            verbose: false,
-        },
-        print: false,
-    }
+    session_launch(Some(name), true, false, identity, false)
 }
 
 /// Run `cmd_session` over a mock tree, returning its result and whatever it
@@ -96,6 +113,24 @@ fn manifest_workspace() -> MockSystem {
             b"identity: researcher\nsession:\n  goal: research prior art\n",
         )
         .unwrap()
+}
+
+/// The canonical manifest tree, with each roster member's own config
+/// injectable so a scenario can perturb exactly one of them (drop a `goal`,
+/// add an unknown key) while the rest of the tree stays fixed.
+fn canonical_workspace_with(product: &[u8], researcher: &[u8]) -> MockSystem {
+    MockSystem::new()
+        .with_file(Path::new("/ws/.remargin.yaml"), WS_MANIFEST)
+        .unwrap()
+        .with_file(Path::new("/ws/product/.remargin.yaml"), product)
+        .unwrap()
+        .with_file(Path::new("/lib/researcher/.remargin.yaml"), researcher)
+        .unwrap()
+}
+
+/// The unperturbed canonical tree used by the happy-path dry-run/print rows.
+fn canonical_workspace() -> MockSystem {
+    canonical_workspace_with(CANONICAL_PRODUCT, CANONICAL_RESEARCHER)
 }
 
 #[test]
@@ -427,6 +462,278 @@ fn dry_run_identity_filter_applies_to_named_fleet() {
     assert!(
         stdout.contains("1 identities; all launchable."),
         "summary: {stdout}"
+    );
+}
+
+// -- Canonical manifest tree: dry-run/print faithfulness + all-or-nothing --
+
+/// Dry-run over the canonical `evaluation` fleet renders the union in
+/// entry-first order (`product`, `researcher`, then the discovered `ws_root`),
+/// with the `./product` entry's overrides winning over its own config and the
+/// no-override members showing `5m (default)` cadence.
+#[test]
+fn canonical_dry_run_union_table_orders_entries_first_with_overrides() {
+    let system = canonical_workspace();
+    let (result, stdout) = run(&system, "/ws", &launch_named("evaluation", Vec::new()));
+    result.unwrap();
+
+    assert!(
+        stdout.contains("3 identities; all launchable."),
+        "three union members: {stdout}"
+    );
+    let product = stdout.find("product").unwrap();
+    let researcher = stdout.find("researcher").unwrap();
+    let ws_root = stdout.find("ws_root").unwrap();
+    assert!(
+        product < ws_root && researcher < ws_root,
+        "manifest entries precede the discovered root: {stdout}"
+    );
+    // The entry's goal+loop overrides win over product's own `session:` block.
+    assert!(
+        stdout.contains("entry goal"),
+        "override goal shown: {stdout}"
+    );
+    assert!(
+        !stdout.contains("own goal"),
+        "entry override replaces the folder's own goal: {stdout}"
+    );
+    assert!(stdout.contains("2m"), "override loop shown: {stdout}");
+    // No-override members keep their own goal and default the cadence.
+    assert!(
+        stdout.contains("research goal"),
+        "researcher goal: {stdout}"
+    );
+    assert!(stdout.contains("root goal"), "root goal: {stdout}");
+    assert!(
+        stdout.contains("5m (default)"),
+        "defaulted cadence cells: {stdout}"
+    );
+}
+
+/// The `--json` array agrees with the table: same entry-first order, same
+/// applied overrides, and the same `5m (default)` marker on defaulted members.
+#[test]
+fn canonical_dry_run_union_json_agrees_with_table() {
+    let system = canonical_workspace();
+    let (result, stdout) = run(
+        &system,
+        "/ws",
+        &session_launch(Some("evaluation"), true, false, Vec::new(), true),
+    );
+    result.unwrap();
+
+    let parsed: Value = serde_json::from_str(&stdout).unwrap();
+    let array = parsed.as_array().unwrap();
+    assert_eq!(array.len(), 3, "three union members: {stdout}");
+    assert_eq!(array[0]["identity"], Value::String(String::from("product")));
+    assert_eq!(
+        array[1]["identity"],
+        Value::String(String::from("researcher"))
+    );
+    assert_eq!(array[2]["identity"], Value::String(String::from("ws_root")));
+    assert_eq!(array[0]["loop"], Value::String(String::from("2m")));
+    assert_eq!(array[0]["goal"], Value::String(String::from("entry goal")));
+    assert_eq!(
+        array[1]["loop"],
+        Value::String(String::from("5m (default)"))
+    );
+    assert_eq!(
+        array[2]["loop"],
+        Value::String(String::from("5m (default)"))
+    );
+    for entry in array {
+        assert_eq!(entry["launchable"], Value::Bool(true));
+    }
+}
+
+/// Dry-run over the `broken` session fails fleet resolution, naming the
+/// offending session and its missing entry, and prints no partial table.
+#[test]
+fn canonical_dry_run_bad_entry_errs_naming_missing_with_no_table() {
+    let system = canonical_workspace();
+    let (result, stdout) = run(&system, "/ws", &launch_named("broken", Vec::new()));
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("broken"),
+        "names the offending session: {err:#}"
+    );
+    assert!(
+        format!("{err:#}").contains("./missing"),
+        "names the offending entry: {err:#}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "no partial table before the resolution error: {stdout}"
+    );
+}
+
+/// Print over the canonical fleet emits a `cd … && claude …` line for every
+/// union member plus each member's `/loop` + `/goal` seeds, with the product
+/// entry's overrides reflected in its seeds.
+#[test]
+fn canonical_print_emits_cd_and_seeds_for_every_member() {
+    let system = canonical_workspace();
+    let (result, stdout) = run(
+        &system,
+        "/ws",
+        &session_launch(Some("evaluation"), false, true, Vec::new(), false),
+    );
+    result.unwrap();
+
+    assert!(stdout.contains("# product"), "product header: {stdout}");
+    assert!(
+        stdout.contains("# researcher"),
+        "researcher header: {stdout}"
+    );
+    assert!(stdout.contains("# ws_root"), "ws_root header: {stdout}");
+    assert!(
+        stdout.contains("cd /ws/product &&"),
+        "product cd line: {stdout}"
+    );
+    assert!(
+        stdout.contains("cd /lib/researcher &&"),
+        "researcher cd line: {stdout}"
+    );
+    assert!(stdout.contains("cd /ws &&"), "ws_root cd line: {stdout}");
+    assert!(
+        stdout.contains("claude --append-system-prompt"),
+        "renders the interactive launch argv: {stdout}"
+    );
+    // Seeds carry the overridden cadence/goal for product and the defaults for
+    // the no-override members.
+    assert!(
+        stdout.contains("/loop 2m"),
+        "product override loop: {stdout}"
+    );
+    assert!(
+        stdout.contains("/goal entry goal"),
+        "product override goal: {stdout}"
+    );
+    assert!(
+        stdout.contains("/loop 5m"),
+        "defaulted cadence seed for no-override members: {stdout}"
+    );
+    assert!(
+        stdout.contains("/goal research goal"),
+        "researcher goal seed: {stdout}"
+    );
+    assert!(
+        stdout.contains("/goal root goal"),
+        "root goal seed: {stdout}"
+    );
+}
+
+/// All-or-nothing: a bad manifest entry aborts a real launch during fleet
+/// resolution — no `Launched` line, nothing printed, no multiplexer reached.
+#[test]
+fn canonical_launch_aborts_on_bad_entry_before_any_output() {
+    let system = canonical_workspace();
+    let (result, stdout) = run(
+        &system,
+        "/ws",
+        &session_launch(Some("broken"), false, false, Vec::new(), false),
+    );
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("./missing"),
+        "names the offending entry: {err:#}"
+    );
+    assert!(
+        !stdout.contains("Launched"),
+        "no Launched line on abort: {stdout}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "nothing printed before the abort: {stdout}"
+    );
+}
+
+/// All-or-nothing: a member missing `goal` (here `/lib/researcher`, which
+/// carries no override goal) aborts the launch while building specs — before
+/// the multiplexer and before any output.
+#[test]
+fn canonical_launch_aborts_on_member_missing_goal() {
+    let system = canonical_workspace_with(
+        CANONICAL_PRODUCT,
+        b"identity: researcher\nsession:\n  loop: 1m\n",
+    );
+    let (result, stdout) = run(
+        &system,
+        "/ws",
+        &session_launch(Some("evaluation"), false, false, Vec::new(), false),
+    );
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("researcher"),
+        "names the offending member: {err:#}"
+    );
+    assert!(
+        format!("{err:#}").contains("goal"),
+        "names the missing field: {err:#}"
+    );
+    assert!(
+        !stdout.contains("Launched"),
+        "no Launched line on abort: {stdout}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "nothing printed before the member error: {stdout}"
+    );
+}
+
+/// All-or-nothing: a strict-parse error in a member's own config (a typo'd
+/// `gaol:` key rejected by `deny_unknown_fields`) aborts fleet resolution
+/// before any spec is built — no `Launched` line, nothing printed.
+#[test]
+fn canonical_launch_aborts_on_strict_parse_error() {
+    let system = canonical_workspace_with(
+        b"identity: product\nsession:\n  goal: own goal\n  loop: 30s\n  gaol: x\n",
+        CANONICAL_RESEARCHER,
+    );
+    let (result, stdout) = run(
+        &system,
+        "/ws",
+        &session_launch(Some("evaluation"), false, false, Vec::new(), false),
+    );
+    let err = result.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("gaol"),
+        "surfaces the unknown key: {err:#}"
+    );
+    assert!(
+        !stdout.contains("Launched"),
+        "no Launched line on abort: {stdout}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "nothing printed before the parse error: {stdout}"
+    );
+}
+
+/// The `--identity` filter narrows the resolved union to a single manifest
+/// entry, and that entry's override still applies under the filter.
+#[test]
+fn canonical_identity_filter_selects_single_entry_row() {
+    let system = canonical_workspace();
+    let (result, stdout) = run(
+        &system,
+        "/ws",
+        &launch_named("evaluation", vec![String::from("product")]),
+    );
+    result.unwrap();
+    assert!(
+        stdout.contains("product"),
+        "keeps the named member: {stdout}"
+    );
+    assert!(!stdout.contains("researcher"), "drops researcher: {stdout}");
+    assert!(!stdout.contains("ws_root"), "drops ws_root: {stdout}");
+    assert!(
+        stdout.contains("1 identities; all launchable."),
+        "summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("entry goal"),
+        "the entry override survives the filter: {stdout}"
     );
 }
 

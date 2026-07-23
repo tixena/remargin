@@ -2622,6 +2622,17 @@ pub fn cmd_session(
 /// backend into an interactive launch argv plus the `/loop` + `/goal` seed
 /// lines, and carried as a [`Tab`]. remargin only starts the session: it
 /// writes no PID/registry file and never supervises what it launched.
+///
+/// # Contract: all-or-nothing
+///
+/// Any configuration issue crashes the whole launch; not even one agent
+/// starts. Every fallible step — building each identity's spec, resolving each
+/// backend, rendering each launch argv — completes for the *entire* fleet
+/// before the first multiplexer action ([`launch_into_multiplexer`]) and
+/// before the first line of output. A single bad member therefore aborts with
+/// no `Launched` line and zero multiplexer invocations. Any new fallible work
+/// must stay ahead of that call and of the first `out(...)`; do not move
+/// per-member validation past it.
 #[cfg(feature = "session")]
 fn render_session_launch(
     sinks: &mut IoSinks<'_>,
