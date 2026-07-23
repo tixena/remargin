@@ -242,6 +242,13 @@ struct HerdrAgent {
     pane_id: String,
 }
 
+/// One pane in a `herdr pane list` response: its id and the tab it belongs to.
+#[derive(Debug, Deserialize)]
+struct HerdrPaneEntry {
+    pane_id: String,
+    tab_id: String,
+}
+
 /// Minimal typed view of a `herdr tab create` response's `tab`: its `tab_id`.
 #[derive(Debug, Deserialize)]
 struct HerdrTab {
@@ -263,6 +270,16 @@ struct HerdrAgentResult {
 #[derive(Debug, Deserialize)]
 struct HerdrAgentStarted {
     result: HerdrAgentResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct HerdrPaneList {
+    result: HerdrPaneListResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct HerdrPaneListResult {
+    panes: Vec<HerdrPaneEntry>,
 }
 
 /// The default tab herdr opens with a new workspace, carried in `workspace
@@ -596,6 +613,17 @@ fn parse_pane_id(json: &str) -> Result<String> {
     Ok(parsed.result.agent.pane_id)
 }
 
+/// Extract the `(pane_id, tab_id)` entries from a `herdr pane list` response.
+///
+/// # Errors
+///
+/// Returns an error when `json` is not the expected `herdr pane list` shape.
+fn parse_panes(json: &str) -> Result<Vec<HerdrPaneEntry>> {
+    let parsed: HerdrPaneList =
+        serde_json::from_str(json).context("parsing 'herdr pane list' JSON")?;
+    Ok(parsed.result.panes)
+}
+
 /// Extract the new `tab_id` from a `herdr tab create` response.
 ///
 /// # Errors
@@ -736,8 +764,43 @@ fn run_herdr_plan(session_name: &str, tabs: &[Tab]) -> Result<()> {
         for argv in &tab.seed {
             run_command(&substitute(argv, HERDR_PANE_PLACEHOLDER, &pane_id))?;
         }
+        // `agent start --tab` splits a NEW pane for the agent, leaving the
+        // tab's original pane empty. Close every non-agent pane in the tab so
+        // each tab holds only its agent. Best-effort: cosmetic cleanup that
+        // must never abort a launch whose agents are already up.
+        close_stray_panes(&workspace_id, &tab_id, &pane_id);
     }
     Ok(())
+}
+
+/// Best-effort: close every pane in `tab_id` except the agent's `keep` pane.
+/// `agent start --tab` splits a new pane, leaving the tab's default pane empty;
+/// this removes it. Spawns real `herdr` and is not exercised by the gate; every
+/// step is tolerant of failure so cosmetic cleanup never aborts a live launch.
+fn close_stray_panes(workspace_id: &str, tab_id: &str, keep: &str) {
+    let list = vec![
+        "herdr".to_owned(),
+        "pane".to_owned(),
+        "list".to_owned(),
+        "--workspace".to_owned(),
+        workspace_id.to_owned(),
+    ];
+    let Ok(json) = capture_json(&list) else {
+        return;
+    };
+    let Ok(panes) = parse_panes(&json) else {
+        return;
+    };
+    for entry in panes {
+        if entry.tab_id == tab_id && entry.pane_id != keep {
+            run_command_ok(&[
+                "herdr".to_owned(),
+                "pane".to_owned(),
+                "close".to_owned(),
+                entry.pane_id,
+            ]);
+        }
+    }
 }
 
 /// Replace every argv element equal to `placeholder` with `value`.

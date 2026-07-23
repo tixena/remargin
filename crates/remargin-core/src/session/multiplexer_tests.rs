@@ -12,8 +12,8 @@ use chrono::{DateTime, Utc};
 use super::{
     Multiplexer, Tab, build_herdr_plan, build_tmux_plan, default_multiplexer,
     herdr_unavailable_error, launch_into_multiplexer, pane_shows_ready_prompt,
-    pane_shows_trust_dialog, parse_default_tab_id, parse_pane_id, parse_tab_id, parse_workspace_id,
-    session_name, substitute,
+    pane_shows_trust_dialog, parse_default_tab_id, parse_pane_id, parse_panes, parse_tab_id,
+    parse_workspace_id, session_name, substitute,
 };
 
 /// A realistic `herdr workspace create` response: its `root_pane` carries the
@@ -430,6 +430,26 @@ fn parses_pane_id_from_agent_start_json() {
     let json =
         r#"{"result":{"agent":{"pane_id":"w4:p2","terminal_id":"term_abc123","agent":"claude"}}}"#;
     assert_eq!(parse_pane_id(json).unwrap(), "w4:p2");
+}
+
+#[test]
+fn parses_panes_with_their_tabs_from_pane_list_json() {
+    // Two tabs, each with the tab's default pane plus the agent's split pane —
+    // the shape the stray-pane cleanup filters over.
+    let json = r#"{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w4:p1","tab_id":"w4:t1"},{"pane_id":"w4:p2","tab_id":"w4:t1"},{"pane_id":"w4:p3","tab_id":"w4:t2"}]}}"#;
+    let panes = parse_panes(json).unwrap();
+
+    assert_eq!(panes.len(), 3);
+    assert_eq!(panes[0].pane_id, "w4:p1");
+    assert_eq!(panes[0].tab_id, "w4:t1");
+    // The non-agent pane in tab t1 (p1) is the one the cleanup would close when
+    // the agent landed on p2.
+    let strays: Vec<&str> = panes
+        .iter()
+        .filter(|p| p.tab_id == "w4:t1" && p.pane_id != "w4:p2")
+        .map(|p| p.pane_id.as_str())
+        .collect();
+    assert_eq!(strays, ["w4:p1"]);
 }
 
 #[test]
