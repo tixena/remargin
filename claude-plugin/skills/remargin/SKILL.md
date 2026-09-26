@@ -24,6 +24,7 @@ When the remargin plugin is installed, these slash commands are available:
 - `/remargin:process-folder <path>` — process a folder driven by activity: first read the full activity delta across ALL identities to build awareness, then act only on items pending to this identity or open/unassigned. Groups by resolved system prompt and spawns one subagent per group. Does NOT touch sandbox markers. Trigger phrases: "process this folder", "process the folder <path>", "go through this folder", "what changed in this folder and handle my part".
 - `/remargin:activity [path]` — report what changed since the caller last acted on each managed `.md` under `path`. Read-only. Trigger phrases: "what's new", "what happened since I was last here", "what changed in this workspace", "any activity I missed", "anything for me".
 - `/remargin:consolidate <path>` — re-create a single managed markdown file so its body reflects **everything** in its comment threads (agreements, decisions, open issues, actionable items, memos). Distinct from `process-file`, which only replies to pending comments. Comments preserved by default; `--delete-comments` removes them after the rewrite. Authorized for humans; for agents only when the resolved system prompt permits it. Trigger phrases: "consolidate this", "consolidate the document", "consolidate <path>".
+- `/remargin:consolidate-thread <path> <comment-id>` — consolidate **one** thread into the section its root is anchored under: only that section's prose is rewritten, and only that thread's comments are kept (default) or deleted (`--delete-comments`). Any id in the thread selects the whole thread. Authorized for humans; for agents only when the resolved system prompt explicitly permits consolidating a single thread. `/remargin:consolidate` runs it once per thread. Trigger phrases: "consolidate this thread", "consolidate the thread on …".
 
 Routing rules:
 
@@ -32,7 +33,8 @@ Routing rules:
 - When the user asks for the sandbox / staging area / "everything I staged" / similar without naming a group, route to `/remargin:process-sandbox` (vault-wide, subagents per group).
 - When the user names a folder (a directory, not a single file and not the sandbox / staging area), route to `/remargin:process-folder` (activity-driven). Branch on the path itself, not its spelling: inspect whether the path is a directory rather than guessing from the name. If the path is ambiguous (file vs folder), resolve by inspecting the path.
 - When the user asks what's new / what happened / what changed, route to `/remargin:activity`.
-- When the user asks to **consolidate** a document (in chat, or a comment containing `/remargin:consolidate`), route to `/remargin:consolidate` — never reproduce its recreate logic inline.
+- When the user asks to **consolidate one thread** (in chat, or a comment containing `/remargin:consolidate-thread`), route to `/remargin:consolidate-thread` — never reproduce its logic inline. Check this before the whole-document rule below: `/remargin:consolidate-thread` also contains the text `/remargin:consolidate`.
+- When the user asks to **consolidate** a document (in chat, or a comment containing `/remargin:consolidate` but not `/remargin:consolidate-thread`), route to `/remargin:consolidate` — never reproduce its recreate logic inline.
 - If the user gives no path and no sandbox cue, ask which they mean. Do not pick.
 - Never bypass a slash command and reproduce its logic inline. The slash command is the canonical entry point; the skill is the router.
 
