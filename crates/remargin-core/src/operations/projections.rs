@@ -38,7 +38,7 @@ use crate::operations::batch::refuse_unknown_fields;
 use crate::operations::sign;
 use crate::operations::{
     apply_sandbox_entry, collapse_body_segments, collect_descendants, find_comment_mut,
-    resolve_thread,
+    remove_comment_segments, resolve_thread,
 };
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
@@ -662,11 +662,7 @@ pub fn project_delete(
     }
 
     let id_set: HashSet<&str> = comment_ids.iter().copied().collect();
-    after
-        .segments
-        .retain(|seg| !matches!(seg, Segment::Comment(cm) if id_set.contains(cm.id.as_str())));
-
-    collapse_body_segments(&mut after.segments);
+    remove_comment_segments(&mut after.segments, &id_set);
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
 

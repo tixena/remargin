@@ -20,6 +20,9 @@ use crate::writer::{FORBIDDEN_TARGETS, InsertPosition};
 
 /// The body every gate test uses: one paragraph, split by hand across two
 /// lines. Mechanical enough that the reject tier can act on it.
+const DOC_WITH_WIDE_GAP: &str =
+    "---\ntitle: Test\nauthor: eduardo\n---\n\n# One\n\nx\n\n\n\ny\n\n# Two\n\nz\n";
+
 const HARD_WRAPPED_BODY: &str = "The import form and the generate form both read their field list from the\n\
                                  gateway, so a change to either one has to land in both controllers.\n";
 
@@ -795,6 +798,46 @@ fn preservation_invariant() {
     assert!(doc.find_comment("abc").is_some());
 }
 
+/// Seeds `DOC_WITH_WIDE_GAP` with one comment under `# Two` and returns its id.
+fn seed_comment_under_second_section(system: &MemorySystem, config: &ResolvedConfig) -> String {
+    let position = InsertPosition::AfterHeading(String::from("Two"));
+    create_comment(
+        system,
+        Path::new("/docs/test.md"),
+        config,
+        &CreateCommentParams::new("note", &position),
+    )
+    .unwrap()
+}
+
+#[test]
+fn delete_leaves_blank_lines_away_from_the_deleted_comment_alone() {
+    let system = system_with_doc(DOC_WITH_WIDE_GAP);
+    let config = open_config();
+    let id = seed_comment_under_second_section(&system, &config);
+    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert!(before.contains("x\n\n\n\ny\n"), "{before}");
+
+    delete_comments(&system, Path::new("/docs/test.md"), &config, &[id.as_str()]).unwrap();
+
+    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    assert!(after.contains("x\n\n\n\ny\n"), "{after}");
+}
+
+#[test]
+fn plan_delete_leaves_blank_lines_away_from_the_deleted_comment_alone() {
+    let system = system_with_doc(DOC_WITH_WIDE_GAP);
+    let config = open_config();
+    let id = seed_comment_under_second_section(&system, &config);
+
+    let (_, after) =
+        projections::project_delete(&system, Path::new("/docs/test.md"), &config, &[id.as_str()])
+            .unwrap();
+
+    let markdown = after.to_markdown().unwrap();
+    assert!(markdown.contains("x\n\n\n\ny\n"), "{markdown}");
+}
+
 #[test]
 fn delete_restores_original_whitespace() {
     let original = "\
@@ -1098,6 +1141,8 @@ Some body text.
     )
     .unwrap();
 
+    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+
     // Delete only the middle comment.
     delete_comments(
         &system,
@@ -1114,8 +1159,14 @@ Some body text.
     assert_eq!(doc.comments().len(), 2);
 
     assert!(
-        !after.contains("\n\n\n"),
+        after.contains("first\n```\n\n```remargin"),
         "deleting middle comment left excessive blank lines:\n{after}"
+    );
+    let tail = |text: &str| String::from(&text[text.find("third\n").unwrap()..]);
+    assert_eq!(
+        tail(&after),
+        tail(&before),
+        "text after the seam is untouched"
     );
 }
 

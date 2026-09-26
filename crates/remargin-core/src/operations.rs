@@ -456,10 +456,7 @@ pub fn delete_comments(
         }
     }
 
-    doc.segments
-        .retain(|seg| !matches!(seg, Segment::Comment(cm) if id_set.contains(cm.id.as_str())));
-
-    collapse_body_segments(&mut doc.segments);
+    remove_comment_segments(&mut doc.segments, &id_set);
 
     let remaining_attachments: HashSet<String> = doc
         .comments()
@@ -594,6 +591,81 @@ pub fn edit_comment(
     })?;
 
     Ok(())
+}
+
+/// Drop the comments in `ids`, joining the body text around each removed block
+/// and tidying newlines only at those joins, so every other segment keeps its bytes.
+pub(crate) fn remove_comment_segments(segments: &mut Vec<Segment>, ids: &HashSet<&str>) {
+    let mut kept: Vec<Segment> = Vec::with_capacity(segments.len());
+    // Index in `kept` of each body that touched a removed block, with the
+    // byte offsets where the joins happened.
+    let mut seams: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut after_removed = false;
+
+    for seg in segments.drain(..) {
+        if matches!(&seg, Segment::Comment(cm) if ids.contains(cm.id.as_str())) {
+            if let Some(Segment::Body(prev)) = kept.last() {
+                let last = kept.len() - 1;
+                let join = prev.len();
+                match seams.last_mut() {
+                    Some((pos, joins)) if *pos == last => {
+                        if joins.last() != Some(&join) {
+                            joins.push(join);
+                        }
+                    }
+                    _ => seams.push((last, vec![join])),
+                }
+            }
+            after_removed = true;
+            continue;
+        }
+        if after_removed && let Segment::Body(text) = &seg {
+            if let Some(Segment::Body(prev)) = kept.last_mut() {
+                // `prev` was registered as a seam, with this join, when the
+                // block before `text` was removed.
+                prev.push_str(text);
+                after_removed = false;
+                continue;
+            }
+            seams.push((kept.len(), vec![0]));
+        }
+        kept.push(seg);
+        after_removed = false;
+    }
+
+    for (pos, joins) in &seams {
+        let preceded_by_comment = *pos > 0 && matches!(kept[pos - 1], Segment::Comment(_));
+        let followed_by_comment = matches!(kept.get(pos + 1), Some(Segment::Comment(_)));
+        if let Segment::Body(text) = &mut kept[*pos] {
+            for &join in joins.iter().rev() {
+                cap_newline_run(text, join);
+            }
+            // A comment's closing fence already ends with `\n`.
+            if text.trim().is_empty() && (preceded_by_comment || followed_by_comment) {
+                *text = String::from("\n");
+            }
+        }
+    }
+
+    *segments = kept;
+}
+
+/// Shorten the run of `\n` that contains byte offset `join` to at most two.
+fn cap_newline_run(text: &mut String, join: usize) {
+    // A later join in the same run may already have shortened it.
+    let at = join.min(text.len());
+    let bytes = text.as_bytes();
+    let start = bytes[..at]
+        .iter()
+        .rposition(|&b| b != b'\n')
+        .map_or(0, |p| p + 1);
+    let end = bytes[at..]
+        .iter()
+        .position(|&b| b != b'\n')
+        .map_or(bytes.len(), |p| at + p);
+    if end - start > 2 {
+        text.replace_range(start + 2..end, "");
+    }
 }
 
 /// Merge adjacent `Body` segments and collapse runs of 3+ consecutive
