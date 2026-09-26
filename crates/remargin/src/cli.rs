@@ -526,7 +526,7 @@ pub enum PlanAction {
     /// Reads the sub-op list from a JSON file (same shape as the
     /// `batch` subcommand): an array of objects with `content` (required)
     /// plus optional `reply_to`, `after_comment`, `after_line`,
-    /// `attach_names`, `auto_ack`, `to`.
+    /// `attach_names`, `auto_ack`, `remargin_kind`, `sandbox`, `to`.
     Batch(PlanBatchArgs),
     /// Project a `claude restrict` / `claude unrestrict` op.
     ///

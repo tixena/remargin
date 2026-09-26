@@ -32,16 +32,35 @@ use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
-use crate::kind::validate_kinds;
+use crate::kind::{kinds_from_json, validate_kinds};
 use crate::linter;
+use crate::operations::batch::refuse_unknown_fields;
 use crate::operations::sign;
 use crate::operations::{
-    collapse_body_segments, collect_descendants, find_comment_mut, resolve_thread,
+    apply_sandbox_entry, collapse_body_segments, collect_descendants, find_comment_mut,
+    resolve_thread,
 };
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::writer::{self, InsertPosition};
+
+/// Keys a plan batch op may carry: [`crate::operations::batch::OP_FIELDS`]
+/// with `attach_names` in place of `attachments`.
+pub const PLAN_OP_FIELDS: &[&str] = &[
+    "ack_skip_reason",
+    "after_comment",
+    "after_heading",
+    "after_line",
+    "attach_names",
+    "auto_ack",
+    "content",
+    "kind",
+    "remargin_kind",
+    "reply_to",
+    "sandbox",
+    "to",
+];
 
 /// One operation inside a [`project_batch`] request: same shape as
 /// [`crate::operations::batch::BatchCommentOp`] except attachments become
@@ -62,7 +81,9 @@ pub struct ProjectBatchOp {
     /// acks iff parent.author != caller (don't ack your own replies).
     pub auto_ack: Option<bool>,
     pub content: String,
+    pub remargin_kind: Vec<String>,
     pub reply_to: Option<String>,
+    pub sandbox: bool,
     pub to: Vec<String>,
 }
 
@@ -77,12 +98,15 @@ impl ProjectBatchOp {
     ///
     /// # Errors
     ///
-    /// Returns an error if the required `content` field is missing or
-    /// not a string.
+    /// Returns an error if the op carries a key outside [`PLAN_OP_FIELDS`],
+    /// if the required `content` field is missing or not a string, or if
+    /// `remargin_kind` is not an array of strings.
     pub fn from_json_object(
         obj: &serde_json::Map<String, serde_json::Value>,
         idx: usize,
     ) -> Result<Self> {
+        refuse_unknown_fields(obj, PLAN_OP_FIELDS, &format!("plan batch op[{idx}]"))?;
+
         let content = obj
             .get("content")
             .and_then(serde_json::Value::as_str)
@@ -128,10 +152,15 @@ impl ProjectBatchOp {
                 .unwrap_or_default(),
             auto_ack: obj.get("auto_ack").and_then(serde_json::Value::as_bool),
             content: String::from(content),
+            remargin_kind: kinds_from_json(obj).with_context(|| format!("plan batch op[{idx}]"))?,
             reply_to: obj
                 .get("reply_to")
                 .and_then(serde_json::Value::as_str)
                 .map(String::from),
+            sandbox: obj
+                .get("sandbox")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
             to: obj
                 .get("to")
                 .and_then(serde_json::Value::as_array)
@@ -156,7 +185,9 @@ impl ProjectBatchOp {
             attachment_filenames: Vec::new(),
             auto_ack: None,
             content,
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         }
     }
@@ -315,8 +346,8 @@ pub fn project_ack(
 /// Surfaces the same preflight diagnostics `batch_comment` would:
 /// missing identity, post-permission rejection, malformed linter state,
 /// any operation's `auto_ack` without `reply_to`, an operation body the
-/// style gate refuses, or an operation's `reply_to` pointing at a missing
-/// parent.
+/// style gate refuses, an invalid `remargin_kind`, or an operation's
+/// `reply_to` pointing at a missing parent.
 pub fn project_batch(
     system: &dyn System,
     path: &Path,
@@ -343,10 +374,7 @@ pub fn project_batch(
     for (idx, op) in operations.iter().enumerate() {
         let existing_ids = after.comment_ids();
         let new_id = id::generate(&existing_ids);
-        // remargin_kind is not yet wired through the batch op surface; None
-        // preserves the pre-field checksum shape (no `remargin_kind:` line).
-        let remargin_kind: Option<Vec<String>> = None;
-        let checksum = compute_checksum(&op.content, &[]);
+        let checksum = compute_checksum(&op.content, &op.remargin_kind);
 
         let thread = op.reply_to.as_deref().map(|parent_id| {
             after
@@ -382,7 +410,7 @@ pub fn project_batch(
             id: new_id,
             line: 0,
             reactions: Reactions::new(),
-            remargin_kind,
+            remargin_kind: (!op.remargin_kind.is_empty()).then(|| op.remargin_kind.clone()),
             reply_to: op.reply_to.clone(),
             signature: None,
             sl: None,
@@ -435,6 +463,10 @@ pub fn project_batch(
     }
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
+
+    if operations.iter().any(|op| op.sandbox) {
+        apply_sandbox_entry(&mut after, identity, now)?;
+    }
 
     Ok((before, after))
 }
@@ -1005,6 +1037,8 @@ fn preflight_batch_ops(operations: &[ProjectBatchOp], author_type: &AuthorType) 
         }
         comment_style::gate(&op.content, author_type)
             .with_context(|| format!("batch operation {idx}"))?;
+        validate_kinds(&op.remargin_kind)
+            .with_context(|| format!("batch operation {idx}: invalid remargin_kind"))?;
     }
     Ok(())
 }

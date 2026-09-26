@@ -859,7 +859,7 @@ remargin [OPTIONS] <COMMAND>
 |---------|-------------|
 | `comment` | Create a comment (supports `--reply-to`, `--after-line`, `--after-comment`, `--to`, `--attach`, `--auto-ack`, `--comment-file`/`-F`, `--kind`) |
 | `comments` | List all comments in a document (supports `--pretty` for threaded tree display, `--kind` filter) |
-| `batch` | Create multiple comments atomically via `--ops` JSON (per-operation `auto_ack` support) |
+| `batch` | Create multiple comments atomically via `--ops` JSON (per-operation `auto_ack`, `remargin_kind` and `sandbox`; an unknown field refuses the batch) |
 | `edit` | Edit an existing comment (cascading ack clear on children) |
 | `delete` | Delete one or more comments |
 | `ack` | Acknowledge one or more comments (supports folder-wide resolution by ID when `--file` is omitted) |

@@ -213,7 +213,7 @@ If the content is "ok", "got it", "thanks", "noted", or pure information with no
 
 ### Q: I want to leave multiple comments at once (not all replies).
 
-Same answer as above: `batch`. Each op can independently be a reply (`reply_to`), an anchor at a line (`after_line`), an anchor under a comment (`after_comment`), or a top-level comment.
+Same answer as above: `batch`. Each op can independently be a reply (`reply_to`), an anchor at a line (`after_line`), an anchor under a comment (`after_comment`), or a top-level comment. Each op also takes `to`, `remargin_kind`, `attachments` and `sandbox`, as `comment` does. An unknown field refuses the whole batch.
 
 ```
 remargin batch --ops '[

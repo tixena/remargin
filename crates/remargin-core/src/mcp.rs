@@ -342,8 +342,9 @@ fn desc_batch() -> ToolDesc {
         name: "batch",
         description: "PREFERRED for any time you'll post more than one comment on a file. Atomic \
              across the set; correctly tracks line shifts between insertions. Each sub-op has \
-             the same fields as a single `comment`. Comments are rendered as markdown; record \
-             observed state, not future-tense announcements.",
+             the same fields as a single `comment`; an unknown field refuses the whole batch. \
+             Comments are rendered as markdown; record observed state, not future-tense \
+             announcements.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -361,7 +362,14 @@ fn desc_batch() -> ToolDesc {
                             "after_comment": { "type": "string" },
                             "after_heading": { "type": "string", "description": "ATX heading path; resolved at write time. Mutually exclusive with after_line/after_comment." },
                             "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." },
-                            "ack_skip_reason": { "type": "string", "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default." }
+                            "ack_skip_reason": { "type": "string", "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default." },
+                            "remargin_kind": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+                                "default": []
+                            },
+                            "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add). The file is staged once when any operation sets it.", "default": false }
                         },
                         "required": ["content"]
                     },
@@ -676,7 +684,7 @@ fn desc_plan() -> ToolDesc {
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
                 "ops": {
                     "type": "array",
-                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, ack_skip_reason, to.",
+                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, ack_skip_reason, remargin_kind, sandbox, to. An unknown field refuses the projection.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -688,6 +696,8 @@ fn desc_plan() -> ToolDesc {
                             "attach_names": { "type": "array", "items": { "type": "string" } },
                             "auto_ack": { "type": "boolean" },
                             "ack_skip_reason": { "type": "string" },
+                            "remargin_kind": { "type": "array", "items": { "type": "string" } },
+                            "sandbox": { "type": "boolean" },
                             "to": { "type": "array", "items": { "type": "string" } }
                         },
                         "required": ["content"]

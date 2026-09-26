@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use os_shim::System as _;
 use os_shim::mock::MemorySystem;
 
+use serde_json::json;
+
 use crate::config::{Mode, ResolvedConfig};
+use crate::crypto::compute_checksum;
+use crate::frontmatter;
 use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::parser::{self, AuthorType};
 
@@ -74,6 +78,14 @@ fn open_config() -> ResolvedConfig {
     }
 }
 
+fn sandbox_authors(doc: &parser::ParsedDocument) -> Vec<String> {
+    frontmatter::read_sandbox_entries(doc)
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.author)
+        .collect()
+}
+
 fn system_with_doc(content: &str) -> MemorySystem {
     MemorySystem::new()
         .with_file(Path::new("/docs/test.md"), content.as_bytes())
@@ -93,7 +105,9 @@ fn simple_batch() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("First batch comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -103,7 +117,9 @@ fn simple_batch() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Second batch comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -113,7 +129,9 @@ fn simple_batch() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Third batch comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -140,7 +158,9 @@ fn batch_with_reply() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Root comment."),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -156,7 +176,9 @@ fn batch_with_reply() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Reply to root."),
+        remargin_kind: Vec::new(),
         reply_to: Some(ids[0].clone()),
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -185,7 +207,9 @@ fn batch_failure_rolls_back() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Good comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -195,7 +219,9 @@ fn batch_failure_rolls_back() {
             attachments: vec![PathBuf::from("/nonexistent/file.png")],
             auto_ack: Some(false),
             content: String::from("Bad comment with missing attachment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -240,7 +266,9 @@ Existing comment.
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("New batch comment."),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -270,7 +298,9 @@ fn batch_two_after_line_comments_both_placed_correctly() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line one."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -280,7 +310,9 @@ fn batch_two_after_line_comments_both_placed_correctly() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line three."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -332,7 +364,9 @@ fn batch_after_line_reverse_order() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line three."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -342,7 +376,9 @@ fn batch_after_line_reverse_order() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line one."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -382,7 +418,9 @@ fn batch_three_after_line_same_region() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("First."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -392,7 +430,9 @@ fn batch_three_after_line_same_region() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Second."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -402,7 +442,9 @@ fn batch_three_after_line_same_region() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Third."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -449,7 +491,9 @@ fn batch_mixed_after_line_and_append() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Positioned comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -459,7 +503,9 @@ fn batch_mixed_after_line_and_append() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Appended comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -469,7 +515,9 @@ fn batch_mixed_after_line_and_append() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Another positioned comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -537,7 +585,9 @@ Line after comment.
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("New comment at end."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -547,7 +597,9 @@ Line after comment.
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Reply to root."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("root")),
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -589,7 +641,9 @@ fn batch_two_after_same_line() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("First at line 9."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -599,7 +653,9 @@ fn batch_two_after_same_line() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Second at line 9."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -637,7 +693,9 @@ fn batch_after_line_beyond_document_length() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Appended at end."),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -664,7 +722,9 @@ fn batch_after_line_zero() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("At the very top."),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -718,7 +778,9 @@ fn batch_auto_ack_single_op() {
         attachments: Vec::new(),
         auto_ack: Some(true),
         content: String::from("Reply with auto-ack."),
+        remargin_kind: Vec::new(),
         reply_to: Some(String::from("abc")),
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -748,7 +810,9 @@ fn batch_auto_ack_mixed_ops() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Independent comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -758,7 +822,9 @@ fn batch_auto_ack_mixed_ops() {
             attachments: Vec::new(),
             auto_ack: Some(true),
             content: String::from("Reply with auto-ack."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("abc")),
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -768,7 +834,9 @@ fn batch_auto_ack_mixed_ops() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Reply without auto-ack."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("abc")),
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -800,7 +868,9 @@ fn batch_auto_ack_forward_reference() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Parent comment."),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -815,7 +885,9 @@ fn batch_auto_ack_forward_reference() {
         attachments: Vec::new(),
         auto_ack: Some(true),
         content: String::from("Reply with auto-ack to batch parent."),
+        remargin_kind: Vec::new(),
         reply_to: Some(parent_ids[0].clone()),
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -876,7 +948,9 @@ Line after comment.
             attachments: Vec::new(),
             auto_ack: Some(true),
             content: String::from("Reply with ack."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("abc")),
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -886,7 +960,9 @@ Line after comment.
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Positioned comment."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -962,7 +1038,9 @@ End text.
             attachments: Vec::new(),
             auto_ack: Some(true),
             content: String::from("Reply to aaa."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("aaa")),
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -972,7 +1050,9 @@ End text.
             attachments: Vec::new(),
             auto_ack: Some(true),
             content: String::from("Reply to bbb."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("bbb")),
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -982,7 +1062,9 @@ End text.
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("End positioned."),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -1037,7 +1119,9 @@ fn batch_auto_ack_without_reply_to_errors() {
         attachments: Vec::new(),
         auto_ack: Some(true),
         content: String::from("Top-level with auto-ack."),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -1100,7 +1184,9 @@ By eduardo (the caller).
             attachments: Vec::new(),
             auto_ack: None,
             content: String::from("Reply to alice."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("abc")),
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -1110,7 +1196,9 @@ By eduardo (the caller).
             attachments: Vec::new(),
             auto_ack: None,
             content: String::from("Reply to self."),
+            remargin_kind: Vec::new(),
             reply_to: Some(String::from("xyz")),
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -1151,7 +1239,9 @@ fn batch_reply_auto_populates_to() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Batch reply."),
+        remargin_kind: Vec::new(),
         reply_to: Some(String::from("abc")),
+        sandbox: false,
         to: Vec::new(),
     }];
 
@@ -1183,7 +1273,9 @@ fn batch_reply_explicit_to() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Batch reply with explicit to."),
+        remargin_kind: Vec::new(),
         reply_to: Some(String::from("abc")),
+        sandbox: false,
         to: vec![String::from("bob")],
     }];
 
@@ -1397,4 +1489,118 @@ fn a_human_authored_batch_still_earns_its_warn_tier_notes() {
 
     assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
     assert_eq!(outcome.warnings[0].op, 0);
+}
+
+#[test]
+fn batch_ops_store_their_kinds_under_the_checksum() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let path = Path::new("/docs/test.md");
+    let mut tagged = BatchCommentOp::new(String::from("Tagged."));
+    tagged.remargin_kind = vec![String::from("decision-item")];
+    let ops = vec![tagged, BatchCommentOp::new(String::from("Untagged."))];
+
+    let ids = batch_comment(&system, path, &open_config(), &ops)
+        .unwrap()
+        .ids;
+
+    let doc = parser::parse_file(&system, path).unwrap();
+    let stored = doc.find_comment(&ids[0]).unwrap();
+    assert_eq!(stored.kinds(), ["decision-item"]);
+    assert_eq!(
+        stored.checksum,
+        compute_checksum(&stored.content, stored.kinds())
+    );
+    assert_eq!(doc.find_comment(&ids[1]).unwrap().remargin_kind, None);
+}
+
+#[test]
+fn an_invalid_kind_sinks_the_whole_batch() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let path = Path::new("/docs/test.md");
+    let mut bad = BatchCommentOp::new(String::from("Bad tag."));
+    bad.remargin_kind = vec![String::from("not/allowed")];
+    let ops = vec![BatchCommentOp::new(String::from("Fine.")), bad];
+
+    let err = batch_comment(&system, path, &open_config(), &ops).unwrap_err();
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("batch operation 1") && msg.contains("remargin_kind"),
+        "{msg}"
+    );
+    assert!(
+        parser::parse_file(&system, path)
+            .unwrap()
+            .comments()
+            .is_empty(),
+        "the valid op is not written either"
+    );
+}
+
+#[test]
+fn op_json_reads_remargin_kind_or_its_kind_alias() {
+    for raw in [
+        json!({ "content": "body", "remargin_kind": ["decision-item", "todo"] }),
+        json!({ "content": "body", "kind": ["decision-item", "todo"] }),
+    ] {
+        let op = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 0).unwrap();
+        assert_eq!(op.remargin_kind, ["decision-item", "todo"], "{raw}");
+    }
+}
+
+#[test]
+fn op_json_refuses_a_kind_that_is_not_an_array_of_strings() {
+    for raw in [
+        json!({ "content": "body", "remargin_kind": "decision-item" }),
+        json!({ "content": "body", "remargin_kind": ["todo", 7_i32] }),
+    ] {
+        let err = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 2).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("batch op[2]") && msg.contains("array of strings"),
+            "{msg}"
+        );
+    }
+}
+
+#[test]
+fn a_sandbox_op_stages_the_file_once() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let path = Path::new("/docs/test.md");
+    let mut first = BatchCommentOp::new(String::from("First."));
+    first.sandbox = true;
+    let mut second = BatchCommentOp::new(String::from("Second."));
+    second.sandbox = true;
+    let ops = vec![first, second, BatchCommentOp::new(String::from("Third."))];
+
+    batch_comment(&system, path, &open_config(), &ops).unwrap();
+
+    let doc = parser::parse_file(&system, path).unwrap();
+    assert_eq!(sandbox_authors(&doc), ["eduardo"]);
+    assert_eq!(doc.comments().len(), 3);
+}
+
+#[test]
+fn a_batch_without_sandbox_leaves_the_file_unstaged() {
+    let system = system_with_doc(MINIMAL_DOC);
+    let path = Path::new("/docs/test.md");
+    let ops = vec![BatchCommentOp::new(String::from("Plain."))];
+
+    batch_comment(&system, path, &open_config(), &ops).unwrap();
+
+    let doc = parser::parse_file(&system, path).unwrap();
+    assert_eq!(sandbox_authors(&doc), Vec::<String>::new());
+}
+
+#[test]
+fn op_json_refuses_an_unknown_field_and_names_it() {
+    let raw = json!({ "content": "body", "after_headng": "Repro > Target" });
+
+    let err = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 0).unwrap_err();
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.starts_with("batch op[0]: unknown field `after_headng`; accepted: "),
+        "{msg}"
+    );
 }

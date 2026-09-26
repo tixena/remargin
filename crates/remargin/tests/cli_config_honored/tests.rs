@@ -205,8 +205,8 @@ fn batch_attributes_created_comments_to_config_identity() {
     let doc_str = String::from(doc.to_string_lossy());
 
     let ops = json!([
-        { "op": "comment", "content": "first via batch" },
-        { "op": "comment", "content": "second via batch" }
+        { "content": "first via batch" },
+        { "content": "second via batch" }
     ])
     .to_string();
 

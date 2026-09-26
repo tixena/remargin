@@ -19,6 +19,8 @@ use crate::config::identity::IdentityFlags;
 use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::mcp;
+use crate::operations::batch::OP_FIELDS;
+use crate::operations::projections::PLAN_OP_FIELDS;
 use crate::operations::{CreateCommentParams, create_comment};
 use crate::parser::{self, AuthorType};
 use crate::permissions::pretool_install::{HOOK_MATCHER, HOOK_SUBCOMMAND};
@@ -565,6 +567,188 @@ fn batch_creates_multiple_comments() {
     let result = extract_tool_text(&response);
     let ids = result["ids"].as_array().unwrap();
     assert_eq!(ids.len(), 3_usize);
+}
+
+#[test]
+fn batch_kinds_are_found_by_the_kind_filter() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Repro\n\n## Target\n\nBody text.\n");
+    let config = test_config();
+
+    let batch = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "batch", "arguments": {
+                "file": "doc.md",
+                "operations": [
+                    { "content": "Tagged batch op.", "after_heading": "Repro > Target", "remargin_kind": ["decision-item"] },
+                    { "content": "Untagged batch op.", "after_heading": "Repro > Target" }
+                ]
+            }}
+        }),
+    );
+    let ids = extract_tool_text(&batch)["ids"].clone();
+
+    let filtered = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 2_i32, "method": "tools/call",
+            "params": { "name": "comments", "arguments": {
+                "file": "doc.md",
+                "remargin_kind": ["decision-item"]
+            }}
+        }),
+    );
+    let found: Vec<Value> = extract_tool_text(&filtered)["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|cm| cm["id"].clone())
+        .collect();
+    assert_eq!(found, [ids[0].clone()]);
+}
+
+#[test]
+fn batch_refuses_an_invalid_kind_before_writing() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody text.\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "batch", "arguments": {
+                "file": "doc.md",
+                "operations": [
+                    { "content": "Fine." },
+                    { "content": "Bad tag.", "remargin_kind": "decision-item" }
+                ]
+            }}
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    assert!(tool_error_text(&response).contains("batch op[1]"));
+    assert_eq!(
+        system.read_to_string(&base.join("doc.md")).unwrap(),
+        "# Hello\n\nBody text.\n"
+    );
+}
+
+/// A batch sub-op documents itself as having the same fields as a single
+/// `comment`; a field missing from its schema is one agents are never told
+/// they can send.
+#[test]
+fn batch_op_schema_declares_every_comment_field() {
+    let base = Path::new("/docs");
+    let response = call(
+        &MemorySystem::new(),
+        base,
+        &test_config(),
+        &json!({ "jsonrpc": "2.0", "id": 1_i32, "method": "tools/list", "params": {} }),
+    );
+    let tools = response["result"]["tools"].as_array().unwrap();
+    let schema = |name: &str| {
+        tools
+            .iter()
+            .find(|t| t["name"] == name)
+            .map(|t| t["inputSchema"].clone())
+            .unwrap()
+    };
+    let comment = schema("comment");
+    let batch = schema("batch");
+    let op_fields = batch["properties"]["operations"]["items"]["properties"]
+        .as_object()
+        .unwrap();
+
+    let missing: Vec<&String> = comment["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|key| key.as_str() != "file")
+        .filter(|key| !op_fields.contains_key(*key))
+        .collect();
+    assert!(missing.is_empty(), "batch ops lack {missing:?}");
+}
+
+/// Ops refuse any key outside their accepted list, so a field the schema
+/// advertises but the parser does not accept would refuse every call that
+/// uses it.
+#[test]
+fn batch_op_schemas_declare_exactly_the_accepted_fields() {
+    let base = Path::new("/docs");
+    let response = call(
+        &MemorySystem::new(),
+        base,
+        &test_config(),
+        &json!({ "jsonrpc": "2.0", "id": 1_i32, "method": "tools/list", "params": {} }),
+    );
+    let tools = response["result"]["tools"].as_array().unwrap();
+    let declared = |tool: &str, array: &str| -> Vec<String> {
+        let schema = tools
+            .iter()
+            .find(|t| t["name"] == tool)
+            .map(|t| t["inputSchema"].clone())
+            .unwrap();
+        let mut keys: Vec<String> = schema["properties"][array]["items"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    };
+    let accepted = |fields: &[&str]| -> Vec<String> {
+        let mut keys: Vec<String> = fields
+            .iter()
+            .filter(|key| **key != "kind")
+            .map(|key| String::from(*key))
+            .collect();
+        keys.sort();
+        keys
+    };
+
+    assert_eq!(declared("batch", "operations"), accepted(OP_FIELDS));
+    assert_eq!(declared("plan", "ops"), accepted(PLAN_OP_FIELDS));
+}
+
+#[test]
+fn batch_refuses_an_unknown_field_before_writing() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody text.\n");
+    let config = test_config();
+
+    let response = call(
+        &system,
+        base,
+        &config,
+        &json!({
+            "jsonrpc": "2.0", "id": 1_i32, "method": "tools/call",
+            "params": { "name": "batch", "arguments": {
+                "file": "doc.md",
+                "operations": [
+                    { "content": "Fine." },
+                    { "content": "Typo.", "after_headng": "Hello" }
+                ]
+            }}
+        }),
+    );
+
+    assert!(is_tool_error(&response));
+    assert!(tool_error_text(&response).contains("batch op[1]: unknown field `after_headng`"));
+    assert_eq!(
+        system.read_to_string(&base.join("doc.md")).unwrap(),
+        "# Hello\n\nBody text.\n"
+    );
 }
 
 #[test]

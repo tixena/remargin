@@ -22,13 +22,31 @@ use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
+use crate::kind::{self, validate_kinds};
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
-use crate::operations::{copy_attachments, find_comment_mut};
+use crate::operations::{apply_sandbox_entry, copy_attachments, find_comment_mut, resolve_thread};
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
+
+/// Keys a batch op may carry. `ack_skip_reason` is read by the MCP ack gate
+/// and `kind` is an alias of `remargin_kind`.
+pub const OP_FIELDS: &[&str] = &[
+    "ack_skip_reason",
+    "after_comment",
+    "after_heading",
+    "after_line",
+    "attachments",
+    "auto_ack",
+    "content",
+    "kind",
+    "remargin_kind",
+    "reply_to",
+    "sandbox",
+    "to",
+];
 
 /// What a batch wrote, and what its bodies earned in passing.
 ///
@@ -64,8 +82,13 @@ pub struct BatchCommentOp {
     pub auto_ack: Option<bool>,
     /// Comment body text.
     pub content: String,
+    /// Classification tags, validated before anything is written.
+    pub remargin_kind: Vec<String>,
     /// ID of the comment this replies to.
     pub reply_to: Option<String>,
+    /// Stage the file in the caller's sandbox in the same write. The file is
+    /// staged once when any op sets it.
+    pub sandbox: bool,
     /// Addressees of the comment.
     pub to: Vec<String>,
 }
@@ -84,9 +107,12 @@ impl BatchCommentOp {
     ///
     /// # Errors
     ///
-    /// Returns an error if the required `content` field is missing or
-    /// not a string.
+    /// Returns an error if the op carries a key outside [`OP_FIELDS`], if
+    /// the required `content` field is missing or not a string, or if
+    /// `remargin_kind` is not an array of strings.
     pub fn from_json_object(obj: &Map<String, Value>, idx: usize) -> Result<Self> {
+        refuse_unknown_fields(obj, OP_FIELDS, &format!("batch op[{idx}]"))?;
+
         let content = obj
             .get("content")
             .and_then(Value::as_str)
@@ -133,10 +159,13 @@ impl BatchCommentOp {
                 .unwrap_or_default(),
             auto_ack: obj.get("auto_ack").and_then(Value::as_bool),
             content: String::from(content),
+            remargin_kind: kind::kinds_from_json(obj)
+                .with_context(|| format!("batch op[{idx}]"))?,
             reply_to: obj
                 .get("reply_to")
                 .and_then(Value::as_str)
                 .map(String::from),
+            sandbox: obj.get("sandbox").and_then(Value::as_bool).unwrap_or(false),
             to: obj
                 .get("to")
                 .and_then(Value::as_array)
@@ -160,7 +189,9 @@ impl BatchCommentOp {
             attachments: Vec::new(),
             auto_ack: None,
             content,
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         }
     }
@@ -178,6 +209,7 @@ impl BatchCommentOp {
 ///
 /// Returns an error if:
 /// - The author is not allowed to post
+/// - Any operation's `remargin_kind` fails validation
 /// - Any attachment does not exist
 /// - A reply-to reference cannot be resolved
 /// - Writing fails
@@ -227,21 +259,13 @@ pub fn batch_comment(
         let existing_ids = doc.comment_ids();
         let new_id = id::generate(&existing_ids);
 
-        // batch does not yet surface remargin_kind; `None`
-        // keeps the checksum identical to the pre-field implementation.
-        // threads kinds through `BatchCommentOp`.
-        let remargin_kind: Option<Vec<String>> = None;
-        let checksum = compute_checksum(&op.content, &[]);
+        let checksum = compute_checksum(&op.content, &op.remargin_kind);
 
         // Resolve reply-to (may reference an earlier comment in this batch).
         let reply_to = op.reply_to.as_deref();
 
         // Resolve thread from reply_to.
-        let thread = reply_to.map(|parent_id| {
-            doc.find_comment(parent_id)
-                .and_then(|parent| parent.thread.clone())
-                .unwrap_or_else(|| String::from(parent_id))
-        });
+        let thread = reply_to.map(|parent_id| resolve_thread(&doc, parent_id));
 
         // Copy attachments.
         let resolved_attachments = copy_attachments(system, path, cfg, &op.attachments)
@@ -277,7 +301,8 @@ pub fn batch_comment(
             id: new_id.clone(),
             line: 0, // Placeholder; updated after document write and re-parse.
             reactions: Reactions::new(),
-            remargin_kind,
+            // Empty stays `None` so untagged comments write no `remargin_kind:` line.
+            remargin_kind: (!op.remargin_kind.is_empty()).then(|| op.remargin_kind.clone()),
             reply_to: reply_to.map(String::from),
             signature: None,
             sl: None,
@@ -334,6 +359,10 @@ pub fn batch_comment(
 
     frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
+    if operations.iter().any(|op| op.sandbox) {
+        apply_sandbox_entry(&mut doc, identity, Utc::now().fixed_offset())?;
+    }
+
     let markdown_after = doc.to_markdown()?;
     linter::lint_or_fail(&markdown_after)
         .context("document has structural issues after batch write")?;
@@ -353,8 +382,37 @@ fn gate_ops(operations: &[BatchCommentOp], author_type: &AuthorType) -> Result<(
         }
         comment_style::gate(&op.content, author_type)
             .with_context(|| format!("batch operation {idx}"))?;
+        validate_kinds(&op.remargin_kind)
+            .with_context(|| format!("batch operation {idx}: invalid remargin_kind"))?;
     }
     Ok(())
+}
+
+/// Refuse an op that carries a key outside `known`, so a typo or an
+/// unsupported field fails the call instead of vanishing from the write.
+pub(crate) fn refuse_unknown_fields(
+    obj: &Map<String, Value>,
+    known: &[&str],
+    op: &str,
+) -> Result<()> {
+    let unknown: Vec<String> = obj
+        .keys()
+        .filter(|key| !known.contains(&key.as_str()))
+        .map(|key| format!("`{key}`"))
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    let noun = if unknown.len() == 1 {
+        "field"
+    } else {
+        "fields"
+    };
+    bail!(
+        "{op}: unknown {noun} {}; accepted: {}",
+        unknown.join(", "),
+        known.join(", ")
+    )
 }
 
 /// Write the batch result with preservation check + post-mutation verify gate.

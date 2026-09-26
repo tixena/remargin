@@ -4,7 +4,8 @@
 //! change the YAML wire format. Empty vectors are dropped from output
 //! so pre-`remargin_kind` comments round-trip byte-for-byte.
 
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
+use serde_json::{Map, Value};
 
 /// Hard upper bound on kind string length.
 ///
@@ -123,6 +124,30 @@ pub fn canonical_kinds(kinds: &[String]) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+/// Read the kind tags off one JSON operation object.
+///
+/// `kind` is an alias of `remargin_kind`, as on the single-comment surfaces.
+/// Absent or `null` yields no tags; anything but an array of strings is
+/// refused.
+///
+/// # Errors
+///
+/// Returns an error when the value is present but is not an array of
+/// strings.
+pub fn kinds_from_json(obj: &Map<String, Value>) -> Result<Vec<String>> {
+    match obj.get("remargin_kind").or_else(|| obj.get("kind")) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(value) => value
+            .as_array()
+            .and_then(|arr| {
+                arr.iter()
+                    .map(|v| v.as_str().map(String::from))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .context("`remargin_kind`/`kind` must be an array of strings"),
+    }
 }
 
 const fn is_allowed_char(ch: char) -> bool {

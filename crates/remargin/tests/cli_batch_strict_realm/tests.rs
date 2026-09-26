@@ -91,8 +91,8 @@ fn batch_into_strict_realm_from_open_caller_does_not_leave_unsigned_comments() {
     let key_str = String::from(key.to_string_lossy());
 
     let ops = json!([
-        { "op": "comment", "content": "first via cross-mode batch" },
-        { "op": "comment", "content": "second via cross-mode batch" }
+        { "content": "first via cross-mode batch" },
+        { "content": "second via cross-mode batch" }
     ])
     .to_string();
 

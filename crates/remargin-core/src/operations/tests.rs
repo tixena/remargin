@@ -10,6 +10,7 @@ use os_shim::mock::MemorySystem;
 
 use crate::comment_style;
 use crate::config::{Mode, ResolvedConfig};
+use crate::frontmatter;
 use crate::operations::{
     CreateCommentParams, ack_comments, batch as batch_ops, create_comment, delete_comments,
     edit_comment, projections, react, sandbox as sandbox_ops, sign,
@@ -2594,6 +2595,41 @@ fn project_batch_auto_ack_without_reply_rejects_with_index() {
 }
 
 #[test]
+fn project_batch_carries_each_op_kinds() {
+    let (system, config, _first) = seed_with_comment();
+    let mut tagged = projections::ProjectBatchOp::new(String::from("Tagged."));
+    tagged.remargin_kind = vec![String::from("decision-item")];
+
+    let (_, after) =
+        projections::project_batch(&system, Path::new("/docs/test.md"), &config, &[tagged])
+            .unwrap();
+
+    let projected = after
+        .comments()
+        .into_iter()
+        .find(|cm| cm.content.starts_with("Tagged."))
+        .unwrap();
+    assert_eq!(projected.kinds(), ["decision-item"]);
+}
+
+#[test]
+fn project_batch_invalid_kind_rejects_with_index() {
+    let (system, config, _first) = seed_with_comment();
+    let mut bad = projections::ProjectBatchOp::new(String::from("Bad tag."));
+    bad.remargin_kind = vec![String::from("not/allowed")];
+    let ops = [projections::ProjectBatchOp::new(String::from("Fine.")), bad];
+
+    let err =
+        projections::project_batch(&system, Path::new("/docs/test.md"), &config, &ops).unwrap_err();
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("operation 1") && msg.contains("remargin_kind"),
+        "{msg}"
+    );
+}
+
+#[test]
 fn project_batch_op_from_json_happy_path_picks_up_every_field() {
     let raw = serde_json::json!({
         "content": "body",
@@ -2602,6 +2638,8 @@ fn project_batch_op_from_json_happy_path_picks_up_every_field() {
         "auto_ack": true,
         "to": ["alice", "bob"],
         "attach_names": ["img.png"],
+        "remargin_kind": ["todo"],
+        "sandbox": true,
     });
     let obj = raw.as_object().unwrap();
 
@@ -2612,6 +2650,42 @@ fn project_batch_op_from_json_happy_path_picks_up_every_field() {
     assert_eq!(op.auto_ack, Some(true));
     assert_eq!(op.to, vec![String::from("alice"), String::from("bob")]);
     assert_eq!(op.attachment_filenames, vec![String::from("img.png")]);
+    assert_eq!(op.remargin_kind, ["todo"]);
+    assert!(op.sandbox);
+}
+
+#[test]
+fn project_batch_op_from_json_refuses_a_field_plan_does_not_read() {
+    let raw = serde_json::json!({ "content": "body", "attachments": ["img.png"] });
+    let obj = raw.as_object().unwrap();
+
+    let err = projections::ProjectBatchOp::from_json_object(obj, 2).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.starts_with("plan batch op[2]: unknown field `attachments`; accepted: "),
+        "{msg}"
+    );
+}
+
+#[test]
+fn project_batch_sandbox_op_projects_the_entry() {
+    let (system, config, _first) = seed_with_comment();
+    let mut staged = projections::ProjectBatchOp::new(String::from("Staged."));
+    staged.sandbox = true;
+
+    let (before, after) =
+        projections::project_batch(&system, Path::new("/docs/test.md"), &config, &[staged])
+            .unwrap();
+
+    let authors = |doc: &parser::ParsedDocument| -> Vec<String> {
+        frontmatter::read_sandbox_entries(doc)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.author)
+            .collect()
+    };
+    assert_eq!(authors(&before), Vec::<String>::new());
+    assert_eq!(authors(&after), ["eduardo"]);
 }
 
 #[test]
@@ -3129,7 +3203,9 @@ fn batch_refuses_forbidden_targets() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("one"),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         }];
         let err = batch_comment(&system, &path, &config, &ops).unwrap_err();
@@ -3472,7 +3548,9 @@ fn batch_refused_when_target_under_restrict() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("a"),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -3482,7 +3560,9 @@ fn batch_refused_when_target_under_restrict() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("b"),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
@@ -3503,7 +3583,9 @@ fn batch_refused_when_deny_ops_lists_batch() {
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("solo"),
+        remargin_kind: Vec::new(),
         reply_to: None,
+        sandbox: false,
         to: Vec::new(),
     }];
     let err = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap_err();
@@ -3528,7 +3610,9 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("first"),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -3538,7 +3622,9 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("second"),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
         BatchCommentOp {
@@ -3548,7 +3634,9 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("third"),
+            remargin_kind: Vec::new(),
             reply_to: None,
+            sandbox: false,
             to: Vec::new(),
         },
     ];
