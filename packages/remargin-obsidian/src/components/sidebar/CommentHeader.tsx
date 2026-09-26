@@ -17,8 +17,8 @@ interface CommentHeaderProps {
 
 /**
  * Rich header for a comment card: avatar circle, comment-id badge, line
- * badge, kind chips, username, optional online dot, right-aligned relative
- * timestamp.
+ * badge, edited chip, kind chips, username, optional online dot,
+ * right-aligned relative timestamp.
  */
 export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps) {
   const isAgent = comment.author_type === "agent";
@@ -61,6 +61,28 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
           >
             L{comment.line}
           </Badge>
+        )}
+        {comment.edited_at && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="shrink-0"
+                  aria-label={`Edited ${formatFullTime(comment.edited_at)}`}
+                >
+                  <Badge
+                    variant="outline"
+                    className="px-1 py-0 rounded-sm text-[9px] font-normal italic leading-none text-text-muted"
+                  >
+                    {`edited ${formatRelative(comment.edited_at)}`}
+                  </Badge>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Edited {formatFullTime(comment.edited_at)}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
         {(comment.remargin_kind ?? []).map((kind) => (
           <Badge

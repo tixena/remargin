@@ -193,6 +193,7 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
               // wire form; map back to the in-memory field here.
               author_type: yaml.type as AuthorType | undefined,
               ts: yaml.ts ? new Date(yaml.ts) : undefined,
+              edited_at: yaml.edited_at ? new Date(yaml.edited_at) : undefined,
               content,
               // OnDiskComment renames `reply_to` → `reply-to`; map back.
               reply_to: yaml["reply-to"],

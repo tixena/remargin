@@ -92,6 +92,19 @@ describe("CommentHeader", () => {
     }
   });
 
+  it("shows an edited chip with the relative time when the comment was edited", () => {
+    const editedAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const html = render(fixture({ edited_at: editedAt }));
+    assert.ok(html.includes(">edited 2h</div>"), html);
+    assert.match(html, /aria-label="Edited [^"]+"/);
+  });
+
+  it("shows no edited chip on a comment that was never edited", () => {
+    const html = render(fixture({ edited_at: undefined }));
+    assert.ok(!html.includes("edited"), html);
+    assert.ok(!html.includes('aria-label="Edited'), html);
+  });
+
   it("styles the kind chip apart from the id badge", () => {
     const html = render(fixture({ remargin_kind: ["decision-item"] }));
     assert.match(

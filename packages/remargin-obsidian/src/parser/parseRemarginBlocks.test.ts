@@ -102,6 +102,24 @@ describe("parseRemarginBlocks — canonical on-disk YAML keys", () => {
     assert.deepEqual(blocks[0].comment.remargin_kind, ["decision-item", "action item"]);
   });
 
+  it("reads `edited_at` from YAML and lands it on comment.edited_at", () => {
+    const doc = [
+      "```remargin",
+      "---",
+      "id: 28n",
+      "author: prodoctivity_notes_agent",
+      "type: agent",
+      "ts: 2026-09-26T01:41:49.131290138Z",
+      "edited_at: 2026-09-26T16:39:09.834404908Z",
+      "---",
+      "edited item comment",
+      "```",
+    ].join("\n");
+
+    const editedAt = parseRemarginBlocks(doc)[0].comment.edited_at;
+    assert.equal(editedAt?.toISOString(), "2026-09-26T16:39:09.834Z");
+  });
+
   it("leaves remargin_kind undefined when the header has none", () => {
     const doc = [
       "```remargin",
@@ -116,5 +134,6 @@ describe("parseRemarginBlocks — canonical on-disk YAML keys", () => {
     ].join("\n");
 
     assert.equal(parseRemarginBlocks(doc)[0].comment.remargin_kind, undefined);
+    assert.equal(parseRemarginBlocks(doc)[0].comment.edited_at, undefined);
   });
 });
