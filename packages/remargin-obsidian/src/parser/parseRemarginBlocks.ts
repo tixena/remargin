@@ -201,6 +201,7 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
               ack: normalizeAcks(yaml.ack),
               reactions: normalizeReactions(yaml.reactions),
               attachments: yaml.attachments ?? [],
+              remargin_kind: yaml.remargin_kind,
               checksum: yaml.checksum,
               signature: yaml.signature,
               line: blockStartLine,

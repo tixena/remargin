@@ -1,3 +1,4 @@
+import { Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Comment } from "@/generated";
@@ -16,7 +17,8 @@ interface CommentHeaderProps {
 
 /**
  * Rich header for a comment card: avatar circle, comment-id badge, line
- * badge, username, optional online dot, right-aligned relative timestamp.
+ * badge, kind chips, username, optional online dot, right-aligned relative
+ * timestamp.
  */
 export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps) {
   const isAgent = comment.author_type === "agent";
@@ -60,6 +62,17 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
             L{comment.line}
           </Badge>
         )}
+        {(comment.remargin_kind ?? []).map((kind) => (
+          <Badge
+            key={kind}
+            variant="outline"
+            className="px-1 py-0 gap-0.5 rounded-full shrink-0 text-[9px] font-normal leading-none text-text-muted"
+            aria-label={`Kind: ${kind}`}
+          >
+            <Tag className="w-2 h-2" aria-hidden="true" />
+            {kind}
+          </Badge>
+        ))}
         <span className="text-xs font-semibold text-text-normal truncate" title={authorTitle}>
           {authorDisplay}
         </span>

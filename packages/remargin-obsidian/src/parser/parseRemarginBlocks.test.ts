@@ -83,4 +83,38 @@ describe("parseRemarginBlocks — canonical on-disk YAML keys", () => {
     // If the key regex dropped the line, reply_to would be undefined.
     assert.equal(blocks[0].comment.reply_to, "parent-id");
   });
+
+  it("reads `remargin_kind: [...]` from YAML and lands it on comment.remargin_kind", () => {
+    const doc = [
+      "```remargin",
+      "---",
+      "id: x36",
+      "author: prodoctivity_notes_agent",
+      "type: agent",
+      "ts: 2026-09-25T23:01:54.585047035Z",
+      "remargin_kind: [decision-item, action item]",
+      "---",
+      "item comment",
+      "```",
+    ].join("\n");
+
+    const blocks = parseRemarginBlocks(doc);
+    assert.deepEqual(blocks[0].comment.remargin_kind, ["decision-item", "action item"]);
+  });
+
+  it("leaves remargin_kind undefined when the header has none", () => {
+    const doc = [
+      "```remargin",
+      "---",
+      "id: c1",
+      "author: alice",
+      "type: human",
+      "ts: 2026-04-25T12:00:00-04:00",
+      "---",
+      "plain",
+      "```",
+    ].join("\n");
+
+    assert.equal(parseRemarginBlocks(doc)[0].comment.remargin_kind, undefined);
+  });
 });

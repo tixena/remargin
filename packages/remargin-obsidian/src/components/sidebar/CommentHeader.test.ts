@@ -76,4 +76,28 @@ describe("CommentHeader", () => {
     const html = render(fixture({ id: "" }));
     assert.ok(!/bg-slate-500/.test(html), "expected no id badge when comment.id is empty");
   });
+
+  it("renders one kind chip per remargin_kind, in stored order", () => {
+    const html = render(fixture({ remargin_kind: ["decision-done", "action item"] }));
+    const first = html.indexOf('aria-label="Kind: decision-done"');
+    const second = html.indexOf('aria-label="Kind: action item"');
+    assert.ok(first > -1 && second > first, html);
+    assert.ok(html.includes(">decision-done</div>"), html);
+  });
+
+  it("renders no kind chip when the comment has no kind", () => {
+    for (const remargin_kind of [[], undefined]) {
+      const html = render(fixture({ remargin_kind }));
+      assert.ok(!html.includes('aria-label="Kind:'), html);
+    }
+  });
+
+  it("styles the kind chip apart from the id badge", () => {
+    const html = render(fixture({ remargin_kind: ["decision-item"] }));
+    assert.match(
+      html,
+      /<div[^>]*class="[^"]*rounded-full[^"]*"[^>]*aria-label="Kind: decision-item"/
+    );
+    assert.doesNotMatch(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*"[^>]*aria-label="Kind:/);
+  });
 });
