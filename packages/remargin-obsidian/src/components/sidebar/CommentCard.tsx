@@ -1,7 +1,9 @@
 import { AckButton } from "@/components/sidebar/AckButton";
 import { AckToggle } from "@/components/sidebar/AckToggle";
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
+import { EditedLabel } from "@/components/sidebar/EditedLabel";
 import { EmojiPicker } from "@/components/sidebar/EmojiPicker";
+import { KindChips } from "@/components/sidebar/KindChips";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import { ReactionPills } from "@/components/sidebar/ReactionPills";
 import { Button } from "@/components/ui/button";
@@ -157,6 +159,8 @@ export function CommentCard({
               }}
             />
           )}
+          {comment.edited_at && <EditedLabel editedAt={comment.edited_at} />}
+          <KindChips kinds={comment.remargin_kind} />
         </div>
         <div className="flex items-center gap-1">
           <Button

@@ -44,7 +44,7 @@ export function AckButton({ ack, me, onAck, toTargets = [] }: AckButtonProps) {
     <button
       type="button"
       className={cn(
-        "inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[10px] leading-none font-semibold cursor-pointer transition-colors",
+        "inline-flex items-center gap-1 h-[var(--input-height)] rounded-sm px-2 text-[10px] leading-none font-semibold cursor-pointer transition-colors",
         visual.tone === "green" &&
           "bg-green-500/20 text-green-500 border border-green-500/40 hover:bg-green-500/30",
         visual.tone === "normal" &&

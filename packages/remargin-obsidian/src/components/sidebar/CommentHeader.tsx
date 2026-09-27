@@ -1,10 +1,9 @@
-import { Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Comment } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
 import { authorLabel } from "@/lib/authorLabel";
-import { formatRelative } from "@/lib/relative-time";
+import { formatFullTime, formatRelative } from "@/lib/relative-time";
 
 interface CommentHeaderProps {
   comment: Comment;
@@ -17,8 +16,8 @@ interface CommentHeaderProps {
 
 /**
  * Rich header for a comment card: avatar circle, comment-id badge, line
- * badge, edited chip, kind chips, username, optional online dot,
- * right-aligned relative timestamp.
+ * badge, username, optional online dot, right-aligned relative timestamp.
+ * The edited label and kind chips live in the card's action row.
  */
 export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps) {
   const isAgent = comment.author_type === "agent";
@@ -62,39 +61,6 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
             L{comment.line}
           </Badge>
         )}
-        {comment.edited_at && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className="shrink-0"
-                  aria-label={`Edited ${formatFullTime(comment.edited_at)}`}
-                >
-                  <Badge
-                    variant="outline"
-                    className="px-1 py-0 rounded-sm text-[9px] font-normal italic leading-none text-text-muted"
-                  >
-                    {`edited ${formatRelative(comment.edited_at)}`}
-                  </Badge>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-xs">Edited {formatFullTime(comment.edited_at)}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-        {(comment.remargin_kind ?? []).map((kind) => (
-          <Badge
-            key={kind}
-            variant="outline"
-            className="px-1 py-0 gap-0.5 rounded-full shrink-0 text-[9px] font-normal leading-none text-text-muted"
-            aria-label={`Kind: ${kind}`}
-          >
-            <Tag className="w-2 h-2" aria-hidden="true" />
-            {kind}
-          </Badge>
-        ))}
         <span className="text-xs font-semibold text-text-normal truncate" title={authorTitle}>
           {authorDisplay}
         </span>
@@ -119,19 +85,4 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
       </TooltipProvider>
     </div>
   );
-}
-
-function formatFullTime(ts?: string | Date): string {
-  if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleString(undefined, {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
 }

@@ -194,6 +194,13 @@
   margin-top: 4px;
 }
 
+.remargin-widget-comment__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Compact chevron button. Stops click propagation so toggling the body
  * does not also fire the surrounding widget click. */
 .remargin-collapse-toggle {

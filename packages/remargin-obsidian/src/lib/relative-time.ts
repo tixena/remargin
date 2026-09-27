@@ -33,3 +33,19 @@ export function formatRelative(ts: string | Date | undefined, now: Date = new Da
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${months[then.getMonth()]} ${then.getDate()}`;
 }
+
+/** Long local date and time for tooltips, e.g. `September 26, 2026, 4:39 PM`. */
+export function formatFullTime(ts?: string | Date): string {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}

@@ -52,7 +52,7 @@ export function AckToggle({ ack, me, toTargets = [] }: AckToggleProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[10px] leading-none font-semibold",
+        "inline-flex items-center gap-1 h-[var(--input-height)] rounded-sm px-2 text-[10px] leading-none font-semibold",
         visual.tone === "green" && "bg-green-500/20 text-green-500 border border-green-500/40",
         visual.tone === "normal" && "bg-transparent text-text-muted border border-bg-border"
       )}

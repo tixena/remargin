@@ -9,11 +9,8 @@ import { __resetParticipantsCacheForTests } from "../../hooks/useParticipants.ts
 import { PluginContext } from "../../hooks/usePlugin.ts";
 import type RemarginPlugin from "../../main.ts";
 import { DEFAULT_SETTINGS } from "../../types.ts";
-import { CommentHeader } from "./CommentHeader.tsx";
+import { CommentCard } from "./CommentCard.tsx";
 
-// Minimal plugin + backend stand-ins. `useParticipants` only reads
-// `plugin.settings` (for the cache key) and calls `backend.registryShow()`,
-// so we stub exactly those.
 const pluginStub = { settings: DEFAULT_SETTINGS } as unknown as RemarginPlugin;
 const backendStub = {
   registryShow: (): Promise<Participant[]> => Promise.resolve([]),
@@ -26,11 +23,11 @@ function fixture(overrides: Partial<Comment>): Comment {
     author: "alice",
     author_type: "human",
     checksum: "",
-    content: "",
+    content: "body",
     edited_at: undefined,
     el: undefined,
-    id: "oi5",
-    line: 0,
+    id: "xuo",
+    line: 104,
     reactions: {},
     remargin_kind: [],
     reply_to: undefined,
@@ -38,10 +35,14 @@ function fixture(overrides: Partial<Comment>): Comment {
     sl: undefined,
     thread: undefined,
     to: [],
-    ts: new Date("2026-04-14T12:00:00-04:00"),
+    ts: new Date("2026-09-25T12:00:00Z"),
     ...overrides,
   };
 }
+
+const noop = () => {
+  /* test-only no-op handler */
+};
 
 function render(comment: Comment): string {
   __resetParticipantsCacheForTests();
@@ -52,33 +53,32 @@ function render(comment: Comment): string {
       createElement(
         BackendContext.Provider,
         { value: backendStub },
-        createElement(CommentHeader, { comment })
+        createElement(CommentCard, {
+          comment,
+          file: "notes/board.md",
+          depth: 0,
+          me: "bob",
+          onAck: noop,
+          onDelete: noop,
+          onReact: noop,
+        })
       )
     )
   );
 }
 
-describe("CommentHeader", () => {
-  it("renders a badge containing the exact comment id", () => {
-    const html = render(fixture({ id: "oi5" }));
-    // Match the id-badge styling (bg-slate-500 text-white) with oi5 inside.
-    assert.match(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*text-white[^"]*"[^>]*>oi5<\/div>/);
-  });
-
-  it("renders the id verbatim for a different comment", () => {
-    const html = render(fixture({ id: "xyz" }));
-    assert.match(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*text-white[^"]*"[^>]*>xyz<\/div>/);
-    // Ensure the fixture id from the previous test didn't leak.
-    assert.ok(!html.includes(">oi5<"), "expected previous id to be absent");
-  });
-
-  it("omits the id badge when comment.id is empty (defensive)", () => {
-    const html = render(fixture({ id: "" }));
-    assert.ok(!/bg-slate-500/.test(html), "expected no id badge when comment.id is empty");
-  });
-
-  it("keeps the edited label and kind chips out of the header", () => {
+describe("CommentCard", () => {
+  it("puts the edited label and kind chips right after the add-reaction button", () => {
     const html = render(fixture({ edited_at: new Date(), remargin_kind: ["decision-done"] }));
+    const picker = html.indexOf('aria-label="Add reaction"');
+    const edited = html.indexOf('aria-label="Edited');
+    const kind = html.indexOf('aria-label="Kind: decision-done"');
+    const reply = html.indexOf(">Reply<");
+    assert.ok(picker > -1 && edited > picker && kind > edited && reply > kind, html);
+  });
+
+  it("shows neither label on an unedited comment without kinds", () => {
+    const html = render(fixture({}));
     assert.ok(!html.includes('aria-label="Edited'), html);
     assert.ok(!html.includes('aria-label="Kind:'), html);
   });

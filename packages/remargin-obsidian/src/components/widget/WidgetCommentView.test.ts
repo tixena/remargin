@@ -127,6 +127,24 @@ describe("WidgetCommentView", () => {
     );
   });
 
+  it("shows the edited label and kind chips under the body when expanded", () => {
+    const html = render(
+      fixture({ edited_at: new Date(), remargin_kind: ["decision-done"] }),
+      false
+    );
+    const body = html.indexOf("remargin-markdown-content");
+    const tags = html.indexOf("remargin-widget-comment__tags");
+    assert.ok(body > -1 && tags > body, html);
+    assert.ok(html.includes('aria-label="Edited'), html);
+    assert.ok(html.includes('aria-label="Kind: decision-done"'), html);
+  });
+
+  it("renders no tag row for an unedited comment without kinds, or when collapsed", () => {
+    assert.ok(!render(fixture(), false).includes("remargin-widget-comment__tags"));
+    const collapsed = render(fixture({ edited_at: new Date(), remargin_kind: ["x"] }), true);
+    assert.ok(!collapsed.includes("remargin-widget-comment__tags"), collapsed);
+  });
+
   // Test #3: clicking the widget root invokes onClick(commentId, sourcePath).
   it("widget-root click invokes onClick with comment id and source path", () => {
     const calls: Array<[string, string]> = [];

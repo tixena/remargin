@@ -1,4 +1,6 @@
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
+import { EditedLabel } from "@/components/sidebar/EditedLabel";
+import { KindChips } from "@/components/sidebar/KindChips";
 import { MarkdownContent } from "@/components/sidebar/MarkdownContent";
 import type { Comment } from "@/generated/types";
 import { activationKeyHandler } from "@/lib/keyboardActivation";
@@ -59,6 +61,7 @@ export function WidgetCommentView({
   };
 
   const showSummary = collapsed && summary !== undefined && summary.totalReplies > 0;
+  const hasTags = !!comment.edited_at || (comment.remargin_kind ?? []).length > 0;
 
   return (
     // The whole card is the click/keyboard target for the sidebar-focus
@@ -84,6 +87,12 @@ export function WidgetCommentView({
           sourcePath={sourcePath}
           className="remargin-widget-comment__body"
         />
+      )}
+      {!collapsed && hasTags && (
+        <div className="remargin-widget-comment__tags">
+          {comment.edited_at && <EditedLabel editedAt={comment.edited_at} />}
+          <KindChips kinds={comment.remargin_kind} />
+        </div>
       )}
     </div>
   );
