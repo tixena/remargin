@@ -13,8 +13,8 @@ const iconBtnStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  width: 22,
-  height: 22,
+  width: "var(--input-height)",
+  height: "var(--input-height)",
   borderRadius: 4,
   border: "none",
   cursor: "pointer",
@@ -69,6 +69,7 @@ export function FontScaleControl() {
           fontSize: 11,
           fontVariantNumeric: "tabular-nums",
           minWidth: 30,
+          height: "var(--input-height)",
           textAlign: "center",
           padding: 0,
         }}

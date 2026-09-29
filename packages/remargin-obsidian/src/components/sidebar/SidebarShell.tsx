@@ -202,7 +202,7 @@ export function SidebarShell({
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              height: 28,
+              height: "var(--input-height)",
               padding: "0 12px",
               borderRadius: 6,
               border: "none",
