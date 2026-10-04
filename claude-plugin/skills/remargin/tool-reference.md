@@ -7,7 +7,7 @@ Each op exists at both surfaces: MCP `mcp__remargin__<op>`; CLI `remargin <op>`.
 | Op | Purpose |
 |----|---------|
 | `ls` | List files and directories. |
-| `get` | Read a file. `start_line`/`end_line`/`line_numbers`/`binary`. Run `metadata` before binary reads. |
+| `get` | Read a file. `start_line`/`end_line`/`line_numbers`/`binary`. The response carries `total_lines`; a window cut to the size budget carries `effective_end_line` (continue from the next line). Run `metadata` before binary reads. |
 | `write` | Write file content (comment-preserving). `create`, `raw`, `binary`, `start_line`/`end_line` for partial writes. |
 | `metadata` | Frontmatter, comment counts, pending counts, mime, size. |
 | `rm` | Remove a file. |
@@ -17,8 +17,8 @@ Each op exists at both surfaces: MCP `mcp__remargin__<op>`; CLI `remargin <op>`.
 | Op | Purpose |
 |----|---------|
 | `comment` | Add one top-level comment. `after_line`, `after_comment`, `attachments`, `to`, `sandbox`. For thread replies use `reply`. |
-| `reply` | **PREFERRED** for thread responses. `parent_id` (required), `content`, `auto_ack` (smart default: ack iff parent.author != caller), `to`, `attachments`, `sandbox`, `remargin_kind`. |
-| `comments` | List comments in a file. MCP returns JSON; CLI `--pretty` gives the human-readable threaded display. |
+| `reply` | **PREFERRED** for thread responses. `parent_id` (required), `content`, `auto_ack` (smart default: ack iff parent.author != caller), `to`, `attachments`, `sandbox`, `kind`. |
+| `comments` | List one file's comments as columnar rows `{total, comment_cols, comments, effective_limit?}`. Filters `kind`, `pending`, `pending_for`, `pending_for_me`; `include_integrity` adds `checksum`/`signature`; paged with `offset`/`limit`. Reads gitignored files. CLI `--json` gives plain objects; `--pretty` the threaded display. |
 | `batch` | Add multiple comments atomically (single write, single verify). Each sub-op supports its own `auto_ack`, `reply_to`, etc. **Use this for N>1 comments on the same file.** |
 | `edit` | Edit an existing comment. Cascades ack-clear to children. |
 | `delete` | Delete one or more comments. Cleans up attachments. |
@@ -45,8 +45,8 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 | Op | Purpose |
 |----|---------|
-| `activity` | "What's new since X" across managed `.md`. Per-file change records (comments, acks, sandbox-adds) sorted by ts. With `since` omitted, the per-file cutoff is the caller's last action — files where the caller has never acted return everything. Folds in comment edits (via `edited_at`) and sandbox refreshes. |
-| `query` | Search across documents for comments. Filters: `pending` (broad — directed + broadcast), `pending_for` (directed to recipient), `pending_for_me` (directed to caller), `pending_broadcast` (unacked broadcasts), `author`, `since`, `comment_id`. Pending filters compose as a union. `expanded=true` includes comments inline. |
+| `activity` | "What's new since X" across managed `.md`. Per-file change records (comments, acks, sandbox-adds) sorted by ts. With `since` omitted, the per-file cutoff is the caller's last action — files where the caller has never acted return everything. Folds in comment edits (via `edited_at`) and sandbox refreshes. Columnar `{…, total, change_cols, files, effective_limit?}`; paged with `offset`/`limit` over changes. |
+| `query` | Search across documents for comments. Filters: `pending` (broad — directed + broadcast), `pending_for` (directed to recipient), `pending_for_me` (directed to caller), `pending_broadcast` (unacked broadcasts), `author`, `since`, `comment_id`. Pending filters compose as a union. `expanded=true` includes comments inline. Also filters `kind`, `content_regex`. Columnar `{base_path, total, comment_cols, results, effective_limit?}`; paged with `offset`/`limit` over comments (files in summary mode). |
 | `search` | Search across documents for text. `regex`, `scope` (all/body/comments), `context`, `ignore_case`, `limit`/`offset` (paged; response always carries `total`). Returns the compact grouped columnar shape `{total, match_cols, files}`. Pages are auto-sized under the session spill cap; a bounded page carries `effective_limit` — advance the `offset` request param for the rest. |
 | `report_spill` | Signal that your client just spilled a remargin result to a file (over its output-token limit). Ratchets the session's page cap DOWN so future `search` pages fit. Infers the size from the last result; `size` overrides. Call it BEFORE reading the spilled file. See Critical rule 22. |
 | `lint` | Structural lint checks. |

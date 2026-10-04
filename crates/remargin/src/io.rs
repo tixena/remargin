@@ -52,16 +52,6 @@ pub fn out_json(sinks: &mut IoSinks<'_>, value: &Value) -> Result<()> {
     )
 }
 
-/// Minified sibling of [`out_json`]: same `elapsed_ms` decoration, but
-/// serialized without pretty-printing for the compact columnar payloads.
-pub fn out_json_min(sinks: &mut IoSinks<'_>, value: &Value) -> Result<()> {
-    let decorated = inject_elapsed_ms(value);
-    out(
-        sinks,
-        &serde_json::to_string(&decorated).unwrap_or_default(),
-    )
-}
-
 pub fn elapsed_ms() -> u64 {
     START_TIME.get().map_or(0, |t| {
         u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)

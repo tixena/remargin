@@ -56,7 +56,6 @@ pub const PLAN_OP_FIELDS: &[&str] = &[
     "auto_ack",
     "content",
     "kind",
-    "remargin_kind",
     "reply_to",
     "sandbox",
     "to",
@@ -100,7 +99,7 @@ impl ProjectBatchOp {
     ///
     /// Returns an error if the op carries a key outside [`PLAN_OP_FIELDS`],
     /// if the required `content` field is missing or not a string, or if
-    /// `remargin_kind` is not an array of strings.
+    /// `kind` is not an array of strings.
     pub fn from_json_object(
         obj: &serde_json::Map<String, serde_json::Value>,
         idx: usize,
@@ -523,7 +522,7 @@ pub fn project_comment(
     // any side-effect work, same as `create_comment`. Empty slice
     // becomes `None` so the projected YAML matches what `create_comment`
     // would actually write.
-    validate_kinds(params.remargin_kind).context("invalid remargin_kind")?;
+    validate_kinds(params.remargin_kind).context("invalid kind")?;
     let remargin_kind: Option<Vec<String>> = if params.remargin_kind.is_empty() {
         None
     } else {
@@ -1034,7 +1033,7 @@ fn preflight_batch_ops(operations: &[ProjectBatchOp], author_type: &AuthorType) 
         comment_style::gate(&op.content, author_type)
             .with_context(|| format!("batch operation {idx}"))?;
         validate_kinds(&op.remargin_kind)
-            .with_context(|| format!("batch operation {idx}: invalid remargin_kind"))?;
+            .with_context(|| format!("batch operation {idx}: invalid kind"))?;
     }
     Ok(())
 }

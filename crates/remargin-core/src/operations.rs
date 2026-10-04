@@ -203,7 +203,7 @@ pub fn create_comment(
 /// Empty input becomes `None` so the YAML writer emits no
 /// `remargin_kind:` line — preserving pre-kind comments byte-for-byte.
 fn validate_and_normalize_kinds(remargin_kind: &[String]) -> Result<Option<Vec<String>>> {
-    validate_kinds(remargin_kind).context("invalid remargin_kind")?;
+    validate_kinds(remargin_kind).context("invalid kind")?;
     if remargin_kind.is_empty() {
         Ok(None)
     } else {
@@ -532,7 +532,7 @@ pub fn edit_comment(
     // Validate replacement kinds before any document mutation so the
     // file stays byte-identical on invalid input.
     if let Some(kinds) = new_kinds {
-        validate_kinds(kinds).context("invalid remargin_kind")?;
+        validate_kinds(kinds).context("invalid kind")?;
     }
 
     let mut doc = parser::parse_file(system, path)?;

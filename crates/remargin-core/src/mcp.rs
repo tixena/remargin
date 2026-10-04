@@ -6,6 +6,7 @@
 #[cfg(test)]
 mod tests;
 
+use core::mem;
 use std::io::{self, BufRead as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -25,7 +26,6 @@ use crate::config::system_prompt::resolve_system_prompt;
 use crate::config::{ResolvedConfig, parse_author_type};
 use crate::document;
 use crate::document::get_image as image_ops;
-use crate::kind::matches_kind_filter;
 use crate::linter;
 use crate::operations;
 use crate::operations::batch::BatchCommentOp;
@@ -180,6 +180,17 @@ struct PlanCommentStaging {
     to_owned: Vec<String>,
 }
 
+/// One page of a grouped columnar payload.
+struct GroupedPage {
+    effective_limit: Option<usize>,
+    /// The groups that have at least one item on this page, in their
+    /// original order, each holding only its rows on this page.
+    groups: Vec<Value>,
+    /// Items across every group before paging: one per row, or one for a
+    /// group that has no rows.
+    total: usize,
+}
+
 /// Per-session adaptive state owned by the stdio run loop.
 ///
 /// `spill_cap` is a learned size ceiling in remargin's own unit (UTF-8 bytes
@@ -287,28 +298,79 @@ fn reject_identity_flags(
     None
 }
 
+/// The error result for a call whose arguments must be refused before any
+/// work: identity-declaration flags (which a schema-ignoring client can still
+/// send), then any argument the tool's schema does not declare.
+fn refuse_arguments(tool: &str, params: &Map<String, Value>) -> Option<Value> {
+    if let Some(rejection) = reject_identity_flags(tool, params) {
+        return Some(tool_result_error_json(&rejection.to_json()));
+    }
+    reject_unknown_arguments(tool, params).map(|message| tool_result_error(&message))
+}
+
+/// Refuse a call carrying an argument its tool's schema does not declare,
+/// so a misspelled or unsupported argument fails instead of being ignored.
+fn reject_unknown_arguments(tool: &str, params: &Map<String, Value>) -> Option<String> {
+    let desc = tool_descriptors()
+        .into_iter()
+        .find(|desc| desc.name == tool)?;
+    let declared = desc
+        .schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let unknown: Vec<String> = params
+        .keys()
+        .filter(|key| !declared.contains_key(*key))
+        .map(|key| format!("`{key}`"))
+        .collect();
+    if unknown.is_empty() {
+        return None;
+    }
+    let noun = if unknown.len() == 1 {
+        "argument"
+    } else {
+        "arguments"
+    };
+    let accepted: Vec<&str> = declared.keys().map(String::as_str).collect();
+    Some(format!(
+        "{tool}: unknown {noun} {}; accepted: {}",
+        unknown.join(", "),
+        accepted.join(", ")
+    ))
+}
+
 /// Build the `activity` tool descriptor.
 fn desc_activity() -> ToolDesc {
     ToolDesc {
         name: "activity",
-        description: "Call this BEFORE processing pending comments on a file or workspace you \
-             haven't acted on recently - it surfaces new comments, reactions, acks, and sandbox \
-             adds you'd otherwise miss. Walks <path> (file or directory; defaults to the MCP \
-             server's working directory) and returns a compact, minified columnar payload: \
-             `{cutoff_explicit, newest_ts_overall, change_cols, files}`, where each file is \
-             `{path, newest_ts, cutoff_applied?, changes}` and every change is a positional row \
-             named by `change_cols` (`[ts, kind, author, author_type, comment_id, line_start, \
-             line_end, reply_to, to]`). `kind` is `ack` / `comment` / `sandbox`; columns a kind \
-             lacks are `null` (acks / sandboxes null the comment-only columns, sandboxes also \
-             null `comment_id`; `to` is `null` for acks / sandboxes and `[]` for a broadcast \
-             comment). Rows sort by ts. With `since` omitted, the per-file cutoff is the \
-             caller's last action in that file; files where the caller has never acted return \
-             everything.",
+        description: "Call this BEFORE processing pending comments on a file or workspace you haven't acted \
+             on recently: it surfaces new comments, reactions, acks and sandbox adds you would \
+             otherwise miss. Walks `path` (a file or directory; defaults to the MCP server's \
+             working directory) and returns a compact, minified columnar payload: \
+             `{cutoff_explicit, newest_ts_overall, total, change_cols, files, effective_limit?}`. \
+             Each file is `{path, newest_ts, cutoff_applied?, changes}`, and every change is a \
+             positional row named by `change_cols`, `[ts, kind, author, author_type, comment_id, \
+             line_start, line_end, reply_to, to]`. Here `kind` is the kind of change, `ack`, \
+             `comment` or `sandbox` (not a comment's classification tags). Columns a change kind \
+             lacks are null: acks and sandbox adds null the comment-only columns, sandbox adds also \
+             null `comment_id`, and `to` is null for acks and sandbox adds but `[]` for a broadcast \
+             comment. Rows sort by `ts`. With `since` omitted, each file's cutoff is the caller's \
+             last action in that file, and files where the caller never acted return everything. \
+             Paging: `total` counts every change across all files; one call returns at most `limit` \
+             changes starting at `offset` (default 0), then cuts the page further so the response \
+             stays under the size budget, and says so with `effective_limit` (the number of changes \
+             actually returned). To read everything, call again with `offset` increased by the \
+             changes received until it reaches `total`. A file split across pages repeats its \
+             `path` on each page.",
         schema: json!({
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "File or directory to scan; defaults to the MCP server's working directory." },
-                "since": { "type": "string", "description": "ISO 8601 cutoff. Omit to derive per-file from caller's last action." }
+                "since": { "type": "string", "description": "ISO 8601 cutoff. Omit to derive per-file from caller's last action." },
+                "offset": { "type": "integer", "description": "Number of changes to skip before this page.", "minimum": 0, "default": 0 },
+                "limit": { "type": "integer", "description": "Return at most this many changes. Omit for as many as fit the size budget.", "minimum": 1 }
             }
         }),
     }
@@ -363,7 +425,7 @@ fn desc_batch() -> ToolDesc {
                             "after_heading": { "type": "string", "description": "ATX heading path; resolved at write time. Mutually exclusive with after_line/after_comment." },
                             "auto_ack": { "type": "boolean", "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it." },
                             "ack_skip_reason": { "type": "string", "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default." },
-                            "remargin_kind": {
+                            "kind": {
                                 "type": "array",
                                 "items": { "type": "string" },
                                 "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
@@ -436,7 +498,7 @@ fn desc_comment() -> ToolDesc {
                 "after_comment": { "type": "string", "description": "Insert after this comment ID" },
                 "after_heading": { "type": "string", "description": "Insert after the ATX heading addressed by this `>`-separated path. Mutually exclusive with after_line/after_comment." },
                 "sandbox": { "type": "boolean", "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)", "default": false },
-                "remargin_kind": {
+                "kind": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
@@ -452,17 +514,44 @@ fn desc_comment() -> ToolDesc {
 fn desc_comments() -> ToolDesc {
     ToolDesc {
         name: "comments",
-        description: "List comments in a document",
+        description: "List the comments of one file in document order, as a compact, minified columnar \
+             payload: `{total, comment_cols, comments, effective_limit?}`. `comment_cols` names the \
+             columns once; every entry of `comments` is one comment as a positional row in that \
+             order, `[id, line, author, author_type, ts, reply_to, thread, to, ack, reactions, \
+             kind, edited_at, attachments, content]`. Columns: `id` the comment id; `line` the \
+             first line of its block in the file; `author` the author identity; `author_type` \
+             `human` or `agent`; `ts` creation time (RFC 3339); `reply_to` the parent comment id, \
+             or null for a root; `thread` the id of the thread's root comment, or null for a root; \
+             `to` the recipient identities (empty means a broadcast); `ack` one `author@ts` string \
+             per acknowledgement, the identity and the RFC 3339 time joined by `@`; `reactions` an \
+             object from each emoji to the list of `{author, ts}` that reacted with it; `kind` the \
+             classification tags, or null; `edited_at` the last edit time, or null if never edited; \
+             `attachments` stored attachment paths; `content` the markdown body, always last. With \
+             `include_integrity: true`, `checksum` and `signature` columns are inserted immediately \
+             before `content`. Filters: `kind` keeps comments carrying any of the given tags; \
+             `pending`, `pending_for` and `pending_for_me` keep unacknowledged comments with the \
+             same meaning as in `query`, and combine as a union. Reads the named file even when it \
+             is gitignored. Paging: `total` counts every comment that matched; one call returns at \
+             most `limit` comments starting at `offset` (default 0), then cuts the page further so \
+             the response stays under the size budget, and says so with `effective_limit` (the \
+             number of comments actually returned). To read everything, call again with `offset` \
+             increased by the comments received until it reaches `total`.",
         schema: json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path to the document" },
-                "remargin_kind": {
+                "kind": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "OR-semantics filter: only return comments whose remargin_kind contains at least one of these values. Empty = no filter.",
+                    "description": "Keep only comments whose kind tags include at least one of these values. Empty = no filter.",
                     "default": []
-                }
+                },
+                "pending": { "type": "boolean", "description": "Keep only pending comments: directed comments some recipient has not acknowledged, and broadcast comments nobody has acknowledged.", "default": false },
+                "pending_for": { "type": "string", "description": "Keep only comments addressed to this identity that it has not acknowledged." },
+                "pending_for_me": { "type": "boolean", "description": "Same as pending_for set to the MCP server's own identity.", "default": false },
+                "include_integrity": { "type": "boolean", "description": "Add the checksum and signature columns immediately before content.", "default": false },
+                "offset": { "type": "integer", "description": "Number of matching comments to skip before this page.", "minimum": 0, "default": 0 },
+                "limit": { "type": "integer", "description": "Return at most this many comments. Omit for as many as fit the size budget.", "minimum": 1 }
             },
             "required": ["file"]
         }),
@@ -532,7 +621,7 @@ fn desc_edit() -> ToolDesc {
                 "file": { "type": "string", "description": "Path to the document" },
                 "id": { "type": "string", "description": "Comment ID to edit" },
                 "content": { "type": "string", "description": "New comment body" },
-                "remargin_kind": {
+                "kind": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Replacement classification tags. Omit to preserve the stored list; pass [] to clear. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries."
@@ -547,21 +636,22 @@ fn desc_edit() -> ToolDesc {
 fn desc_get() -> ToolDesc {
     ToolDesc {
         name: "get",
-        description: "Read a file's contents. Text mode (default) returns a \
-             compact, minified JSON payload. With `line_numbers: false` \
-             (default): `{content, links_cols, links}`. With `line_numbers: \
-             true`: `{start_line, lines, links_cols, links}` \u{2014} `lines` is an \
-             array of bare strings and line i's number is `start_line + i`. \
-             `links` rows are positional `[alias, lines, target, title]` \
-             (named by `links_cols`); `alias` / `title` are null when absent. \
-             A link's on-disk path is derivable from `target`: verbatim when \
-             it has a file extension, else `target + \".md\"`. Pass `binary: \
-             true` to fetch non-markdown files as bytes; returns a content \
-             array with an embedded resource block (a file:// uri, mimeType, \
-             and base64 blob the harness saves outside the realm) plus a text \
-             block carrying `{binary, mime, path, size_bytes}`. Rejects `.md` \
-             in binary mode. Run `metadata` first to check size before pulling \
-             large blobs.",
+        description: "Read a file's contents. Text mode (default) returns a compact, minified payload. With \
+             `line_numbers: false` (default): `{content, total_lines, links_cols, links, \
+             effective_end_line?}`. With `line_numbers: true`: `{start_line, lines, total_lines, \
+             links_cols, links, effective_end_line?}`, where `lines` is an array of bare strings \
+             and line i's number is `start_line + i`. `total_lines` is the whole file's line count. \
+             `links` lists the local links found in the returned lines (comment blocks excluded), \
+             one positional row per target named by `links_cols`, `[alias, lines, target, title]`: \
+             `alias` the link text or null, `lines` the line numbers where it appears, `target` the \
+             link target, `title` the target document's title or null. A link's file is `target` \
+             itself when it has an extension, otherwise `target` plus `.md`. Paging: `start_line` / \
+             `end_line` choose the window; when the window does not fit the size budget, it is cut \
+             and `effective_end_line` gives the last line returned, so call again with `start_line` \
+             set to `effective_end_line + 1`. Pass `binary: true` to fetch a non-markdown file as \
+             bytes: the result is an embedded resource block (a file:// uri, mimeType and base64 \
+             blob) plus a text block `{binary, mime, path, size_bytes}`; `.md` files are refused in \
+             binary mode, and `metadata` gives the size before pulling a large blob.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -680,11 +770,13 @@ fn desc_plan() -> ToolDesc {
                 "auto_ack": { "type": "boolean", "description": "For comment replies: auto-ack the parent. If omitted, the parent is auto-acked iff its author differs from the caller. Pass true to force the ack, false to skip it." },
                 "ack_skip_reason": { "type": "string", "description": "For comment/reply: required when auto_ack:false skips acking another author's comment. Mirrors the live reply gate." },
                 "sandbox": { "type": "boolean", "description": "For comment: atomically project a sandbox entry", "default": false },
+                "parent_id": { "type": "string", "description": "For reply: the comment being replied to (required for op=reply; the same as reply_to)" },
+                "recursive": { "type": "boolean", "description": "For purge: project a directory-level purge of every document under `file`", "default": false },
                 "emoji": { "type": "string", "description": "Emoji for react op" },
                 "remove": { "type": "boolean", "description": "For ack / react: remove instead of add", "default": false },
                 "ops": {
                     "type": "array",
-                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, ack_skip_reason, remargin_kind, sandbox, to. An unknown field refuses the projection.",
+                    "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, ack_skip_reason, kind, sandbox, to. An unknown field refuses the projection.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -696,7 +788,7 @@ fn desc_plan() -> ToolDesc {
                             "attach_names": { "type": "array", "items": { "type": "string" } },
                             "auto_ack": { "type": "boolean" },
                             "ack_skip_reason": { "type": "string" },
-                            "remargin_kind": { "type": "array", "items": { "type": "string" } },
+                            "kind": { "type": "array", "items": { "type": "string" } },
                             "sandbox": { "type": "boolean" },
                             "to": { "type": "array", "items": { "type": "string" } }
                         },
@@ -828,24 +920,37 @@ fn desc_identity_create() -> ToolDesc {
 fn desc_query() -> ToolDesc {
     ToolDesc {
         name: "query",
-        description: "Search across documents for comments. Returns a compact, minified \
-             columnar payload: `{base_path, comment_cols, results}`, where each result is \
-             `{path, comment_count, matched_count, pending_count, pending_for, last_activity, \
-             comments}` and every comment is a positional row named by `comment_cols` \
-             (`[id, line, author, author_type, ts, reply_to, thread, to, ack, reactions, \
-             remargin_kind, edited_at, attachments, content]`, `content` last). Acks compact to \
-             `author@ts` strings. The verbose `checksum` / `signature` and the redundant \
-             per-comment `file` are dropped; pass `include_integrity: true` to add `checksum`, \
-             `signature` columns immediately before `content`. Nullable columns (`reply_to`, \
-             `thread`, `remargin_kind`, `edited_at`) are `null` when absent. \
-             `comment_count`, `pending_count`, `pending_for`, and `last_activity` describe the \
-             whole file regardless of filters; `comments` and `matched_count` reflect the active \
-             filters. \
-             Pending filters (`pending`, `pending_for`, `pending_for_me`, `pending_broadcast`) \
-             compose as a union when more than one is set. `pending` (broad form) includes \
-             both directed comments with unacked recipients AND broadcast (no-`to`) comments \
-             that nobody has acked. `pending_for_me` and `pending_broadcast` use the MCP \
-             server's configured identity.",
+        description: "Search comments across documents. Returns a compact, minified columnar payload: \
+             `{base_path, total, comment_cols, results, effective_limit?}`. `base_path` is the \
+             searched directory (or a file's folder), ending in `/`, and every result `path` is \
+             relative to it. Each result is one file: `{path, comment_count, matched_count, \
+             pending_count, pending_for?, last_activity?, comments}`, where `comment_count`, \
+             `pending_count`, `pending_for` and `last_activity` describe the whole file and \
+             `matched_count` counts the comments that passed the filters. `comments` holds this \
+             page's matching comments as positional rows named by `comment_cols`, `[id, line, \
+             author, author_type, ts, reply_to, thread, to, ack, reactions, kind, edited_at, \
+             attachments, content]`. Columns: `id` the comment id; `line` the first line of its \
+             block in the file; `author` the author identity; `author_type` `human` or `agent`; \
+             `ts` creation time (RFC 3339); `reply_to` the parent comment id, or null for a root; \
+             `thread` the id of the thread's root comment, or null for a root; `to` the recipient \
+             identities (empty means a broadcast); `ack` one `author@ts` string per \
+             acknowledgement, the identity and the RFC 3339 time joined by `@`; `reactions` an \
+             object from each emoji to the list of `{author, ts}` that reacted with it; `kind` the \
+             classification tags, or null; `edited_at` the last edit time, or null if never edited; \
+             `attachments` stored attachment paths; `content` the markdown body, always last. With \
+             `include_integrity: true`, `checksum` and `signature` columns are inserted immediately \
+             before `content`. With `summary: true` the per-file `comments` arrays are left out. \
+             Filters: `kind`, `author`, `since`, `comment_id`, `content_regex`; the pending filters \
+             (`pending`, `pending_for`, `pending_for_me`, `pending_broadcast`) combine as a union. \
+             `pending` covers directed comments with an unacknowledged recipient and broadcast \
+             comments nobody acknowledged; `pending_for_me` and `pending_broadcast` use the MCP \
+             server's identity. A directory search skips gitignored files; naming a file reads it \
+             regardless. Paging: `total` counts every matching comment across all files (every \
+             listed file in summary mode); one call returns at most `limit` comments starting at \
+             `offset` (default 0), then cuts the page further so the response stays under the size \
+             budget, and says so with `effective_limit` (the number of comments actually returned). \
+             To read everything, call again with `offset` increased by the comments received until \
+             it reaches `total`. A file split across pages repeats its summary fields on each page.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -860,14 +965,16 @@ fn desc_query() -> ToolDesc {
                 "pending_for": { "type": "string", "description": "Only pending for this recipient" },
                 "pending_for_me": { "type": "boolean", "description": "Sugar for pending_for=<server identity>. Surfaces directed comments addressed to the caller and not yet acked.", "default": false },
                 "author": { "type": "string", "description": "Only documents with comments by this author" },
-                "remargin_kind": {
+                "kind": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "OR-semantics filter: only surface comments whose remargin_kind contains at least one of these values. Empty = no filter.",
+                    "description": "Keep only comments whose kind tags include at least one of these values. Empty = no filter.",
                     "default": []
                 },
                 "since": { "type": "string", "description": "Only activity after this ISO 8601 timestamp" },
-                "summary": { "type": "boolean", "description": "Return only counts/summary, suppress comment data", "default": false }
+                "summary": { "type": "boolean", "description": "Return only counts/summary, suppress comment data", "default": false },
+                "offset": { "type": "integer", "description": "Number of matching comments (files in summary mode) to skip before this page.", "minimum": 0, "default": 0 },
+                "limit": { "type": "integer", "description": "Return at most this many comments (files in summary mode). Omit for as many as fit the size budget.", "minimum": 1 }
             },
             "required": []
         }),
@@ -933,7 +1040,7 @@ fn desc_reply() -> ToolDesc {
                     "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)",
                     "default": false
                 },
-                "remargin_kind": {
+                "kind": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
@@ -1352,9 +1459,12 @@ fn tool_result_success_min(content: &Value) -> Value {
 }
 
 /// Tools whose success payload is the compact columnar contract, wrapped
-/// minified: `activity`, `get`, `query`, and `search`.
+/// minified: `activity`, `comments`, `get`, `query`, and `search`.
 fn tool_emits_minified(tool_name: &str) -> bool {
-    matches!(tool_name, "activity" | "get" | "query" | "search")
+    matches!(
+        tool_name,
+        "activity" | "comments" | "get" | "query" | "search"
+    )
 }
 
 /// Build an MCP tool result (error).
@@ -1636,11 +1746,8 @@ fn dispatch_tool(
     };
     let p = &normalized;
 
-    // Reject identity-declaration flags. The schema no longer
-    // advertises them, but a schema-ignoring client can still send
-    // them — this is the last defensible checkpoint.
-    if let Some(rejection) = reject_identity_flags(tool_name, p) {
-        return tool_result_error_json(&rejection.to_json());
+    if let Some(refusal) = refuse_arguments(tool_name, p) {
+        return refusal;
     }
 
     // The MCP surface is an agent surface: a human identity resolved
@@ -1674,15 +1781,15 @@ fn dispatch_tool(
     }
     let result = match tool_name {
         "ack" => handle_ack(system, base_dir, config, p),
-        "activity" => handle_activity(system, base_dir, config, p),
+        "activity" => handle_activity(system, base_dir, config, session.spill_cap, p),
         "batch" => handle_batch(system, base_dir, config, p),
         "comment" => handle_comment(system, base_dir, config, p),
-        "comments" => handle_comments(system, base_dir, config, p),
+        "comments" => handle_comments(system, base_dir, config, session.spill_cap, p),
         "cp" => handle_cp(system, base_dir, config, p),
         "delete" => handle_delete(system, base_dir, config, p),
         "doctor" => handle_doctor(system, base_dir, p),
         "edit" => handle_edit(system, base_dir, config, p),
-        "get" => handle_get(system, base_dir, config, p),
+        "get" => handle_get(system, base_dir, config, session.spill_cap, p),
         "get_image" => handle_get_image(system, base_dir, config, p),
         "identity_create" => handle_identity_create(p),
         "lint" => handle_lint(system, base_dir, config, p),
@@ -1697,7 +1804,7 @@ fn dispatch_tool(
         "prompt_resolve" => handle_prompt_resolve(system, base_dir, p),
         "prompt_set" => handle_prompt_set(system, base_dir, config, p),
         "purge" => handle_purge(system, base_dir, config, p),
-        "query" => handle_query(system, base_dir, config, p),
+        "query" => handle_query(system, base_dir, config, session.spill_cap, p),
         "react" => handle_react(system, base_dir, config, p),
         "replace" => handle_replace(system, base_dir, config, p),
         "reply" => handle_reply(system, base_dir, config, p),
@@ -1758,6 +1865,7 @@ fn handle_activity(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
+    spill_cap: usize,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let target = optional_str(params, "path").map_or_else(
@@ -1782,7 +1890,19 @@ fn handle_activity(
     // Compact columnar shape, hardcoded on the MCP surface: changes become
     // positional rows named by `change_cols`. Serialized minified by
     // `tool_result_success_min`.
-    Ok(activity::to_compact_activity(&result))
+    let mut envelope = activity::to_compact_activity(&result);
+    let files = envelope
+        .get_mut("files")
+        .and_then(Value::as_array_mut)
+        .map(mem::take)
+        .unwrap_or_default();
+    let page = page_grouped(&files, "changes", params, spill_cap);
+    if let Some(obj) = envelope.as_object_mut() {
+        obj.insert(String::from("total"), Value::from(page.total));
+        obj.insert(String::from("files"), Value::Array(page.groups));
+    }
+    insert_effective_limit(&mut envelope, page.effective_limit);
+    Ok(envelope)
 }
 
 /// Handle the `ack` tool: acknowledge one or more comments.
@@ -2046,15 +2166,8 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    // MCP parity with the `--kind` CLI flag. Accepts either
-    // `remargin_kind: ["question", "todo"]` or the more natural
-    // `kind: [...]` alias; validation happens inside `create_comment`.
-    let remargin_kind_raw = string_array(params, "remargin_kind");
-    let remargin_kind = if remargin_kind_raw.is_empty() {
-        string_array(params, "kind")
-    } else {
-        remargin_kind_raw
-    };
+    // Validation happens inside `create_comment`.
+    let remargin_kind = string_array(params, "kind");
     let cfg = config;
 
     let position = resolve_insert_position(params, reply_to.as_deref());
@@ -2088,34 +2201,27 @@ fn handle_comments(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
+    spill_cap: usize,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
-    // shared kind filter with the CLI path. Accepts either
-    // `remargin_kind` or `kind` as the MCP key.
-    let kind_filter = {
-        let raw = string_array(params, "remargin_kind");
-        if raw.is_empty() {
-            string_array(params, "kind")
-        } else {
-            raw
-        }
-    };
+    let include_integrity = optional_bool(params, "include_integrity");
+    let filter = build_query_filter_from_params(params, config.identity.clone())?;
 
     let path = base_dir.join(file);
     config.ensure_can_read(system, &path)?;
     let doc = parser::parse_file(system, &path)?;
-    let comments: Vec<&parser::Comment> = doc
-        .comments()
-        .into_iter()
-        .filter(|cm| matches_kind_filter(cm.kinds(), &kind_filter))
-        .collect();
+    let rows = query::compact_rows_for(&doc, &path, &filter, include_integrity);
 
-    let items = comments
-        .iter()
-        .map(serde_json::to_value)
-        .collect::<Result<Vec<Value>, _>>()?;
-    Ok(json!({ "comments": items }))
+    let total = rows.len();
+    let (page, effective_limit) = size_page(page_window(rows, params), spill_cap);
+    let mut envelope = json!({
+        "total": total,
+        "comment_cols": query::comment_cols(include_integrity),
+        "comments": page,
+    });
+    insert_effective_limit(&mut envelope, effective_limit);
+    Ok(envelope)
 }
 
 /// Handle the `delete` tool: delete one or more comments.
@@ -2148,15 +2254,14 @@ fn handle_edit(
     // optional replacement kind list. When the key is absent
     // we pass `None` so the stored list is preserved; an empty array
     // explicitly clears (validate_kinds accepts `[]`).
-    let remargin_kind_value = params.get("remargin_kind").or_else(|| params.get("kind"));
-    let new_kinds: Option<Vec<String>> = match remargin_kind_value {
+    let new_kinds: Option<Vec<String>> = match params.get("kind") {
         Some(Value::Array(arr)) => Some(
             arr.iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect(),
         ),
         Some(Value::Null) | None => None,
-        _ => anyhow::bail!("`remargin_kind`/`kind` must be an array of strings"),
+        _ => anyhow::bail!("`kind` must be an array of strings"),
     };
     let cfg = config;
 
@@ -2208,6 +2313,7 @@ fn handle_get(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
+    spill_cap: usize,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let path_str = required_str(params, "path")?;
@@ -2230,31 +2336,82 @@ fn handle_get(
     }
 
     let lines = document::resolve_line_window(start_line, end_line);
+    let (result, effective_end_line) =
+        read_get_window(system, base_dir, target, lines, spill_cap, config)?;
+    Ok(get_envelope(
+        result,
+        lines.map_or(1, |(s, _)| s),
+        line_numbers,
+        effective_end_line,
+    ))
+}
 
+/// Read the requested window, narrowed to what fits under the size cap and
+/// read again when narrowed, so the links describe exactly the lines
+/// returned. The second value is the last line returned when the cap cut
+/// the window.
+fn read_get_window(
+    system: &dyn System,
+    base_dir: &Path,
+    target: &Path,
+    lines: Option<(usize, usize)>,
+    spill_cap: usize,
+    config: &ResolvedConfig,
+) -> Result<(document::GetResult, Option<usize>)> {
     let result = document::get_with_links(system, base_dir, target, lines, false, config)?;
+    let start_num = lines.map_or(1, |(s, _)| s);
+    let line_values: Vec<Value> = result.content.split('\n').map(Value::from).collect();
+    let kept = rows_within_cap(&line_values, spill_cap);
+    if kept >= line_values.len() {
+        return Ok((result, None));
+    }
+    let end = start_num + kept - 1;
+    let narrowed = document::get_with_links(
+        system,
+        base_dir,
+        target,
+        Some((start_num, end)),
+        false,
+        config,
+    )?;
+    Ok((narrowed, Some(end)))
+}
 
+/// The compact `get` text payload for one window.
+fn get_envelope(
+    result: document::GetResult,
+    start_num: usize,
+    line_numbers: bool,
+    effective_end_line: Option<usize>,
+) -> Value {
     // Compact columnar shape, hardcoded on the MCP surface: rows are
     // positional `[alias, lines, target, title]`, `count` / `path` dropped
     // (both derivable). Serialized minified by `tool_result_success_min`.
     let rows = operations::links::to_compact_rows(result.links);
-    if line_numbers {
+    let mut envelope = if line_numbers {
         // Line numbers are contiguous, so state the start once and drop the
         // per-line objects: line i's number is `start_line + i`.
-        let start_num = lines.map_or(1, |(s, _)| s);
         let body_lines: Vec<&str> = result.content.split('\n').collect();
-        Ok(json!({
+        json!({
             "start_line": start_num,
             "lines": body_lines,
             "links_cols": operations::links::LINK_COLS,
             "links": rows,
-        }))
+        })
     } else {
-        Ok(json!({
+        json!({
             "content": result.content,
             "links_cols": operations::links::LINK_COLS,
             "links": rows,
-        }))
+        })
+    };
+    if let Some(obj) = envelope.as_object_mut() {
+        obj.insert(String::from("total_lines"), Value::from(result.total_lines));
+        if let Some(end) = effective_end_line {
+            obj.insert(String::from("effective_end_line"), Value::from(end));
+        }
     }
+    envelope
 }
 
 /// Handle the `identity_create` tool.
@@ -2585,6 +2742,7 @@ fn handle_query(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
+    spill_cap: usize,
     params: &Map<String, Value>,
 ) -> Result<Value> {
     let path_str = optional_str(params, "path").unwrap_or(".");
@@ -2601,11 +2759,15 @@ fn handle_query(
         .iter()
         .map(|result| query::to_compact_result(result, include_integrity))
         .collect();
-    Ok(json!({
+    let page = page_grouped(&compact, "comments", params, spill_cap);
+    let mut envelope = json!({
         "base_path": query::display_base_path(path_str, is_file),
+        "total": page.total,
         "comment_cols": query::comment_cols(include_integrity),
-        "results": compact,
-    }))
+        "results": page.groups,
+    });
+    insert_effective_limit(&mut envelope, page.effective_limit);
+    Ok(envelope)
 }
 
 /// Translate `query` tool params into a [`QueryFilter`]. Pulled out so
@@ -2620,14 +2782,7 @@ fn build_query_filter_from_params(
                 .with_context(|| format!("invalid timestamp: {s}"))
         })
         .transpose()?;
-    let kind_filter = {
-        let raw = string_array(params, "remargin_kind");
-        if raw.is_empty() {
-            string_array(params, "kind")
-        } else {
-            raw
-        }
-    };
+    let kind_filter = string_array(params, "kind");
     let mut filter = QueryFilter {
         author: optional_str(params, "author").map(String::from),
         comment_id: optional_str(params, "comment_id").map(String::from),
@@ -2936,7 +3091,7 @@ fn search_compact_envelope(
         .iter()
         .map(|m| search::to_compact_row(m, with_context))
         .collect();
-    let (kept, effective_limit) = size_search_page(rows, spill_cap);
+    let (kept, effective_limit) = size_page(rows, spill_cap);
     let files = search::group_compact(&results.matches[..kept.len()], with_context);
 
     let mut envelope = json!({
@@ -2952,38 +3107,117 @@ fn search_compact_envelope(
     envelope
 }
 
-/// Trim a search page so its emitted size stays under `spill_cap`.
+/// Trim a page so its emitted size stays under `spill_cap`.
 ///
-/// Greedily keeps rows while the running serialized size stays within the cap
-/// (minus a margin for the envelope). The rows are the COMPACT columnar rows
-/// the agent receives, measured minified — so the clamp counts the emitted
-/// bytes, not the old verbose shape. Always keeps at least one row when the
-/// window is non-empty, so a single oversized match can never livelock paging.
+/// Greedily keeps rows while the running minified size stays within the cap
+/// (minus a margin for the envelope). Always keeps at least one row when the
+/// window is non-empty, so a single oversized row can never livelock paging.
 /// Returns `Some(effective_limit)` only when the cap forced fewer rows than
-/// the window carried — that clamp is the signal the agent should page for the
-/// rest. `spill_cap` is a self-consistent byte proxy for the client's token
-/// limit, not an equivalent.
-fn size_search_page(window: Vec<Value>, spill_cap: usize) -> (Vec<Value>, Option<usize>) {
-    let window_len = window.len();
+/// the window carried — the signal to advance `offset` for the rest.
+/// `spill_cap` is a self-consistent byte proxy for the client's token limit,
+/// not an equivalent.
+fn size_page(window: Vec<Value>, spill_cap: usize) -> (Vec<Value>, Option<usize>) {
+    let kept = rows_within_cap(&window, spill_cap);
+    if kept >= window.len() {
+        (window, None)
+    } else {
+        let mut page = window;
+        page.truncate(kept);
+        (page, Some(kept))
+    }
+}
+
+/// How many leading `rows` fit under `spill_cap`, admitting the first row
+/// unconditionally.
+fn rows_within_cap(rows: &[Value], spill_cap: usize) -> usize {
     let budget = spill_cap.saturating_sub(spill_cap / SPILL_MARGIN_DIVISOR);
     let mut running = 0_usize;
     let mut kept = 0_usize;
-    for row in &window {
+    for row in rows {
         let size = serde_json::to_string(row).map_or(usize::MAX, |s| s.len());
-        // Admit the first row unconditionally; a lone oversized match must
-        // still ship or the caller can never page past it.
         if kept > 0 && running.saturating_add(size) > budget {
             break;
         }
         running = running.saturating_add(size);
         kept = kept.saturating_add(1);
     }
-    if kept >= window_len {
-        (window, None)
-    } else {
-        let mut page = window;
-        page.truncate(kept);
-        (page, Some(kept))
+    kept
+}
+
+/// Apply the caller's `offset` / `limit` window to `items`.
+fn page_window<T>(items: Vec<T>, params: &Map<String, Value>) -> Vec<T> {
+    let rest = items
+        .into_iter()
+        .skip(optional_usize(params, "offset").unwrap_or(0));
+    match optional_usize(params, "limit") {
+        Some(limit) => rest.take(limit).collect(),
+        None => rest.collect(),
+    }
+}
+
+/// Add `effective_limit` to a paged envelope when the size cap trimmed it.
+fn insert_effective_limit(envelope: &mut Value, effective_limit: Option<usize>) {
+    if let Some(effective) = effective_limit
+        && let Some(obj) = envelope.as_object_mut()
+    {
+        obj.insert(String::from("effective_limit"), Value::from(effective));
+    }
+}
+
+/// Page a grouped columnar payload (per-file objects holding positional rows
+/// under `rows_key`) by rows across all groups, then regroup the survivors.
+fn page_grouped(
+    groups: &[Value],
+    rows_key: &str,
+    params: &Map<String, Value>,
+    spill_cap: usize,
+) -> GroupedPage {
+    // Each item is (group index, row); a group without rows is one item
+    // so it still lists.
+    let mut items: Vec<(usize, Option<Value>)> = Vec::new();
+    for (index, group) in groups.iter().enumerate() {
+        match group.get(rows_key).and_then(Value::as_array) {
+            Some(rows) if !rows.is_empty() => {
+                items.extend(rows.iter().map(|row| (index, Some(row.clone()))));
+            }
+            _ => items.push((index, None)),
+        }
+    }
+    let total = items.len();
+    let window = page_window(items, params);
+    let sizes: Vec<Value> = window
+        .iter()
+        .map(|(index, row)| row.clone().unwrap_or_else(|| groups[*index].clone()))
+        .collect();
+    let kept = rows_within_cap(&sizes, spill_cap);
+    let effective_limit = (kept < window.len()).then_some(kept);
+
+    let mut paged: Vec<Value> = Vec::new();
+    let mut current: Option<usize> = None;
+    for (index, row) in window.into_iter().take(kept) {
+        if current != Some(index) {
+            let mut head = groups[index].clone();
+            if let Some(obj) = head.as_object_mut()
+                && obj.contains_key(rows_key)
+            {
+                obj.insert(String::from(rows_key), Value::Array(Vec::new()));
+            }
+            paged.push(head);
+            current = Some(index);
+        }
+        if let Some(cells) = row
+            && let Some(rows) = paged
+                .last_mut()
+                .and_then(|group| group.get_mut(rows_key))
+                .and_then(Value::as_array_mut)
+        {
+            rows.push(cells);
+        }
+    }
+    GroupedPage {
+        effective_limit,
+        groups: paged,
+        total,
     }
 }
 

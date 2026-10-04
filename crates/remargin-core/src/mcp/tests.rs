@@ -498,7 +498,7 @@ fn comments_lists_created_comment() {
         }),
     );
     let result = extract_tool_text(&list_resp);
-    let comments = result["comments"].as_array().unwrap();
+    let comments = rows_as_objects(&result);
     assert_eq!(comments.len(), 1_usize);
     assert_eq!(comments[0]["id"].as_str().unwrap(), created_id);
     assert_eq!(comments[0]["author"], "tester");
@@ -584,7 +584,7 @@ fn batch_kinds_are_found_by_the_kind_filter() {
             "params": { "name": "batch", "arguments": {
                 "file": "doc.md",
                 "operations": [
-                    { "content": "Tagged batch op.", "after_heading": "Repro > Target", "remargin_kind": ["decision-item"] },
+                    { "content": "Tagged batch op.", "after_heading": "Repro > Target", "kind": ["decision-item"] },
                     { "content": "Untagged batch op.", "after_heading": "Repro > Target" }
                 ]
             }}
@@ -600,13 +600,11 @@ fn batch_kinds_are_found_by_the_kind_filter() {
             "jsonrpc": "2.0", "id": 2_i32, "method": "tools/call",
             "params": { "name": "comments", "arguments": {
                 "file": "doc.md",
-                "remargin_kind": ["decision-item"]
+                "kind": ["decision-item"]
             }}
         }),
     );
-    let found: Vec<Value> = extract_tool_text(&filtered)["comments"]
-        .as_array()
-        .unwrap()
+    let found: Vec<Value> = rows_as_objects(&extract_tool_text(&filtered))
         .iter()
         .map(|cm| cm["id"].clone())
         .collect();
@@ -629,7 +627,7 @@ fn batch_refuses_an_invalid_kind_before_writing() {
                 "file": "doc.md",
                 "operations": [
                     { "content": "Fine." },
-                    { "content": "Bad tag.", "remargin_kind": "decision-item" }
+                    { "content": "Bad tag.", "kind": "decision-item" }
                 ]
             }}
         }),
@@ -708,11 +706,7 @@ fn batch_op_schemas_declare_exactly_the_accepted_fields() {
         keys
     };
     let accepted = |fields: &[&str]| -> Vec<String> {
-        let mut keys: Vec<String> = fields
-            .iter()
-            .filter(|key| **key != "kind")
-            .map(|key| String::from(*key))
-            .collect();
+        let mut keys: Vec<String> = fields.iter().map(|key| String::from(*key)).collect();
         keys.sort();
         keys
     };
@@ -1635,7 +1629,7 @@ fn plan_claude_restrict_op_rejected_via_mcp() {
             "method": "tools/call",
             "params": {
                 "name": "plan",
-                "arguments": { "op": "claude_restrict", "path": "src/secret" }
+                "arguments": { "op": "claude_restrict" }
             }
         }),
     );
@@ -1671,7 +1665,7 @@ fn plan_claude_unrestrict_op_rejected_via_mcp() {
             "method": "tools/call",
             "params": {
                 "name": "plan",
-                "arguments": { "op": "claude_unrestrict", "path": "src/secret" }
+                "arguments": { "op": "claude_unrestrict" }
             }
         }),
     );
@@ -2249,7 +2243,7 @@ fn reply_placed_after_parent_not_appended() {
         }),
     );
     let result = extract_tool_text(&list_resp);
-    let comments = result["comments"].as_array().unwrap();
+    let comments = rows_as_objects(&result);
 
     let parent = comments.iter().find(|c| c["id"] == "aaa").unwrap();
     let reply = comments.iter().find(|c| c["id"] == reply_id).unwrap();
@@ -2315,7 +2309,7 @@ fn reply_ignores_explicit_after_line() {
         }),
     );
     let result = extract_tool_text(&list_resp);
-    let comments = result["comments"].as_array().unwrap();
+    let comments = rows_as_objects(&result);
 
     let parent = comments.iter().find(|c| c["id"] == "aaa").unwrap();
     let reply = comments.iter().find(|c| c["id"] == reply_id).unwrap();
@@ -2371,7 +2365,7 @@ fn non_reply_still_appends() {
         }),
     );
     let result = extract_tool_text(&list_resp);
-    let comments = result["comments"].as_array().unwrap();
+    let comments = rows_as_objects(&result);
 
     let parent = comments.iter().find(|c| c["id"] == "aaa").unwrap();
     let new_comment = comments.iter().find(|c| c["id"] == new_id).unwrap();
@@ -2428,7 +2422,7 @@ fn non_reply_with_after_line_respected() {
         }),
     );
     let result = extract_tool_text(&list_resp);
-    let comments = result["comments"].as_array().unwrap();
+    let comments = rows_as_objects(&result);
     let new_comment = comments.iter().find(|c| c["id"] == new_id).unwrap();
     let new_line = new_comment["line"].as_u64().unwrap();
 
@@ -5540,7 +5534,7 @@ fn mcp_comment_accepts_remargin_kind_and_persists_to_yaml() {
                 "arguments": {
                     "file": "doc.md",
                     "content": "tagged body",
-                    "remargin_kind": ["question", "todo"]
+                    "kind": ["question", "todo"]
                 }
             }
         }),
@@ -5582,7 +5576,7 @@ fn mcp_comments_filters_by_kind() {
                     "arguments": {
                         "file": "doc.md",
                         "content": content,
-                        "remargin_kind": kinds,
+                        "kind": kinds,
                     }
                 }
             }),
@@ -5602,13 +5596,13 @@ fn mcp_comments_filters_by_kind() {
                 "name": "comments",
                 "arguments": {
                     "file": "doc.md",
-                    "remargin_kind": ["todo"]
+                    "kind": ["todo"]
                 }
             }
         }),
     );
     let body = extract_tool_text(&resp);
-    let comments = body["comments"].as_array().unwrap();
+    let comments = rows_as_objects(&body);
     assert_eq!(comments.len(), 1);
     assert!(comments[0]["content"].as_str().unwrap().contains("todo"));
 }
@@ -5647,7 +5641,7 @@ fn mcp_query_kind_filter_or_semantics() {
                 "arguments": {
                     "path": ".",
                     "expanded": true,
-                    "remargin_kind": ["question", "todo"]
+                    "kind": ["question", "todo"]
                 }
             }
         }),
@@ -5691,7 +5685,7 @@ fn mcp_edit_with_kind_replaces_stored_list() {
                 "arguments": {
                     "file": "doc.md",
                     "content": "body",
-                    "remargin_kind": ["question"]
+                    "kind": ["question"]
                 }
             }
         }),
@@ -5715,7 +5709,7 @@ fn mcp_edit_with_kind_replaces_stored_list() {
                     "file": "doc.md",
                     "id": id,
                     "content": "updated body",
-                    "remargin_kind": ["todo"]
+                    "kind": ["todo"]
                 }
             }
         }),
@@ -6945,13 +6939,34 @@ fn fetch_comment(
             "params": { "name": "comments", "arguments": { "file": "doc.md" } }
         }),
     );
-    extract_tool_text(&resp)["comments"]
+    rows_as_objects(&extract_tool_text(&resp))
+        .into_iter()
+        .find(|c| c["id"] == id)
+        .unwrap_or(Value::Null)
+}
+
+/// Rebuild a `comments` payload's positional rows as objects keyed by
+/// `comment_cols`, so tests can address cells by column name.
+fn rows_as_objects(payload: &Value) -> Vec<Value> {
+    let cols: Vec<&str> = payload["comment_cols"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| c["id"] == id)
-        .cloned()
-        .unwrap_or(Value::Null)
+        .map(|col| col.as_str().unwrap())
+        .collect();
+    payload["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            Value::Object(
+                cols.iter()
+                    .zip(row.as_array().unwrap())
+                    .map(|(col, cell)| (String::from(*col), cell.clone()))
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 #[test]
@@ -7075,7 +7090,7 @@ fn reply_with_smart_default_still_acks_parent() {
     let parent = fetch_comment(&system, base, &config, "aaa");
     let ack = parent["ack"].as_array().unwrap();
     assert_eq!(ack.len(), 1);
-    assert_eq!(ack[0]["author"], "tester");
+    assert!(ack[0].as_str().unwrap().starts_with("tester@"), "{ack:?}");
 }
 
 #[test]
@@ -7393,4 +7408,367 @@ fn anonymous_reads_in_a_strict_realm_are_tool_errors() {
             "{tool} must not leak document text: {rendered}"
         );
     }
+}
+
+// --- Paging, comment columns and unknown arguments ------------------------
+
+/// A `tools/call` request for `name` with `arguments`.
+fn tool_request(name: &str, arguments: &Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1_i32,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": arguments }
+    })
+}
+
+/// A document with `count` top-level comments under `# Notes`, the second
+/// one addressed to `tester` (the test identity) and unacknowledged.
+fn system_with_comments(base: &Path, count: usize) -> MemorySystem {
+    let system = system_with_doc(base, "doc.md", "# Notes\n\nBody text.\n");
+    let config = test_config();
+    for index in 0..count {
+        let mut arguments = json!({
+            "file": "doc.md",
+            "content": format!("Comment number {index}."),
+            "after_heading": "Notes",
+        });
+        if index == 1 {
+            arguments["to"] = json!(["tester"]);
+        }
+        let response = call(&system, base, &config, &tool_request("comment", &arguments));
+        assert!(!is_tool_error(&response), "{response}");
+    }
+    system
+}
+
+#[test]
+fn comments_pages_cover_every_comment_exactly_once() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 5);
+    let config = test_config();
+
+    let mut seen: Vec<String> = Vec::new();
+    let mut offset = 0_usize;
+    loop {
+        let response = call(
+            &system,
+            base,
+            &config,
+            &tool_request(
+                "comments",
+                &json!({ "file": "doc.md", "offset": offset, "limit": 2_i32 }),
+            ),
+        );
+        let payload = extract_tool_text(&response);
+        assert_eq!(payload["total"], 5_i32);
+        let rows = rows_as_objects(&payload);
+        if rows.is_empty() {
+            break;
+        }
+        offset += rows.len();
+        seen.extend(
+            rows.iter()
+                .map(|row| String::from(row["id"].as_str().unwrap())),
+        );
+    }
+
+    let mut unique = seen.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(seen.len(), 5);
+    assert_eq!(unique.len(), 5);
+}
+
+#[test]
+fn comments_rows_are_minified_columns_with_kind() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 1);
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("comments", &json!({ "file": "doc.md" })),
+    );
+    let raw = extract_tool_raw_text(&response);
+    assert!(!raw.contains('\n'), "minified: {raw}");
+    let payload = extract_tool_text(&response);
+    let cols: Vec<&str> = payload["comment_cols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|col| col.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        cols,
+        [
+            "id",
+            "line",
+            "author",
+            "author_type",
+            "ts",
+            "reply_to",
+            "thread",
+            "to",
+            "ack",
+            "reactions",
+            "kind",
+            "edited_at",
+            "attachments",
+            "content"
+        ]
+    );
+    assert!(payload.get("effective_limit").is_none());
+}
+
+#[test]
+fn comments_include_integrity_adds_checksum_and_signature_before_content() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 1);
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request(
+            "comments",
+            &json!({ "file": "doc.md", "include_integrity": true }),
+        ),
+    );
+    let payload = extract_tool_text(&response);
+    let cols = payload["comment_cols"].as_array().unwrap();
+    let tail: Vec<&str> = cols[cols.len() - 3..]
+        .iter()
+        .map(|col| col.as_str().unwrap())
+        .collect();
+    assert_eq!(tail, ["checksum", "signature", "content"]);
+}
+
+#[test]
+fn comments_pending_for_me_keeps_only_comments_addressed_to_the_caller() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 3);
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request(
+            "comments",
+            &json!({ "file": "doc.md", "pending_for_me": true }),
+        ),
+    );
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["total"], 1_i32);
+    let rows = rows_as_objects(&payload);
+    assert_eq!(rows[0]["content"], "Comment number 1.");
+}
+
+#[test]
+fn comments_on_a_file_without_comments_is_an_empty_page() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Notes\n\nBody text.\n");
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("comments", &json!({ "file": "doc.md" })),
+    );
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["total"], 0_i32);
+    assert_eq!(payload["comments"], json!([]));
+}
+
+#[test]
+fn comments_page_is_cut_to_the_size_cap_and_says_so() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 6);
+    let config = test_config();
+    let mut session = super::SessionState::default();
+    assert!(!is_tool_error(&call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &report_spill_request(Some(400)),
+    )));
+
+    let response = call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &tool_request("comments", &json!({ "file": "doc.md" })),
+    );
+    let payload = extract_tool_text(&response);
+    let returned = payload["comments"].as_array().unwrap().len();
+    assert_eq!(payload["total"], 6_i32);
+    assert!(returned < 6, "{payload}");
+    assert_eq!(payload["effective_limit"], json!(returned));
+}
+
+#[test]
+fn query_pages_rows_across_files_and_regroups_them() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 2);
+    let config = test_config();
+    system
+        .write(&base.join("other.md"), b"# Other\n\nBody.\n")
+        .unwrap();
+    let response = call(
+        &system,
+        base,
+        &config,
+        &tool_request(
+            "comment",
+            &json!({ "file": "other.md", "content": "Other note." }),
+        ),
+    );
+    assert!(!is_tool_error(&response), "{response}");
+
+    let first = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("query", &json!({ "limit": 2_i32 })),
+    ));
+    assert_eq!(first["total"], 3_i32);
+    let rows_on = |page: &Value| -> usize {
+        page["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|result| result["comments"].as_array().unwrap().len())
+            .sum()
+    };
+    assert_eq!(rows_on(&first), 2);
+
+    let second = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("query", &json!({ "offset": 2_i32, "limit": 2_i32 })),
+    ));
+    assert_eq!(rows_on(&second), 1);
+    assert_eq!(second["results"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn activity_reports_total_and_pages_changes() {
+    let base = Path::new("/docs");
+    let system = system_with_comments(base, 3);
+    system
+        .write(
+            &base.join(".remargin.yaml"),
+            b"identity: tester\ntype: human\n",
+        )
+        .unwrap();
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request(
+            "activity",
+            &json!({ "path": "doc.md", "since": "2000-01-01T00:00:00Z", "limit": 1_i32 }),
+        ),
+    );
+    let payload = extract_tool_text(&response);
+    assert_eq!(payload["total"], 3_i32);
+    let changes: usize = payload["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["changes"].as_array().unwrap().len())
+        .sum();
+    assert_eq!(changes, 1);
+}
+
+#[test]
+fn get_reports_total_lines_and_cuts_the_window_to_the_size_cap() {
+    let base = Path::new("/docs");
+    let body = (1_i32..=40_i32)
+        .map(|n| format!("Line {n} of a long note.\n"))
+        .collect::<Vec<String>>()
+        .concat();
+    let system = system_with_doc(base, "long.md", &body);
+    let config = test_config();
+    let mut session = super::SessionState::default();
+
+    let whole = extract_tool_text(&call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &tool_request("get", &json!({ "path": "long.md" })),
+    ));
+    assert_eq!(whole["total_lines"], 41_i32);
+    assert!(whole.get("effective_end_line").is_none());
+
+    assert!(!is_tool_error(&call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &report_spill_request(Some(300)),
+    )));
+    let cut = extract_tool_text(&call_session(
+        &system,
+        base,
+        &config,
+        &mut session,
+        &tool_request("get", &json!({ "path": "long.md", "line_numbers": true })),
+    ));
+    let end = cut["effective_end_line"].as_u64().unwrap();
+    assert_eq!(
+        cut["lines"].as_array().unwrap().len(),
+        usize::try_from(end).unwrap()
+    );
+    assert!(end < 41);
+}
+
+#[test]
+fn every_tool_refuses_an_argument_it_does_not_declare() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Notes\n\nBody text.\n");
+    let config = test_config();
+    let tools = call(
+        &system,
+        base,
+        &config,
+        &json!({ "jsonrpc": "2.0", "id": 1_i32, "method": "tools/list", "params": {} }),
+    );
+    for tool in tools["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let response = call(
+            &system,
+            base,
+            &config,
+            &tool_request(name, &json!({ "not_an_argument": true })),
+        );
+        assert!(is_tool_error(&response), "{name}: {response}");
+        assert!(
+            tool_error_text(&response).starts_with(&format!(
+                "{name}: unknown argument `not_an_argument`; accepted: "
+            )),
+            "{name}: {response}"
+        );
+    }
+}
+
+#[test]
+fn comment_refuses_the_storage_name_remargin_kind() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Notes\n\nBody text.\n");
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request(
+            "comment",
+            &json!({ "file": "doc.md", "content": "Tagged.", "remargin_kind": ["todo"] }),
+        ),
+    );
+    assert!(is_tool_error(&response));
+    assert!(
+        tool_error_text(&response).starts_with("comment: unknown argument `remargin_kind`"),
+        "{response}"
+    );
 }

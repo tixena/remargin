@@ -43,7 +43,7 @@ pub const COMMENT_COLS: [&str; 14] = [
     "to",
     "ack",
     "reactions",
-    "remargin_kind",
+    "kind",
     "edited_at",
     "attachments",
     "content",
@@ -62,7 +62,7 @@ pub const COMMENT_COLS_INTEGRITY: [&str; 16] = [
     "to",
     "ack",
     "reactions",
-    "remargin_kind",
+    "kind",
     "edited_at",
     "attachments",
     "checksum",
@@ -457,6 +457,22 @@ pub fn to_compact_result(result: &QueryResult, include_integrity: bool) -> Value
         obj.insert(String::from("comments"), Value::Array(rows));
     }
     Value::Object(obj)
+}
+
+/// The comments of one parsed document that pass `filter`, in document
+/// order, as compact rows named by [`comment_cols`].
+#[must_use]
+pub fn compact_rows_for(
+    doc: &parser::ParsedDocument,
+    file: &Path,
+    filter: &QueryFilter,
+    include_integrity: bool,
+) -> Vec<Value> {
+    doc.comments()
+        .into_iter()
+        .filter(|cm| comment_matches_filters(cm, filter))
+        .map(|cm| to_compact_row(&expanded_from_comment(cm, file), include_integrity))
+        .collect()
 }
 
 /// Query across documents in a directory tree.

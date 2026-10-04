@@ -2689,7 +2689,7 @@ fn project_batch_op_from_json_happy_path_picks_up_every_field() {
         "auto_ack": true,
         "to": ["alice", "bob"],
         "attach_names": ["img.png"],
-        "remargin_kind": ["todo"],
+        "kind": ["todo"],
         "sandbox": true,
     });
     let obj = raw.as_object().unwrap();

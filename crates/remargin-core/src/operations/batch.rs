@@ -31,8 +31,7 @@ use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
 
-/// Keys a batch op may carry. `ack_skip_reason` is read by the MCP ack gate
-/// and `kind` is an alias of `remargin_kind`.
+/// Keys a batch op may carry. `ack_skip_reason` is read by the MCP ack gate.
 pub const OP_FIELDS: &[&str] = &[
     "ack_skip_reason",
     "after_comment",
@@ -42,7 +41,6 @@ pub const OP_FIELDS: &[&str] = &[
     "auto_ack",
     "content",
     "kind",
-    "remargin_kind",
     "reply_to",
     "sandbox",
     "to",
@@ -109,7 +107,7 @@ impl BatchCommentOp {
     ///
     /// Returns an error if the op carries a key outside [`OP_FIELDS`], if
     /// the required `content` field is missing or not a string, or if
-    /// `remargin_kind` is not an array of strings.
+    /// `kind` is not an array of strings.
     pub fn from_json_object(obj: &Map<String, Value>, idx: usize) -> Result<Self> {
         refuse_unknown_fields(obj, OP_FIELDS, &format!("batch op[{idx}]"))?;
 
@@ -383,7 +381,7 @@ fn gate_ops(operations: &[BatchCommentOp], author_type: &AuthorType) -> Result<(
         comment_style::gate(&op.content, author_type)
             .with_context(|| format!("batch operation {idx}"))?;
         validate_kinds(&op.remargin_kind)
-            .with_context(|| format!("batch operation {idx}: invalid remargin_kind"))?;
+            .with_context(|| format!("batch operation {idx}: invalid kind"))?;
     }
     Ok(())
 }

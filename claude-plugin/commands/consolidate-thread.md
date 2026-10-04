@@ -21,7 +21,7 @@ Fold one thread into the document body. `<comment-id>` may be the thread's root 
 
 3. **Resolve the comment parameter.** `--delete-comments` → delete mode. `--preserve-comments`, or no flag → **preserve mode (default)**.
 
-4. **Resolve the thread.** Call `mcp__remargin__comments` with `file` = the path — **not** `mcp__remargin__query`, which honors `.gitignore` and silently returns nothing on gitignored files.
+4. **Resolve the thread.** Call `mcp__remargin__comments` with `file` = the path — **not** `mcp__remargin__query`, which honors `.gitignore` and silently returns nothing on gitignored files. `comments` returns rows in pages: keep calling with `offset` increased by the rows received until it reaches `total`, and read each row's cells by the column names in `comment_cols`.
    - Find `<comment-id>`. If it is not in the file → **STOP** with an error naming the id; change nothing.
    - The thread's **root** is that comment's `thread` value, or the comment itself when it has no `thread`.
    - The **thread** is the root plus every comment whose `thread` equals the root's id.
@@ -32,7 +32,7 @@ Fold one thread into the document body. `<comment-id>` may be the thread's root 
    - With no heading above the root, the section is the body text before the first heading. The YAML frontmatter is never part of any section.
    - Record the line range of every comment block inside the section — this thread's and any other thread's. They are pinned and are never part of a write range.
 
-6. **Read.** Call `mcp__remargin__activity` on the file, then read the whole thread end-to-end: every reply, ack, reaction, recipient (`to`) and `remargin_kind`, in thread order, together with the section's current prose.
+6. **Read.** Call `mcp__remargin__activity` on the file, then read the whole thread end-to-end: every reply, ack, reaction, recipient (`to`) and `kind`, in thread order, together with the section's current prose.
 
 7. **Delete-mode preflight.** In delete mode, before writing anything, preview the deletion with `mcp__remargin__plan` (`op: delete`, `file` = the path, `ids` = every id in the thread). If it returns a `reject_reason` → **STOP** with that reason as a chat blocker; change nothing.
 

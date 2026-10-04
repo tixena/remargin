@@ -29,7 +29,7 @@ use remargin_core::permissions::inspect as permissions_inspect;
 use remargin_core::permissions::restrict as permissions_restrict;
 use remargin_core::permissions::unprotect as permissions_unprotect;
 
-use crate::io::{IoSinks, out_json, out_json_min, out_raw, print_output};
+use crate::io::{IoSinks, out_json, out_raw, print_output};
 use crate::params::{QueryOutputMode, QueryParams};
 
 pub fn render_identity_report(
@@ -177,22 +177,6 @@ pub fn render_query_output(
     pending_label: Option<&str>,
 ) -> Result<()> {
     match params.output {
-        QueryOutputMode::Compact { include_integrity } => {
-            // Compact columnar shape, minified — matches the MCP `query`
-            // contract. Verbose `--json` (below) stays byte-identical.
-            let compact: Vec<Value> = results
-                .iter()
-                .map(|result| query::to_compact_result(result, include_integrity))
-                .collect();
-            return out_json_min(
-                sinks,
-                &json!({
-                    "base_path": base_path,
-                    "comment_cols": query::comment_cols(include_integrity),
-                    "results": compact,
-                }),
-            );
-        }
         QueryOutputMode::Json => {
             return print_output(
                 sinks,

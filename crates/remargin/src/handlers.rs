@@ -21,9 +21,8 @@ use crate::ObsidianAction;
 use crate::SessionAction;
 use crate::dispatch::{PERMISSIONS_NOT_RESTRICTED_MARKER, build_identity_flags, tri_state_flag};
 use crate::io::{
-    IoSinks, expand_cli_path, expand_cli_pathbuf, out, out_json, out_json_min, out_raw,
-    parse_line_range, print_output, read_stdin, resolve_doc_path, resolve_purge_path,
-    truncate_content,
+    IoSinks, expand_cli_path, expand_cli_pathbuf, out, out_json, out_raw, parse_line_range,
+    print_output, read_stdin, resolve_doc_path, resolve_purge_path, truncate_content,
 };
 #[cfg(feature = "obsidian")]
 use crate::obsidian;
@@ -665,7 +664,6 @@ pub fn build_query_params(command: &Commands) -> Result<QueryParams<'_>> {
         comment_id,
         content_regex,
         ignore_case,
-        include_integrity,
         pending_flags:
             QueryPendingFlags {
                 pending,
@@ -687,13 +685,7 @@ pub fn build_query_params(command: &Commands) -> Result<QueryParams<'_>> {
     else {
         bail!("internal: build_query_params called with wrong subcommand");
     };
-    // clap enforces `--compact` requires `--json` and `--include-integrity`
-    // requires `--compact`, so compact implies json here.
-    let output = if output_args.compact {
-        QueryOutputMode::Compact {
-            include_integrity: *include_integrity,
-        }
-    } else if output_args.json {
+    let output = if output_args.json {
         QueryOutputMode::Json
     } else if *pretty {
         QueryOutputMode::Pretty
@@ -982,44 +974,20 @@ pub fn cmd_get(
     if gp.output.is_json() && gp.line_numbers {
         let result = document::get_with_links(system, cwd, target, lines, false, config)?;
         let start_num = lines.map_or(1, |(s, _)| s);
-        if gp.output.is_compact() {
-            let body_lines: Vec<&str> = result.content.split('\n').collect();
-            let rows = operations::links::to_compact_rows(result.links);
-            out_json_min(
-                sinks,
-                &json!({
-                    "start_line": start_num,
-                    "lines": body_lines,
-                    "links_cols": operations::links::LINK_COLS,
-                    "links": rows,
-                }),
-            )
-        } else {
-            let json_lines: Vec<Value> = result
-                .content
-                .split('\n')
-                .enumerate()
-                .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
-                .collect();
-            print_output(
-                sinks,
-                true,
-                &json!({ "lines": json_lines, "links": result.links }),
-            )
-        }
+        let json_lines: Vec<Value> = result
+            .content
+            .split('\n')
+            .enumerate()
+            .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
+            .collect();
+        print_output(
+            sinks,
+            true,
+            &json!({ "lines": json_lines, "links": result.links }),
+        )
     } else {
         let result = document::get_with_links(system, cwd, target, lines, gp.line_numbers, config)?;
-        if gp.output.is_compact() {
-            let rows = operations::links::to_compact_rows(result.links);
-            out_json_min(
-                sinks,
-                &json!({
-                    "content": result.content,
-                    "links_cols": operations::links::LINK_COLS,
-                    "links": rows,
-                }),
-            )
-        } else if gp.output.is_json() {
+        if gp.output.is_json() {
             print_output(
                 sinks,
                 true,
@@ -1266,11 +1234,6 @@ pub fn cmd_activity(
 
     match p.output {
         ActivityOutputMode::Pretty => render::emit_activity_pretty(sinks, &result)?,
-        ActivityOutputMode::Compact => {
-            // Compact columnar shape, minified — matches the MCP `activity`
-            // contract. Verbose `--json` (below) stays byte-identical.
-            out_json_min(sinks, &activity::to_compact_activity(&result))?;
-        }
         ActivityOutputMode::Json => {
             let value = serde_json::to_value(&result).context("serializing activity result")?;
             print_output(sinks, true, &value)?;
@@ -2304,20 +2267,6 @@ pub fn cmd_search(
     let results = search::search(system, cwd, &target, &options, config)?;
 
     match params.output {
-        SearchOutputMode::Compact => {
-            // Compact columnar shape, minified — matches the MCP `search`
-            // contract. Verbose `--json` (below) stays byte-identical.
-            let with_context = params.context > 0;
-            let files = search::group_compact(&results.matches, with_context);
-            return out_json_min(
-                sinks,
-                &json!({
-                    "total": results.total,
-                    "match_cols": search::match_cols(with_context),
-                    "files": files,
-                }),
-            );
-        }
         SearchOutputMode::Json => {
             return print_output(
                 sinks,

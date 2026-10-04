@@ -1538,21 +1538,27 @@ fn an_invalid_kind_sinks_the_whole_batch() {
 }
 
 #[test]
-fn op_json_reads_remargin_kind_or_its_kind_alias() {
-    for raw in [
-        json!({ "content": "body", "remargin_kind": ["decision-item", "todo"] }),
-        json!({ "content": "body", "kind": ["decision-item", "todo"] }),
-    ] {
-        let op = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 0).unwrap();
-        assert_eq!(op.remargin_kind, ["decision-item", "todo"], "{raw}");
-    }
+fn op_json_reads_kind() {
+    let raw = json!({ "content": "body", "kind": ["decision-item", "todo"] });
+    let op = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 0).unwrap();
+    assert_eq!(op.remargin_kind, ["decision-item", "todo"]);
+}
+
+#[test]
+fn op_json_refuses_the_storage_name_remargin_kind() {
+    let raw = json!({ "content": "body", "remargin_kind": ["decision-item"] });
+    let err = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 0).unwrap_err();
+    assert!(
+        format!("{err:#}").starts_with("batch op[0]: unknown field `remargin_kind`"),
+        "{err:#}"
+    );
 }
 
 #[test]
 fn op_json_refuses_a_kind_that_is_not_an_array_of_strings() {
     for raw in [
-        json!({ "content": "body", "remargin_kind": "decision-item" }),
-        json!({ "content": "body", "remargin_kind": ["todo", 7_i32] }),
+        json!({ "content": "body", "kind": "decision-item" }),
+        json!({ "content": "body", "kind": ["todo", 7_i32] }),
     ] {
         let err = BatchCommentOp::from_json_object(raw.as_object().unwrap(), 2).unwrap_err();
         let msg = format!("{err:#}");

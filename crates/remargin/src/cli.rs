@@ -82,11 +82,6 @@ impl IdentityArgs {
 /// `--json` before the subcommand must now place it after.
 #[derive(clap::Args, Default)]
 pub struct OutputArgs {
-    /// Compact columnar JSON (implies minified output). Requires --json.
-    /// Supported by get, search, query, and activity.
-    #[arg(long, requires = "json")]
-    pub compact: bool,
-
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -1451,10 +1446,6 @@ pub struct QueryArgs {
     /// Case-insensitive match for `--content-regex`.
     #[arg(long, short = 'i')]
     pub ignore_case: bool,
-    /// Add checksum + signature columns to the compact comment rows.
-    /// Requires `--compact`.
-    #[arg(long, requires = "compact")]
-    pub include_integrity: bool,
     #[command(flatten)]
     pub output_args: OutputArgs,
     /// Base directory to search.

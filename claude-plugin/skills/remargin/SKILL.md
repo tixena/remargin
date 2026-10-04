@@ -215,7 +215,7 @@ If the content is "ok", "got it", "thanks", "noted", or pure information with no
 
 ### Q: I want to leave multiple comments at once (not all replies).
 
-Same answer as above: `batch`. Each op can independently be a reply (`reply_to`), an anchor at a line (`after_line`), an anchor under a comment (`after_comment`), or a top-level comment. Each op also takes `to`, `remargin_kind`, `attachments` and `sandbox`, as `comment` does. An unknown field refuses the whole batch.
+Same answer as above: `batch`. Each op can independently be a reply (`reply_to`), an anchor at a line (`after_line`), an anchor under a comment (`after_comment`), or a top-level comment. Each op also takes `to`, `kind`, `attachments` and `sandbox`, as `comment` does. An unknown field refuses the whole batch.
 
 ```
 remargin batch --ops '[
@@ -247,31 +247,41 @@ remargin batch --ops '[
 
 **Do not** use `Read` / `Edit` / `Write` / `Bash` shell tools on managed `.md` files. The realm rule has no exceptions.
 
-**`get` returns a compact, minified payload.** The MCP `get` tool always returns the token-lean columnar shape (there is no format flag):
+**Read results are compact, minified columns.** The MCP read tools (`comments`, `query`, `activity`, `search`, `get`) always return the token-lean shape below; there is no format flag. A columnar payload names its columns once in a `*_cols` array, and each record is then a positional array (a "row") whose cells follow that order. The command line never uses this shape: its `--json` output is plain objects.
 
-- `line_numbers=false` (default): `{content, links_cols, links}` — `content` is the whole file as one string.
-- `line_numbers=true`: `{start_line, lines, links_cols, links}` — `lines` is an array of bare strings; line `i`'s number is `start_line + i` (no per-line objects).
-- `links` rows are positional arrays named by `links_cols` = `["alias", "lines", "target", "title"]`; `alias` / `title` are `null` when absent. A link's on-disk path is derivable from `target`: verbatim when it has a file extension, else `target + ".md"`.
+**Paging (`comments`, `query`, `activity`, `search`).** Each response carries `total`, the number of items that matched. A call returns at most `limit` items starting at `offset` (default 0), then cuts the page further so the response stays under the session's size budget; when it does, the response carries `effective_limit`, the number of items actually returned. To read everything, call again with `offset` increased by the items you received until it reaches `total`. The items are comments for `comments` and `query` (files in `query`'s summary mode), changes for `activity`, and matches for `search`. A file split across pages repeats its own fields on each page.
 
-**CLI fallback:** when you must drop to the CLI (MCP unreachable), pass **`--json --compact`** to `remargin get` to obtain the same shape. Plain `remargin get --json` is the older verbose payload (`{line, text}` objects, six-column links) — only use it if a caller explicitly needs the legacy shape.
+**Paging (`get`).** `start_line` / `end_line` choose the window. The response always carries `total_lines`, the whole file's line count. When the window does not fit the size budget it is cut, and `effective_end_line` gives the last line returned; continue with `start_line` set to `effective_end_line + 1`.
 
-**`query` returns a compact, minified payload too.** The MCP `query` tool always returns the token-lean columnar shape (no format flag): `{base_path, comment_cols, results}`, each result `{path, comment_count, matched_count, pending_count, pending_for, last_activity, comments}`. `comment_count`, `pending_count`, `pending_for`, and `last_activity` describe the whole file regardless of filters; `comments` and `matched_count` reflect the active filters.
+**Unknown arguments are refused.** Every MCP tool refuses an argument its schema does not declare, with `<tool>: unknown argument \`x\`; accepted: …`, and does nothing. A misspelled filter therefore fails loudly instead of returning unfiltered results.
 
-- `comments` rows are positional arrays named once by the envelope's `comment_cols` = `["id", "line", "author", "author_type", "ts", "reply_to", "thread", "to", "ack", "reactions", "remargin_kind", "edited_at", "attachments", "content"]` (`content` last). Acks are `author@ts` strings; the verbose `checksum` / `signature` and the redundant per-comment `file` are dropped. Nullable columns (`reply_to`, `thread`, `remargin_kind`, `edited_at`) are `null` when absent.
-- Pass `include_integrity: true` (MCP) / `--include-integrity` (CLI, requires `--compact`) to add `checksum`, `signature` columns immediately before `content`.
-- **CLI fallback:** `remargin query ... --json --compact` yields the same shape; plain `--json` is the older verbose `ExpandedComment` objects.
+**`comments`** — one file's comments, in document order: `{total, comment_cols, comments, effective_limit?}`.
 
-**`activity` returns a compact, minified payload too.** The MCP `activity` tool always returns the token-lean columnar shape (no format flag): `{cutoff_explicit, newest_ts_overall, change_cols, files}`, each file `{path, newest_ts, cutoff_applied?, changes}`.
+- `comment_cols` = `["id", "line", "author", "author_type", "ts", "reply_to", "thread", "to", "ack", "reactions", "kind", "edited_at", "attachments", "content"]`; each entry of `comments` is one row in that order.
+- `id` the comment id; `line` the first line of its block; `author` the author identity; `author_type` `human` or `agent`; `ts` creation time (RFC 3339); `reply_to` the parent id, `null` for a root; `thread` the thread root's id, `null` for a root; `to` the recipients (`[]` = broadcast); `ack` one `author@ts` string per acknowledgement (identity and RFC 3339 time joined by `@`); `reactions` an object from each emoji to the list of `{author, ts}` that reacted; `kind` the classification tags, or `null`; `edited_at` the last edit time, `null` if never edited; `attachments` stored attachment paths; `content` the markdown body, always last.
+- `include_integrity: true` inserts `checksum` and `signature` columns immediately before `content`.
+- Filters: `kind` (any of the given tags), `pending`, `pending_for`, `pending_for_me` (same meaning as in `query`; they combine as a union).
+- Reads the named file even when it is gitignored.
 
-- `changes` rows are positional arrays named once by the envelope's `change_cols` = `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. One uniform 9-column shape serves all three kinds; `kind` is `ack` / `comment` / `sandbox`. Columns a kind lacks are `null`: acks / sandboxes null `line_start` / `line_end` / `reply_to` and their `to`; sandboxes also null `comment_id`. `to` is `[]` for a broadcast comment vs `null` (not-applicable) for acks / sandboxes.
-- **CLI fallback:** `remargin activity --json --compact` yields the same shape; plain `--json` is the older verbose tagged `Change` objects, and `--pretty` is the human timeline.
+**`query`** — comments across documents: `{base_path, total, comment_cols, results, effective_limit?}`.
 
-**`search` returns a compact, minified payload too.** The MCP `search` tool always returns the token-lean grouped shape (no format flag): `{total, match_cols, files}` (plus `effective_limit` when a page was clamped), each file `{path, matches}`.
+- `base_path` is the searched directory (or a named file's folder), ending in `/`; every result `path` is relative to it.
+- Each result is one file: `{path, comment_count, matched_count, pending_count, pending_for?, last_activity?, comments}`. `comment_count`, `pending_count`, `pending_for` and `last_activity` describe the whole file; `matched_count` counts the comments that passed the filters; `comments` holds this page's matching rows, with the same `comment_cols` as `comments`. `summary: true` leaves the `comments` arrays out.
+- Filters: `kind`, `author`, `since`, `comment_id`, `content_regex`; the pending filters (`pending`, `pending_for`, `pending_for_me`, `pending_broadcast`) combine as a union. `pending` covers directed comments with an unacknowledged recipient and broadcast comments nobody acknowledged.
+- A directory search skips gitignored files; naming a single file reads it regardless.
 
-- Matches are grouped by file so `path` is stated once; files appear in first-match order and a file's rows are contiguous. `matches` rows are positional arrays named once by the envelope's `match_cols` = `["line", "location", "text", "comment_id"]`. `location` is lowercase `body` / `comment`; `comment_id` is `null` for body matches.
-- With `context` > 0 the rows widen to `["line", "location", "text", "comment_id", "before", "after"]` (`before` / `after` are string arrays) and `match_cols` reflects it.
-- `total` is the exact corpus match count; a page auto-sized under the session spill cap carries `effective_limit`. To page, advance the `offset` **request** param — the response carries no `offset` field.
-- **CLI fallback:** `remargin search <pattern> --json --compact` yields the same shape; plain `--json` is the older verbose flat `SearchMatch` objects (PascalCase `location`).
+**`activity`** — what changed since the caller last acted: `{cutoff_explicit, newest_ts_overall, total, change_cols, files, effective_limit?}`, each file `{path, newest_ts, cutoff_applied?, changes}`.
+
+- `change_cols` = `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. Here `kind` is the kind of change, `ack` / `comment` / `sandbox`, not a comment's classification tags.
+- Columns a change kind lacks are `null`: acks and sandbox adds null `line_start` / `line_end` / `reply_to`; sandbox adds also null `comment_id`; `to` is `[]` for a broadcast comment and `null` for acks and sandbox adds. Rows sort by `ts`.
+
+**`search`** — text matches: `{total, match_cols, files, effective_limit?}`, each file `{path, matches}`, files in first-match order.
+
+- `match_cols` = `["line", "location", "text", "comment_id"]`; `location` is `body` or `comment`; `comment_id` is `null` for body matches. With `context` > 0 the rows widen to `["line", "location", "text", "comment_id", "before", "after"]` (`before` / `after` are string arrays).
+
+**`get`** — file contents: `{content, total_lines, links_cols, links, effective_end_line?}`, or with `line_numbers: true` `{start_line, lines, total_lines, links_cols, links, effective_end_line?}` where `lines` is an array of bare strings and line `i`'s number is `start_line + i`.
+
+- `links` lists the local links in the returned lines (comment blocks excluded), one row per target named by `links_cols` = `["alias", "lines", "target", "title"]`: `alias` the link text or `null`, `lines` where it appears, `target` the link target, `title` the target document's title or `null`. A link's file is `target` itself when it has an extension, otherwise `target + ".md"`.
 
 ### Q: The doc references an image. Should I view it?
 

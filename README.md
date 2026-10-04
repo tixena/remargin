@@ -318,7 +318,7 @@ remargin mcp install --user
 remargin mcp test
 ```
 
-Once installed, Claude Code gets these tools: `ls`, `get`, `get_image`, `write`, `replace`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `report_spill`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `cp`, `mv`, `rm`. (`get_image` returns an image content block for a referenced image; `report_spill` ratchets the search page cap down after an over-limit result.)
+Once installed, Claude Code gets these tools: `ls`, `get`, `get_image`, `write`, `replace`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `report_spill`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `cp`, `mv`, `rm`. (`get_image` returns an image content block for a referenced image; `report_spill` lowers the page size budget of the paged read tools after a client spilled an over-limit result. The read tools' payloads are described in [MCP read payloads](#mcp-read-payloads); every tool refuses an argument its schema does not declare.)
 
 ### Plugin
 
@@ -633,7 +633,7 @@ You don't write this format by hand — the CLI and MCP tools produce it.
 | `to` | No | List of recipients whose attention is requested. Omit for broadcast. |
 | `reply-to` | No | ID of the direct parent comment. |
 | `thread` | No | ID of the thread root (oldest ancestor). |
-| `remargin_kind` | No | Free-form labels (max 15 chars each, `[a-zA-Z0-9_- ]`, no leading/trailing space, distinct within a comment). |
+| `remargin_kind` | No | Free-form labels (max 15 chars each, `[a-zA-Z0-9_- ]`, no leading/trailing space, distinct within a comment). The CLI flag (`--kind`), the MCP argument and the MCP result column are named `kind`. |
 | `attachments` | No | List of file paths relative to document directory. |
 | `reactions` | No | Map of emoji to list of authors. |
 | `ack` | No | List of `author@timestamp` acknowledgment entries. |
@@ -859,7 +859,7 @@ remargin [OPTIONS] <COMMAND>
 |---------|-------------|
 | `comment` | Create a comment (supports `--reply-to`, `--after-line`, `--after-comment`, `--to`, `--attach`, `--auto-ack`, `--comment-file`/`-F`, `--kind`) |
 | `comments` | List all comments in a document (supports `--pretty` for threaded tree display, `--kind` filter) |
-| `batch` | Create multiple comments atomically via `--ops` JSON (per-operation `auto_ack`, `remargin_kind` and `sandbox`; an unknown field refuses the batch) |
+| `batch` | Create multiple comments atomically via `--ops` JSON (per-operation `auto_ack`, `kind` and `sandbox`; an unknown field refuses the batch) |
 | `edit` | Edit an existing comment (cascading ack clear on children) |
 | `delete` | Delete one or more comments |
 | `ack` | Acknowledge one or more comments (supports folder-wide resolution by ID when `--file` is omitted) |
@@ -870,7 +870,7 @@ remargin [OPTIONS] <COMMAND>
 
 | Command | Description |
 |---------|-------------|
-| `get` | Read a file's contents (with optional line range and `--line-numbers`/`-n`; `--binary` fetches a non-markdown file as bytes — base64 under `--json`, an MCP embedded-resource block on the MCP surface; `--json --compact` for a minified columnar payload — see [Compact output](#compact-output)) |
+| `get` | Read a file's contents (with optional line range and `--line-numbers`/`-n`; `--binary` fetches a non-markdown file as bytes — base64 under `--json`, an MCP embedded-resource block on the MCP surface) |
 | `ls` | List files and directories |
 | `write` | Write document contents (comment-preserving, `--create` for new files, `--lines START-END` for partial writes) |
 | `metadata` | Get document metadata (frontmatter, comment counts, pending status) |
@@ -882,8 +882,8 @@ remargin [OPTIONS] <COMMAND>
 
 | Command | Description |
 |---------|-------------|
-| `query` | Search across documents for comments (filter by `--pending`, `--pending-for`, `--pending-for-me`, `--pending-broadcast`, `--author`, `--since`, `--comment-id`, `--kind`; `--expanded` for inline comment details; `--json --compact` for a minified columnar payload, `--include-integrity` to add checksum/signature columns — see [Compact output](#compact-output)) |
-| `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`, and stateless `--limit`/`--offset` pagination with an exact `total`; `--json --compact` for a minified grouped columnar payload — see [Compact output](#compact-output)) |
+| `query` | Search across documents for comments (filter by `--pending`, `--pending-for`, `--pending-for-me`, `--pending-broadcast`, `--author`, `--since`, `--comment-id`, `--kind`; `--expanded` for inline comment details) |
+| `search` | Full-text search across documents (supports `--regex`, `--scope`, `--context`, `--ignore-case`, and stateless `--limit`/`--offset` pagination with an exact `total`) |
 | `lint` | Run structural lint checks on a document |
 | `verify` | Verify comment integrity (checksums and signatures) |
 | `activity` | Show what changed since a cutoff (caller's last action by default) — see [Tracking change](#tracking-change) |
@@ -960,36 +960,45 @@ Returns a projection of any mutating op (`ack`, `batch`, `comment`, `cp`, `delet
 | `--key <PATH>` | Path to Ed25519 signing key |
 | `--assets-dir <PATH>` | Assets directory path |
 | `--json` | Output as JSON |
-| `--compact` | Compact columnar JSON, minified. Requires `--json`; supported by `get`, `query`, `activity`, and `search` today (see [Compact output](#compact-output)) |
 | `--verbose` | Enable tracing output |
 
 > To preview a mutating op without writing, use `remargin plan <op>`. The per-op `--dry-run` flag was removed in favour of the uniform `plan` projection.
 
-### Compact output
+### MCP read payloads
 
-`remargin get <file> --json --compact` emits a token-lean, minified variant of the `get` payload. It is the shape the MCP `get` tool returns unconditionally (the MCP surface has no format flag). Plain `--json` is unchanged.
+The MCP read tools (`comments`, `query`, `activity`, `search`, `get`) return compact, minified payloads; this shape exists only on the MCP surface, and the command line's `--json` output stays plain objects. A columnar payload names its columns once in a `*_cols` array, and every record is then a positional array (a row) whose cells follow that order.
 
-- **With `--line-numbers`:** `{start_line, lines, links_cols, links}`. `lines` is an array of bare strings; line `i`'s number is `start_line + i` (no per-line `{line, text}` objects).
-- **Without `--line-numbers`:** `{content, links_cols, links}` — `content` is the document text as one string.
-- **`links`** rows are positional arrays named by `links_cols` (`["alias", "lines", "target", "title"]`); `alias` / `title` are `null` when absent. The verbose `count` (always `lines.len()`) and `path` columns are dropped. A link's on-disk path is derivable from `target`: verbatim when it carries a file extension, else `target + ".md"`.
+**Paging.** `comments`, `query`, `activity` and `search` take `offset` (default 0) and `limit`, and every response carries `total`, the number of items that matched: comments for `comments` and `query` (files in `query`'s summary mode), changes for `activity`, matches for `search`. A page is cut further to stay under the session's size budget, and then carries `effective_limit`, the number of items actually returned. To read everything, call again with `offset` increased by the items received until it reaches `total`. A file split across pages repeats its own fields on each page. `get` pages by lines: `start_line` / `end_line` choose the window, every response carries `total_lines`, and a window cut to the budget carries `effective_end_line`, the last line returned. After a client reports a spilled result, `report_spill` lowers the budget for the rest of the session.
 
-`remargin query ... --json --compact` emits the same token-lean, minified variant of the `query` payload the MCP `query` tool returns unconditionally. Plain `--json` is unchanged (verbose `ExpandedComment` objects).
+**Unknown arguments.** Every MCP tool refuses an argument its schema does not declare, with `<tool>: unknown argument \`x\`; accepted: …`, and does nothing.
 
-- Shape: `{base_path, comment_cols, results}`, where each result is `{path, comment_count, matched_count, pending_count, pending_for, last_activity, comments}`. `comment_count`, `pending_count`, `pending_for`, and `last_activity` describe the whole file regardless of filters; `comments` and `matched_count` reflect the active filters.
-- **`comments`** rows are positional arrays named once by the envelope's `comment_cols` header: `["id", "line", "author", "author_type", "ts", "reply_to", "thread", "to", "ack", "reactions", "remargin_kind", "edited_at", "attachments", "content"]` (`content` last). Acks compact to `author@ts` strings; the verbose per-comment `checksum` / `signature` and the redundant `file` are dropped. Nullable columns (`reply_to`, `thread`, `remargin_kind`, `edited_at`) are `null` when absent.
-- **`--include-integrity`** (requires `--compact`) re-adds `checksum`, `signature` as columns immediately before `content`, widening both `comment_cols` and every row. On the MCP surface this is the `include_integrity: true` boolean.
+**`comments`** returns one file's comments in document order: `{total, comment_cols, comments, effective_limit?}`.
 
-`remargin activity --json --compact` emits the same token-lean, minified variant of the `activity` payload the MCP `activity` tool returns unconditionally. Plain `--json` is unchanged (verbose tagged `Change` objects); `--pretty` is unaffected.
+- `comment_cols` is `["id", "line", "author", "author_type", "ts", "reply_to", "thread", "to", "ack", "reactions", "kind", "edited_at", "attachments", "content"]`.
+- `id` the comment id; `line` the first line of its block; `author` the author identity; `author_type` `human` or `agent`; `ts` creation time (RFC 3339); `reply_to` the parent id, `null` for a root; `thread` the thread root's id, `null` for a root; `to` the recipients (`[]` means a broadcast); `ack` one `author@ts` string per acknowledgement, the identity and the RFC 3339 time joined by `@`; `reactions` an object from each emoji to the list of `{author, ts}` that reacted with it; `kind` the classification tags (stored in the header as `remargin_kind`), or `null`; `edited_at` the last edit time, `null` if never edited; `attachments` stored attachment paths; `content` the markdown body, always last.
+- `include_integrity: true` inserts `checksum` and `signature` columns immediately before `content`.
+- Filters: `kind` keeps comments carrying any of the given tags; `pending`, `pending_for` and `pending_for_me` keep unacknowledged comments, with the same meaning as in `query`, and combine as a union.
+- It reads the named file even when the file is gitignored.
 
-- Shape: `{cutoff_explicit, newest_ts_overall, change_cols, files}`, where each file is `{path, newest_ts, cutoff_applied?, changes}`.
-- **`changes`** rows are positional arrays named once by the envelope's `change_cols` header: `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. One uniform 9-column shape serves all three kinds; `kind` is `ack` / `comment` / `sandbox`. Columns a kind lacks are `null`: acks / sandboxes null the comment-only columns (`line_start`, `line_end`, `reply_to`) and their `to`; sandboxes also null `comment_id`. `to` is `[]` for a broadcast comment (vs `null` for the not-applicable acks / sandboxes). Timestamps keep full fidelity.
+**`query`** returns comments across documents: `{base_path, total, comment_cols, results, effective_limit?}`.
 
-`remargin search <pattern> --json --compact` emits the same token-lean, minified variant of the `search` payload the MCP `search` tool returns unconditionally. Plain `--json` is unchanged (flat `SearchMatch` objects with PascalCase `location`).
+- `base_path` is the searched directory, or a named file's folder, ending in `/`; every result `path` is relative to it.
+- Each result is one file: `{path, comment_count, matched_count, pending_count, pending_for?, last_activity?, comments}`. `comment_count`, `pending_count`, `pending_for` and `last_activity` describe the whole file; `matched_count` counts the comments that passed the filters; `comments` holds this page's matching rows with the same `comment_cols` as `comments`. `summary: true` leaves the `comments` arrays out.
+- Filters: `kind`, `author`, `since`, `comment_id`, `content_regex`; the pending filters (`pending`, `pending_for`, `pending_for_me`, `pending_broadcast`) combine as a union. `pending` covers directed comments with an unacknowledged recipient and broadcast comments nobody acknowledged.
+- A directory search skips gitignored files; naming a single file reads it regardless.
 
-- Shape: `{total, match_cols, files}` (plus `effective_limit` when a page was clamped), where each file is `{path, matches}`.
-- Matches are grouped by file so `path` is stated once; files appear in first-match order and a file's rows are contiguous. Each match is a positional row named once by the envelope's `match_cols` header: `["line", "location", "text", "comment_id"]`. `location` is lowercase `body` / `comment`; `comment_id` is `null` for body matches.
-- With `--context` / `-C` > 0 the rows widen to `["line", "location", "text", "comment_id", "before", "after"]` (`before` / `after` are string arrays) and `match_cols` reflects the widened arity.
-- `total` is the exact corpus match count. On the MCP surface a page auto-sized under the session spill cap carries `effective_limit`; page by advancing the `offset` request param.
+**`activity`** returns what changed since the caller last acted: `{cutoff_explicit, newest_ts_overall, total, change_cols, files, effective_limit?}`, each file `{path, newest_ts, cutoff_applied?, changes}`.
+
+- `change_cols` is `["ts", "kind", "author", "author_type", "comment_id", "line_start", "line_end", "reply_to", "to"]`. Here `kind` is the kind of change, `ack`, `comment` or `sandbox`, not a comment's classification tags.
+- Columns a change kind lacks are `null`: acks and sandbox adds null `line_start`, `line_end` and `reply_to`; sandbox adds also null `comment_id`; `to` is `[]` for a broadcast comment and `null` for acks and sandbox adds. Rows sort by `ts`.
+
+**`search`** returns text matches: `{total, match_cols, files, effective_limit?}`, each file `{path, matches}`, files in first-match order.
+
+- `match_cols` is `["line", "location", "text", "comment_id"]`; `location` is `body` or `comment`; `comment_id` is `null` for body matches. With `context` > 0 the rows widen to `["line", "location", "text", "comment_id", "before", "after"]`, where `before` and `after` are string arrays.
+
+**`get`** returns file contents: `{content, total_lines, links_cols, links, effective_end_line?}`, or with `line_numbers: true` `{start_line, lines, total_lines, links_cols, links, effective_end_line?}`, where `lines` is an array of bare strings and line `i`'s number is `start_line + i`.
+
+- `links` lists the local links in the returned lines, comment blocks excluded, one row per target named by `links_cols`, `["alias", "lines", "target", "title"]`: `alias` the link text or `null`, `lines` the line numbers where it appears, `target` the link target, `title` the target document's title or `null`. A link's file is `target` itself when it carries an extension, otherwise `target + ".md"`.
 
 ## Tracking change
 
@@ -1006,11 +1015,11 @@ remargin activity --since 2026-04-20T00:00:00Z
 remargin activity --pretty
 ```
 
-The default JSON output is the structured `ActivityResult` shape; `--json --compact` emits the token-lean columnar payload instead (see [Compact output](#compact-output)). `--pretty` switches to a per-file timeline rendered to stderr (so stdout stays clean for piping). Each per-file block opens with a header line that names the cutoff that was applied — `(since 2026-04-20 00:00)` for explicit `--since`, `(since you last touched this file: …)` for the caller-last-action default, and `(since the beginning — no prior activity by you in this file)` for the initial-touch fallback.
+The default JSON output is the structured `ActivityResult` shape. `--pretty` switches to a per-file timeline rendered to stderr (so stdout stays clean for piping). Each per-file block opens with a header line that names the cutoff that was applied — `(since 2026-04-20 00:00)` for explicit `--since`, `(since you last touched this file: …)` for the caller-last-action default, and `(since the beginning — no prior activity by you in this file)` for the initial-touch fallback.
 
 When `--since` is omitted, the per-file cutoff is the latest of (caller's authored comments, caller's acks, caller's sandbox-adds) in that file — files where the caller has never acted return everything (the "initial-touch" fallback). The command also folds in comment edits (via the `Comment.edited_at` field) and sandbox-roster timestamp refreshes, neither of which `comments` / `query` surface as distinct events.
 
-Same surface is exposed via MCP as `mcp__remargin__activity`, which always returns the compact columnar payload (the MCP surface has no format flag).
+Same surface is exposed via MCP as `mcp__remargin__activity`, which returns the paged columnar payload described in [MCP read payloads](#mcp-read-payloads).
 
 ## Typical workflows
 

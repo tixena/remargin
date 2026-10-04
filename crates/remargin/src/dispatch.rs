@@ -407,23 +407,6 @@ const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
     }
 }
 
-/// Reject `--compact` on subcommands that do not emit the compact
-/// columnar contract. `OutputArgs` is flattened everywhere, so a single
-/// gate here keeps the flag from being silently ignored. `get`, `query`,
-/// `activity`, and `search` wire compact today.
-fn reject_unsupported_compact(cmd: &Commands) -> Result<()> {
-    let compact = subcommand_output(cmd).is_some_and(|o| o.compact);
-    if compact
-        && !matches!(
-            cmd,
-            Commands::Activity(_) | Commands::Get(_) | Commands::Query(_) | Commands::Search(_)
-        )
-    {
-        bail!("--compact is not supported for this subcommand");
-    }
-    Ok(())
-}
-
 fn classify_error(err: &anyhow::Error) -> u8 {
     let msg = format!("{err:#}");
     if msg.contains(PERMISSIONS_NOT_RESTRICTED_MARKER) {
@@ -579,8 +562,6 @@ pub fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) 
 }
 
 fn dispatch(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) -> Result<()> {
-    reject_unsupported_compact(cli.cmd())?;
-
     let output = subcommand_output(cli.cmd());
     let json_mode = output.is_some_and(|o| o.json);
 
@@ -816,14 +797,11 @@ fn handle_activity(
     else {
         bail!("internal: handle_activity called with wrong subcommand");
     };
-    // --pretty and --json (hence --compact) are mutually exclusive.
+    // --pretty and --json are mutually exclusive.
     if *pretty && output_args.json {
         bail!("--pretty and --json are mutually exclusive");
     }
-    // clap enforces `--compact` requires `--json`, so compact implies json.
-    let output = if output_args.compact {
-        ActivityOutputMode::Compact
-    } else if *pretty {
+    let output = if *pretty {
         ActivityOutputMode::Pretty
     } else {
         ActivityOutputMode::Json
@@ -1397,10 +1375,7 @@ fn handle_get(
     else {
         bail!("internal: handle_get called with wrong subcommand");
     };
-    // clap enforces `--compact` requires `--json`, so compact implies json.
-    let output = if output_args.compact {
-        GetOutputMode::Compact
-    } else if output_args.json {
+    let output = if output_args.json {
         GetOutputMode::Json
     } else {
         GetOutputMode::Text
@@ -1761,10 +1736,7 @@ fn handle_search(
     else {
         bail!("internal: handle_search called with wrong subcommand");
     };
-    // clap enforces `--compact` requires `--json`, so compact implies json.
-    let output = if output_args.compact {
-        SearchOutputMode::Compact
-    } else if output_args.json {
+    let output = if output_args.json {
         SearchOutputMode::Json
     } else {
         SearchOutputMode::Text

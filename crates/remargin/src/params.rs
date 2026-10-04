@@ -37,27 +37,17 @@ pub struct CommentsParams<'cmd> {
     pub remargin_kind: &'cmd [String],
 }
 
-/// How `get` renders its result. Mutually-exclusive successor to the
-/// previous `json_mode` / `compact` bool pair. `Compact` and `Json` both
-/// emit JSON (see [`GetOutputMode::is_json`]); `Compact` adds the columnar
-/// minified shape.
+/// How `get` renders its result.
 pub enum GetOutputMode {
-    Compact,
     Json,
     Text,
 }
 
 impl GetOutputMode {
-    /// `true` only for the compact columnar shape.
-    #[must_use]
-    pub const fn is_compact(&self) -> bool {
-        matches!(self, Self::Compact)
-    }
-
-    /// `true` when the result is serialized as JSON (verbose or compact).
+    /// `true` when the result is serialized as JSON.
     #[must_use]
     pub const fn is_json(&self) -> bool {
-        matches!(self, Self::Compact | Self::Json)
+        matches!(self, Self::Json)
     }
 }
 
@@ -79,12 +69,9 @@ pub struct EditParams<'cmd> {
     pub remargin_kind: Option<&'cmd [String]>,
 }
 
-/// How `activity` renders its result. Mutually-exclusive successor to the
-/// previous `json_mode` / `pretty` bool pair. `Json` (the default) emits
-/// the verbose `ActivityResult`; `Compact` emits the columnar minified
-/// shape; `Pretty` emits the human timeline to stderr.
+/// How `activity` renders its result. `Json` (the default) emits the
+/// verbose `ActivityResult`; `Pretty` emits the human timeline to stderr.
 pub enum ActivityOutputMode {
-    Compact,
     Json,
     Pretty,
 }
@@ -105,11 +92,8 @@ pub struct RestrictParams<'cmd> {
 }
 
 /// How `query` results are rendered. Mutually-exclusive successor to the
-/// previous `json_mode` / `pretty` / `summary` bool triple. `Compact`
-/// carries `include_integrity` in the variant (only reachable under
-/// `--compact`), keeping it off the `QueryParams` bool budget.
+/// previous `json_mode` / `pretty` / `summary` bool triple.
 pub enum QueryOutputMode {
-    Compact { include_integrity: bool },
     Json,
     Plain,
     Pretty,
@@ -160,12 +144,9 @@ pub struct QueryParams<'cmd> {
     pub since: Option<&'cmd str>,
 }
 
-/// How `search` renders its result. Mutually-exclusive successor to the
-/// previous `json_mode` bool. `Compact` and `Json` both emit JSON;
-/// `Compact` adds the grouped columnar minified shape. `Text` is the
-/// human match listing.
+/// How `search` renders its result. `Json` emits the match objects; `Text`
+/// is the human match listing.
 pub enum SearchOutputMode {
-    Compact,
     Json,
     Text,
 }

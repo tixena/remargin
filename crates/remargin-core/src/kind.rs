@@ -126,18 +126,15 @@ pub fn canonical_kinds(kinds: &[String]) -> Vec<String> {
     out
 }
 
-/// Read the kind tags off one JSON operation object.
-///
-/// `kind` is an alias of `remargin_kind`, as on the single-comment surfaces.
-/// Absent or `null` yields no tags; anything but an array of strings is
-/// refused.
+/// Read the `kind` tags off one JSON operation object. Absent or `null`
+/// yields no tags; anything but an array of strings is refused.
 ///
 /// # Errors
 ///
 /// Returns an error when the value is present but is not an array of
 /// strings.
 pub fn kinds_from_json(obj: &Map<String, Value>) -> Result<Vec<String>> {
-    match obj.get("remargin_kind").or_else(|| obj.get("kind")) {
+    match obj.get("kind") {
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(value) => value
             .as_array()
@@ -146,7 +143,7 @@ pub fn kinds_from_json(obj: &Map<String, Value>) -> Result<Vec<String>> {
                     .map(|v| v.as_str().map(String::from))
                     .collect::<Option<Vec<_>>>()
             })
-            .context("`remargin_kind`/`kind` must be an array of strings"),
+            .context("`kind` must be an array of strings"),
     }
 }
 

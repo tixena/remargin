@@ -4,13 +4,7 @@ use std::path::Path;
 use std::process::Output;
 
 use assert_cmd::Command;
-use os_shim::System as _;
-use os_shim::real::RealSystem;
-use remargin_core::config::ResolvedConfig;
-use remargin_core::config::identity::IdentityFlags;
-use remargin_core::config::parse_author_type;
-use remargin_core::mcp;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tempfile::TempDir;
 
 fn realm() -> TempDir {
@@ -168,72 +162,4 @@ fn identity_flag_drives_caller() {
     assert_status(&out, 0);
     let value: Value = serde_json::from_str(str::from_utf8(&out.stdout).unwrap()).unwrap();
     assert_eq!(value["files"].as_array().unwrap().len(), 1);
-}
-
-/// E10: MCP / CLI parity. The MCP surface returns the compact columnar
-/// payload unconditionally; `remargin activity --json --compact` yields the
-/// same shape, so the two surfaces are structurally identical.
-#[test]
-fn mcp_and_cli_match() {
-    let realm = realm();
-    write_md(
-        &realm,
-        "note.md",
-        &doc_with_one_comment("c1", "bob", "2026-04-06T12:00:00-04:00"),
-    );
-
-    let cli = run_in(
-        realm.path(),
-        &[
-            "activity",
-            "--json",
-            "--compact",
-            "--identity",
-            "alice",
-            "--type",
-            "agent",
-        ],
-    );
-    assert_status(&cli, 0);
-    let cli_payload: Value = serde_json::from_str(str::from_utf8(&cli.stdout).unwrap()).unwrap();
-
-    let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
-    let mut flags = IdentityFlags::default();
-    flags.identity = Some(String::from("alice"));
-    flags.author_type = Some(parse_author_type("agent").unwrap());
-    let config = ResolvedConfig::resolve(&system, &base, &flags, None).unwrap();
-    let request = json!({
-        "jsonrpc": "2.0",
-        "id": 1_i32,
-        "method": "tools/call",
-        "params": {
-            "name": "activity",
-            "arguments": {}
-        }
-    });
-    let request_str = serde_json::to_string(&request).unwrap();
-    let response_str = mcp::process_request(&system, &base, &config, &request_str)
-        .unwrap()
-        .unwrap();
-    let response: Value = serde_json::from_str(&response_str).unwrap();
-    let result = response.get("result").unwrap();
-    let content = result.get("content").and_then(Value::as_array).unwrap();
-    let text = content[0].get("text").and_then(Value::as_str).unwrap();
-    let mcp_payload: Value = serde_json::from_str(text).unwrap();
-
-    // Same columnar header; change rows carry no path, so they match
-    // element-wise across surfaces.
-    assert_eq!(cli_payload["change_cols"], mcp_payload["change_cols"]);
-    let cli_files = cli_payload["files"].as_array().unwrap();
-    let mcp_files = mcp_payload["files"].as_array().unwrap();
-    assert_eq!(cli_files.len(), mcp_files.len());
-    assert_eq!(cli_files.len(), 1);
-    let cli_changes = cli_files[0]["changes"].as_array().unwrap();
-    let mcp_changes = mcp_files[0]["changes"].as_array().unwrap();
-    assert_eq!(cli_changes, mcp_changes);
-    // comment_id lives at column index 4 (see `change_cols`).
-    let cli_row = cli_changes[0].as_array().unwrap();
-    assert_eq!(cli_row.len(), 9);
-    assert_eq!(cli_row[4], json!("c1"));
 }

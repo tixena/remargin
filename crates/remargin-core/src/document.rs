@@ -388,6 +388,8 @@ pub enum WriteProjection {
 pub struct GetResult {
     pub content: String,
     pub links: Vec<Link>,
+    /// Line count of the whole file, regardless of the requested window.
+    pub total_lines: usize,
 }
 
 /// List files and directories at the given path.
@@ -612,6 +614,7 @@ pub fn get_with_links(
     let full = system
         .read_to_string(&resolved)
         .with_context(|| format!("reading {}", resolved.display()))?;
+    let total_lines = full.split('\n').count();
 
     // Raw (un-numbered) text for the window the caller asked for.
     let window: String = match lines {
@@ -643,6 +646,7 @@ pub fn get_with_links(
     Ok(GetResult {
         content,
         links: outbound,
+        total_lines,
     })
 }
 

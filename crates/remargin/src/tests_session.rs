@@ -43,7 +43,6 @@ fn session_launch(
         multiplexer: Some(String::from("tmux")),
         name: name.map(String::from),
         output_args: OutputArgs {
-            compact: false,
             json,
             verbose: false,
         },
@@ -269,7 +268,6 @@ fn bare_launch_rejects_unknown_multiplexer() {
         multiplexer: Some(String::from("screen")),
         name: None,
         output_args: OutputArgs {
-            compact: false,
             json: false,
             verbose: false,
         },
@@ -299,7 +297,6 @@ fn bare_launch_rejects_zellij_now_removed() {
         multiplexer: Some(String::from("zellij")),
         name: None,
         output_args: OutputArgs {
-            compact: false,
             json: false,
             verbose: false,
         },
