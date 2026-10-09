@@ -15,7 +15,7 @@ export type SandboxGroupBulkIcon =
   | "arrow-down-to-line"
   | "chevrons-up"
   | "chevrons-down"
-  // Legacy names — retained so older callers / tests still compile.
+  // No current caller passes these three.
   | "check-check"
   | "minus"
   | "plus";

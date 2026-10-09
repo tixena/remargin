@@ -1,3 +1,5 @@
+# Build output, dependencies and local files of the website.
+
 # Astro build output
 dist/
 .astro/

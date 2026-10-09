@@ -1,3 +1,4 @@
+# Build output, dependencies, local settings and tracker state that stay out of git.
 
 # Rust build artifacts
 /target
