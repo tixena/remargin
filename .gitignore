@@ -3,7 +3,6 @@
 # Rust build artifacts
 /target
 
-# Node.js
 node_modules/
 
 # Beads / Dolt files (added by bd init)
@@ -13,7 +12,6 @@ node_modules/
 .beads/
 .beads-credential-key
 
-# Notes
 notes/
 
 # Claude Code user settings (local-only)

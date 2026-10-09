@@ -1,33 +1,26 @@
-/* =====================================================================
-   Remargin website — global tokens + base + utility styles.
-   Component-specific styles live alongside each .astro file.
-   ===================================================================== */
+/* Remargin website — global tokens + base + utility styles.
+   Component-specific styles live alongside each .astro file. */
 
 :root {
-  /* Brand */
   --color-brand: #7f6df2;
   --color-brand-strong: #6f5be8;
   --color-brand-soft: #a89af7;
   --color-brand-bg: #1f1a3a;
 
-  /* Surfaces */
   --color-bg: #0e0d14;
   --color-surface: #16151f;
   --color-surface-raised: #1e1d2a;
   --color-surface-strong: #272636;
 
-  /* Borders */
   --color-border-subtle: #2a2939;
   --color-border: #38374a;
   --color-border-strong: #4a4862;
 
-  /* Text */
   --color-text: #e6e4f1;
   --color-text-muted: #a5a2ba;
   --color-text-dim: #6f6c85;
   --color-text-inverse: #0e0d14;
 
-  /* Semantic */
   --color-success: #34d399;
   --color-success-bg: #0f2a22;
   --color-warning: #f59e0b;
@@ -35,11 +28,9 @@
   --color-danger: #f87171;
   --color-danger-bg: #2a1014;
 
-  /* Accent */
   --color-accent-amber: #d4a017;
   --color-accent-amber-bg: #2a2008;
 
-  /* Type families */
   --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-sans: "Inter", "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 
@@ -48,11 +39,10 @@
   --pad: 32px;
 }
 
-/* ------ Fonts ------
-   Loaded from Google Fonts via <link> in src/pages/index.astro <head>.
-   Both families are SIL OFL. */
+/* Fonts: loaded from Google Fonts via <link> in src/pages/index.astro <head>. Both families are
+   SIL OFL. */
 
-/* ------ Base ------ */
+/* Base */
 * {
   box-sizing: border-box;
 }
@@ -100,7 +90,7 @@ a:hover {
   border-radius: 2px;
 }
 
-/* ------ Utility ------ */
+/* Utility */
 .skip {
   position: absolute;
   left: -9999px;
@@ -155,7 +145,7 @@ a:hover {
   font-family: var(--font-mono);
 }
 
-/* ------ Buttons (used in Hero + Roadmap CTAs) ------ */
+/* Buttons (used in Hero + Roadmap CTAs) */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -199,7 +189,7 @@ a:hover {
   border-color: var(--color-border-strong);
 }
 
-/* ------ Section rhythm + headers ------ */
+/* Section rhythm + headers */
 section {
   padding: 96px 0;
   border-bottom: 1px solid var(--color-border-subtle);
@@ -246,7 +236,7 @@ section:last-of-type {
   max-width: 70ch;
 }
 
-/* ------ Caption (used after centerpiece blocks) ------ */
+/* Caption (used after centerpiece blocks) */
 .caption {
   margin-top: 24px;
   font-style: italic;
@@ -255,7 +245,7 @@ section:last-of-type {
   max-width: 70ch;
 }
 
-/* ------ Inline code ------ */
+/* Inline code */
 .body-code,
 p code,
 li code {

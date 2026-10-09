@@ -1,6 +1,5 @@
-/* ========================================================================
- * Remargin — Sandbox hierarchy (defensive, Obsidian-proof)
- * ------------------------------------------------------------------------
+/* Remargin — Sandbox hierarchy (defensive, Obsidian-proof)
+ *
  * Every rule is scoped under `.remargin-container .rmg-*` (or
  * `.remargin-container .remargin-sandbox`) so Obsidian's app.css can't
  * casually win the cascade. Specificity here is intentionally a notch
@@ -15,13 +14,11 @@
  *   - Brand purple + accent amber + semantic red/green = OUR tokens.
  *   - Surface / text fall back to Obsidian theme vars
  *     (--background-primary, --text-normal, --text-faint, etc.) so the
- *     panel still feels native when the user flips light/dark themes.
- * ====================================================================== */
+ *     panel still feels native when the user flips light/dark themes. */
 
 /* Tokens live on the sidebar root so the L1 section headers — rendered
  * outside .remargin-sandbox — resolve them too. */
 .remargin-container {
-  /* Brand */
   --rmg-brand: #7f6df2;
   --rmg-brand-strong: #6f5be8;
   --rmg-brand-soft: #a89af7;
@@ -33,13 +30,11 @@
   --rmg-amber-bg: rgba(212, 160, 23, 0.1);
   --rmg-amber-border: rgba(212, 160, 23, 0.32);
 
-  /* Semantic */
   --rmg-success: #34d399;
   --rmg-danger: #f87171;
 
-  /* Type stacks — prefer Obsidian's theme fonts so the panel inherits
-   * whatever the user's vault is set to; our preferred faces are
-   * fallbacks for environments that don't define them. */
+  /* Type stacks: Obsidian's theme fonts first, so the panel follows the vault's setting; ours
+   * are the fallbacks. */
   --rmg-mono: var(
     --font-monospace,
     "IBM Plex Mono",
@@ -67,10 +62,8 @@
   word-break: break-word;
 }
 
-/* ========================================================================
- * L1 — Sandbox body. Brand-purple rail runs the height of every child.
- * Collapsing the Sandbox SectionHeader hides this whole block.
- * ====================================================================== */
+/* L1 — Sandbox body. Brand-purple rail runs the height of every child.
+ * Collapsing the Sandbox SectionHeader hides this whole block. */
 
 .remargin-container .rmg-l1-body {
   position: relative;
@@ -89,10 +82,8 @@
   opacity: 0.5;
 }
 
-/* ========================================================================
- * L2 — Sandbox group (the files of one system prompt). Amber rail nested
- * inside the brand rail.
- * ====================================================================== */
+/* L2 — Sandbox group (the files of one system prompt). Amber rail nested
+ * inside the brand rail. */
 
 .remargin-container .rmg-l2 {
   position: relative;
@@ -113,7 +104,6 @@
   opacity: 0.6;
 }
 
-/* L2 header row */
 .remargin-container .rmg-l2__head {
   display: grid;
   grid-template-columns: 14px 1fr auto;
@@ -259,10 +249,8 @@
   justify-content: flex-end;
 }
 
-/* ========================================================================
- * L3 — Section (Staged / Unstaged). Tracked-uppercase eyebrow, no rail.
- * Sits inside the amber column, so the L2 rail visually "owns" it.
- * ====================================================================== */
+/* L3 — Section (Staged / Unstaged). Tracked-uppercase eyebrow, no rail.
+ * Sits inside the amber column, so the L2 rail visually "owns" it. */
 
 .remargin-container .rmg-l3 {
   margin-top: 10px;
@@ -343,10 +331,8 @@
   padding: 6px 6px 0 14px;
 }
 
-/* ========================================================================
- * Icon button — defensive reset. Obsidian sets background, cursor and
- * font on every <button>. We use !important on those properties only.
- * ====================================================================== */
+/* Icon button — defensive reset. Obsidian sets background, cursor and
+ * font on every <button>. We use !important on those properties only. */
 
 .remargin-container button.rmg-icon-btn {
   display: inline-flex !important;
@@ -388,11 +374,9 @@
   height: 11px;
 }
 
-/* ========================================================================
- * Submit buttons. We don't use the shadcn <Button> here because Obsidian
+/* Submit buttons. We don't use the shadcn <Button> here because Obsidian
  * routinely overrides shadcn's defaults; a plain <button> + our class is
- * predictable and easier to defend.
- * ====================================================================== */
+ * predictable and easier to defend. */
 
 .remargin-container button.rmg-btn-submit {
   display: inline-flex !important;
@@ -465,10 +449,8 @@
   border-color: rgba(14, 13, 20, 0.25);
 }
 
-/* ========================================================================
- * Sandbox rows. We don't restyle the shadcn Checkbox — rows carry no file
- * icon and the layout is tightened.
- * ====================================================================== */
+/* Sandbox rows. We don't restyle the shadcn Checkbox — rows carry no file
+ * icon and the layout is tightened. */
 
 .remargin-container .rmg-sandbox-row {
   display: flex;
@@ -569,11 +551,9 @@
   min-width: 0;
 }
 
-/* ========================================================================
- * Tree children — guide rail. Each level of nesting gets a single thin
+/* Tree children — guide rail. Each level of nesting gets a single thin
  * vertical line on its left, so siblings under a folder feel grouped.
- * Wraps the children of a folder row in <SandboxTreeNode>.
- * ====================================================================== */
+ * Wraps the children of a folder row in <SandboxTreeNode>. */
 .remargin-container .rmg-tree-children {
   position: relative;
   padding-left: 12px;
@@ -581,12 +561,10 @@
   border-left: 1px solid var(--background-modifier-border);
 }
 
-/* ========================================================================
- * Checkbox override — scoped to the Sandbox only, so we don't ripple
+/* Checkbox override — scoped to the Sandbox only, so we don't ripple
  * into other places that use the shared <Checkbox>. The shared component
  * uses --primary as its checked color; we want our brand purple and a
- * slightly larger hit target than the 12px default.
- * ====================================================================== */
+ * slightly larger hit target than the 12px default. */
 .remargin-container .remargin-sandbox button[role="checkbox"] {
   width: 14px !important;
   height: 14px !important;
@@ -618,14 +596,12 @@
   color: inherit;
 }
 
-/* ========================================================================
- * L1 head — every top-level section header (Sandbox, Inbox, …). Tinted
+/* L1 head — every top-level section header (Sandbox, Inbox, …). Tinted
  * brand-purple wash, mono-uppercase tracked title. The row itself is a
  * <div>; the collapsible trigger <button> inside wraps only the
  * chevron/icon/title/badge, with the actions tray as its sibling.
  * Plain unlayered CSS on purpose: Obsidian's unlayered button styles beat
- * Tailwind's @layer utilities, so utilities alone cannot style a button.
- * ====================================================================== */
+ * Tailwind's @layer utilities, so utilities alone cannot style a button. */
 .remargin-container .rmg-l1-head {
   display: flex;
   align-items: center;

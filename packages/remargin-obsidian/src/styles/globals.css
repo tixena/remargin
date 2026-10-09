@@ -147,10 +147,7 @@
   background-color: var(--background-primary-alt);
 }
 
-/* ----------------------------------------------------------------------
- * Widget-side classes shared by the editor surfaces: reading mode and
- * Live Preview.
- * ---------------------------------------------------------------------- */
+/* Widget-side classes shared by the editor surfaces: reading mode and Live Preview. */
 
 /* Per-thread visual container. The outermost `.remargin-widget-thread`
  * wraps the root comment AND all nested replies in a subtle tinted
