@@ -40,10 +40,9 @@ use crate::permissions::goose_install::{self, TestOutcome};
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GuardOutcome {
-    /// Enforcement may be silently disabled. Emit the diagnostic on
-    /// stdout so the failure is surfaced into the session.
+    /// Enforcement may be silently disabled; the diagnostic goes to stdout.
     Fail(String),
-    /// Enforcement will be live. Emit nothing; the session proceeds clean.
+    /// Enforcement will be live; emit nothing.
     Ok,
 }
 
@@ -109,9 +108,8 @@ fn plugin_failure(system: &dyn System, root: &Path) -> Option<String> {
 
     let outcomes: Vec<TestOutcome> = dirs
         .iter()
-        // A probe that cannot answer is not evidence of a live guard, so an
-        // I/O failure reads the same as a corrupt plugin — and carries its
-        // own cause.
+        // A probe that cannot answer is not evidence of a live guard, so an I/O failure reads as a
+        // corrupt plugin and carries its own cause.
         .map(|dir| {
             goose_install::test(system, dir).unwrap_or_else(|err| {
                 TestOutcome::Broken(format!(

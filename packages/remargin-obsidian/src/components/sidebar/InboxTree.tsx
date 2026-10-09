@@ -1,3 +1,5 @@
+/** The Inbox section's tree view: directory, file, comment. */
+
 import { ChevronDown, ChevronRight, Clock, FileText, Folder } from "lucide-react";
 import { useState } from "react";
 import { deriveLeafState } from "@/components/sidebar/inboxLeafState";
@@ -9,21 +11,21 @@ import { authorLabel } from "@/lib/authorLabel";
 import { buildFileTree, type FileTreeNode } from "@/lib/buildFileTree";
 import { activationKeyHandler } from "@/lib/keyboardActivation";
 
+/** One inbox row: a comment and the file it lives in. */
 interface InboxItem {
   file: string;
   comment: ExpandedComment;
 }
 
+/** Props for {@link InboxTree}. */
 interface InboxTreeProps {
   items: InboxItem[];
-  /**
-   * Current identity. `null` while the CLI identity probe is still in
-   * flight — leaves render as neutral in that window.
-   */
+  /** `null` while the identity probe is in flight; leaves render as neutral in that window. */
   me: string | null;
   onOpenAtLine?: (filePath: string, line?: number) => void;
 }
 
+/** Props for {@link CommentLeaf}. */
 interface CommentLeafProps {
   item: InboxItem;
   depth: number;
@@ -107,6 +109,7 @@ function CommentLeaf({ item, depth, me, onOpenAtLine }: CommentLeafProps) {
   );
 }
 
+/** Props for {@link InboxFileNode}. */
 interface FileNodeProps {
   filePath: string;
   comments: InboxItem[];
@@ -164,6 +167,7 @@ function InboxFileNode({ filePath, comments, depth, isActive, me, onOpenAtLine }
   );
 }
 
+/** Props for {@link InboxDirNode}. */
 interface DirNodeProps {
   node: FileTreeNode;
   depth: number;
@@ -176,7 +180,6 @@ interface DirNodeProps {
 function InboxDirNode({ node, depth, itemsByFile, activeFile, me, onOpenAtLine }: DirNodeProps) {
   const [expanded, setExpanded] = useState(true);
 
-  // Count pending comments under this directory
   const pendingCount = collectFileLeaves(node)
     .flatMap((fp) => itemsByFile.get(fp) ?? [])
     .filter((i) => i.comment.ack?.length === 0).length;
@@ -235,6 +238,7 @@ function collectFileLeaves(node: FileTreeNode): string[] {
   return result;
 }
 
+/** Props for {@link InboxTreeNode}. */
 interface InboxTreeNodeProps {
   node: FileTreeNode;
   depth: number;
@@ -282,7 +286,6 @@ function InboxTreeNode({
  * Groups comments by: directory -> file -> comment leaf.
  */
 export function InboxTree({ items, me, onOpenAtLine }: InboxTreeProps) {
-  // Build a map from file path to sorted comments
   const itemsByFile = new Map<string, InboxItem[]>();
   for (const item of items) {
     let arr = itemsByFile.get(item.file);
@@ -292,7 +295,6 @@ export function InboxTree({ items, me, onOpenAtLine }: InboxTreeProps) {
     }
     arr.push(item);
   }
-  // Sort comments within each file by timestamp descending
   for (const arr of itemsByFile.values()) {
     arr.sort((a, b) => (b.comment.ts?.getTime() ?? 0) - (a.comment.ts?.getTime() ?? 0));
   }

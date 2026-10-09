@@ -1,3 +1,5 @@
+//! One comment from an open-mode caller into a strict-mode realm, checked for its signature.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,10 +74,7 @@ fn body(path: &Path) -> String {
     fs::read_to_string(path).unwrap()
 }
 
-/// Caller in open mode runs `remargin comment` against a doc in a
-/// strict-mode realm. The realm's verify invariant requires every
-/// comment to be signed, so the singular comment path must either
-/// escalate (sign) or refuse — never write an unsigned comment.
+/// A comment from an open-mode caller into a strict-mode realm is signed or refused.
 #[test]
 fn comment_into_strict_realm_from_open_caller_does_not_leave_unsigned_comment() {
     let (_tmp, outer, doc, key) = build_cross_mode_layout();
@@ -106,8 +105,6 @@ fn comment_into_strict_realm_from_open_caller_does_not_leave_unsigned_comment() 
     let doc_parsed = parse_doc(&after).unwrap();
 
     if out.status.success() {
-        // Acceptable fix path #1: write escalated to strict mode and
-        // signed the new comment.
         for cm in doc_parsed.comments() {
             assert!(
                 cm.signature.is_some(),
@@ -120,9 +117,6 @@ fn comment_into_strict_realm_from_open_caller_does_not_leave_unsigned_comment() 
             );
         }
     } else {
-        // Acceptable fix path #2: comment refused with an error
-        // that names the cross-mode hazard. The doc must remain
-        // untouched.
         assert!(
             doc_parsed.comments().is_empty(),
             "BUG: comment refused but already wrote partial state. \

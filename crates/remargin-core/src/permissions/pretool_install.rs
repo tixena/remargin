@@ -22,20 +22,18 @@ use serde_json::{Map, Value, json};
 
 use crate::permissions::hook_settings::{self, CommandState};
 
-/// Matcher string written into the `PreToolUse` hook entry. Every tool
-/// the dispatcher inspects must be listed here so Claude Code fans the
-/// hook in for those calls.
+/// Every tool the dispatcher inspects must be listed, or Claude Code will not fan the hook in.
 pub const HOOK_MATCHER: &str = "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash";
 
-/// Subcommand appended to the absolute binary path in the generated hook
-/// command, and the entry's identity in a settings file. The dispatcher it
-/// names reads stdin and writes the decision JSON to stdout.
+/// Appended to the absolute binary path in the generated command; also the entry's identity in
+/// a settings file.
 pub const HOOK_SUBCOMMAND: &str = "claude pretool";
 
 /// The `PATH`-relative command installs wrote before they embedded the
 /// binary path. Recognized and reported, never written.
 pub const LEGACY_HOOK_COMMAND: &str = "remargin claude pretool";
 
+/// Whether an install changed the settings file.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InstallOutcome {
@@ -43,6 +41,7 @@ pub enum InstallOutcome {
     Installed,
 }
 
+/// Whether an uninstall found an entry to remove.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum UninstallOutcome {
@@ -50,17 +49,16 @@ pub enum UninstallOutcome {
     Uninstalled,
 }
 
+/// Whether the `PreToolUse` hook entry is live.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TestOutcome {
-    /// The entry is there but its command cannot spawn, so no tool call is
-    /// gated. Carries the specific fault so the caller can name it.
+    /// The entry is there but its command cannot spawn, so nothing is gated; carries the fault.
     Broken(String),
     Installed,
     NotInstalled,
-    /// The entry is there and enforces, but names the binary by bare name
-    /// ([`LEGACY_HOOK_COMMAND`]) — one `PATH` change away from silently
-    /// gating nothing. Carries the command as found.
+    /// The entry enforces but names the binary by bare name ([`LEGACY_HOOK_COMMAND`]); carries the
+    /// command as found.
     PathRelative(String),
 }
 

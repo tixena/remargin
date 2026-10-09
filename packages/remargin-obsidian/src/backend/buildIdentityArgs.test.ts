@@ -1,3 +1,5 @@
+/** Tests for the identity flags forwarded to the CLI in config and manual modes. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "@/types";
@@ -12,8 +14,6 @@ function settingsWith(overrides: Partial<RemarginSettings>): RemarginSettings {
 }
 
 describe("buildIdentityArgs", () => {
-  // ---- Config mode: forward ONLY --config ----
-
   it("config mode with a config file path emits only --config", () => {
     const args = buildIdentityArgs(
       settingsWith({
@@ -40,10 +40,6 @@ describe("buildIdentityArgs", () => {
   });
 
   it("config mode never emits --identity, --type, or --key", () => {
-    // Regression guard: the plugin used to forward --type on every CLI
-    // call even in config mode, silently overriding the YAML's type:
-    // field. That combination prevented the CLI from resolving a
-    // type-scoped signing key.
     const args = buildIdentityArgs(
       settingsWith({
         identityMode: "config",
@@ -59,8 +55,6 @@ describe("buildIdentityArgs", () => {
       );
     }
   });
-
-  // ---- Manual mode: --identity + --type, never --key ----
 
   it("manual mode with an author emits --identity and --type human", () => {
     const args = buildIdentityArgs(
@@ -83,9 +77,6 @@ describe("buildIdentityArgs", () => {
   });
 
   it("manual mode never forwards --key, even when keyFilePath is set", () => {
-    // The plugin deprecated the keyFilePath setting (see SettingsTab for
-    // the UI hint). Any future commit that reintroduces a --key
-    // forwarding in manual mode will fail this test.
     const args = buildIdentityArgs(
       settingsWith({
         identityMode: "manual",
@@ -99,14 +90,8 @@ describe("buildIdentityArgs", () => {
     );
   });
 
-  // ---- Fallback when config mode is selected but path is empty ----
-
   it("config mode with empty configFilePath falls back to manual", () => {
-    // If the user selects "Config file" but hasn't typed a path yet, we
-    // must not emit `--config ""` (which would mean "I have no config
-    // file" to the CLI in an ambiguous way). Falling back to the manual
-    // identity args keeps operations working with whatever author name
-    // is set.
+    // `--config ""` would be ambiguous to the CLI, so an empty path falls back to the manual args.
     const args = buildIdentityArgs(
       settingsWith({
         identityMode: "config",

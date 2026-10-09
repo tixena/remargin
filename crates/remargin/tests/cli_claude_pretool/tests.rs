@@ -1,3 +1,5 @@
+//! Pipes `PreToolUse` envelopes into `remargin claude pretool` and drives its install lifecycle.
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -64,8 +66,7 @@ fn envelope(tool: &str, cwd: &Path, tool_input: &Value) -> Vec<u8> {
     serde_json::to_vec(&event).unwrap()
 }
 
-/// Scenario 21: end-to-end against a real `claude restrict`-ed
-/// realm. The hook denies the Read with the canonical message.
+/// In a `claude restrict`-ed realm the hook denies a Read with the canonical message.
 #[test]
 fn end_to_end_against_real_claude_restricted_realm() {
     let realm = realm_with_claude();
@@ -95,10 +96,7 @@ fn end_to_end_against_real_claude_restricted_realm() {
     assert!(reason.contains("mcp__remargin__get"));
 }
 
-/// Scenario 7 (target-path scope): the session cwd sits outside the
-/// realm, but the target is an absolute path inside a `claude
-/// restrict`-ed realm. Scope is resolved from the target, so the hook
-/// still denies — exit 0 with the deny payload on stdout.
+/// Scope is resolved from the target: an absolute path into a restricted realm denies from any cwd.
 #[test]
 fn cwd_outside_realm_absolute_target_inside_denies() {
     let realm = realm_with_claude();
@@ -124,8 +122,6 @@ fn cwd_outside_realm_absolute_target_inside_denies() {
     assert!(reason.contains("mcp__remargin__get"));
 }
 
-/// Scenario 22: exit 0 with empty stdout when the path is
-/// unrestricted.
 #[test]
 fn unrestricted_call_exits_zero_with_empty_stdout() {
     let realm = realm_with_claude();
@@ -145,8 +141,7 @@ fn unrestricted_call_exits_zero_with_empty_stdout() {
     );
 }
 
-/// Scenario 23: malformed stdin exits 2 with a non-empty stderr
-/// (Claude Code feeds stderr back to the model on exit 2).
+/// Exit 2 with a non-empty stderr, which Claude Code feeds back to the model.
 #[test]
 fn malformed_stdin_exits_two_with_stderr() {
     let out = run_pretool(b"not json");
@@ -156,8 +151,6 @@ fn malformed_stdin_exits_two_with_stderr() {
     assert!(stderr.contains("malformed PreToolUse event"));
 }
 
-/// Scenario 24: env-var prefix on a Bash command does not hide the
-/// real verb from the extractor.
 #[test]
 fn env_var_prefix_does_not_hide_verb() {
     let realm = realm_with_claude();
@@ -179,9 +172,7 @@ fn env_var_prefix_does_not_hide_verb() {
     );
 }
 
-/// Scenario 25: the JSON wire shape matches Claude Code's
-/// `PreToolUse` hook contract verbatim — keys are `camelCase`,
-/// decision is lowercase, `hookEventName` is exactly `"PreToolUse"`.
+/// Keys are `camelCase`, the decision is lowercase and `hookEventName` is exactly `"PreToolUse"`.
 #[test]
 fn decision_json_matches_claude_code_contract() {
     let realm = realm_with_claude();
@@ -213,15 +204,12 @@ fn decision_json_matches_claude_code_contract() {
             .unwrap()
             .contains("mcp__remargin__edit")
     );
-    // No extra top-level keys snuck in.
     let obj = payload.as_object().unwrap();
     assert_eq!(obj.len(), 1);
     assert!(obj.contains_key("hookSpecificOutput"));
 }
 
-/// Widened matcher: `MultiEdit` on a restricted `file_path` denies
-/// end-to-end through the wired hook. `MultiEdit`'s path field is
-/// `file_path`, same as `Edit`.
+/// `MultiEdit` carries its path in `file_path`, as `Edit` does.
 #[test]
 fn multi_edit_against_restricted_realm_denies() {
     let realm = realm_with_claude();
@@ -246,8 +234,7 @@ fn multi_edit_against_restricted_realm_denies() {
     );
 }
 
-/// Widened matcher: `Grep` whose `path` is the restricted search root
-/// denies end-to-end.
+/// A `Grep` whose `path` is the restricted search root denies.
 #[test]
 fn grep_against_restricted_realm_denies() {
     let realm = realm_with_claude();
@@ -272,8 +259,7 @@ fn grep_against_restricted_realm_denies() {
     );
 }
 
-/// Widened matcher: `Glob` whose `path` is the restricted search root
-/// denies end-to-end.
+/// A `Glob` whose `path` is the restricted search root denies.
 #[test]
 fn glob_against_restricted_realm_denies() {
     let realm = realm_with_claude();
@@ -298,8 +284,7 @@ fn glob_against_restricted_realm_denies() {
     );
 }
 
-/// Ancestor gap, end-to-end: a `Bash rm` of the realm root (a strict
-/// ancestor of the trusted root `secret`) denies through the wired binary.
+/// A `Bash rm` of the realm root, a strict ancestor of the trusted root `secret`, denies.
 #[test]
 fn bash_rm_realm_root_ancestor_denies() {
     let realm = realm_with_claude();
@@ -319,8 +304,7 @@ fn bash_rm_realm_root_ancestor_denies() {
     );
 }
 
-/// Ancestor gap, end-to-end: an `ls` of the same realm root reads the
-/// ancestor and stays allowed — exit 0 with empty stdout.
+/// An `ls` of the same realm root only reads the ancestor, so it is allowed: exit 0, empty stdout.
 #[test]
 fn bash_ls_realm_root_ancestor_silent_allows() {
     let realm = realm_with_claude();
@@ -339,8 +323,7 @@ fn bash_ls_realm_root_ancestor_silent_allows() {
     );
 }
 
-/// Ancestor gap, end-to-end: a `Grep` whose search root is the realm root
-/// sweeps the protected subtree and denies through the wired binary.
+/// A `Grep` rooted at the realm root sweeps the protected subtree, so it denies.
 #[test]
 fn grep_realm_root_ancestor_denies() {
     let realm = realm_with_claude();
@@ -367,9 +350,7 @@ fn grep_realm_root_ancestor_denies() {
     assert!(reason.contains("mcp__remargin__search"));
 }
 
-/// CLI policy, end-to-end: a walk that never declares
-/// `permissions: cli_allowed` denies `remargin ls` by default, and the
-/// reason carries the opt-in hint rather than the explicit-`false` message.
+/// With `cli_allowed` undeclared, `remargin ls` is denied and the reason carries the opt-in hint.
 #[test]
 fn bash_remargin_cli_denied_by_default_when_undeclared() {
     let realm = TempDir::new().unwrap();
@@ -391,8 +372,7 @@ fn bash_remargin_cli_denied_by_default_when_undeclared() {
     assert!(!reason.contains("cli_allowed: false"), "reason: {reason}");
 }
 
-/// CLI policy, end-to-end: declaring `permissions: cli_allowed: true`
-/// opts the realm back in — `remargin ls` silently allows.
+/// `permissions: cli_allowed: true` opts the realm back in: `remargin ls` is silently allowed.
 #[test]
 fn bash_remargin_cli_allowed_when_declared_true() {
     let realm = TempDir::new().unwrap();
@@ -445,8 +425,7 @@ fn pretool_install_local_writes_hook_to_project_settings() {
     let value: Value = serde_json::from_str(&body).unwrap();
     let entries = value["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
-    // The absolute path of the binary that ran the install, so a `PATH`
-    // miss can never turn the hook into a silent fail-open pass.
+    // An absolute binary path: a `PATH` miss would turn the hook into a silent fail-open pass.
     let expected = format!("{} claude pretool", cargo_bin("remargin").display());
     assert_eq!(
         entries[0]["hooks"][0]["command"].as_str().unwrap(),
@@ -531,7 +510,6 @@ fn pretool_uninstall_removes_only_remargin_entry() {
     let realm = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
 
-    // Pre-seed settings with a foreign PreToolUse entry alongside.
     let settings_dir = realm.path().join(".claude");
     fs::create_dir_all(&settings_dir).unwrap();
     let initial = json!({
@@ -601,7 +579,6 @@ fn bare_pretool_still_runs_the_dispatcher() {
     let target = realm.path().join("secret/foo.md");
     let stdin = envelope("Read", realm.path(), &json!({ "file_path": target }));
 
-    // Same as run_pretool, but explicitly the no-subcommand form.
     let out = run_pretool(&stdin);
     assert_eq!(out.status.code(), Some(0_i32));
     let stdout = String::from_utf8(out.stdout).unwrap();

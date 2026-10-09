@@ -28,7 +28,6 @@ participants:
     pubkeys: []
 ";
 
-/// Create a default `ResolvedConfig` for testing.
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -44,7 +43,6 @@ fn test_config() -> ResolvedConfig {
     }
 }
 
-/// Create a comment with the given parameters.
 fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -> Comment {
     Comment {
         ack,
@@ -68,7 +66,6 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
     }
 }
 
-/// Create a `ParsedDocument` with given body text and comments.
 fn make_doc(body: &str, comments: Vec<Comment>) -> ParsedDocument {
     let mut segments = vec![Segment::Body(String::from(body))];
     for cm in comments {
@@ -78,7 +75,6 @@ fn make_doc(body: &str, comments: Vec<Comment>) -> ParsedDocument {
     ParsedDocument::from_segments(segments)
 }
 
-/// Helper to get a value from a `Mapping` by string key.
 fn get_value<'map>(mapping: &'map Mapping, key: &str) -> Option<&'map Value> {
     mapping.get(Value::String(String::from(key)))
 }
@@ -108,10 +104,8 @@ fn existing_frontmatter_preserved() {
     ensure_frontmatter(&mut doc, &config).unwrap();
 
     let markdown = doc.to_markdown().unwrap();
-    // User fields preserved (not overwritten).
     assert!(markdown.contains("Custom Title"));
     assert!(markdown.contains("alice"));
-    // Remargin fields added; with nothing pending only last_activity ships.
     assert!(markdown.contains("remargin_last_activity:"));
     assert!(!markdown.contains("remargin_pending"));
 }
@@ -148,7 +142,7 @@ fn pending_count() {
     update_remargin_fields(&mut mapping, &comments);
 
     let pending = get_value(&mapping, "remargin_pending").unwrap();
-    assert_eq!(pending.as_u64().unwrap(), 2); // cm1 and cm2 are unacked
+    assert_eq!(pending.as_u64().unwrap(), 2);
 }
 
 #[test]
@@ -173,13 +167,11 @@ fn pending_for() {
     let pending_for = get_value(&mapping, "remargin_pending_for").unwrap();
     let seq = pending_for.as_sequence().unwrap();
     let names: Vec<&str> = seq.iter().map(|v| v.as_str().unwrap()).collect();
-    // Sorted and deduplicated.
     assert_eq!(names, vec!["alice", "eduardo"]);
 }
 
 #[test]
 fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
-    // test plan #1: only an unaddressed pending comment.
     let cm = make_comment("u", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -197,9 +189,6 @@ fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
 
 #[test]
 fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
-    // test plan #2: addressed + unaddressed mixed; sorted.
-    // `<unassigned>` < `eduardo` lexicographically (`<` is U+003C,
-    // before any ASCII letter), so the sentinel comes first.
     let addressed = make_comment(
         "a",
         "2026-04-06T12:00:00-04:00",
@@ -223,8 +212,6 @@ fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
 
 #[test]
 fn pending_for_two_unaddressed_dedupes_sentinel() {
-    // test plan #3: two unaddressed unacked comments produce
-    // a single `<unassigned>` entry.
     let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let cm2 = make_comment("b", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm1, &cm2];
@@ -243,8 +230,6 @@ fn pending_for_two_unaddressed_dedupes_sentinel() {
 
 #[test]
 fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
-    // test plan #4: unaddressed but acked is no longer
-    // pending; `<unassigned>` does not appear.
     let cm = make_comment(
         "a",
         "2026-04-06T12:00:00-04:00",
@@ -266,9 +251,6 @@ fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
 
 #[test]
 fn pending_count_directed_with_partial_ack_is_pending() {
-    // `to: [alice]`, acked only by `bob`. Alice has not acked, so the
-    // conversation is still open from her perspective; the comment
-    // must count as pending.
     let cm = make_comment(
         "a",
         "2026-04-06T12:00:00-04:00",
@@ -292,9 +274,6 @@ fn pending_count_directed_with_partial_ack_is_pending() {
 
 #[test]
 fn pending_for_directed_with_partial_ack_lists_unacked_recipient() {
-    // Same shape as above; the unacked recipient must surface in
-    // remargin_pending_for. The party who DID ack (bob) must NOT
-    // appear because bob is not in `to` and is no longer waiting.
     let cm = make_comment(
         "a",
         "2026-04-06T12:00:00-04:00",
@@ -320,8 +299,6 @@ fn pending_for_directed_with_partial_ack_lists_unacked_recipient() {
 
 #[test]
 fn pending_for_directed_with_one_recipient_acked_excludes_them() {
-    // `to: [alice, eduardo]`, only alice has acked. Eduardo must
-    // surface as pending; alice must not (she has acked).
     let cm = make_comment(
         "a",
         "2026-04-06T12:00:00-04:00",
@@ -347,10 +324,6 @@ fn pending_for_directed_with_one_recipient_acked_excludes_them() {
 
 #[test]
 fn pending_count_self_addressed_with_third_party_ack_is_pending() {
-    // The exact shape witnessed in index.md `57m`: comment authored
-    // by `eduardo`, addressed `to: [eduardo]`, acked by an unrelated
-    // agent. Eduardo himself has not acked, so the conversation is
-    // still open from his perspective.
     let cm = make_comment(
         "a",
         "2026-04-06T12:00:00-04:00",
@@ -379,11 +352,6 @@ fn pending_count_self_addressed_with_third_party_ack_is_pending() {
 
 #[test]
 fn broadcast_comment_with_no_to_and_no_ack_is_pending_for_unassigned() {
-    // Broadcast comment: no `to:`, no `ack:`. Pending in the eyes
-    // of everyone — counts toward remargin_pending and surfaces
-    // under the `<unassigned>` sentinel in remargin_pending_for so
-    // the document is never silently "closed" when somebody posted
-    // a question to nobody in particular.
     let cm = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -429,7 +397,6 @@ fn last_activity() {
 
     let last = get_value(&mapping, "remargin_last_activity").unwrap();
     let ts_str = last.as_str().unwrap();
-    // The ack at 16:00 is the most recent.
     assert!(ts_str.contains("16:00:00"));
 }
 
@@ -448,8 +415,6 @@ fn no_comments_omits_pending_fields() {
 
 #[test]
 fn zero_pending_sheds_stale_stored_values() {
-    // A doc whose previous write stamped a non-zero count must lose both
-    // fields once the last pending comment is acked — remove, not skip.
     let mut mapping = Mapping::new();
     mapping.insert(
         Value::String(String::from("remargin_pending")),
@@ -482,17 +447,15 @@ fn user_field_preserved() {
     let config = test_config();
     let mut mapping = Mapping::new();
 
-    // Pre-set a custom title.
     mapping.insert(
         Value::String(String::from("title")),
         Value::String(String::from("Custom")),
     );
 
-    // Body has a different heading.
     populate_user_fields(&mut mapping, "# Auto Title\n", &config);
 
     let title = get_value(&mapping, "title").unwrap();
-    assert_eq!(title.as_str().unwrap(), "Custom"); // Not overwritten.
+    assert_eq!(title.as_str().unwrap(), "Custom");
 }
 
 #[test]
@@ -528,14 +491,6 @@ fn no_identity_no_author() {
     );
 }
 
-// -------------------------------------------------------------------
-// Authenticated document author gate (`ensure_frontmatter_authored`).
-//
-// Create stamps the caller identity (ignoring any spoofed value),
-// edits are gated by the realm mode. `config` is assumed already
-// escalated to the doc's realm.
-// -------------------------------------------------------------------
-
 fn strict_config(identity: Option<&str>) -> ResolvedConfig {
     ResolvedConfig {
         identity: identity.map(String::from),
@@ -553,16 +508,14 @@ fn registered_config(identity: &str) -> ResolvedConfig {
     }
 }
 
-/// Row 1: create ignores a spoofed author and stamps the caller.
 #[test]
 fn authored_create_ignores_supplied_author() {
-    let config = test_config(); // identity `eduardo`, open
+    let config = test_config();
     let mut doc = parser::parse("---\nauthor: someone_else\n---\n\n# Doc\n").unwrap();
     ensure_frontmatter_authored(&mut doc, &config, true, None).unwrap();
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("eduardo"));
 }
 
-/// Row 2: create with no supplied author stamps the caller identity.
 #[test]
 fn authored_create_stamps_caller_identity() {
     let config = test_config();
@@ -571,7 +524,6 @@ fn authored_create_stamps_caller_identity() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("eduardo"));
 }
 
-/// Row 3: create with no identity drops the author key entirely.
 #[test]
 fn authored_create_no_identity_drops_author() {
     let config = ResolvedConfig {
@@ -583,7 +535,6 @@ fn authored_create_no_identity_drops_author() {
     assert_eq!(read_author(&doc).unwrap(), None);
 }
 
-/// Row 4: strict edit that leaves the author unchanged passes.
 #[test]
 fn authored_strict_edit_unchanged_author_ok() {
     let config = strict_config(Some("alice"));
@@ -592,7 +543,6 @@ fn authored_strict_edit_unchanged_author_ok() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("alice"));
 }
 
-/// Row 5: strict edit that changes an existing author is rejected.
 #[test]
 fn authored_strict_edit_changed_author_rejected() {
     let config = strict_config(Some("mallory"));
@@ -605,8 +555,6 @@ fn authored_strict_edit_changed_author_rejected() {
     );
 }
 
-/// Row 6a: strict None->Some where the new author equals the caller
-/// identity is allowed (a first-time author may claim only itself).
 #[test]
 fn authored_strict_first_author_matching_caller_allowed() {
     let config = strict_config(Some("alice"));
@@ -615,8 +563,6 @@ fn authored_strict_first_author_matching_caller_allowed() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("alice"));
 }
 
-/// Row 6b: strict None->Some where the new author is not the caller
-/// identity is rejected.
 #[test]
 fn authored_strict_first_author_mismatch_rejected() {
     let config = strict_config(Some("alice"));
@@ -629,8 +575,6 @@ fn authored_strict_first_author_mismatch_rejected() {
     );
 }
 
-/// Strict edits never treat an omitted author as a change: the on-disk
-/// author is preserved rather than rejected.
 #[test]
 fn authored_strict_edit_omit_author_preserved() {
     let config = strict_config(Some("editor"));
@@ -639,7 +583,6 @@ fn authored_strict_edit_omit_author_preserved() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("alice"));
 }
 
-/// Row 7: registered edit to an active participant is allowed.
 #[test]
 fn authored_registered_edit_to_active_ok() {
     let config = registered_config("eduardo");
@@ -648,7 +591,6 @@ fn authored_registered_edit_to_active_ok() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("alice"));
 }
 
-/// Row 8: registered edit to an unregistered author is rejected.
 #[test]
 fn authored_registered_edit_to_unregistered_rejected() {
     let config = registered_config("eduardo");
@@ -661,8 +603,7 @@ fn authored_registered_edit_to_unregistered_rejected() {
     );
 }
 
-/// Row 8 (revoked variant): registered edit to a revoked participant is
-/// rejected — `is_active` treats revoked as inactive.
+/// `is_active` treats a revoked participant as inactive.
 #[test]
 fn authored_registered_edit_to_revoked_rejected() {
     let config = registered_config("eduardo");
@@ -675,7 +616,6 @@ fn authored_registered_edit_to_revoked_rejected() {
     );
 }
 
-/// Row 9: open edit may change the author to anything.
 #[test]
 fn authored_open_edit_changed_author_ok() {
     let config = test_config();
@@ -684,7 +624,6 @@ fn authored_open_edit_changed_author_ok() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("anyone"));
 }
 
-/// Row 10: an edit that omits the author preserves the on-disk value.
 #[test]
 fn authored_edit_omit_author_preserves_on_disk() {
     let config = test_config();
@@ -693,19 +632,15 @@ fn authored_edit_omit_author_preserves_on_disk() {
     assert_eq!(read_author(&doc).unwrap().as_deref(), Some("alice"));
 }
 
-/// An edit that omits the author on an authorless doc leaves it authorless —
-/// the editor's identity must NOT be back-filled (contrast the create path
-/// and the un-authenticated `ensure_frontmatter`).
+/// The editor's identity must not be back-filled, unlike on the create path.
 #[test]
 fn authored_edit_omit_author_on_authorless_doc_stays_absent() {
-    let config = test_config(); // identity `eduardo` present but not applicable
+    let config = test_config();
     let mut doc = parser::parse("---\ntitle: Doc\n---\n\n# Doc\n").unwrap();
     ensure_frontmatter_authored(&mut doc, &config, false, None).unwrap();
     assert_eq!(read_author(&doc).unwrap(), None);
 }
 
-/// The authored path is identical to `ensure_frontmatter` for every field
-/// other than `author`: user fields are preserved, remargin fields recomputed.
 #[test]
 fn authored_preserves_non_author_fields() {
     let config = test_config();
@@ -717,7 +652,6 @@ fn authored_preserves_non_author_fields() {
     assert!(!markdown.contains("remargin_pending"));
 }
 
-/// `read_author` returns the string value when present and `None` otherwise.
 #[test]
 fn read_author_reads_value_or_none() {
     let with = parser::parse("---\nauthor: alice\n---\n\nBody\n").unwrap();
@@ -728,9 +662,6 @@ fn read_author_reads_value_or_none() {
 
 #[test]
 fn sandbox_null_value_reads_as_empty() {
-    // Bare `sandbox:` in YAML parses as a null value. Reading it must not
-    // error; callers should treat it as an empty list so they can add the
-    // first entry cleanly.
     let body = "---\ntitle: Doc\nsandbox:\n---\n\nBody.\n";
     let doc = make_doc(body, Vec::new());
 
@@ -757,9 +688,7 @@ fn sandbox_existing_sequence_reads_entries() {
     assert_eq!(entries[0].author, "alice");
 }
 
-/// Frontmatter written before the `Z` switch spells a zero offset
-/// `+00:00`. It must read back as the same instant its `Z` twin does, and
-/// converge to `Z` the next time the document is written.
+/// A stored `+00:00` reads as the same instant as `Z` and is rewritten as `Z` on the next write.
 #[test]
 fn sandbox_legacy_zero_offset_reads_like_z_and_converges_on_write() {
     let legacy_body =
@@ -786,9 +715,6 @@ fn sandbox_legacy_zero_offset_reads_like_z_and_converges_on_write() {
 
 #[test]
 fn sandbox_null_value_self_heals_on_write() {
-    // Starting from bare `sandbox:` (null), add an entry and confirm the
-    // serialized frontmatter is a proper YAML sequence the next read can
-    // parse.
     let body = "---\ntitle: Doc\nsandbox:\n---\n\nBody.\n";
     let mut doc = make_doc(body, Vec::new());
 
@@ -805,7 +731,6 @@ fn sandbox_null_value_self_heals_on_write() {
     assert!(markdown.contains("sandbox:"));
     assert!(markdown.contains("- eduardo@2026-04-16T10:33:21"));
 
-    // Round-trip: the rewritten document parses cleanly.
     let reparsed = parser::parse(&markdown).unwrap();
     let reread = read_sandbox_entries(&reparsed).unwrap();
     assert_eq!(reread.len(), 1);
@@ -814,8 +739,6 @@ fn sandbox_null_value_self_heals_on_write() {
 
 #[test]
 fn sandbox_non_sequence_errors() {
-    // A non-null, non-sequence value is still a user error. We want the
-    // bug report pointed at the file, not silently dropped state.
     let body = "---\ntitle: Doc\nsandbox: alice\n---\n\nBody.\n";
     let doc = make_doc(body, Vec::new());
 
@@ -823,15 +746,6 @@ fn sandbox_non_sequence_errors() {
     let msg = format!("{err}");
     assert!(msg.contains("not a sequence"), "got: {msg}");
 }
-
-// -------------------------------------------------------------------
-// add_sandbox_entry_for refresh semantics.
-//
-// Roster stays one-entry-per-identity, but the entry's `ts` field
-// advances on every successful call. The ts-equality short-circuit
-// preserves the test-friendly noop invariant when the clock has
-// not advanced.
-// -------------------------------------------------------------------
 
 fn t1() -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339("2026-04-16T10:00:00-04:00").unwrap()
@@ -849,7 +763,6 @@ fn t4() -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339("2026-04-16T13:00:00-04:00").unwrap()
 }
 
-/// Scenario 1: first-time add pushes the entry.
 #[test]
 fn add_sandbox_entry_first_time() {
     let mut entries = Vec::new();
@@ -860,8 +773,6 @@ fn add_sandbox_entry_first_time() {
     assert_eq!(entries[0].ts, t1());
 }
 
-/// Scenario 2: re-adding the same identity with a newer ts
-/// refreshes the entry in place.
 #[test]
 fn add_sandbox_entry_refreshes_with_new_ts() {
     let mut entries = vec![SandboxEntry {
@@ -874,7 +785,6 @@ fn add_sandbox_entry_refreshes_with_new_ts() {
     assert_eq!(entries[0].ts, t2());
 }
 
-/// Scenario 3: ts-equality short-circuit returns false (no rewrite).
 #[test]
 fn add_sandbox_entry_noop_on_identical_ts() {
     let mut entries = vec![SandboxEntry {
@@ -885,7 +795,6 @@ fn add_sandbox_entry_noop_on_identical_ts() {
     assert!(!mutated);
 }
 
-/// Scenario 4: adding a second identity appends.
 #[test]
 fn add_sandbox_entry_appends_second_identity() {
     let mut entries = vec![SandboxEntry {
@@ -898,8 +807,6 @@ fn add_sandbox_entry_appends_second_identity() {
     assert_eq!(entries[1].author, "bob");
 }
 
-/// Scenario 5: refreshing one identity in a multi-entry roster
-/// does not perturb the others.
 #[test]
 fn add_sandbox_entry_refreshes_one_in_multi_roster() {
     let mut entries = vec![
@@ -919,7 +826,6 @@ fn add_sandbox_entry_refreshes_one_in_multi_roster() {
     assert_eq!(entries[1].ts, t2());
 }
 
-/// Scenario 8: position is preserved across refreshes.
 #[test]
 fn add_sandbox_entry_preserves_order_across_refresh() {
     let mut entries = vec![

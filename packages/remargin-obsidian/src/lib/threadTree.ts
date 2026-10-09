@@ -1,3 +1,5 @@
+/** Comment thread trees built from a flat comment list. */
+
 import type { Comment } from "@/generated/types";
 
 /**

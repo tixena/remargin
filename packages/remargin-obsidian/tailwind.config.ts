@@ -1,3 +1,5 @@
+/** Tailwind configuration for the plugin's stylesheet. */
+
 import type { Config } from "tailwindcss";
 
 export default {

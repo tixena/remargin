@@ -57,24 +57,14 @@ pub const EXIT_PRESERVATION: u8 = 5;
 pub const EXIT_SKILL: u8 = 6;
 pub const EXIT_NOT_FOUND: u8 = 7;
 pub const EXIT_AMBIGUOUS: u8 = 8;
-/// Claude Code's `PreToolUse` hook contract maps exit 2 to "block the
-/// tool call and feed stderr back to the model". Use the same value
-/// for fail-closed pretool outcomes so the hook signal is intact.
+/// Claude Code's `PreToolUse` contract: exit 2 blocks the tool call and feeds stderr to the model.
 pub const EXIT_PRETOOL_FAIL: u8 = 2;
-/// Marker prefix in the error message so the top-level error mapper
-/// can route pretool failures to exit code 2 (Claude Code's blocking
-/// signal) without mistaking them for general CLI errors.
+/// Prefix on the error message that routes a pretool failure to exit code 2.
 pub const PRETOOL_FAIL_SENTINEL: &str = "__remargin_pretool_fail__:";
-/// Gitignore-style "no match" sentinel returned by
-/// `permissions check` when the path is unrestricted.
-/// Numerically equal to [`EXIT_ERROR`] so existing tooling that branches
-/// on `1 vs 0` still works; the `main` harness recognises the sentinel
-/// to skip the "error: ..." render that would otherwise prepend the
-/// gitignore-style result.
+/// Returned by `permissions check` for an unrestricted path, gitignore-style. Equal to
+/// [`EXIT_ERROR`]; the run loop recognises the sentinel and prints no "error: ..." line.
 pub const EXIT_NOT_RESTRICTED: u8 = 1;
-/// Internal marker substring used by [`cmd_permissions`] to communicate
-/// "not restricted" to [`classify_error`] without leaking through
-/// stderr.
+/// How [`cmd_permissions`] tells [`classify_error`] "not restricted" without printing to stderr.
 pub const PERMISSIONS_NOT_RESTRICTED_MARKER: &str = "__remargin_permissions_check_not_restricted__";
 
 /// The flattened arg groups a subcommand declares, extracted in a
@@ -221,7 +211,6 @@ pub const fn subcommand_output(cmd: &Commands) -> Option<&OutputArgs> {
     subcommand_parts(cmd).output
 }
 
-/// Pull the per-action [`OutputArgs`] from a [`SessionAction`] variant.
 #[cfg(feature = "session")]
 const fn session_action_output(action: &SessionAction) -> &OutputArgs {
     match action {
@@ -236,7 +225,6 @@ const fn session_action_output(action: &SessionAction) -> &OutputArgs {
     }
 }
 
-/// Pull the per-action [`OutputArgs`] from a [`ClaudeAction`] variant.
 const fn claude_action_output(action: &ClaudeAction) -> &OutputArgs {
     match action {
         ClaudeAction::Plugin {
@@ -267,7 +255,6 @@ const fn claude_action_output(action: &ClaudeAction) -> &OutputArgs {
     }
 }
 
-/// Pull the per-action [`OutputArgs`] from a [`GooseAction`] variant.
 const fn goose_action_output(action: &GooseAction) -> &OutputArgs {
     match action {
         GooseAction::Mcp {
@@ -285,7 +272,6 @@ const fn goose_action_output(action: &GooseAction) -> &OutputArgs {
     }
 }
 
-/// Pull the per-action [`OutputArgs`] from a [`PlanClaudeAction`] variant.
 const fn plan_claude_action_output(action: &PlanClaudeAction) -> &OutputArgs {
     match action {
         PlanClaudeAction::Restrict {
@@ -303,8 +289,6 @@ const fn plan_claude_action_output(action: &PlanClaudeAction) -> &OutputArgs {
     }
 }
 
-/// Pull the per-action [`OutputArgs`] from a [`PermissionsAction`]
-/// variant. Both `show` and `check` flatten an `OutputArgs`.
 const fn permissions_action_output(action: &PermissionsAction) -> &OutputArgs {
     match action {
         PermissionsAction::Show { output_args }
@@ -316,8 +300,6 @@ const fn permissions_action_output(action: &PermissionsAction) -> &OutputArgs {
     }
 }
 
-/// Pull the per-action [`OutputArgs`] from a [`PlanAction`] variant.
-/// Every plan sub-action flattens an `OutputArgs`.
 const fn plan_action_output(action: &PlanAction) -> &OutputArgs {
     match action {
         PlanAction::Ack(PlanAckArgs {
@@ -457,10 +439,8 @@ pub fn build_identity_flags(
 
     let key = match identity_args.key() {
         Some(raw) => {
-            // `--key` accepts a bare name shorthand (e.g. `mykey` →
-            // `~/.ssh/mykey`). Expand only when the raw value contains
-            // a path sigil — bare names are resolved later by
-            // `resolve_key_path`.
+            // A bare `--key` name (`mykey`) is resolved later by `resolve_key_path`; expand only a value
+            // that carries a path sigil.
             if raw.starts_with('~') || raw.contains('$') {
                 Some(expand_cli_path(system, raw)?.to_string_lossy().into_owned())
             } else {
@@ -529,14 +509,9 @@ pub fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) 
             let verify_failure = err.downcast_ref::<operations::verify::VerifyFailure>();
             let subset_failure = err.downcast_ref::<operations::verify::SubsetGateFailure>();
             if is_silent_sentinel {
-                // Sentinel for `permissions check`.
-                // Output already emitted on the success path; we only
-                // need the gitignore-style exit code, no "error: ..."
-                // render.
+                // `permissions check` already printed its result; only the exit code remains.
             } else if let Some(reason) = err_msg.strip_prefix(PRETOOL_FAIL_SENTINEL) {
-                // Pretool fail-closed: Claude Code reads stderr and
-                // feeds it back to the model. No "error: " prefix —
-                // just the bare reason.
+                // Claude Code feeds stderr back to the model, so the bare reason goes out with no prefix.
                 let _ = writeln!(sinks.stderr, "{reason}");
             } else if json_mode {
                 let payload = subset_failure
@@ -570,9 +545,8 @@ fn dispatch(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>)
     }
 
     let default_identity = IdentityArgs::default();
-    // Feature-gated: with `unrestricted`, this is a derived `Default` on a
-    // regular struct; without it, a unit struct. Both spell as `UnrestrictedArgs::default()`
-    // but clippy flags the unit-struct case as `default_constructed_unit_structs`.
+    // With the `unrestricted` feature this is a regular struct; without it, a unit struct, where
+    // clippy flags `::default()` as `default_constructed_unit_structs`.
     #[cfg(feature = "unrestricted")]
     let default_unrestricted = UnrestrictedArgs::default();
     #[cfg(not(feature = "unrestricted"))]
@@ -583,9 +557,7 @@ fn dispatch(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>)
 
     let (flags, assets_dir) = build_identity_flags(system, identity_args, assets_args)?;
 
-    // The Mcp subcommand forwards its flags directly to `mcp::run` so
-    // per-tool identity fields can still be declared on each request.
-    // Branch out early.
+    // `mcp` forwards its flags straight to `mcp::run`, so it branches out early.
     if let Commands::Mcp(McpArgs {
         action,
         identity_args: _,
@@ -797,7 +769,6 @@ fn handle_activity(
     else {
         bail!("internal: handle_activity called with wrong subcommand");
     };
-    // --pretty and --json are mutually exclusive.
     if *pretty && output_args.json {
         bail!("--pretty and --json are mutually exclusive");
     }
@@ -1340,9 +1311,8 @@ fn handle_edit(
     else {
         bail!("internal: handle_edit called with wrong subcommand");
     };
-    // When no --kind flags are provided we preserve the stored list; any
-    // occurrence (even `--kind x` once) replaces the full list — consistent
-    // with how `--to` works.
+    // No `--kind` preserves the stored list; any occurrence replaces the whole list, as `--to`
+    // does.
     let kind_replacement = (!remargin_kind.is_empty()).then_some(remargin_kind.as_slice());
     let p = EditParams {
         content,

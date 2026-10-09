@@ -1,12 +1,11 @@
+//! Tests for the Obsidian plugin install and uninstall, driven with stub bytes.
+
 use os_shim::mock::MemorySystem;
 
 use super::*;
 
-/// Stub `main.js` bytes used by every install test so we never hit the
-/// network. Contents are arbitrary -- only the length and identity
-/// matter for the assertions.
+/// Stub bytes, so no install test touches the network.
 const STUB_MAIN_JS: &[u8] = b"// stub main.js\nconsole.log('remargin');\n";
-/// Stub `manifest.json` bytes. Valid JSON but also arbitrary.
 const STUB_MANIFEST: &[u8] = br#"{"id":"remargin","name":"Remargin","version":"0.0.0-test"}"#;
 
 fn seed_vault(fs: &MemorySystem, vault: &Path) {
@@ -80,7 +79,6 @@ fn install_preserves_data_json() {
     let vault = PathBuf::from("/home/user/vault");
     seed_vault(&fs, &vault);
 
-    // Seed an existing install with a data.json.
     let plugin_dir = vault.join(PLUGIN_REL_PATH);
     fs.create_dir_all(&plugin_dir).unwrap();
     let data_json = plugin_dir.join("data.json");

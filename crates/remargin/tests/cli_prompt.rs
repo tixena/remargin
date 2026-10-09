@@ -1,4 +1,4 @@
-//! `remargin prompt resolve` integration tests.
+//! `remargin prompt resolve` and `prompt set` integration tests.
 
 #[cfg(test)]
 #[path = "cli_prompt/tests.rs"]

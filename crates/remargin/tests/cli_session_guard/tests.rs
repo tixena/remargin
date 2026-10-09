@@ -1,3 +1,5 @@
+//! `remargin claude session-guard` diagnostics and the install lifecycle of its hook entry.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -59,10 +61,7 @@ fn run_args(args: &[&str], cwd: &Path, home: &Path) -> Output {
         .unwrap()
 }
 
-/// Case 8: the guard runs in a realm whose `.remargin.yaml` does not
-/// parse. `SessionStart` cannot block, so the process exits 0 and
-/// surfaces the failure as diagnostic JSON on stdout — `additionalContext`
-/// names the config and `systemMessage` points at `remargin doctor`.
+/// `SessionStart` cannot block: an unparseable realm config is a stdout diagnostic and exit 0.
 #[test]
 fn guard_with_broken_realm_config_emits_diagnostic() {
     let realm = TempDir::new().unwrap();
@@ -74,7 +73,6 @@ fn guard_with_broken_realm_config_emits_diagnostic() {
     );
     fs::write(realm.path().join(".remargin.yaml"), ": : not valid : :").unwrap();
 
-    // The hook entry is live, so the broken config is the only failure.
     let out = run_guard_in(
         realm.path(),
         home.path(),
@@ -108,8 +106,7 @@ fn guard_with_broken_realm_config_emits_diagnostic() {
     );
 }
 
-/// A live hook entry + a parseable realm config → the session proceeds
-/// clean (exit 0, empty stdout).
+/// A live hook entry and a parseable realm config: exit 0 with empty stdout.
 #[test]
 fn guard_with_valid_config_proceeds_clean() {
     let realm = TempDir::new().unwrap();
@@ -138,17 +135,14 @@ fn guard_with_valid_config_proceeds_clean() {
     );
 }
 
-/// A `PATH`-relative entry whose `remargin` is absent from PATH → the
-/// guard exits 0 but emits a diagnostic whose `additionalContext` explains
-/// the fail-open (exit-127) risk.
+/// A `PATH`-relative entry with `remargin` off PATH: the diagnostic explains the fail-open risk.
 #[test]
 fn guard_with_remargin_off_path_emits_diagnostic() {
     let realm = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     write_path_relative_hook(realm.path());
 
-    // The binary still runs (assert_cmd invokes it by absolute path), but
-    // its PATH lookup for a bare `remargin` finds nothing.
+    // The binary runs by absolute path; only its own lookup of a bare `remargin` finds nothing.
     let empty = TempDir::new().unwrap();
     let out = run_guard_in(realm.path(), home.path(), empty.path().to_str().unwrap());
     assert_eq!(out.status.code(), Some(0_i32));
@@ -162,13 +156,10 @@ fn guard_with_remargin_off_path_emits_diagnostic() {
     );
 }
 
-/// No `PreToolUse` entry in either settings scope → the guard is loud
-/// (names both scopes and the install command) yet still non-blocking
-/// (exit 0), the same shape the goose guard reports an absent plugin with.
+/// With no `PreToolUse` entry in either scope the guard names both scopes and the install command.
 #[test]
 fn guard_without_any_hook_entry_emits_diagnostic() {
     let realm = TempDir::new().unwrap();
-    // The diagnostic names the cwd the process reports, which is resolved.
     let realm_path = fs::canonicalize(realm.path()).unwrap();
     let home = TempDir::new().unwrap();
 
@@ -219,8 +210,7 @@ fn session_guard_install_local_writes_hook_to_project_settings() {
     let value: Value = serde_json::from_str(&body).unwrap();
     let entries = value["hooks"]["SessionStart"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
-    // The absolute path of the binary that ran the install: a backstop that
-    // silently fails to spawn is worse than none.
+    // An absolute binary path: a backstop that silently fails to spawn is worse than none.
     let expected = format!("{} claude session-guard", cargo_bin("remargin").display());
     assert_eq!(
         entries[0]["hooks"][0]["command"].as_str().unwrap(),
@@ -285,8 +275,7 @@ fn session_guard_uninstall_preserves_pretool_hook() {
     let realm = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
 
-    // Both hooks share one settings file; uninstalling the guard must not
-    // touch the PreToolUse enforcement hook.
+    // Both hooks share one settings file; uninstalling the guard must leave the `PreToolUse` hook.
     run_args(
         &["claude", "pretool", "install", "--local"],
         realm.path(),

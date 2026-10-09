@@ -256,12 +256,6 @@ fn key_path_literal_absolute() {
 
 #[test]
 fn manual_identity_declaration_supersedes_walked_config() {
-    // Branch 2 of the resolver: --identity + --type + --key is a complete
-    // manual declaration. It does not read any .remargin.yaml to fill in
-    // identity fields — the walked config's `identity: config_user` is
-    // irrelevant. Mode still comes from the walked config (mode is a
-    // property of the directory tree, not of the identity declaration)
-    // and assets_dir still honors the CLI flag when set.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -599,10 +593,6 @@ fn resolve_mode_defaults_to_open_when_no_config() {
 
 #[test]
 fn resolve_mode_ignores_type_filter() {
-    // The whole point: even when the nearest config is `type: agent`, the
-    // mode resolution does not skip it looking for a human config — it
-    // returns the agent config's mode, because mode is a directory-tree
-    // property.
     let system = MemorySystem::new()
         .with_dir(Path::new("/home/vault/sub"))
         .unwrap()
@@ -627,9 +617,6 @@ fn resolve_mode_ignores_type_filter() {
 
 #[test]
 fn resolve_mode_walks_past_configs_without_an_explicit_mode_field() {
-    // A config without a `mode:` field does not declare a realm; the
-    // walk must continue upward. With no further config the resolver
-    // falls back to Open and reports no source.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/.remargin.yaml"),
@@ -647,10 +634,6 @@ fn resolve_mode_walks_past_configs_without_an_explicit_mode_field() {
 
 #[test]
 fn resolve_mode_skips_inner_yaml_without_mode_and_uses_outer_strict() {
-    // The exact shape the live vault hits: an outer yaml declares strict;
-    // an inner yaml in a subdirectory only carries a system_prompt block
-    // with no mode field. The walk for a file in the inner dir must reach
-    // the outer's strict declaration.
     let system = MemorySystem::new()
         .with_file(Path::new("/vault/.remargin.yaml"), b"mode: strict\n")
         .unwrap()
@@ -677,15 +660,6 @@ fn mode_as_str_roundtrip() {
 
 #[test]
 fn agent_type_filter_does_not_inherit_human_identity() {
-    // Scenario: user has ~/.remargin.yaml with type: human and an identity.
-    // Workspace has no config. An agent operation passes --type agent;
-    // the resolver walks up with `type == agent` as a strict-equality
-    // filter and finds only the human file, which fails the filter.
-    //
-    // Expected: the walk exhausts with no match. The resolver does NOT
-    // silently borrow the human identity with a swapped author_type —
-    // the three-branch design makes this a hard error instead
-    // of a silent misattribution.
     let system = MemorySystem::new()
         .with_dir(Path::new("/home/user/project/src"))
         .unwrap()
@@ -724,10 +698,6 @@ fn agent_type_filter_does_not_inherit_human_identity() {
 
 #[test]
 fn registry_participant_display_name_mixed() {
-    // Mixed registry: some participants set `display_name`, some don't.
-    // Both shapes must parse, and the struct must carry `Some` / `None`
-    // respectively. Downstream JSON output (in the CLI) substitutes
-    // the participant id when `None`.
     let yaml = "\
 participants:
   alice:
@@ -763,16 +733,8 @@ participants:
     );
 }
 
-// ---------- resolve_signing_key: fail-fast contract ----------
-
 #[test]
 fn resolve_signing_key_returns_none_in_open_mode() {
-    // Open mode: even registered authors with a key resolved on the
-    // config do not "require" a signature from the op's perspective. The
-    // helper must return Ok(None) so create_comment skips signing.
-    //
-    // Mode is sourced from the config file. No config → default
-    // mode is Open.
     let system = MemorySystem::new();
     let resolved = ResolvedConfig::resolve(
         &system,
@@ -787,12 +749,6 @@ fn resolve_signing_key_returns_none_in_open_mode() {
 
 #[test]
 fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
-    // Strict + unregistered author: `requires_signature` is false
-    // (author not registered active), so the helper short-circuits with
-    // `None`. The resolver itself would reject an unregistered identity,
-    // so in practice this code path is only reached for arbitrary
-    // author names the op layer looks up (e.g. verifying siblings
-    // authored by someone else).
     let system = MemorySystem::new()
         .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")
         .unwrap()
@@ -815,14 +771,6 @@ fn resolve_signing_key_returns_none_for_unregistered_in_strict() {
 
 #[test]
 fn resolve_signing_key_returns_key_when_present() {
-    // Strict + registered active + key_path set: the helper hands back a
-    // reference to the resolved key path so the caller signs with it.
-    //
-    // The `.remargin.yaml` declares the complete identity (eduardo /
-    // human / id_ed25519) directly — under the three-branch resolver
-    // key is paired with identity inside the same file (branch 3 walk)
-    // or inside a manual --identity/--type/--key declaration (branch 2).
-    // Supplying `--key` alone is not a valid shape.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/eduardo")
         .unwrap()
@@ -855,11 +803,6 @@ fn resolve_signing_key_returns_key_when_present() {
 
 #[test]
 fn resolve_bails_when_strict_identity_has_no_key() {
-    // Strict + registered active identity + NO key_path: the resolver
-    // itself now fails fast. Previously `create_comment`
-    // silently wrote an unsigned artifact here and the post-write gate
-    // tripped on the NEXT mutation. the gate
-    // moves to construction time so ops never see an invalid config.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/.remargin.yaml"),
@@ -900,9 +843,6 @@ fn resolve_bails_when_strict_identity_has_no_key() {
 
 #[test]
 fn resolve_bails_when_revoked_identity_in_strict_mode() {
-    // acceptance: a revoked participant in strict mode causes
-    // `ResolvedConfig::resolve` to error, not the op handler. This
-    // replaces the equivalent op-level `can_post` check.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/eduardo")
         .unwrap()
@@ -935,12 +875,7 @@ fn resolve_bails_when_revoked_identity_in_strict_mode() {
     );
 }
 
-// WHY: a file's realm is the source of truth for mode. The caller's
-// own context — cwd walk, --config target, anything else — does not
-// participate in the decision. Today escalate_mode_for_doc only
-// upgrades when the realm is stricter than the caller, so a file
-// living in an open realm still gets verified/written under a
-// stricter caller mode. That breaks the invariant.
+/// A file's realm decides the mode; the caller's own context takes no part.
 #[test]
 fn doc_realm_open_replaces_caller_strict_mode() {
     let system = MemorySystem::new()
@@ -1027,10 +962,6 @@ fn session_malformed_loop_is_attributable_error_not_panic() {
 #[cfg(feature = "session")]
 #[test]
 fn session_budget_tokens_is_rejected_not_ignored() {
-    // `tokens` was dropped from the schema because no backend can enforce a
-    // token cap. A config still carrying it must fail to parse with an error
-    // naming the field — silently ignoring it would recreate the same
-    // silent no-op the removal exists to kill.
     let err = serde_yaml::from_str::<Config>(
         "session:\n  loop: 30s\n  goal: x\n  budget: { max_turns: 20, tokens: 200000 }\n",
     )
@@ -1183,8 +1114,7 @@ fn sessions_empty_agents_list_fails() {
     );
 }
 
-/// Strict realm whose registry holds an active `eduardo` and a revoked
-/// `revoked_user`.
+/// Strict realm whose registry holds one active participant and one revoked one.
 fn strict_realm_system() -> MemorySystem {
     MemorySystem::new()
         .with_file(Path::new("/project/.remargin.yaml"), b"mode: strict\n")

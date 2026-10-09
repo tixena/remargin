@@ -2,7 +2,7 @@
 //! active participants of its registry. An anonymous caller, a caller
 //! resolved in a neighbouring open realm, and a revoked participant are
 //! all refused — with no document text on stdout. An active participant
-//! reads exactly as before, and a walk rooted in an admitted directory
+//! reads normally, and a walk rooted in an admitted directory
 //! omits the nested strict realm instead of failing outright.
 
 #[cfg(test)]

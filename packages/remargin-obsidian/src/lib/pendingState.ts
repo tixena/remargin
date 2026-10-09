@@ -1,3 +1,5 @@
+/** Pending-comment predicates and per-thread pending counts. */
+
 import type { Comment } from "@/generated/types";
 import { type ThreadNode, walkThread } from "./threadTree";
 
@@ -14,8 +16,7 @@ export function isPendingFor(comment: Comment, recipient: string): boolean {
 /**
  * True when `comment` is a broadcast (no `to:` recipients) AND no one
  * has acked it yet. Broadcast pendings count as "pending for everyone"
- * for auto-expand purposes — the user spec says these auto-expand even
- * when there is no current identity.
+ * for auto-expand purposes, even when there is no current identity.
  */
 export function isPendingBroadcast(comment: Comment): boolean {
   return comment.to.length === 0 && comment.ack.length === 0;

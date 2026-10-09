@@ -1,3 +1,5 @@
+//! One `plan` projection per op, checked for the op label it reports.
+
 use core::str;
 use std::fs;
 

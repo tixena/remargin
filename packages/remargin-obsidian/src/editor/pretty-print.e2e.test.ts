@@ -1,3 +1,9 @@
+/**
+ * End-to-end tests of the editor widgets: a real plugin, collapse state, focus bus,
+ * post-processor and CM6 build, so a click or collapse toggle in one surface reaches the
+ * matching subscriber. `obsidian`, `createRoot` and `EditorState` are the mocked parts.
+ */
+
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { EditorState } from "@codemirror/state";
@@ -15,27 +21,7 @@ import {
   remarginPostProcessor,
 } from "./readingModeProcessor.ts";
 
-/**
- * End-to-end coverage for the pretty-print stack. Exercises the
- * combined wiring (real `RemarginPlugin`, real `CollapseState`, real
- * `focusEvents`, real post-processor, real CM6 build) so a click or
- * collapse toggle in one surface lands on the matching subscriber.
- *
- * Mocking:
- *
- *  - `obsidian` replaced module-wide by `test-obsidian-stub.mjs`.
- *  - `react-dom/client` replaced via `__setCreateRootForTests` seams
- *    so tests can capture the rendered element and invoke `onClick`
- *    directly (no happy-dom).
- *  - `@codemirror/state`'s `EditorState` mocked at the surface
- *    `buildDecorations` consumes (`doc.toString`, `field(...)`).
- */
-
-/**
- * Full-fence form of c1, used as the `doc` body for CM6 / `makeEditorState`
- * paths. CM6 sees the on-disk markdown source verbatim, so fences are
- * required for the parser to recognize the block.
- */
+// The full-fence form: CM6 sees the on-disk markdown, so the parser needs the fences.
 const VALID_BLOCK_C1 = [
   "```remargin",
   "---",
@@ -48,12 +34,7 @@ const VALID_BLOCK_C1 = [
   "```",
 ].join("\n");
 
-/**
- * Bare YAML+content form of c1, matching what `code.textContent` returns
- * in reading mode after Obsidian's markdown renderer strips the outer
- * fences. The post-processor re-wraps via `parseFromInnerContent` before
- * parsing.
- */
+// The bare form `code.textContent` returns in reading mode, after the renderer strips the fences.
 const VALID_BLOCK_C1_INNER = [
   "---",
   "id: c1",
@@ -86,7 +67,6 @@ const INVALID_BLOCK_NO_ID = [
   "```",
 ].join("\n");
 
-/** Bare-inner form of the missing-id fixture, for reading-mode tests. */
 const INVALID_BLOCK_NO_ID_INNER = [
   "---",
   "author: alice",
@@ -107,10 +87,6 @@ function makeApp(): unknown {
   return {
     vault: {
       adapter: { basePath: "/tmp/test-vault" },
-      // Reading-mode child issues `getAbstractFileByPath` + `cachedRead`
-      // to assemble the cross-block thread tree. The e2e harness keeps
-      // both as no-op-shaped stubs because no scenario here exercises
-      // the cross-block path.
       getAbstractFileByPath: () => null,
       cachedRead: async () => "",
       on: () => ({}),
@@ -158,18 +134,17 @@ interface MockPreElement {
   replaceWith(node: unknown): void;
 }
 
+/** Mock for the `<code class="language-remargin">` element. */
 interface MockCodeElement {
   textContent: string;
   parentElement: MockPreElement;
 }
 
+/** A stand-in for the widget's host element. */
 interface MockHost {
   className: string;
   dataset: Record<string, string>;
-  // The reading-mode post-processor pre-hides the host via
-  // `host.style.display = "none"` and `render()` un-hides via
-  // `style.display = ""`, so the mock must carry a real (mutable)
-  // style bag.
+  /** Mutable: the post-processor hides the host through it and `render()` un-hides it. */
   style: Record<string, string>;
   __remarginRoot?: { unmount: () => void; render: (element: unknown) => void };
 }
@@ -197,6 +172,7 @@ function makeEl(codes: MockCodeElement[]): HTMLElement {
   } as unknown as HTMLElement;
 }
 
+/** Mock post-processor context that records the children added to it. */
 interface MockCtx {
   sourcePath: string;
   __children: unknown[];
@@ -249,12 +225,7 @@ function makeEditorState(opts: {
   };
 }
 
-/**
- * Override `globalThis.document` so the post-processor's
- * `document.createElement("div")` and the CM6 widget's
- * `document.createElement("div")` (inside `RemarginWidget.toDOM`)
- * return controllable mocks. Restored in `afterEach`.
- */
+// `globalThis.document` is replaced so both surfaces' `createElement("div")` return mocks.
 let originalDocument: typeof globalThis.document | undefined;
 const createdHosts: MockHost[] = [];
 
@@ -347,8 +318,6 @@ function captureFocusEvents(plugin: RemarginPlugin): RemarginFocusDetail[] {
 }
 
 describe("pretty-print end-to-end", () => {
-  // Scenario 1: toggle on -> reading-mode widget renders (post-processor
-  // replaces the <pre> and registers a child).
   it("scenario 1: editorWidgets=true -> reading-mode widget replaces <pre>", () => {
     const plugin = makePlugin(true);
     captureReadingModeOnClicks();
@@ -361,9 +330,6 @@ describe("pretty-print end-to-end", () => {
 
     assert.equal(code.parentElement.replaced, true, "<pre> was replaced");
     assert.equal(createdHosts.length, 1, "exactly one reading-mode host element");
-    // Host className must carry both the structural class AND
-    // `remargin-container` so Tailwind utilities scoped via the
-    // `important: ".remargin-container"` rule apply in the subtree.
     const classes = createdHosts[0].className.split(/\s+/);
     assert.ok(
       classes.includes("remargin-reading-host"),
@@ -377,8 +343,6 @@ describe("pretty-print end-to-end", () => {
     assert.equal(ctx.__children.length, 1, "ctx.addChild fired once");
   });
 
-  // Scenario 2: toggle on -> CM6 builds exactly one decoration in
-  // Live Preview.
   it("scenario 2: editorWidgets=true + Live Preview -> CM6 builds 1 decoration", () => {
     const plugin = makePlugin(true);
     const state = makeEditorState({
@@ -391,8 +355,6 @@ describe("pretty-print end-to-end", () => {
     assert.equal(decorations.size, 1, "exactly one decoration");
   });
 
-  // Scenario 3: toggle off -> both surfaces leave the raw fence in
-  // place.
   it("scenario 3: editorWidgets=false -> reading-mode no-op AND CM6 emits no decorations", () => {
     const plugin = makePlugin(false);
     const code = makeCode(VALID_BLOCK_C1_INNER);
@@ -409,10 +371,6 @@ describe("pretty-print end-to-end", () => {
     assert.equal(decorations.size, 0, "CM6 emits no decorations when toggle off");
   });
 
-  // Scenario 4: clicking the reading-mode widget invokes
-  // plugin.focusComment, which fires `remargin:focus` on the plugin's
-  // focus bus. This is the bridge contract a sidebar subscriber relies
-  // on.
   it("scenario 4: reading-mode click -> remargin:focus fires with (id, file)", () => {
     const plugin = makePlugin(true);
     const captured = captureReadingModeOnClicks();
@@ -424,11 +382,7 @@ describe("pretty-print end-to-end", () => {
     const processor = remarginPostProcessor(plugin);
     processor(el, ctx as never);
 
-    // The post-processor calls ctx.addChild(child); we have to drive
-    // child.onload() to mount the React root because the obsidian
-    // stub's MarkdownRenderChild has no automatic lifecycle. Once
-    // mounted, the captured onClick prop wires through to
-    // plugin.focusComment.
+    // The stub's MarkdownRenderChild has no lifecycle, so `child.onload()` is driven by hand.
     const child = ctx.__children[0] as { onload: () => void; onunload: () => void };
     child.onload();
 
@@ -439,17 +393,11 @@ describe("pretty-print end-to-end", () => {
     child.onunload();
   });
 
-  // Scenario 5: clicking the CM6 widget invokes plugin.focusComment
-  // through the same bridge.
   it("scenario 5: CM6 widget click -> remargin:focus fires with (id, file)", () => {
     const plugin = makePlugin(true);
     const captured = captureCm6WidgetOnClicks();
     const focusDetails = captureFocusEvents(plugin);
 
-    // Build the parsed block and instantiate a real RemarginWidget
-    // through the production constructor path. We could equivalently
-    // walk the build()-produced RangeSet, but constructing directly
-    // gives us a stable handle to call toDOM() on.
     const state = makeEditorState({
       doc: VALID_BLOCK_C1,
       livePreview: true,
@@ -469,18 +417,11 @@ describe("pretty-print end-to-end", () => {
     assert.deepStrictEqual(focusDetails, [{ commentId: "c1", file: "notes/y.md" }]);
   });
 
-  // Scenario 6: a collapse toggle in reading mode invalidates the next
-  // CM6 build for the matching id (eq() returns false) — proving the
-  // shared CollapseState is the bridge between the two surfaces.
+  // The shared CollapseState is the bridge between the two surfaces.
   it("scenario 6: collapse toggle (any surface) makes next CM6 widget !eq the previous", () => {
     const plugin = makePlugin(true);
     captureReadingModeOnClicks();
 
-    // 1. Mount the reading-mode widget so it has a chance to register
-    //    its collapse subscription. (This is the "reading-mode side" of
-    //    the bridge; the toggle-flow it owns is symmetric across
-    //    surfaces, so the assertion that follows holds whichever
-    //    surface initiated.)
     const code = makeCode(VALID_BLOCK_C1_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx();
@@ -488,7 +429,6 @@ describe("pretty-print end-to-end", () => {
     const child = ctx.__children[0] as { onload: () => void; onunload: () => void };
     child.onload();
 
-    // 2. Capture the CM6 widget BEFORE the toggle.
     const state = makeEditorState({ doc: VALID_BLOCK_C1, livePreview: true });
     const before = buildDecorations(state as unknown as EditorState, plugin);
     let widgetBefore: RemarginWidget | null = null;
@@ -497,12 +437,8 @@ describe("pretty-print end-to-end", () => {
     });
     assert.ok(widgetBefore);
 
-    // 3. Toggle through the SHARED plugin.collapseState. Reading-mode
-    //    and CM6 both consume this same instance, which is the whole
-    //    point of the bridge.
     plugin.collapseState.toggle("c1");
 
-    // 4. Capture the CM6 widget AFTER the toggle.
     const after = buildDecorations(state as unknown as EditorState, plugin);
     let widgetAfter: RemarginWidget | null = null;
     after.between(0, state.doc.toString().length, (_f, _t, value) => {
@@ -510,8 +446,6 @@ describe("pretty-print end-to-end", () => {
     });
     assert.ok(widgetAfter);
 
-    // 5. eq() must say "different" — that is what forces CM6 to
-    //    destroy + rebuild the DOM for that id, mirroring the toggle.
     assert.equal(
       (widgetBefore as RemarginWidget).eq(widgetAfter as RemarginWidget),
       false,
@@ -521,8 +455,6 @@ describe("pretty-print end-to-end", () => {
     child.onunload();
   });
 
-  // Scenario 7: Source Mode (livePreview field === false) ->
-  // CM6 emits zero decorations regardless of the toggle.
   it("scenario 7: Source Mode -> CM6 emits no decorations", () => {
     const plugin = makePlugin(true);
     const state = makeEditorState({ doc: VALID_BLOCK_C1, livePreview: false });
@@ -530,14 +462,9 @@ describe("pretty-print end-to-end", () => {
     assert.equal(decorations.size, 0);
   });
 
-  // Scenario 8: a malformed remargin block leaves both surfaces with
-  // the raw fence — neither the post-processor nor the CM6 builder
-  // emits a widget for it.
   it("scenario 8: malformed block -> reading-mode untouched AND CM6 emits no decoration", () => {
     const plugin = makePlugin(true);
 
-    // Reading-mode side: post-processor must skip the malformed code
-    // element entirely.
     const code = makeCode(INVALID_BLOCK_NO_ID_INNER);
     const el = makeEl([code]);
     const ctx = makeCtx();
@@ -545,11 +472,7 @@ describe("pretty-print end-to-end", () => {
     assert.equal(code.parentElement.replaced, false, "<pre> stays in place");
     assert.equal(ctx.__children.length, 0, "ctx.addChild not called");
 
-    // CM6 side: build() must yield a decoration set that contains zero
-    // entries for the malformed block. To make the surrounding-blocks
-    // case explicit, we sandwich a valid block on either side and
-    // assert exactly two decorations come out (one per valid block,
-    // none for the malformed one in the middle).
+    // A valid block on either side of the malformed one: exactly two decorations must come out.
     const doc = `${VALID_BLOCK_C1}\n${INVALID_BLOCK_NO_ID}\n${VALID_BLOCK_C2}`;
     const state = makeEditorState({ doc, livePreview: true });
     const decorations = buildDecorations(state as unknown as EditorState, plugin);
@@ -558,10 +481,6 @@ describe("pretty-print end-to-end", () => {
     const ids: string[] = [];
     decorations.between(0, state.doc.toString().length, (_f, _t, value) => {
       const widget = (value as { spec: { widget: RemarginWidget } }).spec.widget;
-      // RemarginWidget exposes its id privately; round-trip via toDOM
-      // is the only public hook. We installed the fake createRoot
-      // earlier in the global afterEach reset, so reinstall here for
-      // the cm6 side.
       const host = (() => {
         captureCm6WidgetOnClicks();
         return widget.toDOM();

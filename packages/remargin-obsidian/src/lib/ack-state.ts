@@ -1,3 +1,5 @@
+/** The ack state of a comment and the ack affordance its card offers. */
+
 /**
  * Three visual states for the Ack toggle on a comment card.
  *

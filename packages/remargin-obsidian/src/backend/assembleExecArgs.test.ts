@@ -1,3 +1,5 @@
+/** Tests for the argv assembly of a CLI invocation. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { assembleExecArgs } from "./assembleExecArgs.ts";

@@ -9,13 +9,10 @@ use std::collections::HashSet;
 
 use rand::RngExt as _;
 
-/// Character set for generated IDs: lowercase letters and digits.
 const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Number of distinct characters in the charset (36).
 const CHARSET_SIZE: u32 = 36;
 
-/// Minimum and default ID length.
 const INITIAL_LENGTH: u32 = 3;
 
 /// Generate a unique ID that does not collide with any existing IDs.
@@ -41,7 +38,6 @@ pub fn generate(existing_ids: &HashSet<&str>) -> String {
     }
 }
 
-/// Determine the appropriate ID length given the set of existing IDs.
 fn pick_length(existing_ids: &HashSet<&str>) -> u32 {
     let mut length = INITIAL_LENGTH;
 
@@ -52,8 +48,7 @@ fn pick_length(existing_ids: &HashSet<&str>) -> u32 {
             .filter(|id| id.len() == length as usize)
             .count();
 
-        // Check if ids_at_length / space_size > 0.5 using integer arithmetic:
-        // ids_at_length * 2 > space_size.
+        // More than half full, in integer arithmetic.
         if ids_at_length * 2 <= space_size as usize {
             break;
         }

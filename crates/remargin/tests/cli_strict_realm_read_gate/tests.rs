@@ -1,3 +1,5 @@
+//! Runs the read subcommands against a strict realm as admitted and refused callers.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,8 +40,7 @@ title: Read doc
 Needle body text.
 ";
 
-/// Representative invocation per read subcommand, run with the strict
-/// realm as the working directory.
+/// Run with the strict realm as the working directory.
 const READ_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("get", &["doc.md"]),
     ("ls", &["."]),
@@ -51,8 +52,7 @@ const READ_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("verify", &["doc.md"]),
 ];
 
-/// The same read surface, invoked from the neighbouring open realm with
-/// the strict realm named in the argument instead of the cwd.
+/// Run from the neighbouring open realm, naming the strict realm in the argument.
 const CROSS_REALM_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("get", &["strict/doc.md"]),
     ("ls", &["strict"]),

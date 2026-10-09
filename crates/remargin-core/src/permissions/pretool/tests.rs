@@ -82,7 +82,6 @@ fn deny_reason(decision: &Decision) -> &str {
         .as_str()
 }
 
-/// Test 1: `Read` on unrestricted path → `SilentAllow`.
 #[test]
 fn read_on_unrestricted_path_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -91,7 +90,6 @@ fn read_on_unrestricted_path_silent_allows() {
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
 
-/// Test 2: `Read` on restricted path → `Deny` with the `Read` message.
 #[test]
 fn read_on_restricted_path_denies_with_get_message() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -105,7 +103,6 @@ fn read_on_restricted_path_denies_with_get_message() {
     assert!(deny_reason(&decision).contains("/r/secret/foo.md"));
 }
 
-/// Test 3: `Write` on restricted path → `Deny` with the `Write` message.
 #[test]
 fn write_on_restricted_path_denies_with_write_message() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -118,7 +115,6 @@ fn write_on_restricted_path_denies_with_write_message() {
     assert!(deny_reason(&decision).contains("mcp__remargin__write"));
 }
 
-/// Test 4: `Edit` on restricted path → `Deny` with the `Edit` message.
 #[test]
 fn edit_on_restricted_path_denies_with_edit_message() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -131,8 +127,7 @@ fn edit_on_restricted_path_denies_with_edit_message() {
     assert!(deny_reason(&decision).contains("mcp__remargin__edit"));
 }
 
-/// Test 5: `NotebookEdit` on restricted path — note the input field is
-/// `notebook_path`, not `file_path`.
+/// The input field is `notebook_path`, not `file_path`.
 #[test]
 fn notebook_edit_on_restricted_path_denies_with_notebook_message() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -146,9 +141,7 @@ fn notebook_edit_on_restricted_path_denies_with_notebook_message() {
     assert!(deny_reason(&decision).contains("notebook"));
 }
 
-/// Test 6: the verb is no longer a gate — `echo` naming a word that
-/// resolves inside the realm denies just like `cat` would. Quote
-/// stripping rejoins the path so the resolved word is `/r/secret/foo`.
+/// The verb is not a gate: `echo` naming a word inside the realm denies as `cat` would.
 #[test]
 fn bash_verb_not_a_gate_word_into_realm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -160,7 +153,6 @@ fn bash_verb_not_a_gate_word_into_realm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 7: `Bash` mutator that mentions a restricted path → `Deny`.
 #[test]
 fn bash_mutator_referencing_restricted_path_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -170,8 +162,6 @@ fn bash_mutator_referencing_restricted_path_denies() {
     assert!(deny_reason(&decision).contains("shell command"));
 }
 
-/// Test 8: `Bash` mutator that does NOT mention a restricted path →
-/// `SilentAllow`.
 #[test]
 fn bash_mutator_on_unrestricted_path_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -180,7 +170,6 @@ fn bash_mutator_on_unrestricted_path_silent_allows() {
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
 
-/// Test 9: `Bash` mutator with no path reference → `SilentAllow`.
 #[test]
 fn bash_mutator_with_no_path_reference_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -189,7 +178,6 @@ fn bash_mutator_with_no_path_reference_silent_allows() {
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
 
-/// Test 10: per-realm `also_deny_bash` extra triggers the check.
 #[test]
 fn bash_per_realm_extra_verb_triggers_check() {
     let system = mock_with(&[(
@@ -200,11 +188,8 @@ fn bash_per_realm_extra_verb_triggers_check() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 11: `Glob` with only a `pattern` (no `path`) resolves the search
-/// root to the event cwd `/r`, a strict ancestor of the trusted root
-/// `/r/secret`. A recursive glob from `/r` sweeps the protected subtree, so
-/// it denies with the `ls` redirect. The missing optional `path` still must
-/// not fail-closed — it produces a decision, not a `Fail`.
+/// With no `path` the search root is the event cwd, an ancestor of the trusted root, so it
+/// denies.
 #[test]
 fn glob_no_path_resolves_cwd_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -213,7 +198,6 @@ fn glob_no_path_resolves_cwd_ancestor_of_root_denies() {
     assert!(deny_reason(&decision).contains("mcp__remargin__ls"));
 }
 
-/// Test 12: unknown `tool_name` → `SilentAllow`.
 #[test]
 fn unknown_tool_name_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -222,13 +206,6 @@ fn unknown_tool_name_silent_allows() {
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
 
-// ---------------------------------------------------------------------
-// Widened matcher (design item 1): MultiEdit, Grep, Glob join the gated
-// tools. MultiEdit uses `file_path`; Grep/Glob use an optional `path`
-// defaulting to the event cwd.
-// ---------------------------------------------------------------------
-
-/// Widened 1: `MultiEdit` on a restricted `file_path` → `Deny`.
 #[test]
 fn multi_edit_on_restricted_path_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -242,9 +219,6 @@ fn multi_edit_on_restricted_path_denies() {
     assert!(deny_reason(&decision).contains("/r/secret/foo.md"));
 }
 
-/// Widened 2: `Grep` whose `path` is the restricted search root → `Deny`.
-/// The per-command `search` redirect message is a separate task; the
-/// generic guidance is acceptable here.
 #[test]
 fn grep_on_restricted_path_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -256,7 +230,6 @@ fn grep_on_restricted_path_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Widened 3: `Glob` whose `path` is the restricted search root → `Deny`.
 #[test]
 fn glob_on_restricted_path_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -268,10 +241,7 @@ fn glob_on_restricted_path_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Widened 4: `Grep` with no `path` resolves the search root to the event
-/// cwd `/r`, a strict ancestor of the trusted root. A recursive grep from
-/// `/r` sweeps the protected subtree, so it denies with the `search`
-/// redirect; the missing optional field yields a decision, never a `Fail`.
+/// The missing optional `path` yields a decision, never a `Fail`.
 #[test]
 fn grep_no_path_resolves_cwd_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -280,9 +250,7 @@ fn grep_no_path_resolves_cwd_ancestor_of_root_denies() {
     assert!(deny_reason(&decision).contains("mcp__remargin__search"));
 }
 
-/// Widened 4b: `Grep` with no `path` under a wildcard realm resolves the
-/// root to the event cwd, which lands inside the realm → `Deny`. Proves
-/// the cwd fallback participates in restriction, not just fail-open.
+/// The cwd fallback takes part in restriction, not only in fail-open.
 #[test]
 fn grep_no_path_resolves_cwd_inside_wildcard_realm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -290,7 +258,6 @@ fn grep_no_path_resolves_cwd_inside_wildcard_realm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Widened 5: an unmatched tool (`WebFetch`) is not gated → `SilentAllow`.
 #[test]
 fn web_fetch_tool_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -303,10 +270,7 @@ fn web_fetch_tool_silent_allows() {
     assert_eq!(outcome, PretoolOutcome::SilentAllow);
 }
 
-/// Test 13 (inverted): the session cwd sits outside every realm, but
-/// the absolute target lands inside one. Scope is resolved from the
-/// target, so the realm's `.remargin.yaml` governs → `Deny`. This
-/// case fail-opened while resolution keyed off the cwd.
+/// Scope is resolved from the target, so a cwd outside every realm does not open the path.
 #[test]
 fn cwd_outside_realm_absolute_target_inside_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -318,14 +282,7 @@ fn cwd_outside_realm_absolute_target_inside_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-// ---------------------------------------------------------------------
-// Target-path scope resolution (design item 1). Permissions come from
-// the realm above the canonicalized target, never from the session cwd.
-// ---------------------------------------------------------------------
-
-/// Scenario 2: cwd inside realm A, absolute target inside realm B.
-/// Realm B's `.remargin.yaml` governs — realm A never enters the walk,
-/// so A's unrelated root cannot silent-allow B's restricted target.
+/// The realm above the target governs; the cwd's realm never enters the walk.
 #[test]
 fn target_in_other_realm_uses_that_realms_config() {
     let system = mock_with(&[
@@ -340,8 +297,6 @@ fn target_in_other_realm_uses_that_realms_config() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Scenario 3: no `.remargin.yaml` anywhere above the target →
-/// `SilentAllow`. Unprotected paths stay unprotected regardless of cwd.
 #[test]
 fn no_realm_above_target_silent_allows() {
     let system = MemorySystem::new();
@@ -349,10 +304,7 @@ fn no_realm_above_target_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// Scenario 4: nested realms. The target sits under the inner realm's
-/// trusted root, which only the inner `.remargin.yaml` declares — the
-/// outer root does not cover it, so the `Deny` proves the nearest realm
-/// above the target governs.
+/// Only the inner realm declares the root, so the deny proves the nearest realm governs.
 #[test]
 fn nested_realms_nearest_above_target_governs() {
     let system = mock_with(&[
@@ -363,9 +315,7 @@ fn nested_realms_nearest_above_target_governs() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Scenario 5: a relative target is rooted at the cwd, then scope is
-/// resolved from the resulting absolute path. `../secret/a.md` from
-/// `/r/sub` lands inside the realm → `Deny`.
+/// A relative target is rooted at the cwd, then scope is resolved from the absolute path.
 #[test]
 fn relative_target_rooted_at_cwd_then_resolved() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))])
@@ -375,7 +325,6 @@ fn relative_target_rooted_at_cwd_then_resolved() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 14: malformed stdin JSON → `Fail`.
 #[test]
 fn malformed_stdin_fails() {
     let system = MemorySystem::new();
@@ -383,9 +332,7 @@ fn malformed_stdin_fails() {
     assert!(reason.contains("malformed PreToolUse event"));
 }
 
-/// An out-of-realm `trusted_roots` entry makes resolution fail closed;
-/// the hook surfaces it loudly as `Fail` (exit 2) rather than
-/// silent-allowing the touched path.
+/// A failed resolution surfaces as `Fail`, not as a silent allow.
 #[test]
 fn out_of_realm_trusted_root_fails_loud() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("/other/secret"))]);
@@ -395,7 +342,6 @@ fn out_of_realm_trusted_root_fails_loud() {
     assert!(reason.contains("/other/secret"), "{reason}");
 }
 
-/// Test 15: missing `tool_name` → `Fail`.
 #[test]
 fn missing_tool_name_fails() {
     let system = MemorySystem::new();
@@ -403,7 +349,6 @@ fn missing_tool_name_fails() {
     assert!(reason.contains("missing field"));
 }
 
-/// Test 16: missing `tool_input.file_path` for `Read` → `Fail`.
 #[test]
 fn read_missing_file_path_fails() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -412,8 +357,6 @@ fn read_missing_file_path_fails() {
     assert!(reason.contains("missing tool_input.file_path"));
 }
 
-/// Test 17: a relative `file_path` is resolved against the event's
-/// `cwd` and then checked.
 #[test]
 fn relative_file_path_resolves_against_event_cwd() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))])
@@ -427,11 +370,7 @@ fn relative_file_path_resolves_against_event_cwd() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 18 (rewritten): `cd` into the realm, then a bare-name mutator.
-/// The realm-root path `/r/secret` never appears verbatim in the
-/// command; only a parser that tracks `cd` and resolves the relative
-/// `cd secret` target (and the following bare `rm foo`) against it can
-/// deny. The `cd secret` word already lands on the realm root here.
+/// The realm path never appears verbatim: only tracking `cd` resolves the bare `rm foo` into it.
 #[test]
 fn bash_cd_reconstructed_target_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -439,7 +378,6 @@ fn bash_cd_reconstructed_target_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 19: wildcard restrict (`*`) catches any path in the realm.
 #[test]
 fn wildcard_restrict_denies_anywhere_in_realm() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -447,7 +385,6 @@ fn wildcard_restrict_denies_anywhere_in_realm() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Test 20: idempotent — same input twice returns the same outcome.
 #[test]
 fn identical_input_yields_identical_outcome() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -457,8 +394,6 @@ fn identical_input_yields_identical_outcome() {
     assert_eq!(first, second);
 }
 
-/// Verb extractor skips env-var assignments so `FOO=bar cat /x`
-/// resolves to `cat` (not `FOO=bar`).
 #[test]
 fn bash_verb_extractor_skips_env_var_prefix() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -517,8 +452,6 @@ fn bash_rtk_ls_non_mutator_silent_allows() {
 
 #[test]
 fn bash_rtk_ls_restricted_path_denies() {
-    // `ls` reveals realm structure; the verb no longer matters — the
-    // `/r/secret/` argument resolves into the realm and denies.
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json("Bash", "/r", &json!({ "command": "rtk ls /r/secret/" }));
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
@@ -586,9 +519,6 @@ fn bash_rtk_wrapped_with_per_realm_extra_denies() {
 
 #[test]
 fn bash_bare_proxy_still_denies_on_path() {
-    // Without `rtk` in front, `proxy` is the verb, not a wrapper — but
-    // the verb no longer gates, so the restricted `/r/secret/foo.md`
-    // argument denies regardless.
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json(
         "Bash",
@@ -747,8 +677,6 @@ fn bash_unknown_mutator_falls_back_to_no_equivalent_message() {
     );
     let decision = expect_deny(pretool(&system, &stdin));
     let reason = deny_reason(&decision);
-    // The realm-scoped fallback: names the realm, rules the work outside it,
-    // never suggests unrestricting or asking.
     assert!(reason.contains("/r"), "reason: {reason}");
     assert!(reason.contains("outside"), "reason: {reason}");
     assert!(!reason.contains("unrestrict"), "reason: {reason}");
@@ -762,10 +690,6 @@ fn bash_rtk_wrapped_sed_shows_sed_guidance() {
     );
 }
 
-// ---------------------------------------------------------------------
-// cli_allowed: folder-level CLI policy hook enforcement
-// ---------------------------------------------------------------------
-
 fn cli_deny_yaml() -> &'static str {
     "permissions:\n  cli_allowed: false\n"
 }
@@ -774,7 +698,6 @@ fn cli_allow_yaml() -> &'static str {
     "permissions:\n  cli_allowed: true\n"
 }
 
-/// T5: policy deny + `remargin write x` → Deny with `cli_allowed` message.
 #[test]
 fn bash_cli_denied_blocks_remargin_verb() {
     let system = mock_with(&[("/r/.remargin.yaml", cli_deny_yaml())]);
@@ -785,7 +708,6 @@ fn bash_cli_denied_blocks_remargin_verb() {
     assert!(reason.contains("mcp__remargin__"), "reason: {reason}");
 }
 
-/// T6: policy allow + `remargin write x` → `SilentAllow`.
 #[test]
 fn bash_cli_allowed_permits_remargin_verb() {
     let system = mock_with(&[("/r/.remargin.yaml", cli_allow_yaml())]);
@@ -793,11 +715,9 @@ fn bash_cli_allowed_permits_remargin_verb() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// T6b: no `cli_allowed` declared (default = deny) + `remargin ls` → Deny
-/// with the opt-in hint, not the explicit-`false` message.
+/// The default deny carries the opt-in hint, not the explicit-`false` message.
 #[test]
 fn bash_cli_default_deny_blocks_remargin_verb() {
-    // No .remargin.yaml present → unconstrained → default deny.
     let system = mock_with(&[]);
     let stdin = event_json("Bash", "/r", &json!({ "command": "remargin ls" }));
     let decision = expect_deny(pretool(&system, &stdin));
@@ -806,7 +726,6 @@ fn bash_cli_default_deny_blocks_remargin_verb() {
     assert!(!reason.contains("cli_allowed: false"), "reason: {reason}");
 }
 
-/// T7: policy deny + `FOO=bar rtk proxy remargin ls` → Deny (env + wrapper stripped).
 #[test]
 fn bash_cli_denied_with_env_prefix_and_rtk_proxy_wrapper() {
     let system = mock_with(&[("/r/.remargin.yaml", cli_deny_yaml())]);
@@ -819,7 +738,6 @@ fn bash_cli_denied_with_env_prefix_and_rtk_proxy_wrapper() {
     assert!(deny_reason(&decision).contains("cli_allowed: false"));
 }
 
-/// T8: policy deny + `ls` (non-remargin verb) → `SilentAllow`.
 #[test]
 fn bash_cli_denied_non_remargin_verb_unaffected() {
     let system = mock_with(&[("/r/.remargin.yaml", cli_deny_yaml())]);
@@ -827,7 +745,6 @@ fn bash_cli_denied_non_remargin_verb_unaffected() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// T5b: policy deny + bare `remargin` with no args → Deny.
 #[test]
 fn bash_cli_denied_bare_remargin_no_args() {
     let system = mock_with(&[("/r/.remargin.yaml", cli_deny_yaml())]);
@@ -836,7 +753,6 @@ fn bash_cli_denied_bare_remargin_no_args() {
     assert!(deny_reason(&decision).contains("cli_allowed: false"));
 }
 
-/// T5c: policy deny in a child, cwd in that child → Deny.
 #[test]
 fn bash_cli_denied_child_policy_applies_to_cwd_in_child() {
     let system = mock_with(&[("/r/sub/.remargin.yaml", cli_deny_yaml())])
@@ -847,8 +763,7 @@ fn bash_cli_denied_child_policy_applies_to_cwd_in_child() {
     assert!(deny_reason(&decision).contains("cli_allowed: false"));
 }
 
-/// T5d: policy deny in child but cwd is the parent (above the deny) → the
-/// parent's own `cli_allowed: true` declaration governs → `SilentAllow`.
+/// The child's deny is not in the parent cwd's walk, so the parent's allow governs.
 #[test]
 fn bash_cli_denied_child_policy_does_not_affect_parent_cwd() {
     let system = mock_with(&[
@@ -857,16 +772,9 @@ fn bash_cli_denied_child_policy_does_not_affect_parent_cwd() {
     ])
     .with_dir(Path::new("/r/sub"))
     .unwrap();
-    // cwd = /r (parent, declares allow; the child's deny is not in its walk).
     let stdin = event_json("Bash", "/r", &json!({ "command": "remargin write x" }));
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
-
-// ---------------------------------------------------------------------
-// Shell-parsing bypass regressions. Each command reaches a
-// remargin-managed path through shell syntax the old substring matcher
-// could not see; real parsing now denies every one.
-// ---------------------------------------------------------------------
 
 fn assert_realm_bash_denies(command: &str) {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -889,7 +797,7 @@ fn regression_pipe_into_tee_denies() {
     assert_realm_bash_denies("echo hi | tee /r/secret/x");
 }
 
-/// The subshell `(` used to defeat verb extraction.
+/// A subshell does not hide the verb.
 #[test]
 fn regression_subshell_cd_then_rm_denies() {
     assert_realm_bash_denies("(cd /r/secret && rm x)");
@@ -913,8 +821,7 @@ fn regression_glob_realm_segment_denies() {
     assert_realm_bash_denies("rm /r/sec*ret/foo");
 }
 
-/// Canonicalizing the bash word resolves the symlink into the realm.
-/// Real FS because `MemorySystem` does not model symlinks.
+/// Real filesystem, because `MemorySystem` does not model symlinks.
 #[cfg(unix)]
 #[test]
 fn regression_symlink_into_realm_via_bash_denies() {
@@ -944,9 +851,7 @@ fn regression_symlink_into_realm_via_bash_denies() {
     ));
 }
 
-/// A symlink chain (link -> link -> realm target) named by a shell
-/// command resolves through every hop and denies. Real FS because
-/// `MemorySystem` does not model symlinks.
+/// A link to a link to a realm target resolves through every hop.
 #[cfg(unix)]
 #[test]
 fn regression_symlink_chain_into_realm_via_bash_denies() {
@@ -977,10 +882,7 @@ fn regression_symlink_chain_into_realm_via_bash_denies() {
     ));
 }
 
-/// A symlink whose target lies outside every realm resolves out of the
-/// realm and silent-allows. The realm's wildcard root covers the link's
-/// own path, so only canonicalization following the link out flips the
-/// decision away from a false deny. Real FS for the same reason.
+/// Only following the link out of the realm avoids a false deny on the link's own path.
 #[cfg(unix)]
 #[test]
 fn regression_symlink_outside_realm_via_bash_silent_allows() {
@@ -1015,9 +917,7 @@ fn regression_symlink_outside_realm_via_bash_silent_allows() {
     );
 }
 
-/// A `~`-relative word expands via `HOME` into a realm and denies. Uses
-/// `MemorySystem::with_env` — the `env_var("HOME")` seam `expand_tilde`
-/// reads — so no symlink modelling or real filesystem is needed.
+/// `~` expands through the `HOME` env seam, so no real filesystem is needed.
 #[test]
 fn bash_tilde_word_expanding_into_realm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))])
@@ -1031,14 +931,7 @@ fn bash_tilde_word_expanding_into_realm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-// ---------------------------------------------------------------------
-// Testing Plan cases (design item 2): reads deny like writes, chains and
-// pipes are parsed, embedded literal paths are recovered, and the CLI
-// policy is unchanged.
-// ---------------------------------------------------------------------
-
-/// Plan 1: `grep` only reads, but reads into the realm deny too — with
-/// the search-op guidance.
+/// Reads into the realm deny too, with the search-op guidance.
 #[test]
 fn plan_grep_read_denies_with_search_guidance() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1047,7 +940,6 @@ fn plan_grep_read_denies_with_search_guidance() {
     assert!(deny_reason(&decision).contains("mcp__remargin__search"));
 }
 
-/// Plan 2: `rm` after a non-mutator verb in a `&&` chain denies.
 #[test]
 fn plan_logical_and_chain_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1055,7 +947,6 @@ fn plan_logical_and_chain_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 3: a pipe into `tee` writing the realm path denies.
 #[test]
 fn plan_pipe_into_tee_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1067,7 +958,6 @@ fn plan_pipe_into_tee_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 4: a subshell that `cd`s into the realm then removes denies.
 #[test]
 fn plan_subshell_cd_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1079,8 +969,6 @@ fn plan_subshell_cd_rm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 5: an absolute `cd` into the realm then a bare-name `rm` denies —
-/// the `cd` target is tracked as the base for the following word.
 #[test]
 fn plan_cd_then_bare_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1088,7 +976,6 @@ fn plan_cd_then_bare_rm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 6: quote stripping rejoins `/r/secret/x` from `"/r/"secret/x`.
 #[test]
 fn plan_quoted_prefix_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1096,7 +983,6 @@ fn plan_quoted_prefix_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 7: a path in no realm silent-allows even with a realm elsewhere.
 #[test]
 fn plan_no_realm_path_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1104,8 +990,6 @@ fn plan_no_realm_path_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// Plan 8: a literal managed path embedded in a `python -c` argument is
-/// still recovered and denied.
 #[test]
 fn plan_python_c_literal_path_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1117,7 +1001,6 @@ fn plan_python_c_literal_path_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 9: the `cli_allowed: false` remargin-verb denial is unchanged.
 #[test]
 fn plan_cli_denied_remargin_verb_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", cli_deny_yaml())]);
@@ -1126,8 +1009,6 @@ fn plan_cli_denied_remargin_verb_denies() {
     assert!(deny_reason(&decision).contains("cli_allowed: false"));
 }
 
-/// Plan 10: a pipeline touching two realms denies on the first word that
-/// resolves into either one.
 #[test]
 fn plan_two_realm_pipeline_denies() {
     let system = mock_with(&[
@@ -1138,14 +1019,6 @@ fn plan_two_realm_pipeline_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-// ---------------------------------------------------------------------
-// Shared-predicate unification: the Bash branch decides restriction
-// through the same `path_is_restricted` predicate as the Path branch, so
-// a deny_ops-only path is denied under Bash too and the two branches
-// cannot drift. Trusted-root glob coverage stays green.
-// ---------------------------------------------------------------------
-
-/// Unify 1: a `deny_ops`-only path (no `trusted_roots`) denies under `Edit`.
 #[test]
 fn deny_ops_only_path_edit_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &deny_ops_yaml("x.md", "edit"))]);
@@ -1157,8 +1030,7 @@ fn deny_ops_only_path_edit_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Unify 2 (the fix): the same `deny_ops`-only path denies under `Bash rm`,
-/// which previously consulted `trusted_roots` only and let it through.
+/// The Bash branch shares the `deny_ops` check with the Path branch.
 #[test]
 fn deny_ops_only_path_bash_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &deny_ops_yaml("x.md", "edit"))]);
@@ -1166,8 +1038,6 @@ fn deny_ops_only_path_bash_rm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Unify 3: a wildcard `trusted_roots` realm still denies a `Bash rm` of a
-/// path inside it — trusted-root coverage is unchanged by the unification.
 #[test]
 fn wildcard_trusted_roots_bash_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1175,20 +1045,12 @@ fn wildcard_trusted_roots_bash_rm_denies() {
     expect_deny(pretool(&system, &stdin));
 }
 
-/// Unify 4: a path in neither `deny_ops` nor `trusted_roots` silent-allows.
 #[test]
 fn path_in_neither_bash_rm_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &deny_ops_yaml("x.md", "edit"))]);
     let stdin = event_json("Bash", "/r", &json!({ "command": "rm /r/y.md" }));
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
-
-// ---------------------------------------------------------------------
-// allow_dot_folders: the hook honours the realm's dot-folder re-allow,
-// mirroring the `hook_covered_rules` re-allow so retiring the projected
-// rules cannot regress an explicitly-allowed dot folder. The carve-out
-// only lifts restriction for dot-folder paths — never for non-dot paths.
-// ---------------------------------------------------------------------
 
 /// A wildcard realm re-allowing the named dot folders. Empty
 /// `allow_dot_folders` (`""`) emits `allow_dot_folders: []`.
@@ -1198,7 +1060,6 @@ fn restrict_with_dot_folders(root: &str, allow_dot_folders: &str) -> String {
     )
 }
 
-/// Case 1: `Read` a file inside an allowed dot folder → `SilentAllow`.
 #[test]
 fn allow_dot_folders_allowed_dot_folder_read_silent_allows() {
     let system = mock_with(&[(
@@ -1213,7 +1074,6 @@ fn allow_dot_folders_allowed_dot_folder_read_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// Case 2: a dot folder not on the list (`.git`) stays restricted → `Deny`.
 #[test]
 fn allow_dot_folders_unlisted_dot_folder_read_denies() {
     let system = mock_with(&[(
@@ -1224,7 +1084,6 @@ fn allow_dot_folders_unlisted_dot_folder_read_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Case 3: an empty allow list restricts every dot folder → `Deny`.
 #[test]
 fn allow_dot_folders_empty_list_dot_folder_read_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_with_dot_folders("'*'", ""))]);
@@ -1232,7 +1091,6 @@ fn allow_dot_folders_empty_list_dot_folder_read_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Case 4: a non-dot path under the realm is unaffected — still managed.
 #[test]
 fn allow_dot_folders_non_dot_path_still_denies() {
     let system = mock_with(&[(
@@ -1243,9 +1101,7 @@ fn allow_dot_folders_non_dot_path_still_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Case 5: a `Bash` word into an allowed dot folder → `SilentAllow`. cwd
-/// sits outside the wildcard realm so only the `/r/.obsidian/x` argument
-/// — not the bare verb word — resolves into it.
+/// The cwd sits outside the realm, so only the argument resolves into it, not the bare verb.
 #[test]
 fn allow_dot_folders_allowed_dot_folder_bash_silent_allows() {
     let system = mock_with(&[(
@@ -1256,10 +1112,8 @@ fn allow_dot_folders_allowed_dot_folder_bash_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// Parity: for a fixed realm + `allow_dot_folders`, the hook's decision on
-/// each dot-folder path agrees with whether `hook_covered_rules` emitted a
-/// re-allow covering it — restricted iff not re-allowed. Guards the hook
-/// against drift from the shape set `doctor` uses for drift detection.
+/// The hook restricts a dot-folder path exactly when `hook_covered_rules` emits no re-allow
+/// for it.
 #[test]
 fn allow_dot_folders_hook_matches_hook_covered_reallow() {
     use std::path::PathBuf;
@@ -1288,8 +1142,6 @@ fn allow_dot_folders_hook_matches_hook_covered_reallow() {
         "/r/.git/config",
         "/r/.cache/blob",
     ] {
-        // A re-allow covers `path` iff `hook_covered_rules` emitted a rule
-        // for the path's leading dot-folder component.
         let folder = path.strip_prefix("/r/").unwrap().split('/').next().unwrap();
         let reallowed = rules.allow.contains(&format!("Read(/r/{folder}/**)"));
 
@@ -1302,10 +1154,6 @@ fn allow_dot_folders_hook_matches_hook_covered_reallow() {
         );
     }
 }
-
-// ---------------------------------------------------------------------
-// Wildcard realm rooted at the cwd: same per-word scan; bare words pass.
-// ---------------------------------------------------------------------
 
 #[test]
 fn bash_wildcard_bare_verb_ls_allows() {
@@ -1328,8 +1176,6 @@ fn bash_wildcard_cargo_build_release_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// A real path argument into the wildcard realm still denies — the
-/// path-evidence carve-out never lifts an actual managed-path reference.
 #[test]
 fn bash_wildcard_real_path_argument_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1337,9 +1183,7 @@ fn bash_wildcard_real_path_argument_denies() {
     expect_deny(pretool(&system, &stdin));
 }
 
-/// After a tracked `cd` into a wildcard realm, a bare-name mutator argument
-/// is a meaningful path candidate and denies — the cwd is no longer the
-/// event cwd, so `foo` resolves to a real managed path.
+/// After a tracked `cd` a bare argument resolves to a real managed path.
 #[test]
 fn bash_wildcard_cd_then_bare_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1347,14 +1191,6 @@ fn bash_wildcard_cd_then_bare_rm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-// ---------------------------------------------------------------------
-// Per-command deny messages (design item 8): every deny reason carries the
-// exact replacement op with the blocked command's own arguments, or — when
-// the verb has no equivalent — names the realm and rules the work outside
-// it without ever offering an alternative or mentioning unrestrict.
-// ---------------------------------------------------------------------
-
-/// Message 1: `cat` carries `get path=<p>` with the specific resolved path.
 #[test]
 fn msg_cat_carries_get_with_path() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1367,7 +1203,6 @@ fn msg_cat_carries_get_with_path() {
     );
 }
 
-/// Message 2: `grep` carries both the pattern and the resolved path.
 #[test]
 fn msg_grep_carries_search_with_pattern_and_path() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1380,7 +1215,6 @@ fn msg_grep_carries_search_with_pattern_and_path() {
     );
 }
 
-/// Message 3: the `Glob` tool carries `ls path=<p>`.
 #[test]
 fn msg_glob_tool_carries_ls_with_path() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1397,7 +1231,6 @@ fn msg_glob_tool_carries_ls_with_path() {
     );
 }
 
-/// Message 4: `rm` carries `rm path=<p>`.
 #[test]
 fn msg_rm_carries_rm_with_path() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1410,7 +1243,6 @@ fn msg_rm_carries_rm_with_path() {
     );
 }
 
-/// Message 5: the `Edit` tool carries `edit path=<p>` (existing per-verb op).
 #[test]
 fn msg_edit_tool_carries_edit_with_path() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1427,8 +1259,6 @@ fn msg_edit_tool_carries_edit_with_path() {
     );
 }
 
-/// Message 6: a verb with no remargin equivalent (`cargo`) writing into the
-/// realm names the realm and rules the work outside it — never "unrestrict".
 #[test]
 fn msg_no_equivalent_names_realm_and_stays_outside() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1440,8 +1270,6 @@ fn msg_no_equivalent_names_realm_and_stays_outside() {
     assert!(!reason.contains("unrestrict"), "reason: {reason}");
 }
 
-/// Message 7: every deny reason is non-empty and names either a remargin op
-/// or the realm rule — no denial is ever bare.
 #[test]
 fn msg_no_denial_is_bare() {
     for command in [
@@ -1479,21 +1307,11 @@ fn msg_mv_carries_src_and_dst() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Fail closed inside a realm, fail open when none is found. A realm
-// locked with `trusted_roots: []` is deny-all (parity with the op guard);
-// a canonicalize failure under a governing realm resolves the existing
-// prefix so restriction is checked on a real path, never silently
-// allowed; absence of any realm still fails open.
-// ---------------------------------------------------------------------
-
 /// A realm locked to an empty allow-set (`trusted_roots: []`).
 fn locked_empty_yaml() -> &'static str {
     "permissions:\n  trusted_roots: []\n"
 }
 
-/// Plan 1: `Read` a target under a locked-empty realm → `Deny`. The empty
-/// allow-set locks the realm, so every path under it is managed.
 #[test]
 fn locked_empty_realm_read_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", locked_empty_yaml())]);
@@ -1501,9 +1319,6 @@ fn locked_empty_realm_read_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 2: a `Bash rm` of a target under the same locked-empty realm →
-/// `Deny`. The Bash branch shares `path_is_restricted`, so the lock denies
-/// there too.
 #[test]
 fn locked_empty_realm_bash_rm_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", locked_empty_yaml())]);
@@ -1511,12 +1326,7 @@ fn locked_empty_realm_bash_rm_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Plan 3: a `Write` to a not-yet-existing leaf reached through a symlinked
-/// directory in the prefix. Full-path canonicalize fails (the leaf does not
-/// exist), but canonicalizing the deepest existing ancestor resolves the
-/// symlink into the realm, so restriction is checked on the real target and
-/// denies — never a silent allow of an unchecked path. Real FS because
-/// `MemorySystem` does not model symlinks.
+/// The deepest existing ancestor is canonicalized, so a symlinked prefix resolves into the realm.
 #[cfg(unix)]
 #[test]
 fn canonicalize_prefix_symlink_new_file_write_denies() {
@@ -1534,7 +1344,6 @@ fn canonicalize_prefix_symlink_new_file_write_denies() {
         "permissions:\n  trusted_roots:\n    - path: src/secret\n",
     )
     .unwrap();
-    // `alias` -> the trusted root; the `new.md` leaf under it does not exist.
     symlink(realm_path.join("src/secret"), realm_path.join("alias")).unwrap();
 
     let cwd = realm_path.display().to_string();
@@ -1550,10 +1359,7 @@ fn canonicalize_prefix_symlink_new_file_write_denies() {
     ));
 }
 
-/// Plan 4: a `Write` to a nonexistent leaf with no `.remargin.yaml` above
-/// it. Full-path canonicalize fails, but with no governing realm the
-/// fallback stays allow → `SilentAllow`. Real FS so canonicalize actually
-/// fails on the missing leaf.
+/// With no governing realm a canonicalize failure stays an allow.
 #[cfg(unix)]
 #[test]
 fn canonicalize_fail_no_realm_silent_allows() {
@@ -1575,8 +1381,6 @@ fn canonicalize_fail_no_realm_silent_allows() {
     );
 }
 
-/// Plan 5: a malformed event JSON envelope → `Fail` (the CLI maps `Fail`
-/// to exit 2), unchanged.
 #[test]
 fn malformed_event_json_fails() {
     let system = MemorySystem::new();
@@ -1587,9 +1391,6 @@ fn malformed_event_json_fails() {
     );
 }
 
-/// Plan 6: a normal realm with a resolvable path is unchanged — a target
-/// under the trusted root still denies, a sibling outside it still
-/// silent-allows.
 #[test]
 fn normal_realm_resolvable_path_unchanged() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1604,17 +1405,6 @@ fn normal_realm_resolvable_path_unchanged() {
     assert_eq!(pretool(&system, &allowed), PretoolOutcome::SilentAllow);
 }
 
-// ---------------------------------------------------------------------
-// Ancestor gap: a candidate that is a strict ANCESTOR of a trusted root
-// (the realm at `/r`, trusted root `/r/secret`, target `/r`) is not
-// at/below the root, so `path_is_restricted` alone leaves it allowed.
-// The Bash branch denies it for the destructive verb set only (reads of
-// an ancestor stay allowed); the Grep/Glob branch denies it because a
-// recursive search from the ancestor sweeps the protected subtree.
-// ---------------------------------------------------------------------
-
-/// `rm /r` targets a strict ancestor of `/r/secret`; a destructive verb on
-/// the ancestor reaches the subtree → `Deny`.
 #[test]
 fn bash_rm_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1622,8 +1412,7 @@ fn bash_rm_ancestor_of_root_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// `rm -rf /r` — the recursive-force flags do not change the analysis; the
-/// ancestor word still denies.
+/// The recursive-force flags do not change the analysis.
 #[test]
 fn bash_rm_rf_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1631,8 +1420,6 @@ fn bash_rm_rf_ancestor_of_root_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// `ls /r` reads the ancestor directory; reads are not destructive, so the
-/// ancestor stays allowed → `SilentAllow`.
 #[test]
 fn bash_ls_ancestor_of_root_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1640,8 +1427,6 @@ fn bash_ls_ancestor_of_root_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// `cat /r` reads the ancestor; a non-destructive verb never denies an
-/// ancestor → `SilentAllow`.
 #[test]
 fn bash_cat_ancestor_of_root_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1649,8 +1434,7 @@ fn bash_cat_ancestor_of_root_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// `rm /r/other` targets a sibling of the trusted root, not an ancestor of
-/// it, so removing it cannot reach `/r/secret` → `SilentAllow`.
+/// A sibling of the trusted root is not an ancestor of it.
 #[test]
 fn bash_rm_sibling_of_root_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1658,8 +1442,6 @@ fn bash_rm_sibling_of_root_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// `mv /r /tmp/x` — the ancestor is the move source; relocating it moves the
-/// protected subtree → `Deny`.
 #[test]
 fn bash_mv_ancestor_source_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1667,8 +1449,7 @@ fn bash_mv_ancestor_source_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// `mv /tmp/x /r` — the ancestor is the move destination; every path word is
-/// checked, so the ancestor destination denies → `Deny`.
+/// Every path word is checked, so an ancestor destination denies too.
 #[test]
 fn bash_mv_ancestor_destination_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1676,8 +1457,7 @@ fn bash_mv_ancestor_destination_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// A redirect write (`>`) to the ancestor is the non-verb member of the
-/// destructive set → `Deny`, even though the verb (`echo`) reads nothing.
+/// A redirect write is destructive even though `echo` reads nothing.
 #[test]
 fn bash_redirect_write_to_ancestor_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1693,9 +1473,7 @@ fn bash_glued_append_redirect_to_ancestor_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// Reading the ancestor and redirecting the output OUTSIDE the realm writes
-/// nothing into the realm → `SilentAllow`; the redirect target `/tmp/x` is
-/// unmanaged and `/r` is only read.
+/// Reading the ancestor and redirecting outside the realm writes nothing into it.
 #[test]
 fn bash_read_ancestor_redirect_outside_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1703,10 +1481,7 @@ fn bash_read_ancestor_redirect_outside_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// The ancestor deny message names the target, the managed subtree, and the
-/// realm, and rules the work out -- it never offers a bogus single-file
-/// `mcp__remargin__rm path=/r` redirect for a directory that is not a
-/// managed file.
+/// The message never offers a single-file redirect for a directory that is not a managed file.
 #[test]
 fn bash_ancestor_deny_message_names_realm_no_false_redirect() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1722,10 +1497,8 @@ fn bash_ancestor_deny_message_names_realm_no_false_redirect() {
     );
 }
 
-/// A glob-carrying ancestor word whose metacharacter sits below the realm
-/// root (`/r/a*`, realm `/r`, trusted root `/r/a/secret`) still resolves the
-/// realm and is matched glob-aware → `Deny`. A glob at the realm-root level
-/// (`/r*`) is out of scope — resolving the realm walks literal components.
+/// A glob below the realm root still resolves the realm; a glob at the root level is out of
+/// scope.
 #[test]
 fn bash_glob_below_root_ancestor_word_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("a/secret"))]);
@@ -1733,8 +1506,6 @@ fn bash_glob_below_root_ancestor_word_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// `Grep path=/r` — a search root that is a strict ancestor of the trusted
-/// root sweeps the subtree → `Deny` with the `search` redirect.
 #[test]
 fn grep_ancestor_path_denies_with_search() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1743,8 +1514,6 @@ fn grep_ancestor_path_denies_with_search() {
     assert!(deny_reason(&decision).contains("mcp__remargin__search"));
 }
 
-/// `Glob path=/r` — same ancestor search root → `Deny` with the `ls`
-/// redirect.
 #[test]
 fn glob_ancestor_path_denies_with_ls() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1753,8 +1522,6 @@ fn glob_ancestor_path_denies_with_ls() {
     assert!(deny_reason(&decision).contains("mcp__remargin__ls"));
 }
 
-/// `Grep path=/r/other` — a sibling of the trusted root, not an ancestor, so
-/// the recursive search cannot reach `/r/secret` → `SilentAllow`.
 #[test]
 fn grep_sibling_path_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1766,9 +1533,7 @@ fn grep_sibling_path_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// `Read file_path=/r/file.md` — an unprotected file directly under the
-/// ancestor realm root. `Read` touches only the named path, never a subtree,
-/// so the ancestor rule does not apply → `SilentAllow`, unchanged.
+/// `Read` touches only the named path, so the ancestor rule does not apply.
 #[test]
 fn read_ancestor_realm_file_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1776,18 +1541,6 @@ fn read_ancestor_realm_file_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-// ---------------------------------------------------------------------
-// Wildcard-root realm sanity. Under a `*` realm the trusted root IS the
-// realm root, so nothing at/below it changes (every managed subpath still
-// denies verb-independently). The realm root itself has no strict ancestor
-// inside the realm, but destroying it destroys the whole realm -- so a
-// destructive verb on the wildcard realm root denies for the same reason
-// (and by the same at-or-above match) as an absolute realm's root, while a
-// read of it stays allowed. Pins the decision Eduardo left open.
-// ---------------------------------------------------------------------
-
-/// `rm /r` under a wildcard realm rooted at `/r` destroys the entire realm →
-/// `Deny`, consistent with the absolute-root case.
 #[test]
 fn bash_rm_wildcard_realm_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1795,8 +1548,6 @@ fn bash_rm_wildcard_realm_root_denies() {
     expect_deny(pretool(&system, &stdin));
 }
 
-/// `ls /r` under a wildcard realm rooted at `/r` only reads the realm root →
-/// `SilentAllow`; reads of the root are never destructive.
 #[test]
 fn bash_ls_wildcard_realm_root_silent_allows() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1804,8 +1555,6 @@ fn bash_ls_wildcard_realm_root_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// `Grep path=/r` under a wildcard realm rooted at `/r` recursively sweeps
-/// the whole realm → `Deny`.
 #[test]
 fn grep_wildcard_realm_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1813,8 +1562,6 @@ fn grep_wildcard_realm_root_denies() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// `rm /r/x.md` under a wildcard realm still denies through the normal,
-/// verb-independent at/below path -- the ancestor work does not disturb it.
 #[test]
 fn bash_rm_wildcard_subpath_still_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("'*'"))]);
@@ -1822,21 +1569,13 @@ fn bash_rm_wildcard_subpath_still_denies() {
     expect_deny(pretool(&system, &stdin));
 }
 
-/// The documented blind spot: a candidate ABOVE the realm root cannot be
-/// detected by the upward walk (the realm's `.remargin.yaml` lives below the
-/// candidate), so `rm /parent` where the realm is at `/parent/realm` stays a
-/// `SilentAllow`. Pins the limitation so a future reader sees it is by design.
+/// A candidate above the realm root is undetectable: the realm's config lives below it.
 #[test]
 fn bash_rm_above_realm_root_undetected_silent_allows() {
     let system = mock_with(&[("/parent/realm/.remargin.yaml", &restrict_yaml("secret"))]);
     let stdin = event_json("Bash", "/x", &json!({ "command": "rm -rf /parent" }));
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
-
-// ---------------------------------------------------------------------
-// In-realm cwd: same per-word scan as anywhere else. Bare words pass
-// (accepted gap); path-evidenced words still deny.
-// ---------------------------------------------------------------------
 
 /// A realm restricting `path` whose folder policy also denies the CLI.
 fn restrict_with_cli_denied(path: &str) -> String {
@@ -1896,8 +1635,7 @@ fn in_realm_cwd_bare_git_is_allowed() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// The remargin CLI stays the sanctioned surface from an in-realm cwd —
-/// and stays subject to the folder-level `cli_allowed` policy.
+/// From an in-realm cwd the CLI still answers to the folder-level `cli_allowed` policy.
 #[test]
 fn in_realm_cwd_remargin_cli_stays_allowed() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_with_cli_allowed("secret"))]);
@@ -1943,9 +1681,6 @@ fn in_realm_cwd_at_wildcard_realm_root_pathless_walker_is_allowed() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// The remargin CLI stays the sanctioned surface from a cwd at the
-/// wildcard realm root — and stays subject to the folder-level
-/// `cli_allowed` policy.
 #[test]
 fn in_realm_cwd_at_wildcard_realm_root_remargin_cli_stays_allowed() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_with_cli_allowed("'*'"))]);
@@ -1966,18 +1701,13 @@ fn in_realm_cwd_at_wildcard_realm_root_remargin_cli_stays_allowed() {
     assert!(deny_reason(&decision).contains("cli_allowed: false"));
 }
 
-/// (a) bare words from an unrestricted cwd stay unevaluated; (b) explicit
-/// restricted paths deny from any cwd; (c) tracked `cd` then bare words deny.
 #[test]
 fn in_realm_cwd_regression_guards_unchanged() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
 
-    // (a) cwd = realm root, above the trusted root: bare relative words do
-    // not resolve into /r/secret, so the command stays allowed.
     let bare_stdin = event_json("Bash", "/r", &json!({ "command": "grep pattern idea.md" }));
     assert_eq!(pretool(&system, &bare_stdin), PretoolOutcome::SilentAllow);
 
-    // (b) explicit managed path from an unrelated cwd still denies.
     let explicit_stdin = event_json(
         "Bash",
         "/tmp",
@@ -1988,7 +1718,6 @@ fn in_realm_cwd_regression_guards_unchanged() {
         PretoolOutcome::Deny(_)
     ));
 
-    // (c) tracked cd into the realm then a bare-word read still denies.
     let cd_stdin = event_json(
         "Bash",
         "/x",
@@ -1999,10 +1728,6 @@ fn in_realm_cwd_regression_guards_unchanged() {
         PretoolOutcome::Deny(_)
     ));
 }
-
-// ---------------------------------------------------------------------
-// Host tool prefix: one registry, rendered per host
-// ---------------------------------------------------------------------
 
 fn reason_under(
     system: &MemorySystem,
@@ -2064,8 +1789,7 @@ fn per_tool_messages_render_per_host() {
     }
 }
 
-/// Every verb in the shell guidance vocabulary renders per host, plus a
-/// verb outside it so the no-equivalent fallback is covered too.
+/// Includes a verb outside the vocabulary, so the no-equivalent fallback is covered.
 #[test]
 fn shell_verb_guidance_renders_per_host() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -2078,9 +1802,7 @@ fn shell_verb_guidance_renders_per_host() {
     }
 }
 
-/// The two whole-command denies — ancestor-destructive and the
-/// `cli_allowed` policy deny — each build their own string and so each
-/// needs the prefix threaded independently.
+/// Each whole-command deny builds its own string, so each needs the prefix threaded.
 #[test]
 fn whole_command_denies_render_per_host() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -2090,8 +1812,7 @@ fn whole_command_denies_render_per_host() {
     assert_hosts_differ_only_by_prefix(&cli_denied, &bash_target("remargin write /r/x.md"), "/r");
 }
 
-/// The Claude render is the byte-identical default: `pretool` must produce
-/// exactly what `decide` produces under the Claude prefix.
+/// `pretool` must produce exactly what `decide` produces under the Claude prefix.
 #[test]
 fn claude_entry_point_renders_the_claude_prefix() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);

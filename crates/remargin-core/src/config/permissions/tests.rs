@@ -151,10 +151,6 @@ fn deny_ops_unknown_op_in_resolver_names_source_file() {
     assert!(chain.contains("delte") || chain.contains("unknown variant"));
 }
 
-// ---------------------------------------------------------------------
-// Resolver
-// ---------------------------------------------------------------------
-
 fn write_yaml(system: MemorySystem, path: &str, body: &str) -> MemorySystem {
     system.with_file(Path::new(path), body.as_bytes()).unwrap()
 }
@@ -517,9 +513,7 @@ fn in_realm_absolute_restrict_path_preserved() {
     );
 }
 
-/// An absolute entry pointing outside the declaring realm is a
-/// misconfiguration: resolution fails closed, naming the yaml, the entry
-/// as written, and the resolved anchor.
+/// Resolution fails closed, naming the yaml, the entry as written and the resolved anchor.
 #[test]
 fn out_of_realm_absolute_entry_fails_resolution() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: /other/secret\n";
@@ -534,8 +528,7 @@ fn out_of_realm_absolute_entry_fails_resolution() {
     assert!(chain.contains("/other/secret"), "{chain}");
 }
 
-/// A relative entry that climbs out via `../` escapes even though it never
-/// looks absolute — the check runs on the resolved anchor.
+/// The check runs on the resolved anchor, so a `../` climb is caught without looking absolute.
 #[test]
 fn dotdot_escape_entry_fails_resolution() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: ../sibling\n";
@@ -551,8 +544,6 @@ fn dotdot_escape_entry_fails_resolution() {
     assert!(chain.contains("/sibling"), "{chain}");
 }
 
-/// A `~` expansion landing outside the realm escapes just like a written
-/// absolute path — driven through `MemorySystem`'s HOME.
 #[test]
 fn tilde_expansion_escape_fails_resolution() {
     let yaml = "permissions:\n  trusted_roots:\n    - ~/notes\n";
@@ -569,7 +560,6 @@ fn tilde_expansion_escape_fails_resolution() {
     assert!(chain.contains("/home/alice/notes"), "{chain}");
 }
 
-/// A `~` expansion that lands inside the realm is contained and resolves.
 #[test]
 fn tilde_expansion_inside_realm_resolves() {
     let yaml = "permissions:\n  trusted_roots:\n    - ~/notes\n";
@@ -603,11 +593,6 @@ fn lint_reports_out_of_realm_trusted_root() {
         "expected out-of-realm finding; got {findings:#?}",
     );
 }
-
-// ---------------------------------------------------------------------
-// resolve_trusted_roots_for_cwd: MCP/sandbox boundary set, derived from
-// `permissions.trusted_roots`. Falls back to `[cwd]` when none declared.
-// ---------------------------------------------------------------------
 
 #[test]
 fn trusted_roots_cwd_fallback_when_none_declared() {
@@ -646,8 +631,6 @@ fn trusted_roots_expand_tilde_against_mock_home() {
     let resolved = resolve_trusted_roots_for_cwd(&system, Path::new("/realm")).unwrap();
     assert_eq!(resolved, vec![PathBuf::from("/realm/home/alice/notes")]);
 }
-
-// trusted_roots: absent vs explicitly empty list
 
 #[test]
 fn permissions_block_with_no_trusted_roots_key_parses_to_none() {
@@ -696,8 +679,6 @@ fn resolver_leaves_lock_unset_when_key_absent() {
 
 #[test]
 fn resolver_records_deepest_lock_first_in_walk() {
-    // Both files lock; deepest (child) should be recorded as the
-    // canonical locker source.
     let parent = "permissions:\n  trusted_roots: []\n";
     let child = "permissions:\n  trusted_roots: []\n";
     let system = MemorySystem::new()
@@ -716,7 +697,6 @@ fn resolver_records_deepest_lock_first_in_walk() {
 
 #[test]
 fn resolve_trusted_roots_for_cwd_locked_returns_empty() {
-    // No inherited entries + lock → empty Vec, NOT a cwd fallback.
     let yaml = "permissions:\n  trusted_roots: []\n";
     let system = MemorySystem::new()
         .with_dir(Path::new("/realm"))
@@ -727,11 +707,6 @@ fn resolve_trusted_roots_for_cwd_locked_returns_empty() {
     assert_eq!(resolved, [] as [PathBuf; 0]);
 }
 
-// ---------------------------------------------------------------------
-// cli_allowed: folder-level CLI policy — nearest-wins resolver tests
-// ---------------------------------------------------------------------
-
-/// T1: no `cli_allowed` anywhere in walk → effective = false (default deny).
 #[test]
 fn cli_allowed_default_deny_when_absent() {
     let system = MemorySystem::new()
@@ -747,12 +722,10 @@ fn cli_allowed_default_deny_when_absent() {
     assert!(!resolved.cli_allowed(), "effective default must be false");
 }
 
-/// T2: nearest-wins deny — root + A absent, A.A declares deny.
-/// Deny everywhere: A.A explicitly, the undeclared walks by default.
 #[test]
 fn cli_allowed_nearest_wins_deny() {
     let root_yaml = "identity: alice\n";
-    let mid_yaml = "identity: alice\n"; // no cli_allowed
+    let mid_yaml = "identity: alice\n";
     let deep_yaml = "permissions:\n  cli_allowed: false\n";
     let system = MemorySystem::new()
         .with_dir(Path::new("/realm/a/aa"))
@@ -767,23 +740,19 @@ fn cli_allowed_nearest_wins_deny() {
         )
         .unwrap();
 
-    // Walk from A.A: deepest declaration wins → deny.
     let from_aa = resolve_permissions(&system, Path::new("/realm/a/aa")).unwrap();
     assert_eq!(from_aa.cli_allowed, Some(false));
     assert!(!from_aa.cli_allowed());
 
-    // Walk from A: no declaration in A or root → default deny.
     let from_a = resolve_permissions(&system, Path::new("/realm/a")).unwrap();
     assert!(from_a.cli_allowed.is_none());
     assert!(!from_a.cli_allowed());
 
-    // Walk from root: no declaration → default deny.
     let from_root = resolve_permissions(&system, Path::new("/realm")).unwrap();
     assert!(from_root.cli_allowed.is_none());
     assert!(!from_root.cli_allowed());
 }
 
-/// T3: root declares `allow` — inherited everywhere below (no override).
 #[test]
 fn cli_allowed_root_allow_inherited() {
     let root_yaml = "permissions:\n  cli_allowed: true\n";
@@ -793,19 +762,15 @@ fn cli_allowed_root_allow_inherited() {
         .with_file(Path::new("/realm/.remargin.yaml"), root_yaml.as_bytes())
         .unwrap();
 
-    // From /realm: declared allow.
     let from_root = resolve_permissions(&system, Path::new("/realm")).unwrap();
     assert_eq!(from_root.cli_allowed, Some(true));
     assert!(from_root.cli_allowed());
 
-    // From /realm/sub: no sub-declaration → walks up, finds root allow.
     let from_sub = resolve_permissions(&system, Path::new("/realm/sub")).unwrap();
     assert_eq!(from_sub.cli_allowed, Some(true));
     assert!(from_sub.cli_allowed());
 }
 
-/// T4: deeper override re-allows — root allow, A deny, A.A allow.
-/// Deny in A subtree except A.A subtree.
 #[test]
 fn cli_allowed_deeper_override_re_allows() {
     let root_yaml = "permissions:\n  cli_allowed: true\n";
@@ -824,23 +789,19 @@ fn cli_allowed_deeper_override_re_allows() {
         )
         .unwrap();
 
-    // Root: allow.
     let from_root = resolve_permissions(&system, Path::new("/realm")).unwrap();
     assert_eq!(from_root.cli_allowed, Some(true));
     assert!(from_root.cli_allowed());
 
-    // A: deny (nearest declaration).
     let from_a = resolve_permissions(&system, Path::new("/realm/a")).unwrap();
     assert_eq!(from_a.cli_allowed, Some(false));
     assert!(!from_a.cli_allowed());
 
-    // A.A: allow (nearest declaration overrides A's deny).
     let from_aa = resolve_permissions(&system, Path::new("/realm/a/aa")).unwrap();
     assert_eq!(from_aa.cli_allowed, Some(true));
     assert!(from_aa.cli_allowed());
 }
 
-/// T1b: `permissions:` block parses `cli_allowed` correctly.
 #[test]
 fn permissions_block_parses_cli_allowed() {
     let yaml_allow = "permissions:\n  cli_allowed: true\n";

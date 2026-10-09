@@ -21,32 +21,22 @@ use crate::permissions::claude_sync::{RevertReport, revert_rules};
 use crate::permissions::restrict::{find_claude_anchor, write_remargin_yaml};
 use crate::permissions::sidecar;
 
-/// Wildcard literal mirroring the schema constant. Keeps the
-/// public surface symmetric with `restrict`.
 const RESTRICT_WILDCARD: &str = "*";
 
 /// Caller-supplied parameters for [`unprotect`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct UnprotectArgs {
-    /// Subpath relative to the anchor, OR the literal `"*"`. Must
-    /// match the on-disk `path` field of the `trusted_roots` entry
-    /// being reversed (the lookup key for both the YAML editor and
-    /// the sidecar).
+    /// A subpath relative to the anchor, or `"*"`; must match the on-disk `path` of the entry
+    /// being reversed.
     pub path: String,
-    /// When `true`, [`unprotect`] returns an error instead of a
-    /// warning when `path` is not currently restricted (no YAML
-    /// entry and no sidecar entry). For scripted callers that want
-    /// hard-fail-on-miss semantics. Default `false` preserves the
-    /// human-friendly warn-and-no-op behaviour.
+    /// Error instead of warn when `path` is not currently restricted.
     pub strict: bool,
 }
 
 impl UnprotectArgs {
-    /// Build a [`UnprotectArgs`] across the crate boundary. The
-    /// struct is `#[non_exhaustive]` so external callers cannot use
-    /// struct literals; this constructor preserves the API stability
-    /// guarantee.
+    /// Build an [`UnprotectArgs`] from outside the crate: the struct is `#[non_exhaustive]`, so
+    /// struct literals are unavailable there.
     #[must_use]
     pub const fn new(path: String) -> Self {
         Self {
@@ -55,7 +45,6 @@ impl UnprotectArgs {
         }
     }
 
-    /// Builder-style setter for [`UnprotectArgs::strict`].
     #[must_use]
     pub const fn with_strict(mut self, strict: bool) -> Self {
         self.strict = strict;
@@ -69,21 +58,15 @@ impl UnprotectArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct UnprotectOutcome {
-    /// Canonical absolute path that was unprotected. For the
-    /// wildcard form, the anchor root.
+    /// Canonical; for the wildcard form this is the anchor root.
     pub absolute_path: PathBuf,
     /// The directory holding `.claude/`.
     pub anchor: PathBuf,
-    /// Settings files the revert touched. Empty when no sidecar
-    /// entry existed.
+    /// Empty when no sidecar entry existed.
     pub claude_files_touched: Vec<PathBuf>,
-    /// Every rule string that was scrubbed from the settings files.
     pub rules_removed: Vec<String>,
-    /// Diagnostics — manual-edit detections, missing files, etc.
-    /// Empty on the clean-revert happy path.
+    /// Manual-edit detections and missing files; empty on a clean revert.
     pub warnings: Vec<String>,
-    /// `true` when a matching `permissions.trusted_roots[*].path` entry
-    /// existed in `.remargin.yaml` and was removed.
     pub yaml_entry_removed: bool,
 }
 

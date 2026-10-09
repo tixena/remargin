@@ -24,9 +24,7 @@ use crate::config::{ResolvedConfig, load_config_filtered_with_path, load_registr
 use crate::frontmatter::read_sandbox_entries;
 use crate::parser::{self, Comment, SandboxEntry};
 
-/// Uniform column names for every [`CompactChangeRow`], emitted once
-/// per response in the envelope's `change_cols` header. Columns a given
-/// kind lacks are `null` in that kind's row.
+/// Columns a change kind lacks are `null` in that kind's row.
 pub const CHANGE_COLS: [&str; 9] = [
     "ts",
     "kind",
@@ -45,26 +43,12 @@ pub const CHANGE_COLS: [&str; 9] = [
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct FileChanges {
-    /// One change per surfaced event (comment, ack, sandbox-add).
-    /// Sorted ts-ascending; ties broken by `kind` then by id /
-    /// `author` so the order is deterministic across runs.
+    /// Sorted by ts, then by kind, then by id or author.
     pub changes: Vec<Change>,
-    /// The cutoff that was actually applied when filtering this
-    /// file's changes. Mirrors what `gather_one_file` ran the
-    /// per-change `past_cutoff` predicate against. When the caller
-    /// passed an explicit `since`, every file shares that cutoff;
-    /// when `since` was `None`, this is the caller's last-action
-    /// timestamp (or `None` for the initial-touch fallback).
-    /// Surfaced so `--pretty` can announce the cutoff to the
-    /// reader and so JSON consumers can mirror it.
+    /// The explicit `since`, else the caller's last action in this file, else `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_applied: Option<DateTime<FixedOffset>>,
-    /// Latest ts across all changes in this file. Mirrors the max
-    /// of `changes[*].ts`; surfaced separately so the activity
-    /// summary view does not need to fold the changes vec.
     pub newest_ts: Option<DateTime<FixedOffset>>,
-    /// File path (canonical absolute, mirroring how the walker
-    /// emits it).
     pub path: PathBuf,
 }
 
@@ -78,8 +62,6 @@ pub struct FileChanges {
 #[serde(tag = "kind", rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Change {
-    /// An ack landed on a comment's roster after the cutoff. One
-    /// record per (comment, ack-author) pair.
     Ack {
         author: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,10 +69,7 @@ pub enum Change {
         comment_id: String,
         ts: DateTime<FixedOffset>,
     },
-    /// A comment was created (or, when `edited_at` is set, edited)
-    /// after the cutoff. The `ts` field carries
-    /// `max(ts, edited_at)` so consumers see the timestamp that
-    /// triggered the surface.
+    /// `ts` carries `max(ts, edited_at)`, the timestamp that surfaced the change.
     Comment {
         author: String,
         author_type: String,
@@ -102,8 +81,6 @@ pub enum Change {
         to: Vec<String>,
         ts: DateTime<FixedOffset>,
     },
-    /// A sandbox-roster entry landed (or refreshed) after the
-    /// cutoff. One record per (file, identity) pair.
     Sandbox {
         author: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,8 +142,6 @@ impl Change {
         }
     }
 
-    /// Carrying ts of the change. Drives both the per-file sort
-    /// and the per-file `newest_ts` fold.
     #[must_use]
     pub const fn ts(&self) -> DateTime<FixedOffset> {
         match self {
@@ -200,16 +175,9 @@ impl Change {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct ActivityResult {
-    /// `true` when the caller passed an explicit `since` cutoff;
-    /// `false` when the per-file caller-last-action default was
-    /// used. Drives the wording of the `--pretty` cutoff header
-    /// and JSON consumers can mirror the same distinction.
     pub cutoff_explicit: bool,
-    /// Files with at least one change. Sorted by path so the
-    /// output is deterministic.
+    /// Sorted by path.
     pub files: Vec<FileChanges>,
-    /// Max of every file's `newest_ts`. `None` when no file had
-    /// any change.
     pub newest_ts_overall: Option<DateTime<FixedOffset>>,
 }
 
@@ -253,7 +221,6 @@ pub struct CompactFileChanges {
     pub path: PathBuf,
 }
 
-/// Project one verbose [`Change`] onto its compact positional row.
 #[must_use]
 pub fn to_compact_row(change: &Change) -> CompactChangeRow {
     let ts = change.ts();
@@ -313,11 +280,8 @@ pub fn to_compact_row(change: &Change) -> CompactChangeRow {
     }
 }
 
-/// Build the full compact activity envelope from a verbose result.
-///
-/// Shape `{cutoff_explicit, newest_ts_overall, change_cols, files}`. Both
-/// the MCP surface (hardcoded) and CLI `--json --compact` route through
-/// this, then serialize minified.
+/// The compact activity envelope for a verbose result:
+/// `{cutoff_explicit, newest_ts_overall, change_cols, files}`.
 #[must_use]
 pub fn to_compact_activity(result: &ActivityResult) -> Value {
     let files: Vec<Value> = result.files.iter().map(to_compact_file).collect();
@@ -346,21 +310,15 @@ fn to_compact_file(file: &FileChanges) -> Value {
     Value::Object(obj)
 }
 
-/// Gather activity for `path` (file or directory) since `since`.
+/// Gathers the changes under `path` (a file or a directory) since `since`.
 ///
-/// The caller's identity drives the per-file initial-touch fallback
-/// when `since` is `None`: the cutoff for each file is the latest
-/// of the caller's own activity (comment authorship, ack, sandbox)
-/// in that file. When the caller has never acted, the cutoff is
-/// `None` and the function returns every change in the file.
+/// With no `since`, each file's cutoff is the caller's latest action in it, and a file the
+/// caller never touched returns every change.
 ///
 /// # Errors
 ///
-/// - `config` carries no identity.
-/// - `path` does not live under any `.remargin.yaml`-managed
-///   realm.
-/// - A strict realm covering `path` does not admit the caller.
-/// - I/O / parse failures from the walker or the markdown parser.
+/// Returns an error when `config` carries no identity, `path` is under no managed realm, a strict
+/// realm covering `path` does not admit the caller, or the walk or the parser fails.
 pub fn gather_activity(
     system: &dyn System,
     path: &Path,

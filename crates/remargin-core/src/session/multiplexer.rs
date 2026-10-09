@@ -6,7 +6,7 @@
 //! running its launch command, seeded by typing the slash-commands into the
 //! live TUI via the multiplexer's send-keys. remargin only *starts* the
 //! session — it writes no PID/registry file and never stops, reaps, or
-//! supervises what it launched (discussion decisions 3 & 5).
+//! supervises what it launched.
 //!
 //! The module splits cleanly into two halves so the interesting part is
 //! deterministic and unit-testable without spawning anything:
@@ -38,24 +38,19 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
-/// Placeholder tokens the herdr execution layer substitutes with the real ids
-/// parsed from herdr's JSON: `workspace_id` from `workspace create`, `tab_id`
-/// from `workspace create`'s default tab (identity 0) or each `tab create`
-/// (identities 1..N), and `pane_id` from each `agent start`.
+/// Placeholder tokens the execution layer replaces with the ids parsed from herdr's JSON: the
+/// workspace id, each tab id, and each agent's pane id.
 const HERDR_PANE_PLACEHOLDER: &str = "<PANE>";
 const HERDR_TAB_PLACEHOLDER: &str = "<TAB>";
 const HERDR_WORKSPACE_PLACEHOLDER: &str = "<WS>";
 
 /// `herdr wait agent-status --timeout` for the idle prompt, in milliseconds.
 const HERDR_IDLE_TIMEOUT_MS: u32 = 35_000;
-/// `herdr wait output --timeout` for the trust-dialog probe, in milliseconds.
-/// Best-effort: an already-trusted folder shows no dialog and this simply
-/// expires, so keep it short — the real readiness gate is `wait agent-status`.
+/// Short on purpose: an already-trusted folder shows no dialog and this probe simply expires.
 const HERDR_TRUST_TIMEOUT_MS: u32 = 10_000;
 
-/// Bounded readiness poll: at most this many `capture-pane` reads before
-/// seeding proceeds anyway. With [`READINESS_POLL`] this caps the wait near
-/// ten seconds per tab.
+/// With [`READINESS_POLL`] this caps the wait near ten seconds per tab; seeding then proceeds
+/// anyway.
 const READINESS_MAX_POLLS: u32 = 40;
 /// Delay between readiness polls and after dismissing the trust dialog.
 const READINESS_POLL: Duration = Duration::from_millis(250);
@@ -128,19 +123,15 @@ impl Multiplexer {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Tab {
-    /// Working directory the tab launches in.
     pub cwd: PathBuf,
-    /// Identity governing the tab; also the tab/window name.
+    /// Also the tab or window name.
     pub identity: String,
-    /// Interactive launch argv (`claude …`) run as the tab's command.
     pub launch_argv: Vec<String>,
     /// Slash-command lines typed into the live session (`/loop …`, `/goal …`).
     pub seed_inputs: Vec<String>,
 }
 
 impl Tab {
-    /// Assemble a tab from its identity, working directory, launch argv, and
-    /// seed lines.
     #[must_use]
     pub const fn new(
         identity: String,
@@ -185,7 +176,7 @@ pub struct TmuxTabSeed {
 pub struct TmuxPlan {
     /// `new-session` (first tab) then one `new-window` per further tab.
     pub launch: Vec<Vec<String>>,
-    /// Per-tab seed choreography, in tab order.
+    /// In tab order.
     pub tabs: Vec<TmuxTabSeed>,
 }
 
@@ -200,9 +191,8 @@ pub struct TmuxPlan {
 pub struct HerdrPlan {
     /// `herdr workspace create …` for the named session.
     pub create_workspace: Vec<String>,
-    /// Per tab, in order: optional `tab create`, `agent start`, and wait/seed
-    /// choreography. One tab per identity — identity 0 reuses the workspace's
-    /// default tab; identities 1..N create their own.
+    /// One tab per identity, in order. Identity 0 reuses the workspace's default tab; the others
+    /// create their own.
     pub tabs: Vec<HerdrTabPlan>,
 }
 
@@ -210,28 +200,20 @@ pub struct HerdrPlan {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct HerdrTabPlan {
-    /// `herdr agent start <identity> --tab <TAB> --cwd <cwd> --no-focus
-    /// -- <launch_argv>`. `<TAB>` is resolved from the workspace's default tab
-    /// (identity 0) or this tab's [`Self::tab_create`] JSON (identities 1..N).
+    /// `herdr agent start <identity> --tab <TAB> --cwd <cwd> --no-focus -- <launch_argv>`.
     pub agent_start: Vec<String>,
-    /// `herdr pane send-keys <PANE> enter` — accepts the workspace-trust
-    /// dialog. Sent only when [`Self::wait_trust`] actually matched; on an
-    /// already-trusted folder the dialog never appears and this is skipped.
+    /// Accepts the workspace-trust dialog; sent only when [`Self::wait_trust`] matched.
     pub dismiss_trust_enter: Vec<String>,
-    /// Identity governing the tab; also the herdr agent name.
+    /// Also the herdr agent name.
     pub identity: String,
     /// Ordered seed commands: for each seed line, `herdr agent send <identity>
     /// <line>` then `herdr pane send-keys <PANE> enter`.
     pub seed: Vec<Vec<String>>,
-    /// `herdr tab create --workspace <WS> --cwd <cwd> --label <identity>
-    /// --no-focus` for identities 1..N. Empty for identity 0, which reuses the
-    /// workspace's default tab so no empty leftover pane is created.
+    /// Empty for identity 0, which reuses the workspace's default tab.
     pub tab_create: Vec<String>,
     /// Required readiness gate: `herdr wait agent-status <PANE> --status idle`.
     pub wait_idle: Vec<String>,
-    /// Best-effort trust probe: `herdr wait output <PANE> --match trust`. A
-    /// timeout here means the folder was already trusted (no dialog appeared) —
-    /// it is NOT fatal; the launch proceeds to [`Self::wait_idle`] regardless.
+    /// Best-effort trust probe; a timeout means the folder was already trusted and is not fatal.
     pub wait_trust: Vec<String>,
 }
 
@@ -262,21 +244,25 @@ struct HerdrWorkspace {
     workspace_id: String,
 }
 
+/// The `result` of a `herdr agent start` response.
 #[derive(Debug, Deserialize)]
 struct HerdrAgentResult {
     agent: HerdrAgent,
 }
 
+/// A `herdr agent start` response.
 #[derive(Debug, Deserialize)]
 struct HerdrAgentStarted {
     result: HerdrAgentResult,
 }
 
+/// A `herdr pane list` response.
 #[derive(Debug, Deserialize)]
 struct HerdrPaneList {
     result: HerdrPaneListResult,
 }
 
+/// The `result` of a `herdr pane list` response.
 #[derive(Debug, Deserialize)]
 struct HerdrPaneListResult {
     panes: Vec<HerdrPaneEntry>,
@@ -289,21 +275,25 @@ struct HerdrRootPane {
     tab_id: String,
 }
 
+/// A `herdr tab create` response.
 #[derive(Debug, Deserialize)]
 struct HerdrTabCreated {
     result: HerdrTabResult,
 }
 
+/// The `result` of a `herdr tab create` response.
 #[derive(Debug, Deserialize)]
 struct HerdrTabResult {
     tab: HerdrTab,
 }
 
+/// A `herdr workspace create` response.
 #[derive(Debug, Deserialize)]
 struct HerdrWorkspaceCreated {
     result: HerdrWorkspaceResult,
 }
 
+/// The `result` of a `herdr workspace create` response.
 #[derive(Debug, Deserialize)]
 struct HerdrWorkspaceResult {
     root_pane: HerdrRootPane,
@@ -741,10 +731,8 @@ fn run_herdr_plan(session_name: &str, tabs: &[Tab]) -> Result<()> {
         let agent_start = substitute(&tab.agent_start, HERDR_TAB_PLACEHOLDER, &tab_id);
         let agent_json = capture_json(&agent_start)?;
         let pane_id = parse_pane_id(&agent_json)?;
-        // The trust dialog only appears on the first launch in an untrusted
-        // folder. Probe for it best-effort: if it shows, dismiss it; if the
-        // probe times out (already trusted), do NOT fail the launch — an early
-        // draft did, which aborted every later agent. Readiness is `wait_idle`.
+        // The trust dialog appears only on a first launch in an untrusted folder. A probe timeout
+        // means already trusted and must not fail the launch; readiness is `wait_idle`.
         if run_command_ok(&substitute(
             &tab.wait_trust,
             HERDR_PANE_PLACEHOLDER,
@@ -764,10 +752,8 @@ fn run_herdr_plan(session_name: &str, tabs: &[Tab]) -> Result<()> {
         for argv in &tab.seed {
             run_command(&substitute(argv, HERDR_PANE_PLACEHOLDER, &pane_id))?;
         }
-        // `agent start --tab` splits a NEW pane for the agent, leaving the
-        // tab's original pane empty. Close every non-agent pane in the tab so
-        // each tab holds only its agent. Best-effort: cosmetic cleanup that
-        // must never abort a launch whose agents are already up.
+        // `agent start --tab` splits a new pane and leaves the tab's original pane empty; close it.
+        // Best-effort: this cleanup must never abort a launch whose agents are up.
         close_stray_panes(&workspace_id, &tab_id, &pane_id);
     }
     Ok(())

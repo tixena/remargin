@@ -26,7 +26,6 @@ fn target_of<'link>(links: &'link [Link], target: &str) -> &'link Link {
     links.iter().find(|l| l.target == target).unwrap()
 }
 
-// 1. Three distinct resolvable wikilinks → three entries.
 #[test]
 fn three_distinct_wikilinks_three_entries() {
     let sys = vault(&[
@@ -41,7 +40,6 @@ fn three_distinct_wikilinks_three_entries() {
     assert_eq!(target_of(&links, "Beta").count, 1);
 }
 
-// 2. Same target ×3 → one entry, count 3, lines length 3.
 #[test]
 fn same_target_thrice_one_entry_count_three() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -56,7 +54,6 @@ fn same_target_thrice_one_entry_count_three() {
     assert_eq!(link.lines[2], 3);
 }
 
-// 3. Broken internal link → omitted entirely.
 #[test]
 fn broken_internal_link_omitted() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -66,7 +63,6 @@ fn broken_internal_link_omitted() {
     assert_eq!(links[0].target, "Alpha");
 }
 
-// 4. External URL dropped entirely (local links only).
 #[test]
 fn external_url_dropped() {
     let sys = vault(&[]);
@@ -78,19 +74,16 @@ fn external_url_dropped() {
     );
 }
 
-// 5. Link inside a code fence → not detected.
 #[test]
 fn link_in_code_fence_not_detected() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
     let body = "```\n[[Alpha]]\n```\n[[Alpha]]";
     let links = run(body, &sys);
-    // Only the out-of-fence occurrence counts.
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].count, 1);
     assert_eq!(links[0].lines[0], 4);
 }
 
-// 5b. Link inside an inline code span → not detected.
 #[test]
 fn link_in_inline_code_not_detected() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -100,7 +93,6 @@ fn link_in_inline_code_not_detected() {
     assert_eq!(links[0].count, 1);
 }
 
-// 6. Wikilink with alias → alias set.
 #[test]
 fn wikilink_alias_set() {
     let sys = vault(&[("Budget Model.md", "# Budget Model")]);
@@ -111,7 +103,6 @@ fn wikilink_alias_set() {
     assert_eq!(links[0].alias.as_deref(), Some("the model"));
 }
 
-// 7. Frontmatter up / related → detected.
 #[test]
 fn frontmatter_up_related_detected() {
     let sys = vault(&[
@@ -132,7 +123,6 @@ fn frontmatter_up_related_detected() {
     );
 }
 
-// 8. Embed of a resolvable image → path set.
 #[test]
 fn embed_image_resolvable_path_set() {
     let sys = vault(&[("diagram.png", "PNGDATA")]);
@@ -141,26 +131,19 @@ fn embed_image_resolvable_path_set() {
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].target, "diagram.png");
     assert_eq!(links[0].path.as_deref(), Some("diagram.png"));
-    // Non-markdown target → no title.
     assert!(links[0].title.is_none());
 }
 
-// 9. Sliced read → references slice-relative.
-//
-// The caller (get_with_links) slices and feeds the slice text in; here we
-// emulate by passing only the slice's lines so reference lines start at 1
-// for the slice's first line.
+/// Passing only the slice's lines emulates a sliced read: reference lines start at 1.
 #[test]
 fn sliced_references_are_slice_relative() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
-    // Slice text: two lines, link on the second.
     let slice = "intro line\nsee [[Alpha]]";
     let links = run(slice, &sys);
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].lines[0], 2);
 }
 
-// 10. One-hop title → title equals the target doc's own title.
 #[test]
 fn one_hop_title_from_target() {
     let sys = vault(&[(
@@ -173,7 +156,6 @@ fn one_hop_title_from_target() {
     assert_eq!(links[0].title.as_deref(), Some("Q3 revenue model"));
 }
 
-// 10b. Title falls back to first heading when no frontmatter title.
 #[test]
 fn title_falls_back_to_heading() {
     let sys = vault(&[("Notes.md", "# Real Heading\n\nbody")]);
@@ -182,20 +164,16 @@ fn title_falls_back_to_heading() {
     assert_eq!(links[0].title.as_deref(), Some("Real Heading"));
 }
 
-// 11. Dedup / references correctness across mixed syntaxes for one target.
 #[test]
 fn dedup_across_mixed_syntaxes() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
     let body = "[[Alpha]] then [Alpha](Alpha.md) then [[Alpha|nick]]";
     let links = run(body, &sys);
-    // `Alpha` (wikilink) and `Alpha.md` (md-link) are distinct targets by
-    // text: wikilinks carry no extension, md-links carry the file name.
     let alpha = target_of(&links, "Alpha");
     assert_eq!(alpha.count, 2);
     assert_eq!(alpha.lines.len(), 2);
 }
 
-// 12. Heading / block / anchor handling.
 #[test]
 fn heading_and_block_suffixes_resolve_to_note() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -206,7 +184,6 @@ fn heading_and_block_suffixes_resolve_to_note() {
     assert_eq!(links[0].count, 2);
 }
 
-// 12b. Pure self-anchors are not outbound links.
 #[test]
 fn self_anchor_not_a_link() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -215,7 +192,6 @@ fn self_anchor_not_a_link() {
     assert_eq!(links, [] as [Link; 0]);
 }
 
-// Autolinks and bare URLs are external → dropped.
 #[test]
 fn autolink_and_bare_url_dropped() {
     let sys = vault(&[]);
@@ -227,7 +203,6 @@ fn autolink_and_bare_url_dropped() {
     );
 }
 
-// A reference link resolving to an external URL is dropped.
 #[test]
 fn external_reference_link_dropped() {
     let sys = vault(&[]);
@@ -239,7 +214,6 @@ fn external_reference_link_dropped() {
     );
 }
 
-// A reference link with no matching definition is dropped.
 #[test]
 fn reference_link_without_definition_dropped() {
     let sys = vault(&[]);
@@ -248,7 +222,6 @@ fn reference_link_without_definition_dropped() {
     assert_eq!(links, [] as [Link; 0]);
 }
 
-// Markdown image with resolvable internal source → path set.
 #[test]
 fn md_image_internal_resolvable() {
     let sys = vault(&[("pic.png", "PNG")]);
@@ -259,8 +232,6 @@ fn md_image_internal_resolvable() {
     assert_eq!(links[0].path.as_deref(), Some("pic.png"));
 }
 
-// One resolvable internal link amid five external links → only the
-// internal one survives, and it carries a real path.
 #[test]
 fn mixed_local_and_external_returns_only_local() {
     let sys = vault(&[("Alpha.md", "# Alpha")]);
@@ -273,8 +244,6 @@ fn mixed_local_and_external_returns_only_local() {
     assert_eq!(links[0].path.as_deref(), Some("Alpha.md"));
 }
 
-// An external target repeated three times creates no entry at all (no
-// entry, no references).
 #[test]
 fn repeated_external_target_creates_no_entry() {
     let sys = vault(&[]);
@@ -283,11 +252,8 @@ fn repeated_external_target_creates_no_entry() {
     assert!(links.is_empty(), "repeated external is absent: {links:?}");
 }
 
-// `alias` / `title` keys are omitted (not null) when absent; present when
-// the link supplies them.
 #[test]
 fn null_optional_fields_omitted_from_json() {
-    // Internal link, no alias, target with no title → alias + title absent.
     let sys = vault(&[("Plain.md", "no heading, no frontmatter")]);
     let links = run("[[Plain]]", &sys);
     let json = serde_json::to_value(&links[0]).unwrap();
@@ -296,7 +262,6 @@ fn null_optional_fields_omitted_from_json() {
     assert!(!map.contains_key("title"), "absent title omitted: {json}");
     assert!(map.contains_key("path"), "path is always present: {json}");
 
-    // Aliased link to a titled target → both keys present.
     let sys2 = vault(&[("Beta.md", "---\ntitle: Beta Doc\n---\n# H")]);
     let links2 = run("[[Beta|nick]]", &sys2);
     let json2 = serde_json::to_value(&links2[0]).unwrap();
@@ -305,8 +270,6 @@ fn null_optional_fields_omitted_from_json() {
     assert_eq!(map2["title"], "Beta Doc");
 }
 
-// `skip_serializing_if` only affects output: a Link with `None` fields
-// round-trips back to `None`.
 #[test]
 fn link_with_none_fields_round_trips() {
     let sys = vault(&[("Plain.md", "no heading")]);
@@ -321,9 +284,6 @@ fn link_with_none_fields_round_trips() {
     assert!(back.title.is_none());
 }
 
-// `to_compact_rows` projects verbose links onto `[alias, lines, target,
-// title]`, dropping the derivable `count` / `path` columns; `LINK_COLS`
-// names the four survivors in order.
 #[test]
 fn compact_rows_drop_count_and_path() {
     let sys = vault(&[
@@ -343,13 +303,10 @@ fn compact_rows_drop_count_and_path() {
     let (plain_alias, plain_lines, _, plain_title) = rows.iter().find(|r| r.2 == "Plain").unwrap();
     assert_eq!(*plain_alias, None);
     assert_eq!(*plain_title, None);
-    // Both occurrences on line 1: the dropped `count` was `lines.len()`.
     assert_eq!(plain_lines, &vec![1, 1]);
 }
 
-// The compact row drops `path`; it is derivable from `target` — verbatim
-// when the target has a file extension, else `target + ".md"`. Confirm the
-// derived value matches the verbose `path` the resolver produced.
+/// `path` is derivable from `target`: verbatim with a file extension, else `target + ".md"`.
 #[test]
 fn compact_row_path_derivable_from_target() {
     let sys = vault(&[("Note.md", "# Note"), ("img.png", "fakebytes")]);
@@ -367,10 +324,7 @@ fn compact_row_path_derivable_from_target() {
     assert!(rows.iter().any(|r| r.2 == "img.png"));
 }
 
-// Codegen contract: the compact-links row alias renders its `Option`
-// tuple columns as nullable in both TS and Zod (relies on the pinned
-// tixschema that maps `Option` in tuple-element position to nullable),
-// and the compact-links payload carries the row type by reference.
+/// The row alias renders its `Option` tuple columns as nullable in TypeScript and Zod.
 #[test]
 fn compact_links_schema_renders_nullable_columns() {
     let row_ts = super::compact_link_row_schema::Schema::ts_definition();

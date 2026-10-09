@@ -1,3 +1,5 @@
+/** Tests for the reading-mode post-processor and the render child it mounts per comment block. */
+
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
@@ -35,15 +37,12 @@ interface MockCodeElement {
   parentElement: MockPreElement;
 }
 
+/** A stand-in for the widget's host element. */
 interface MockHost {
   className: string;
   dataset: Record<string, string>;
-  // The post-processor pre-hides the host via `host.style.display = "none"`
-  // and `render()` un-hides via `style.display = ""`, so the mock must
-  // carry a real (mutable) style bag.
+  /** Mutable: the post-processor hides the host through it and `render()` un-hides it. */
   style: Record<string, string>;
-  // Placeholder so tests that need to dispatch a click can attach a
-  // listener after the post-processor mounts the React root.
   __clickHandlers: Array<(event: unknown) => void>;
   addEventListener(event: string, handler: (event: unknown) => void): void;
   click(): void;
@@ -102,6 +101,7 @@ function makeEl(codes: MockCodeElement[]): HTMLElement {
   } as unknown as HTMLElement;
 }
 
+/** Mock post-processor context that records the children added to it. */
 interface MockCtx extends MarkdownPostProcessorContext {
   __children: unknown[];
 }
@@ -120,6 +120,7 @@ function makeCtx(sourcePath = "notes/test.md"): MockCtx {
   return ctx as unknown as MockCtx;
 }
 
+/** The slice of the plugin the reading-mode code touches, with an in-memory vault. */
 interface MockPlugin {
   settings: { editorWidgets: boolean };
   collapseState: CollapseState;
@@ -174,13 +175,7 @@ function makePlugin(editorWidgets: boolean): MockPlugin {
   return plugin;
 }
 
-/**
- * A well-formed remargin block as it appears inside `<pre><code>` in
- * reading mode — i.e. AFTER markdown rendering has stripped the outer
- * `` ``` `` fences. This is exactly the shape `code.textContent` returns
- * in production. The post-processor delegates to `parseFromInnerContent`,
- * which re-wraps before parsing.
- */
+// As `code.textContent` returns it in reading mode: the renderer has stripped the outer fences.
 const VALID_BLOCK = [
   "---",
   "id: c1",
@@ -209,19 +204,8 @@ const INVALID_BLOCK_NO_ID = [
   "no id here",
 ].join("\n");
 
-/**
- * A fixture whose synthesized-fence wrap (see `parseFromInnerContent`)
- * yields TWO complete blocks, exercising the post-processor's
- * `parsed.length !== 1` guard. The shape: bare YAML+content for block
- * one, then a literal closing fence `` ``` `` (which the wrapper's outer
- * `` ```remargin `` opener will close on), then a second `` ```remargin ``
- * fence introducing block two. The wrapper appends its own closing
- * fence after this body, but block two has already self-closed before
- * that.
- *
- * In practice this is a malformed `<pre><code>` body and isn't expected
- * in real usage; the test is here to lock in the guard's behaviour.
- */
+// Wrapped in the synthesized fence this yields TWO complete blocks, which exercises the
+// `parsed.length !== 1` guard. A malformed body, not expected in real usage.
 const TWO_BLOCKS_IN_ONE_FENCE = [
   "---",
   "id: c1",
@@ -242,17 +226,11 @@ const TWO_BLOCKS_IN_ONE_FENCE = [
   "```",
 ].join("\n");
 
-/**
- * Override the `document` global so the post-processor's
- * `document.createElement("div")` call returns a controllable mock.
- * Restored in `afterEach`.
- */
+// `document` is replaced so the post-processor's `createElement("div")` returns a mock.
 let originalDocument: typeof globalThis.document | undefined;
 const createdHosts: MockHost[] = [];
 
 beforeEach(() => {
-  // Stash any pre-existing global document so the harness can be
-  // composed with future DOM-providing test runners without surprise.
   originalDocument = (globalThis as { document?: typeof globalThis.document }).document;
   createdHosts.length = 0;
   (globalThis as { document?: unknown }).document = {
@@ -273,10 +251,6 @@ afterEach(() => {
 });
 
 describe("parseFromInnerContent", () => {
-  // The helper accepts the bare YAML+content shape that
-  // `<pre><code class="language-remargin">…</code></pre>` exposes via
-  // `code.textContent` (markdown rendering strips the outer fences)
-  // and returns exactly one valid parsed block.
   it("test #2-helper: bare YAML+content (no fences) → exactly one valid block", () => {
     const inner = [
       "---",
@@ -297,8 +271,6 @@ describe("parseFromInnerContent", () => {
 });
 
 describe("remarginPostProcessor", () => {
-  // AC: When `editorWidgets === false`, the post-processor is a no-op
-  // (raw <pre> stays).
   it("test #1: setting off → leaves <pre> untouched and skips addChild", () => {
     const plugin = makePlugin(false);
     const code = makeCode(VALID_BLOCK);
@@ -312,8 +284,6 @@ describe("remarginPostProcessor", () => {
     assert.equal(ctx.__children.length, 0, "ctx.addChild must NOT be called");
   });
 
-  // AC: When `editorWidgets === true` and the block is well-formed, the
-  // <pre> is replaced with a host element containing the React tree.
   it("test #2: valid block → <pre> replaced; host has data-remargin-id; addChild fires once", () => {
     const plugin = makePlugin(true);
     const code = makeCode(VALID_BLOCK);
@@ -326,10 +296,7 @@ describe("remarginPostProcessor", () => {
     assert.equal(code.parentElement.replaced, true, "<pre> must be replaced");
     assert.equal(createdHosts.length, 1, "exactly one host element should be created");
     const host = createdHosts[0];
-    // Host className must carry both the structural class AND
-    // `remargin-container` so Tailwind utilities scoped via
-    // tailwind.config.ts's `important: ".remargin-container"` apply
-    // inside the widget.
+    // `remargin-container` is what scopes the Tailwind utilities inside the widget.
     assert.ok(
       host.className.split(/\s+/).includes("remargin-reading-host"),
       `expected host className to include remargin-reading-host, got: "${host.className}"`
@@ -347,7 +314,6 @@ describe("remarginPostProcessor", () => {
     );
   });
 
-  // AC: When the block is malformed (parser returns valid: false), skip.
   it("test #3: invalid block (missing id) → <pre> untouched, addChild skipped", () => {
     const plugin = makePlugin(true);
     const code = makeCode(INVALID_BLOCK_NO_ID);
@@ -361,9 +327,6 @@ describe("remarginPostProcessor", () => {
     assert.equal(ctx.__children.length, 0, "ctx.addChild must NOT be called");
   });
 
-  // AC: When the parser returns >1 blocks for the fence (length !== 1),
-  // skip. (Two `````remargin` fences nested inside one `<pre>` is the
-  // structural shape we guard against here.)
   it("test #4: parser returns multiple blocks → <pre> untouched", () => {
     const plugin = makePlugin(true);
     const code = makeCode(TWO_BLOCKS_IN_ONE_FENCE);
@@ -377,9 +340,7 @@ describe("remarginPostProcessor", () => {
     assert.equal(ctx.__children.length, 0, "ctx.addChild must NOT be called");
   });
 
-  // Pre-hide must reserve layout height (visibility), not collapse the
-  // section (display:none) — a zero-height section stalls Obsidian's
-  // incremental reading-mode renderer.
+  // A zero-height (display:none) section stalls Obsidian's incremental reading-mode renderer.
   it("test #5b: valid block → host pre-hidden via visibility, not display:none", () => {
     const plugin = makePlugin(true);
     const code = makeCode(VALID_BLOCK);
@@ -394,8 +355,6 @@ describe("remarginPostProcessor", () => {
     assert.notEqual(host.style.display, "none", "host must NOT be collapsed via display:none");
   });
 
-  // AC: Multiple separate <pre> elements in the same DOM root are each
-  // handled independently.
   it("test #5: two separate <pre> elements → both replaced; addChild fires twice", () => {
     const plugin = makePlugin(true);
     const codeA = makeCode(VALID_BLOCK);
@@ -416,13 +375,9 @@ describe("remarginPostProcessor", () => {
 });
 
 describe("ReadingModeCommentChild", () => {
-  // AC: onload mounts a React root + subscribes to collapseState; onunload
-  // unsubscribes and unmounts.
   it("test #6: onload mounts a root and subscribes; onunload unsubscribes and unmounts", async () => {
     const plugin = makePlugin(true);
 
-    // Track every collapseState subscription so we can verify onload
-    // registered one and onunload tore it down.
     let listenerRegistered = false;
     let unsubscribed = false;
     const realSubscribe = plugin.collapseState.subscribe.bind(plugin.collapseState);
@@ -435,17 +390,9 @@ describe("ReadingModeCommentChild", () => {
       };
     };
 
-    // Build the parsed block by running the helper that re-wraps
-    // bare YAML+content with synthesized fences (matching the production
-    // call site in `remarginPostProcessor`). If the parser's output
-    // shape changes incompatibly, this test should break loudly rather
-    // than silently miscoerce.
     const parsed = parseFromInnerContent(VALID_BLOCK)[0];
     assert.ok(parsed?.valid, "test fixture must be a valid block");
 
-    // Inject a fake `createRoot` so we don't need a real DOM. The mock
-    // tracks render and unmount calls; that's the only behaviour the
-    // AC requires us to verify.
     let renderCalls = 0;
     let unmountCalls = 0;
     const fakeRoot = {
@@ -484,20 +431,12 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // AC: Toggling collapse re-renders only the matching child.
   it("test #7: collapseState toggle re-renders only the matching id", async () => {
     const plugin = makePlugin(true);
-    // VALID_BLOCK / VALID_BLOCK_2 are bare YAML+content (matching the
-    // shape Obsidian's renderer hands the post-processor); use the
-    // helper so they pass through the same fence-synthesis path as
-    // production. See note on test #6.
     const parsedA = parseFromInnerContent(VALID_BLOCK)[0];
     const parsedB = parseFromInnerContent(VALID_BLOCK_2)[0];
 
-    // Spy on every render so we can assert per-child render counts.
-    // Each child gets its own fake root — `__setCreateRootForTests`
-    // is a single global, so we install a factory that hands out a
-    // fresh tracked root per call.
+    // `__setCreateRootForTests` is one global, so the factory hands out a tracked root per call.
     const renderCounts: number[] = [];
     const unmountCounts: number[] = [];
     let nextIndex = -1;
@@ -550,15 +489,10 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // AC: Click on the host fires plugin.focusComment(id, sourcePath).
   it("test #8: widget onClick prop forwards to plugin.focusComment(id, sourcePath)", async () => {
     const plugin = makePlugin(true);
     const parsed = parseFromInnerContent(VALID_BLOCK)[0];
 
-    // Capture the React element the child renders so we can fish out
-    // the wired `onClick` prop and invoke it directly. The render tree
-    // is `WidgetProviders > WidgetCommentThread` — the thread component
-    // carries the `onClick` prop directly.
     let capturedOnClick: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
@@ -587,9 +521,7 @@ describe("ReadingModeCommentChild", () => {
         plugin as unknown as RemarginPlugin
       );
       child.onload();
-      // The first render now happens after loadTree resolves (or its
-      // sourcePath fallback fires for the unmocked vault file). Drain
-      // microtasks so the render fires before we assert.
+      // The first render waits on `loadTree`, so microtasks are drained before asserting.
       await new Promise((r) => setTimeout(r, 0));
 
       assert.ok(capturedOnClick, "expected the rendered widget to receive an onClick prop");
@@ -602,11 +534,7 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // The rendered React element must be a `WidgetProviders` wrapping
-  // the thread block (a <div> containing toolbar + thread), and
-  // `WidgetProviders` must receive the plugin + host as its portal
-  // container. Without the wrapper, mounting crashes with
-  // "useBackend must be used within a BackendContext.Provider".
+  // Without the wrapper the mount throws: "useBackend must be used within a BackendContext.Provider".
   it("test #9: render wraps the thread block in WidgetProviders with plugin + host", async () => {
     const plugin = makePlugin(true);
     const parsed = parseFromInnerContent(VALID_BLOCK)[0];
@@ -634,8 +562,6 @@ describe("ReadingModeCommentChild", () => {
         plugin as unknown as RemarginPlugin
       );
       child.onload();
-      // First render happens after loadTree resolves (or its
-      // sourcePath fallback fires). Drain microtasks before asserting.
       await new Promise((r) => setTimeout(r, 0));
 
       const wrapper = capturedElement as {
@@ -665,9 +591,6 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // AC: when the doc contains a reply whose parent is the block being
-  // rendered, the parent's host re-renders with the reply nested as
-  // `root.replies`. Mirrors the Live Preview cross-block tree behaviour.
   it("test #10: parent block renders nested reply once cachedRead resolves", async () => {
     const plugin = makePlugin(true);
     plugin.__vaultFiles.set(
@@ -697,8 +620,6 @@ describe("ReadingModeCommentChild", () => {
       ].join("\n")
     );
 
-    // The render call captures the latest WidgetCommentThread root prop
-    // so we can assert post-resolution shape (replies populated).
     const captured: Array<{ id: string; replyIds: string[] }> = [];
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
@@ -732,12 +653,9 @@ describe("ReadingModeCommentChild", () => {
       );
       child.onload();
 
-      // Drain microtasks so the awaited cachedRead resolves and
-      // `loadTree` runs its post-await render.
       await new Promise((r) => setTimeout(r, 0));
 
-      // First render is the leaf-only first paint; the second is the
-      // post-resolve render with replies populated.
+      // The first render is the leaf-only first paint; the second has the replies populated.
       const last = captured[captured.length - 1];
       assert.ok(last, "expected at least one render after cachedRead resolved");
       assert.equal(last.id, "c1", "post-resolve render keeps the parent root");
@@ -749,9 +667,7 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // AC: a block whose comment is a reply with parent in the same doc
-  // renders NOTHING — the parent's host owns it. The host is hidden so
-  // it doesn't reserve vertical space.
+  // The parent's host owns the reply, and the reply's own host is hidden so it reserves no space.
   it("test #11: reply block whose parent is in the doc is suppressed (host hidden, root unmounted)", async () => {
     const plugin = makePlugin(true);
     plugin.__vaultFiles.set(
@@ -791,13 +707,9 @@ describe("ReadingModeCommentChild", () => {
       },
     })) as unknown as Parameters<typeof __setCreateRootForTests>[0]);
 
-    // Run the deferred collapse synchronously so the suppression
-    // assertions below observe the collapsed state.
     __setDeferCollapseForTests((cb) => cb());
 
     try {
-      // Build the parsed block for c2 so the child believes it's
-      // rendering the reply chunk.
       const c2Inner = [
         "---",
         "id: c2",
@@ -836,12 +748,8 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // AC: an orphan reply (parent NOT present in the doc) is promoted to
-  // a top-level root by buildThreadTree, so the reading-mode host
-  // renders it as a leaf rather than suppressing it.
   it("test #12: orphan reply (parent missing from doc) renders as a leaf root", async () => {
     const plugin = makePlugin(true);
-    // Doc contains ONLY the reply — its parent (c1) is missing.
     plugin.__vaultFiles.set(
       "notes/orphan.md",
       [
@@ -914,11 +822,8 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // Regression: a same-doc reply must NOT collapse to display:none during
-  // the render pass — that zero-height section stalls Obsidian's
-  // incremental renderer and trailing content stops painting. The collapse
-  // is deferred until after the pass; until then the host stays painted
-  // (visibility:hidden, reserving height).
+  // A same-doc reply must not collapse to display:none during the render pass: a zero-height
+  // section stalls Obsidian's incremental renderer and trailing content stops painting.
   it("test #13: suppressed reply defers its collapse past the render pass", async () => {
     const plugin = makePlugin(true);
     plugin.__vaultFiles.set(
@@ -948,8 +853,7 @@ describe("ReadingModeCommentChild", () => {
       ].join("\n")
     );
 
-    // Capture the deferred collapse instead of running it, so we can
-    // observe host state DURING the render window vs AFTER.
+    // The deferred collapse is captured, not run, to compare host state during and after the pass.
     let deferred: (() => void) | null = null;
     __setDeferCollapseForTests((cb) => {
       deferred = cb;
@@ -987,12 +891,10 @@ describe("ReadingModeCommentChild", () => {
       child.onload();
       await new Promise((r) => setTimeout(r, 0));
 
-      // During the render window: scheduled but NOT yet collapsed.
       assert.ok(deferred, "a collapse must be scheduled");
       assert.notEqual(host.style.display, "none", "must NOT collapse mid-render");
       assert.equal(unmountCalls, 0, "root must not be unmounted before the deferred pass");
 
-      // After the pass completes, the deferred collapse runs.
       (deferred as unknown as () => void)();
       assert.equal(host.style.display, "none", "collapses after the render pass");
       assert.equal(unmountCalls, 1, "root unmounted after the deferred pass");

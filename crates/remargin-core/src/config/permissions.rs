@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use self::op_name::OpName;
 
+/// One `deny_ops` entry as written: a path and the ops denied on it.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -19,6 +20,7 @@ pub struct DenyOpsEntry {
     pub path: String,
 }
 
+/// One denied op: a bare op name, or a record that also lists exempt identities.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 #[non_exhaustive]
@@ -27,6 +29,7 @@ pub enum DenyOpsItem {
     Full(DenyOpsItemFull),
 }
 
+/// The record form of a denied op: the op and the identities exempt from the deny.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -82,6 +85,7 @@ impl DenyOpsItem {
     }
 }
 
+/// The `permissions:` block of one `.remargin.yaml`, as written.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -89,19 +93,15 @@ pub struct Permissions {
     #[serde(default)]
     pub allow_dot_folders: Vec<String>,
 
-    /// Folder-level CLI policy. `None` = not declared at this level
-    /// (inherit from parent walk). `Some(true)` = CLI allowed.
-    /// `Some(false)` = CLI denied. Resolved with nearest-wins
-    /// semantics; effective default when absent everywhere = denied.
+    /// `None` inherits from the parent walk; denied when no level declares it.
     #[serde(default)]
     pub cli_allowed: Option<bool>,
 
     #[serde(default)]
     pub deny_ops: Vec<DenyOpsEntry>,
 
-    /// `None` = falls back to cwd. `Some(vec![])` = locked realm, deny
-    /// everything outside inherited parent roots. `Some(non-empty)` =
-    /// exactly those paths reachable. `"*"` = entire declaring realm.
+    /// `None` falls back to cwd, `[]` locks the realm, a non-empty list names exactly the reachable
+    /// paths, and `"*"` is the whole declaring realm.
     #[serde(default)]
     pub trusted_roots: Option<Vec<TrustedRootEntry>>,
 }
@@ -115,6 +115,7 @@ pub enum TrustedRootEntry {
     Path(String),
 }
 
+/// The record form of a `trusted_roots` entry.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -122,8 +123,7 @@ pub struct TrustedRootEntryFull {
     #[serde(default)]
     pub also_deny_bash: Vec<String>,
 
-    /// Suppress the projected `Bash(remargin *)` deny so the CLI stays
-    /// usable inside this entry.
+    /// Suppresses the projected `Bash(remargin *)` deny inside this entry.
     #[serde(default)]
     pub cli_allowed: bool,
 

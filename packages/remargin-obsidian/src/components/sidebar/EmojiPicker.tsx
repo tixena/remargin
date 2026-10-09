@@ -1,3 +1,5 @@
+/** The reaction emoji picker. */
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -5,18 +7,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 
+/** Props for {@link EmojiPicker}. */
 export interface EmojiPickerProps {
-  /** Invoked with the chosen emoji (unicode character). */
   onPick: (emoji: string) => void;
-  /** Disable the trigger when the underlying comment is not yet persisted. */
   disabled?: boolean;
 }
 
-/**
- * Curated set of common reaction emojis. A full emoji-mart integration is
- * deferred — for P2 reactions this short list covers the everyday cases
- * without dragging a multi-megabyte picker into the Obsidian bundle.
- */
+/** A short curated list, so no multi-megabyte emoji picker enters the Obsidian bundle. */
 const QUICK_EMOJIS: readonly string[] = [
   "👍",
   "👎",
@@ -45,14 +42,8 @@ export function EmojiPicker({ onPick, disabled }: EmojiPickerProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        {/*
-         * Inline style mirrors the panel-header refresh button
-         * (SidebarShell) — Obsidian's host theme paints a default
-         * background + border on bare <button> elements which Tailwind
-         * classes alone don't reliably override. Setting `border:none`
-         * and `backgroundColor:transparent` explicitly keeps the icon
-         * borderless regardless of theme.
-         */}
+        {/* Obsidian's host theme paints a background and border on bare <button> elements that
+            Tailwind classes do not reliably beat, hence the explicit inline style. */}
         <button
           type="button"
           onClick={(e) => e.stopPropagation()}

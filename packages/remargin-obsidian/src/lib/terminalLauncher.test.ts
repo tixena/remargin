@@ -1,3 +1,5 @@
+/** Tests for terminal resolution and the osascript launch arguments. */
+
 import { strict as assert } from "node:assert";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +43,6 @@ describe("resolveTerminal — auto-detection", () => {
     writeFileSync(join(dir, "konsole"), "");
     writeFileSync(join(dir, "xterm"), "");
     process.env["PATH"] = dir;
-    // konsole outranks xterm in the candidate table.
     assert.deepEqual(resolveTerminal("", "linux"), ["konsole", "-e"]);
   });
 

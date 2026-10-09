@@ -1,3 +1,5 @@
+/** Static-markup tests for one prompt group of the Sandbox section. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -7,8 +9,7 @@ import type { PromptGroup } from "./buildPromptGroups.ts";
 import type { InlinePromptEditorSaveArgs } from "./InlinePromptEditor.tsx";
 import { PromptGroupSection, type PromptGroupSectionProps } from "./SandboxSection.tsx";
 
-// SSR-only render — first-render defaults are headerOpen=true, editing=false;
-// behavioural state changes are not reachable without a client renderer.
+// SSR-only: first-render defaults are headerOpen=true and editing=false, and nothing changes them.
 
 function explicit(overrides: Partial<PromptGroup> = {}): PromptGroup {
   const prompt: ResolvedSystemPrompt = {
@@ -118,7 +119,6 @@ describe("PromptGroupSection — header chrome", () => {
 
   it("renders the file count badge", () => {
     const html = render(explicit({ files: ["a.md", "b.md", "c.md"] }));
-    // The count badge is a span containing the number.
     assert.ok(html.includes(">3<"), `expected file count of 3, got: ${html}`);
   });
 
@@ -133,8 +133,6 @@ describe("PromptGroupSection — header chrome", () => {
   });
 
   it("shows the chevron-down icon when the header is open (initial render)", () => {
-    // headerOpen defaults to true on first render — chevron-down should
-    // be present.
     const html = render(explicit());
     assert.ok(html.includes("lucide-chevron-down"), `expected open chevron, got: ${html}`);
   });
@@ -156,9 +154,7 @@ describe("PromptGroupSection — edit / configure affordances", () => {
       html.includes('title="Edit prompt"'),
       `expected Edit prompt gear title, got: ${html}`
     );
-    // The gear glyph is painted by Obsidian's setIcon (via ObsidianIcon) at
-    // runtime — in jsdom the placeholder span is empty. The title attribute
-    // is the testable contract.
+    // Obsidian paints the gear glyph at runtime, so the title attribute is the testable contract.
   });
 
   it("renders the '+ Configure' affordance ONLY on the Default group", () => {

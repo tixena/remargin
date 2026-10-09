@@ -1,17 +1,9 @@
+/** Tests for `performUpdateCheck`, the update-check orchestrator behind the backend. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { ReleasesFetcher, UpdateCheckState } from "@/lib/githubReleases.ts";
 import { performUpdateCheck } from "./performUpdateCheck.ts";
-
-/**
- * These tests cover the standalone `performUpdateCheck` helper that
- * backs `RemarginBackend.checkForUpdates`. The helper is extracted from
- * the backend class so the strip-only TypeScript loader used by node's
- * test runner can parse it — the class's parameter-property constructor
- * is not valid input for the loader, which is why every
- * backend-adjacent unit test imports helpers directly instead of
- * instantiating `RemarginBackend`.
- */
 
 const freshCache = (): UpdateCheckState => ({
   plugin: {

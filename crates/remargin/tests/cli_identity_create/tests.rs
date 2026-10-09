@@ -1,3 +1,5 @@
+//! `remargin identity create` output, in YAML and `--json`, and its round-trip into a realm.
+
 use core::str;
 use std::fs;
 use std::process::Output;
@@ -61,8 +63,6 @@ fn create_with_key_includes_key_line() {
 
 #[test]
 fn create_does_not_emit_mode_line() {
-    // Mode is a tree property, not identity-scoped — never appears
-    // in the emitted YAML.
     let out = run(&[
         "identity",
         "create",
@@ -89,8 +89,6 @@ fn create_rejects_invalid_type() {
         "martian",
     ]);
     assert!(!out.status.success(), "invalid --type must fail");
-    // stdout stays clean so callers can redirect without capturing
-    // garbage on failure.
     assert!(
         stdout_of(&out).is_empty(),
         "stdout must stay empty on --type error; got: {:?}",
@@ -125,7 +123,6 @@ fn create_json_mode_returns_structured_fields() {
 
 #[test]
 fn create_output_round_trips_through_remargin_yaml() {
-    // The emitted YAML must load cleanly as a `.remargin.yaml`.
     let tmp = TempDir::new().unwrap();
     let out = run(&[
         "identity",
@@ -138,8 +135,6 @@ fn create_output_round_trips_through_remargin_yaml() {
     assert_ok(&out);
     fs::write(tmp.path().join(".remargin.yaml"), stdout_of(&out)).unwrap();
 
-    // Invoke `identity show` inside the new realm — it must parse
-    // the file we just wrote.
     let show = Command::cargo_bin("remargin")
         .unwrap()
         .current_dir(tmp.path())
@@ -159,10 +154,6 @@ fn create_output_round_trips_through_remargin_yaml() {
 
 #[test]
 fn bare_identity_still_works_backward_compat() {
-    // Older callers invoked `remargin identity` (no subcommand) to
-    // resolve the active identity. That surface must keep working
-    // — `identity` without a subcommand defaults to the show
-    // action.
     let tmp = TempDir::new().unwrap();
     fs::write(
         tmp.path().join(".remargin.yaml"),
@@ -195,8 +186,6 @@ fn create_requires_type_arg() {
 
 #[test]
 fn stdout_has_no_extra_stderr_noise() {
-    // A user who does `remargin identity create ... > .remargin.yaml`
-    // deserves a quiet stderr so the YAML stays pristine.
     let out = run(&[
         "identity",
         "create",

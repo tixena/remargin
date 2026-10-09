@@ -1,3 +1,5 @@
+//! `get --binary` output shapes: raw bytes, the base64 JSON payload and `--out`.
+
 use assert_cmd::Command;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -72,11 +74,9 @@ fn binary_get_with_out_writes_file() {
 
     assert!(output.status.success(), "command failed: {output:?}");
 
-    // The file on disk is byte-identical to the source.
     let written = fs::read(&out).unwrap();
     assert_eq!(written, FAKE_PNG);
 
-    // Stdout summary in --json mode carries the metadata, NOT the bytes.
     let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["mime"], "image/png");
     assert!(payload.get("content").is_none());

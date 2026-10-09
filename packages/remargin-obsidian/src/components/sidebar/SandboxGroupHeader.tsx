@@ -1,3 +1,5 @@
+/** The header row of a Staged / Unstaged sandbox sub-group. */
+
 import { ChevronDown } from "lucide-react";
 import { useCallback } from "react";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
@@ -18,32 +20,26 @@ export type SandboxGroupBulkIcon =
   | "minus"
   | "plus";
 
+/** Props for {@link SandboxGroupHeader}. */
 export interface SandboxGroupHeaderProps {
-  /** Group label shown to the right of the chevron — "Staged" / "Unstaged". */
   label: string;
-  /** Number of files currently in this group; shown as a small inline count. */
   count: number;
-  /** Whether the group is currently expanded. */
   open: boolean;
-  /** Toggle the group open/closed. */
   onToggleOpen: () => void;
   /**
-   * Left bulk-action icon. Semantics by group:
-   *   - Staged:   "square-check"        → select all staged rows
-   *   - Unstaged: "arrow-up-to-line"    → stage the current selection
+   * Staged: "square-check" selects all staged rows. Unstaged: "arrow-up-to-line" stages the
+   * current selection.
    */
   leftBulkIcon: SandboxGroupBulkIcon;
   leftBulkTitle: string;
   onLeftBulk: () => void;
   /**
-   * Right bulk-action icon. Semantics by group:
-   *   - Staged:   "arrow-down-to-line"  → unstage selected (or all)
-   *   - Unstaged: "chevrons-up"         → stage everything unstaged
+   * Staged: "arrow-down-to-line" unstages the selected rows, or all. Unstaged: "chevrons-up"
+   * stages everything unstaged.
    */
   rightBulkIcon: SandboxGroupBulkIcon;
   rightBulkTitle: string;
   onRightBulk: () => void;
-  /** Disable bulk actions when the group is empty. */
   disabled?: boolean;
 }
 

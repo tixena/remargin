@@ -28,17 +28,15 @@ use serde_json::{Map, Value, json};
 
 use crate::permissions::hook_settings::{self, CommandState};
 
-/// Subcommand appended to the absolute binary path in the generated hook
-/// command, and the entry's identity in a settings file.
-///
-/// The guard it names reads no stdin; it re-verifies enforcement will be
-/// live and writes its diagnostic JSON to stdout.
+/// Appended to the absolute binary path in the generated command; also the entry's identity in
+/// a settings file.
 pub const SESSION_HOOK_SUBCOMMAND: &str = "claude session-guard";
 
 /// The `PATH`-relative command installs wrote before they embedded the
 /// binary path. Recognized and reported, never written.
 pub const LEGACY_SESSION_HOOK_COMMAND: &str = "remargin claude session-guard";
 
+/// Whether an install changed the settings file.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InstallOutcome {
@@ -46,6 +44,7 @@ pub enum InstallOutcome {
     Installed,
 }
 
+/// Whether an uninstall found an entry to remove.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum UninstallOutcome {
@@ -53,17 +52,16 @@ pub enum UninstallOutcome {
     Uninstalled,
 }
 
+/// Whether the `SessionStart` guard entry is live.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TestOutcome {
-    /// The entry is there but its command cannot spawn, so no backstop runs
-    /// at session start. Carries the specific fault.
+    /// The entry is there but its command cannot spawn, so no backstop runs; carries the fault.
     Broken(String),
     Installed,
     NotInstalled,
-    /// The entry is there and runs, but names the binary by bare name
-    /// ([`LEGACY_SESSION_HOOK_COMMAND`]) — one `PATH` change away from
-    /// silently not running. Carries the command as found.
+    /// The entry runs but names the binary by bare name ([`LEGACY_SESSION_HOOK_COMMAND`]); carries
+    /// the command as found.
     PathRelative(String),
 }
 
@@ -76,9 +74,8 @@ pub enum TestOutcome {
 pub fn install(system: &dyn System, settings_file: &Path) -> Result<InstallOutcome> {
     let command = hook_settings::hook_command(system, SESSION_HOOK_SUBCOMMAND)?;
     let mut value = hook_settings::load_or_default(system, settings_file)?;
-    // An entry whose command drifted (an older install's bare name, or a
-    // binary that moved) is rewritten in place rather than duplicated:
-    // install is the one sanctioned path for rewriting a user's settings.
+    // A drifted command is rewritten in place, not duplicated: install is the one sanctioned path
+    // for rewriting a user's settings.
     if rewrite_existing_entry(&mut value, &command) {
         hook_settings::write_settings(system, settings_file, &value)?;
         return Ok(InstallOutcome::Installed);

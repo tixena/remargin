@@ -1,3 +1,5 @@
+//! `remargin search` in text and `--json` modes, with and without paging.
+
 use core::str;
 use std::fs;
 
@@ -82,10 +84,7 @@ fn search_limit_offset_json_carries_total() {
     );
 }
 
-/// Regression: verbose `--json` (no `--compact`) stays byte-identical to
-/// the pre-change payload — flat `SearchMatch` objects with `PascalCase`
-/// `location`, always-present `before` / `after`, string `path`, and the
-/// `{matches, total}` envelope. The Obsidian plugin parses exactly this.
+/// The verbose `--json` the Obsidian plugin parses: flat matches in a `{matches, total}` envelope.
 #[test]
 fn search_verbose_json_unchanged_by_compact() {
     let tmp = TempDir::new().unwrap();

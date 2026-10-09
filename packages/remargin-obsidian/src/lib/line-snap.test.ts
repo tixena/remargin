@@ -1,3 +1,5 @@
+/** Tests for snapping an insert line past remargin blocks. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { snapAfterCommentBlock } from "./line-snap.ts";
@@ -33,7 +35,6 @@ describe("snapAfterCommentBlock", () => {
         "line10",
       ].join("\n")
     );
-    // Line 2 is before the block, line 9 is after it.
     assert.equal(snapAfterCommentBlock(lines, 2), 2);
     assert.equal(snapAfterCommentBlock(lines, 9), 9);
     assert.equal(snapAfterCommentBlock(lines, 10), 10);
@@ -52,9 +53,7 @@ describe("snapAfterCommentBlock", () => {
         "outro", // 8
       ].join("\n")
     );
-    // Cursor on the YAML line inside the block snaps to line 8.
     assert.equal(snapAfterCommentBlock(lines, 4), 8);
-    // Cursor on body line inside the block snaps to line 8.
     assert.equal(snapAfterCommentBlock(lines, 6), 8);
   });
 
@@ -69,9 +68,7 @@ describe("snapAfterCommentBlock", () => {
     const lines = toLines(
       ["intro", "```remargin", "---", "id: x", "---", "body", "```", "outro"].join("\n")
     );
-    // Line 7 is the closing fence — we still want to snap past it because
-    // inserting "after" the fence and "before" the fence would otherwise be
-    // ambiguous.
+    // The closing fence itself snaps too: "after" versus "before" the fence would be ambiguous.
     assert.equal(snapAfterCommentBlock(lines, 7), 8);
   });
 
@@ -94,12 +91,8 @@ describe("snapAfterCommentBlock", () => {
         "tail", // 14
       ].join("\n")
     );
-    // Cursor on line 4 (inside block A) snaps to 8 (inside block B), then
-    // across to 14.
     assert.equal(snapAfterCommentBlock(lines, 4), 14);
-    // Cursor inside block B alone snaps to 14.
     assert.equal(snapAfterCommentBlock(lines, 10), 14);
-    // Cursor after both blocks is unchanged.
     assert.equal(snapAfterCommentBlock(lines, 14), 14);
   });
 
@@ -162,8 +155,6 @@ describe("snapAfterCommentBlock", () => {
         "tail", // 10
       ].join("\n")
     );
-    // Cursor inside the block (line 7) snaps to the line after the 4-backtick
-    // closing fence.
     assert.equal(snapAfterCommentBlock(lines, 7), 10);
   });
 

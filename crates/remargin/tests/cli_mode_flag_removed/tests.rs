@@ -1,9 +1,10 @@
+//! Passes `--mode` to the binary and expects clap to refuse it.
+
 use core::str;
 
 use assert_cmd::Command;
 
-/// `remargin --mode open comment foo.md "..."` → clap rejects
-/// `--mode` at parse time with exit code 2.
+/// Clap rejects a global `--mode` at parse time with exit code 2.
 #[test]
 fn global_mode_flag_is_rejected() {
     let output = Command::cargo_bin("remargin")
@@ -34,8 +35,7 @@ fn global_mode_flag_is_rejected() {
     );
 }
 
-/// Same flag on another subcommand (write) must also reject — the
-/// ban is global, not per-subcommand.
+/// The refusal is global, not per-subcommand: `write` rejects the flag too.
 #[test]
 fn subcommand_mode_flag_is_rejected() {
     let output = Command::cargo_bin("remargin")
@@ -58,8 +58,3 @@ fn subcommand_mode_flag_is_rejected() {
         "expected --mode in error, got: {stderr:?}"
     );
 }
-
-// The `resolve-mode` subcommand's behavior is covered in-process by
-// `resolve_mode_*` tests in `remargin-core/src/config/tests.rs`
-// against a MemorySystem. The CLI smoke variant was deleted because
-// it walked up to the real `~/.remargin.yaml`.

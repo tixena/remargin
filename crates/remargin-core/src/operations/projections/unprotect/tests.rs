@@ -15,13 +15,9 @@ use crate::permissions::claude_sync::{RuleSet, apply_rules};
 use crate::permissions::restrict::{RestrictArgs, restrict};
 use crate::permissions::unprotect::UnprotectArgs;
 
-/// Mimic a pre-retirement `restrict`: write the `.remargin.yaml` entry
-/// (via the current `restrict`) AND project a legacy deny set into the
-/// settings files + sidecar, so the unprotect projection has a populated
-/// sidecar to reverse — the state a realm restricted by an older binary
-/// carries into the migration. The current `restrict` writes no settings
-/// or sidecar (the hook is the single source of truth), so tests that
-/// exercise the sidecar-driven reverse must seed it here.
+/// Restrict `path`, then seed the settings files and the sidecar with a deny set, so the
+/// unprotect projection has a populated sidecar to reverse. The current `restrict` writes
+/// neither.
 fn restrict_with_legacy_sidecar(
     system: &MemorySystem,
     realm: &Path,
@@ -116,10 +112,8 @@ fn restrict_args(path: &str) -> RestrictArgs {
     RestrictArgs::new(String::from(path), Vec::new(), false)
 }
 
-/// After a clean `restrict src/secret`, projecting `unprotect src/secret`
-/// reports `WouldBeRemoved` for both the YAML entry and the sidecar
-/// entry, with non-empty `rules_to_remove` for each tracked file and
-/// no conflicts.
+/// Both entries are `WouldBeRemoved`, each tracked file has rules to remove, and nothing
+/// conflicts.
 #[test]
 fn clean_projection_after_restrict() {
     let (system, realm, project, user) = fresh_realm();
@@ -155,9 +149,7 @@ fn clean_projection_after_restrict() {
     );
 }
 
-/// Path was never restricted: noop signals via both `Absent` entry
-/// actions, and both `YamlEntryMissing` + `SidecarEntryMissing`
-/// surface as conflicts.
+/// Both entry actions are `Absent` and both missing-entry conflicts surface.
 #[test]
 fn never_restricted_yields_both_missing_conflicts() {
     let (system, realm, _project, _user) = fresh_realm();
@@ -186,15 +178,13 @@ fn never_restricted_yields_both_missing_conflicts() {
     assert!(saw_sidecar_missing, "expected SidecarEntryMissing conflict");
 }
 
-/// YAML present, sidecar missing: `yaml.WouldBeRemoved`;
-/// `sidecar.Absent`; `settings_files` empty (no rules to look up).
+/// `yaml.WouldBeRemoved`, `sidecar.Absent`, and no settings files to scrub.
 #[test]
 fn yaml_present_sidecar_missing() {
     let (system, realm, project, user) = fresh_realm();
     let settings = vec![project, user];
     restrict(&system, &realm, &restrict_args("src/secret"), &settings).unwrap();
 
-    // Manually wipe the sidecar by writing an empty entries map.
     let sidecar_path = realm.join(".claude/.remargin-restrictions.json");
     let empty_sidecar = serde_json::json!({"version": 1_u32, "entries": {}}).to_string();
     let with_empty_sidecar = system
@@ -221,17 +211,13 @@ fn yaml_present_sidecar_missing() {
     assert!(saw_sidecar_missing);
 }
 
-/// YAML missing, sidecar present: `yaml.Absent`;
-/// `sidecar.WouldBeRemoved`; settings `rules_to_remove` non-empty;
-/// conflict `YamlEntryMissing`.
+/// `yaml.Absent`, `sidecar.WouldBeRemoved`, rules to remove, and a `YamlEntryMissing` conflict.
 #[test]
 fn sidecar_present_yaml_missing() {
     let (system, realm, project, user) = fresh_realm();
     let settings = vec![project, user];
     restrict_with_legacy_sidecar(&system, &realm, "src/secret", &settings);
 
-    // Wipe the YAML — the sidecar still tracks the rules, but the
-    // YAML no longer references the path.
     let yaml_path = realm.join(".remargin.yaml");
     let stripped = "permissions: {}\n";
     let with_stripped_yaml = system.with_file(&yaml_path, stripped.as_bytes()).unwrap();
@@ -259,16 +245,13 @@ fn sidecar_present_yaml_missing() {
     assert!(saw_yaml_missing);
 }
 
-/// One of the tracked rules has been manually deleted from the
-/// project-scope settings file. The plan reports it under
-/// `rules_already_absent` and surfaces a `RuleAlreadyAbsent` conflict.
+/// A tracked rule deleted by hand is reported under `rules_already_absent` and as a conflict.
 #[test]
 fn rule_already_absent_drift_surfaces_conflict() {
     let (system, realm, project, user) = fresh_realm();
     let settings = vec![project.clone(), user];
     restrict_with_legacy_sidecar(&system, &realm, "src/secret", &settings);
 
-    // Read project settings, drop the first deny rule, write back.
     let body = system.read_to_string(&project).unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&body).unwrap();
     let removed_rule = {
@@ -314,8 +297,6 @@ fn rule_already_absent_drift_surfaces_conflict() {
     );
 }
 
-/// Wildcard plan after `restrict *` works symmetrically: same shape as
-/// the named-path projection.
 #[test]
 fn wildcard_projection_after_wildcard_restrict() {
     let (system, realm, project, user) = fresh_realm();
@@ -336,7 +317,6 @@ fn wildcard_projection_after_wildcard_restrict() {
     ));
 }
 
-/// No `.claude/` ancestor returns a Reject with a clear message.
 #[test]
 fn no_anchor_returns_reject() {
     let cwd = PathBuf::from("/orphan");
@@ -383,8 +363,6 @@ fn unreachable_existence_flip(path: &Path) {
     assert_eq!(path.display().to_string(), "<existence flipped>");
 }
 
-/// Idempotent observation: running plan twice in a row produces the
-/// same conflict set, entry actions, and rule lists.
 #[test]
 fn plan_twice_in_a_row_is_idempotent() {
     let (system, realm, project, user) = fresh_realm();

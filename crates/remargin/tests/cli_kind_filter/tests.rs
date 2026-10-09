@@ -1,3 +1,5 @@
+//! `--kind` on `comment`, `comments`, `query` and `edit`, run against a temp vault.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,8 +21,6 @@ fn setup_vault() -> (TempDir, PathBuf) {
     fs::write(root.join(".remargin.yaml"), ALICE_CONFIG).unwrap();
     fs::create_dir_all(root.join("docs")).unwrap();
     for name in ["a.md", "b.md"] {
-        // Minimal managed-doc frontmatter so `remargin comment`
-        // accepts the write.
         let body = "---\ntitle: Test\n---\n\n# Hello\n";
         fs::write(root.join("docs").join(name), body).unwrap();
     }
@@ -192,7 +192,6 @@ fn invalid_kind_is_rejected_before_write() {
         stderr.contains("remargin_kind") && stderr.contains("invalid character"),
         "expected clear validation error, got: {stderr}"
     );
-    // File must not have been mutated (no comment id / no kind line).
     let disk = fs::read_to_string(root.join("docs/a.md")).unwrap();
     assert!(
         !disk.contains("```remargin"),

@@ -1,3 +1,5 @@
+/** The editor-side widget for one comment thread. */
+
 import { useEffect, useMemo, useState } from "react";
 import { shouldAutoExpand, summarizeThread } from "@/lib/pendingState";
 import type { ThreadNode } from "@/lib/threadTree";
@@ -6,24 +8,15 @@ import type { CollapseState } from "@/state/collapseState";
 import { WidgetCommentView } from "./WidgetCommentView";
 import { WidgetRootToolbar } from "./WidgetRootToolbar";
 
+/** Props for {@link WidgetCommentThread}. */
 export interface WidgetCommentThreadProps {
   root: ThreadNode;
   sourcePath: string;
-  /**
-   * Resolved current identity (`backend.identity().identity`) or null
-   * when no identity is set. Drives the auto-expand / pending-for-me
-   * counts. Threading it through the widget is what wires identity
-   * into the widget render path (was previously identity-blind).
-   */
+  /** The resolved identity, or null; drives the auto-expand and pending-for-me counts. */
   me: string | null;
   collapseState: CollapseState;
   onClick: (commentId: string, file: string) => void;
-  /**
-   * True only at the top-level mount of the thread (the document-side
-   * root call). Drives the per-thread bulk expand/collapse icons in
-   * the header. Recursive descendant calls leave it unset so nested
-   * reply rows never render the toolbar.
-   */
+  /** True only at the thread's top-level mount; nested reply rows never render the toolbar. */
   isRoot?: boolean;
 }
 
@@ -48,22 +41,14 @@ export function WidgetCommentThread({
 }: WidgetCommentThreadProps) {
   const id = root.comment.id;
 
-  // Auto-expand priming MUST run before the first paint that consults
-  // `collapsed` below — using a layout effect keeps the chevron and
-  // body in sync with the seeded state on initial mount. Plain
-  // `useEffect` would render once collapsed (the default), then flip.
+  // A layout effect: plain `useEffect` would paint once collapsed (the default), then flip.
   useEffect(() => {
     if (!collapseState.has(id) && shouldAutoExpand(root, me)) {
       collapseState.setExpanded(id);
     }
-    // The store mutation will fire a notification that re-renders us
-    // through the subscription effect below, so we don't need to
-    // re-bind dependencies here.
   }, [id, root, me, collapseState]);
 
-  // Subscribe to the shared CollapseState so chevron toggles in any
-  // surface (this widget, the sibling reading-mode widget, the
-  // thread-level toolbar) re-render this subtree.
+  // Chevron toggles from any surface sharing the CollapseState re-render this subtree.
   const [, force] = useState(0);
   useEffect(() => {
     return collapseState.subscribe(() => {
@@ -74,20 +59,8 @@ export function WidgetCommentThread({
   const collapsed = collapseState.isCollapsed(id);
   const summary = useMemo(() => summarizeThread(root, me), [root, me]);
 
-  // The root toolbar (identity badge, id, reply/pending counts, bulk
-  // expand/collapse icons) lives in its OWN row above the comment card,
-  // visible only on the root of a thread. Nested replies skip the
-  // toolbar so it never crowds deep threads.
-  //
-  // "Collapse all" is a HARD RESET: it overwrites every descendant's
-  // existing collapsed/expanded state, by design. Once the user opts in
-  // via this control, `CollapseState.has(id)` returns true for every id
-  // touched, so the auto-expand priming branch in the effect above
-  // won't re-flip them on the next mount — explicit user choice wins.
-  //
-  // Summary-on-card is suppressed for roots because the toolbar already
-  // surfaces the same counts; nested replies (no toolbar) keep the
-  // card-side summary so a collapsed reply still hints at hidden depth.
+  // "Collapse all" is a hard reset: it marks every descendant as touched, so auto-expand priming
+  // never re-flips them. Roots drop the card-side summary because the toolbar shows those counts.
   return (
     <div className="remargin-widget-thread">
       {isRoot && (
@@ -124,12 +97,7 @@ export function WidgetCommentThread({
   );
 }
 
-/**
- * Bulk-set the collapsed flag for `root` and every descendant. Exported
- * so unit tests can drive the same logic the per-thread expand/collapse
- * toolbar invokes without having to introspect React-rendered click
- * handlers.
- */
+/** Bulk-set the collapsed flag for `root` and every descendant. */
 export function setSubtreeCollapsed(
   root: ThreadNode,
   collapseState: CollapseState,

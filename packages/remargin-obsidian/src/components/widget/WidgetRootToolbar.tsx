@@ -1,17 +1,16 @@
+/** The toolbar row above a root comment widget. */
+
 import type { MouseEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import type { Comment } from "@/generated/types";
 import type { PendingSummary } from "@/lib/pendingState";
 
+/** Props for {@link WidgetRootToolbar}. */
 export interface WidgetRootToolbarProps {
-  /** The thread's root comment. Drives the identity badge + id badge. */
   comment: Comment;
-  /** Reply + pending counts for the entire subtree. */
   summary: PendingSummary;
-  /** Bulk-expand the root + every descendant. */
   onExpandAll: () => void;
-  /** Bulk-collapse the root + every descendant (hard reset). */
   onCollapseAll: () => void;
 }
 

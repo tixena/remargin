@@ -1,3 +1,5 @@
+//! `remargin doctor` runs against temp realms with the hooks installed through the CLI.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -55,8 +57,6 @@ fn finding_kinds(report: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Case 6: with both the `PreToolUse` hook and the `SessionStart` guard
-/// installed, `doctor` exits 0 and reports no `SessionGuardMissing`.
 #[test]
 fn doctor_clean_when_both_hooks_installed() {
     let realm = TempDir::new().unwrap();
@@ -82,9 +82,7 @@ fn doctor_clean_when_both_hooks_installed() {
     );
 }
 
-/// Case 7: with only the `PreToolUse` hook installed (guard absent from
-/// both scopes), `doctor` exits 1 and the sole finding is
-/// `SessionGuardMissing`.
+/// The guard is absent from both scopes: exit 1, and the sole finding is `SessionGuardMissing`.
 #[test]
 fn doctor_flags_missing_guard_when_only_pretool_installed() {
     let realm = TempDir::new().unwrap();
@@ -112,11 +110,7 @@ fn doctor_flags_missing_guard_when_only_pretool_installed() {
     );
 }
 
-/// A fixture mirroring the real stale `Bash(remargin *)` entry in a
-/// project settings file (with the enforcement hooks wired so doctor
-/// does not short-circuit) is detected as a `LeftoverProjectedRule`,
-/// and `--prompt-mode` emits an agent-executable removal instruction
-/// naming the rule and its file.
+/// A stale `Bash(remargin *)` deny is a leftover rule, and `--prompt-mode` names its removal.
 #[test]
 fn doctor_detects_stale_remargin_cli_deny_and_prompt_mode_repairs_it() {
     let realm = TempDir::new().unwrap();
@@ -141,7 +135,6 @@ fn doctor_detects_stale_remargin_cli_deny_and_prompt_mode_repairs_it() {
 
     let user_settings = home.path().join(".claude/settings.json");
 
-    // --json: the stale rule is detected as a leftover.
     let out = run_doctor(realm.path(), home.path(), &user_settings, &["--json"]);
     assert_status(&out, 1);
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -166,7 +159,6 @@ fn doctor_detects_stale_remargin_cli_deny_and_prompt_mode_repairs_it() {
         "message should name the stale rule: {report}",
     );
 
-    // --prompt-mode: emits a removal instruction for the same rule.
     let prompt_out = run_doctor(
         realm.path(),
         home.path(),

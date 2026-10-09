@@ -1,3 +1,5 @@
+//! `permissions show` / `check` on the CLI and over MCP, against hand-staged realm configs.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -12,12 +14,7 @@ use remargin_core::mcp;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-// ----: schema mirrors for `permissions show --json` ----
-//
-// The mirrors below are `#[serde(deny_unknown_fields)]` so any
-// new field on the corresponding Rust type fails the build until
-// the schema doc on `permissions/inspect.rs` is updated.
-
+/// Mirror of one `allow_dot_folders` entry in `permissions show --json`.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AllowDotFoldersSchema {
@@ -25,6 +22,7 @@ struct AllowDotFoldersSchema {
     source_file: String,
 }
 
+/// Mirror of one `deny_ops` entry.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DenyOpsSchema {
@@ -33,6 +31,7 @@ struct DenyOpsSchema {
     source_file: String,
 }
 
+/// Mirror of one op inside a `deny_ops` entry.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DenyOpsItemSchema {
@@ -40,6 +39,7 @@ struct DenyOpsItemSchema {
     name: String,
 }
 
+/// Mirror of one `trusted_roots` entry.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TrustedRootSchema {
@@ -51,6 +51,9 @@ struct TrustedRootSchema {
     source_file: String,
 }
 
+/// Mirror of the whole `permissions show --json` payload. Every mirror denies unknown fields, so
+/// a field added to the Rust type fails here until the schema doc in `permissions/inspect.rs` and
+/// the mirror follow.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ShowSchema {
@@ -89,8 +92,6 @@ fn write_realm_yaml(realm: &Path, body: &str) {
     fs::write(realm.join(".remargin.yaml"), body).unwrap();
 }
 
-/// Scenario 20a: `permissions show --json` over a hand-rolled
-/// realm reports the declared `restrict` and `deny_ops` entries.
 #[test]
 fn show_json_lists_declared_entries() {
     let realm = TempDir::new().unwrap();
@@ -98,8 +99,7 @@ fn show_json_lists_declared_entries() {
         realm.path(),
         "permissions:\n  trusted_roots:\n    - path: src/secret\n  deny_ops:\n    - path: archive\n      ops: [purge]\n",
     );
-    // Materialise the targets so `restrict_covers` matches paths
-    // canonicalised through the real filesystem.
+    // The targets must exist so the paths canonicalise through the real filesystem.
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
     fs::create_dir_all(realm.path().join("archive")).unwrap();
 
@@ -123,9 +123,7 @@ fn show_json_lists_declared_entries() {
     );
 }
 
-/// `permissions check` exits 0 when the path is OUTSIDE the
-/// allow-list declared by `restrict` — the path is restricted
-/// (the gitignore-style "matched = success" code, post-polarity-flip).
+/// Exit 0 means restricted: the path is outside the allow-list, gitignore-style "matched".
 #[test]
 fn check_exits_zero_for_restricted_path() {
     let realm = TempDir::new().unwrap();
@@ -140,8 +138,6 @@ fn check_exits_zero_for_restricted_path() {
     assert_status(&out, 0);
 }
 
-/// Scenario 21a: with no `.remargin.yaml`, `permissions show`
-/// returns empty collections under `--json`.
 #[test]
 fn show_json_empty_when_no_config() {
     let realm = TempDir::new().unwrap();
@@ -164,9 +160,7 @@ fn show_json_empty_when_no_config() {
     );
 }
 
-/// `permissions check` exits 1 when the path IS inside the
-/// allow-list — sanctioned, not restricted, gitignore-style
-/// "not matched".
+/// Exit 1 means not restricted: the path is inside the allow-list, gitignore-style "not matched".
 #[test]
 fn check_exits_one_when_unrestricted() {
     let realm = TempDir::new().unwrap();
@@ -181,8 +175,7 @@ fn check_exits_one_when_unrestricted() {
     assert_status(&out, 1);
 }
 
-/// `--why` populates the matching-rule section in JSON output when
-/// the target is OUTSIDE the allow-list (post-polarity-flip).
+/// `--why` fills the matching-rule section in JSON output for a target outside the allow-list.
 #[test]
 fn check_why_populates_matching_rule() {
     let realm = TempDir::new().unwrap();
@@ -209,8 +202,6 @@ fn check_why_populates_matching_rule() {
     let rule = body.get("matching_rule").unwrap();
     assert_eq!(rule.get("kind").unwrap().as_str().unwrap(), "trusted_roots");
 }
-
-// --- Scenario 22: MCP parity ------------------------------------------
 
 fn mcp_call(base: &Path, config: &ResolvedConfig, tool_name: &str, arguments: &Value) -> Value {
     let system = RealSystem::new();
@@ -252,8 +243,7 @@ fn parse_cli_json(out: &Output) -> Value {
     value
 }
 
-/// `permissions_show` MCP tool returns the same JSON shape the CLI
-/// emits under `--json`.
+/// The MCP `permissions_show` tool returns the JSON shape the CLI emits under `--json`.
 #[test]
 fn mcp_permissions_show_matches_cli_json() {
     let realm = TempDir::new().unwrap();
@@ -264,15 +254,12 @@ fn mcp_permissions_show_matches_cli_json() {
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
     fs::create_dir_all(realm.path().join("archive")).unwrap();
 
-    // CLI side.
     let cli = run_in(realm.path(), &["permissions", "show", "--json"]);
     assert_status(&cli, 0);
     let cli_body = parse_cli_json(&cli);
 
-    // MCP side.
     let system = RealSystem::new();
-    // Canonicalise the temp path so the parent-walk inside the MCP
-    // resolver matches the CLI's canonicalised cwd.
+    // Canonical, so the MCP resolver's parent walk matches the CLI's canonicalised cwd.
     let base = system.canonicalize(realm.path()).unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
     let result = mcp_call(&base, &config, "permissions_show", &json!({}));
@@ -281,8 +268,7 @@ fn mcp_permissions_show_matches_cli_json() {
     assert_eq!(cli_body, mcp_body, "CLI and MCP show output diverged");
 }
 
-/// `permissions_check` MCP tool agrees with CLI `--json` for both
-/// restricted (= outside allow-list) and unrestricted (= inside) targets.
+/// MCP `permissions_check` agrees with CLI `--json` for restricted and unrestricted targets.
 #[test]
 fn mcp_permissions_check_matches_cli_json() {
     let realm = TempDir::new().unwrap();
@@ -299,7 +285,6 @@ fn mcp_permissions_check_matches_cli_json() {
     let base = system.canonicalize(realm.path()).unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
-    // Outside allow-list → restricted.
     let cli_hit = run_in(
         realm.path(),
         &[
@@ -321,7 +306,6 @@ fn mcp_permissions_check_matches_cli_json() {
     let mcp_hit_body = mcp_payload(&mcp_hit);
     assert_eq!(cli_hit_body, mcp_hit_body);
 
-    // Inside allow-list → not restricted.
     let cli_miss = run_in(
         realm.path(),
         &["permissions", "check", "src/secret/foo.md", "--json"],
@@ -338,11 +322,7 @@ fn mcp_permissions_check_matches_cli_json() {
     assert_eq!(cli_miss_body, mcp_miss_body);
 }
 
-/// pin the canonical `permissions show --json` schema
-/// against the doc in `permissions/inspect.rs`. Strict-mode
-/// deserialise into [`ShowSchema`] aborts the test if any new
-/// undocumented field appears in the output. Per-entry semantics
-/// are pinned in companion assertions below.
+/// Strict deserialisation into [`ShowSchema`] fails on any undocumented field in the output.
 #[test]
 fn permissions_show_json_shape_is_canonical() {
     let realm = canonical_schema_realm();
@@ -358,9 +338,7 @@ fn permissions_show_json_shape_is_canonical() {
     );
     let parsed = parse.unwrap();
 
-    // Read every documented field — pins the doc semantics and
-    // also keeps the strict `dead_code` lint quiet without
-    // per-struct `#[allow]`s (banned by clippy::restriction).
+    // Reading every field pins the documented semantics and keeps the `dead_code` lint satisfied.
     assert!(
         parsed.elapsed_ms < 60_000,
         "elapsed_ms unrealistically large"
@@ -379,8 +357,6 @@ fn permissions_show_json_shape_is_canonical() {
 
     assert_trusted_root_wildcard_invariant(&parsed.trusted_roots);
 
-    // Belt-and-suspenders: also flag an undocumented top-level
-    // key by inspecting the raw Value, not just the typed mirror.
     let body: Value = serde_json::from_str(stdout).unwrap();
     let documented = [
         "allow_dot_folders",
@@ -422,8 +398,6 @@ fn assert_trusted_root_wildcard_invariant(restrict: &[TrustedRootSchema]) {
     let mut saw_absolute = false;
     for entry in restrict {
         assert_ne!(entry.source_file, "");
-        // `also_deny_bash` and `cli_allowed` must round-trip;
-        // touching them keeps the strict-mirror types honest.
         let _: &Vec<String> = &entry.also_deny_bash;
         let _: bool = entry.cli_allowed;
         if entry.path_text == "*" {
@@ -447,9 +421,7 @@ fn assert_trusted_root_wildcard_invariant(restrict: &[TrustedRootSchema]) {
     assert!(saw_absolute, "missing absolute-path restrict entry");
 }
 
-/// empty config still respects the canonical schema —
-/// every documented top-level key is present (with empty
-/// arrays) plus `elapsed_ms`.
+/// An empty config still carries every documented top-level key, as empty arrays.
 #[test]
 fn permissions_show_json_empty_shape_is_canonical() {
     let realm = TempDir::new().unwrap();
@@ -480,8 +452,7 @@ fn permissions_show_json_empty_shape_is_canonical() {
     assert!(map.get("elapsed_ms").unwrap().is_u64());
 }
 
-/// `permissions show` text output names the realm and the
-/// restricted entry. Smoke test for the human-readable formatter.
+/// The text output names the realm and the restricted entry.
 #[test]
 fn show_text_output_includes_restrict_entry() {
     let realm = TempDir::new().unwrap();
@@ -504,9 +475,7 @@ fn show_text_output_includes_restrict_entry() {
     );
 }
 
-/// `PathBuf` coverage: relative paths beginning with `./` canonicalise
-/// through the CLI surface. Uses an OUTSIDE-the-allow-list target so
-/// the CLI exits 0 (= restricted, allow-list flipped).
+/// A relative `./` path canonicalises; the target is outside the allow-list, so the exit is 0.
 #[test]
 fn check_dot_slash_path_canonicalises() {
     let realm = TempDir::new().unwrap();
@@ -524,8 +493,6 @@ fn check_dot_slash_path_canonicalises() {
     assert_status(&out, 0);
 }
 
-// ---: dispatch-time boundary -------------------------------------
-
 fn extract_tool_text(result: &Value) -> String {
     let content = result.get("content").and_then(Value::as_array).unwrap();
     content[0]
@@ -542,8 +509,7 @@ fn is_tool_error(result: &Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Sandbox bootstrap: with no `trusted_roots`, the spawn cwd is the
-/// only root. Reading a file under it succeeds.
+/// With no `trusted_roots`, the spawn cwd is the only root and a file under it reads.
 #[test]
 fn mcp_sandbox_allows_path_under_spawn_cwd() {
     let realm = TempDir::new().unwrap();
@@ -558,9 +524,7 @@ fn mcp_sandbox_allows_path_under_spawn_cwd() {
     assert!(text.contains("# hi"), "{text}");
 }
 
-/// Sandbox enforcement: a path that escapes the cwd's
-/// (canonicalised) root surfaces as a tool-level error containing
-/// the documented `path escapes MCP sandbox` marker.
+/// A path escaping the cwd's root is a tool-level error carrying `path escapes MCP sandbox`.
 #[test]
 fn mcp_sandbox_rejects_path_outside_root() {
     let realm = TempDir::new().unwrap();
@@ -586,8 +550,7 @@ fn mcp_sandbox_rejects_path_outside_root() {
     );
 }
 
-/// `permissions_show` is in the no-path tool list — it works even
-/// when the spawn cwd is the sandbox's only root.
+/// `permissions_show` takes no path, so it works with the spawn cwd as the sandbox's only root.
 #[test]
 fn mcp_sandbox_lets_permissions_show_through() {
     let realm = TempDir::new().unwrap();
@@ -598,16 +561,7 @@ fn mcp_sandbox_lets_permissions_show_through() {
     assert!(!is_tool_error(&result), "{result:#?}");
 }
 
-// The two `trusted_roots`-shaped scenarios that lived here
-// (recursive-realm-respect and no-transitive-trust) tested the old
-// deny-list-with-carve-out polarity. Post-eradication, the relevant
-// semantics are pinned by op_guard's allow-list scenarios in
-// `remargin-core/src/permissions/op_guard/tests.rs`.
-
-/// MCP cwd is NOT implicitly trusted when an inherited
-/// `.remargin.yaml` declares `trusted_roots` that exclude it. A
-/// folder-walk tool that omits `path` (defaulting to cwd) must
-/// reject the same way an explicit cwd path does.
+/// The cwd is not implicitly trusted: an omitted `path` rejects as an explicit cwd path would.
 #[test]
 fn mcp_ls_without_path_rejects_when_cwd_outside_trusted_roots() {
     let realm = TempDir::new().unwrap();
@@ -648,8 +602,7 @@ fn mcp_ls_without_path_rejects_when_cwd_outside_trusted_roots() {
     );
 }
 
-/// When cwd IS in `trusted_roots`, the same omitted-path call
-/// succeeds — the gate is "is cwd trusted" not "is path missing".
+/// With the cwd in `trusted_roots` the same omitted-path call succeeds.
 #[test]
 fn mcp_ls_without_path_succeeds_when_cwd_inside_trusted_roots() {
     let realm = TempDir::new().unwrap();

@@ -1,3 +1,5 @@
+/** The file section header: abbreviated folder path, title, copy button and Initialize. */
+
 import { Check, Copy, FileText, Wand2 } from "lucide-react";
 import { Notice, TFile } from "obsidian";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,23 +11,13 @@ import { extractTitle } from "@/lib/file-title";
 import { hasRemarginFrontmatter } from "@/lib/hasRemarginFrontmatter";
 import type RemarginPlugin from "@/main";
 
+/** Props for {@link FilePathHeader}. */
 interface FilePathHeaderProps {
   plugin: RemarginPlugin;
   filePath?: string;
-  /** Pending comment count badge. */
   pendingCount?: number;
-  /**
-   * Monotonically bumped by the sidebar shell on any mutation. Used by
-   * the 'Initialize' flow so the file contents re-read after
-   * `remargin write` injects frontmatter — the button then disappears
-   * because `hasRemarginFrontmatter` now returns true.
-   */
+  /** Bumped on any mutation; invalidates the file contents read for the title and Initialize. */
   refreshKey?: number;
-  /**
-   * Called after a successful initialize so the rest of the sidebar
-   * (thread list, inbox, sandbox) refreshes against the newly-managed
-   * file.
-   */
   onInitialized?: () => void;
 }
 
@@ -53,23 +45,16 @@ export function FilePathHeader({
   const [copied, setCopied] = useState(false);
   const [initializing, setInitializing] = useState(false);
 
-  // Derive directory path and filename/title.
   const dirPath = useMemo(() => {
     if (!filePath) return "";
     const lastSlash = filePath.lastIndexOf("/");
     return lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
   }, [filePath]);
 
-  // Identity of the contents we hold: the active path plus the sidebar's
-  // refresh counter, so any mutation invalidates them and forces a
-  // re-read — specifically so the 'Initialize' button disappears once
-  // frontmatter has been injected.
+  // The active path plus the refresh counter, so any mutation forces a re-read.
   const contentsToken = readToken(refreshKey ?? 0, filePath ?? "");
   const [read, setRead] = useState<{ token: string; contents: string } | null>(null);
 
-  // Re-read whenever the token moves so the title can follow H1 edits.
-  // Uses cachedRead (non-blocking, metadata-cache-backed) to avoid
-  // hammering the vault on every render.
   useEffect(() => {
     if (!filePath) return;
     const file = plugin.app.vault.getAbstractFileByPath(filePath);
@@ -89,9 +74,7 @@ export function FilePathHeader({
     };
   }, [plugin, filePath, contentsToken]);
 
-  // Contents captured under a superseded token describe a path or a
-  // revision we're no longer showing, so they read as "not yet known"
-  // until the current read lands.
+  // Contents read under a superseded token count as not yet known until the current read lands.
   const fileContents = read?.token === contentsToken ? read.contents : "";
 
   const title = useMemo(() => {
@@ -99,18 +82,10 @@ export function FilePathHeader({
     return extractTitle(fileContents, filePath);
   }, [filePath, fileContents]);
 
-  /**
-   * Bare .md files (no remargin frontmatter) get an 'Initialize'
-   * affordance so users can one-click them into the managed tree. The
-   * check runs off the already-read `fileContents` so it costs nothing
-   * beyond the existing title read. Files with non-markdown extensions
-   * never qualify — they're not documents.
-   */
+  // A bare .md file (no remargin frontmatter) gets an Initialize button; other extensions never do.
   const isBareMarkdown = useMemo(() => {
     if (!filePath || !filePath.toLowerCase().endsWith(".md")) return false;
-    // Treat the initial empty string (pre-first-read) as "unknown" and
-    // suppress the button until we actually have contents; otherwise
-    // the button would flicker in for every file open.
+    // Empty contents mean "not read yet": no button, or it would flicker in on every file open.
     if (fileContents === "") return false;
     return !hasRemarginFrontmatter(fileContents);
   }, [filePath, fileContents]);
@@ -119,10 +94,7 @@ export function FilePathHeader({
     if (!filePath || initializing) return;
     setInitializing(true);
     try {
-      // `remargin write <path> <current-contents>` triggers the
-      // frontmatter-injection pass every managed file runs through. No
-      // special subcommand: the write is a no-op on the body but a
-      // full canonicalization on the frontmatter.
+      // `remargin write` with the current contents leaves the body alone and injects the frontmatter.
       await plugin.backend.write(filePath, fileContents);
       onInitialized?.();
     } catch (err) {
@@ -133,7 +105,6 @@ export function FilePathHeader({
     }
   }, [filePath, fileContents, initializing, plugin, onInitialized]);
 
-  // Abbreviate the directory path based on available width.
   const maxChars = Math.max(8, Math.floor((containerWidth - RESERVED_PX) / CHAR_WIDTH_PX));
   const displayDir = useMemo(() => abbreviatePath(dirPath, maxChars), [dirPath, maxChars]);
 

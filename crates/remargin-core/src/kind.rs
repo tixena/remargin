@@ -7,42 +7,22 @@
 use anyhow::{Context as _, Result, bail};
 use serde_json::{Map, Value};
 
-/// Hard upper bound on kind string length.
-///
-/// Matches the acceptance criteria for (`[a-zA-Z0-9_\- ]{1,15}`).
-/// Keeps tags short enough to render as compact chips in the Obsidian
-/// sidebar and to discourage abuse as free-text mini-content.
+/// Short enough to render as a compact chip and too short to carry free-text content.
 pub const MAX_KIND_LENGTH: usize = 15;
 
-/// Maximum number of kind tags a single comment may carry.
-///
-/// Chosen to keep both the YAML line and the signature payload bounded
-/// and to discourage "kind-stuffing" as an alternative to proper
-/// threading. Eight is comfortably above the handful of categories the
-/// product design doc calls out and still fits on one on-screen chip row.
+/// Bounds the YAML line and the signature payload; eight still fits on one chip row.
 pub const MAX_KINDS_PER_COMMENT: usize = 8;
 
-/// Human-readable restatement of the validation grammar. Referenced
-/// by error messages so operators can copy-paste the exact shape into
-/// their tooling without digging through source.
+/// Shown in error messages only; the check itself is [`validate_single`].
 pub const VALID_KIND_REGEX: &str = r"^[A-Za-z0-9_ \-]{1,15}$";
 
-/// Validate a slice of proposed `remargin_kind` values.
-///
-/// Called from the parser for every block on read, and from every
-/// mutating operation (create, edit, batch) before the
-/// checksum is computed. Keeping validation centralised means a
-/// malformed tag cannot sneak in through a parser edge-case and break
-/// signature verification downstream.
+/// Validates the kinds of one comment. The parser calls it on every block it reads, and every
+/// mutating operation calls it before the checksum is computed.
 ///
 /// # Errors
 ///
-/// Returns an error describing the offending value when:
-///
-/// - The list has more than [`MAX_KINDS_PER_COMMENT`] entries.
-/// - An entry is empty, longer than [`MAX_KIND_LENGTH`], contains a
-///   disallowed character, or starts/ends with a space.
-/// - Two entries are equal (duplicates).
+/// Returns an error naming the offending value when the list is too long, repeats a value, or
+/// holds an entry [`validate_single`] refuses.
 pub fn validate_kinds(kinds: &[String]) -> Result<()> {
     if kinds.len() > MAX_KINDS_PER_COMMENT {
         bail!(
@@ -53,9 +33,7 @@ pub fn validate_kinds(kinds: &[String]) -> Result<()> {
     }
     for (index, kind) in kinds.iter().enumerate() {
         validate_single(kind)?;
-        // Duplicates are detected by looking forward from the current
-        // position; the inner loop is bounded by MAX_KINDS_PER_COMMENT
-        // so the quadratic scan is a rounding error.
+        // Quadratic, but bounded by MAX_KINDS_PER_COMMENT.
         for other in &kinds[index + 1..] {
             if other == kind {
                 bail!("remargin_kind has duplicate value {kind:?}");
@@ -65,13 +43,13 @@ pub fn validate_kinds(kinds: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Per-element validation. Exposed for callers that only need to check
-/// a single incoming string (e.g. an MCP param validator before
-/// assembling the full vector).
+/// Validates one kind: 1 to [`MAX_KIND_LENGTH`] characters from `[A-Za-z0-9_ -]`, with no leading
+/// or trailing space.
 ///
 /// # Errors
 ///
-/// See the error conditions enumerated on [`validate_kinds`].
+/// Returns an error naming the entry when it is empty, too long, space-padded, or holds a
+/// disallowed character.
 pub fn validate_single(kind: &str) -> Result<()> {
     if kind.is_empty() {
         bail!("remargin_kind entry is empty");
@@ -92,16 +70,8 @@ pub fn validate_single(kind: &str) -> Result<()> {
     Ok(())
 }
 
-/// Shared `--kind` filter matcher used by `comments` and `query`.
-///
-/// Returns `true` when `filter` is empty (no filter active) or when
-/// `comment_kinds` contains at least one of the values in `filter`
-/// (OR semantics).
-///
-/// Kept in this module so the `comments` list-a-single-file path and
-/// the `query` walk-the-tree path share a single implementation — the
-/// design doc for explicitly calls out the previous divergence
-/// between those two surfaces as a bug.
+/// The `--kind` filter shared by `comments` and `query`: `true` when `filter` is empty or when
+/// `comment_kinds` holds at least one of its values.
 #[must_use]
 pub fn matches_kind_filter(comment_kinds: &[String], filter: &[String]) -> bool {
     if filter.is_empty() {
@@ -110,14 +80,8 @@ pub fn matches_kind_filter(comment_kinds: &[String], filter: &[String]) -> bool 
     filter.iter().any(|wanted| comment_kinds.contains(wanted))
 }
 
-/// Return the set of kinds canonicalised for hashing:
-///
-/// - De-duplicated (validator already enforces this, but the helper
-///   stays defensive so a future caller that skips validation cannot
-///   silently desync checksum and signature).
-/// - Sorted lexicographically so `[a, b]` and `[b, a]` hash to the
-///   same value. Storage order is preserved in the YAML; only the
-///   hashed representation is canonicalised.
+/// The kinds as they are hashed: sorted and de-duplicated, so `[a, b]` and `[b, a]` produce the
+/// same checksum and signature. The stored order is left alone.
 #[must_use]
 pub fn canonical_kinds(kinds: &[String]) -> Vec<String> {
     let mut out: Vec<String> = kinds.to_vec();

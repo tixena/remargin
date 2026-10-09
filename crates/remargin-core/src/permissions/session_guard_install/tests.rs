@@ -1,3 +1,6 @@
+//! Tests for the `SessionStart` guard installer: install, uninstall, drift repair and the
+//! `test` verdicts.
+
 use std::path::{Path, PathBuf};
 
 use os_shim::System;
@@ -57,7 +60,6 @@ fn install_writes_matcherless_hook_when_settings_missing() {
     assert_eq!(hooks_arr[0]["command"].as_str().unwrap(), hook_command());
 }
 
-/// Case 5: a second install over an already-present guard is a no-op.
 #[test]
 fn install_is_idempotent_on_already_installed_entry() {
     let system = mock();
@@ -213,10 +215,7 @@ fn test_reports_not_installed_when_entry_absent() {
     assert_eq!(test(&system, &path).unwrap(), TestOutcome::NotInstalled);
 }
 
-/// A user-annotated guard entry (a `matcher` was added) is still
-/// identified by its inner subcommand — detection keys on the command, not
-/// the matcher — so install rewrites that one entry in place, keeping the
-/// annotation, and uninstall removes it.
+/// Detection keys on the command, so an entry the user annotated with a matcher is still ours.
 #[test]
 fn entry_with_added_matcher_is_identified_by_command() {
     let body = serde_json::to_string_pretty(&json!({
@@ -257,12 +256,9 @@ fn entry_with_added_matcher_is_identified_by_command() {
     assert!(stripped.get("hooks").is_none());
 }
 
-/// The binary the entry names is gone: the backstop cannot spawn, so
-/// `test` reports it broken rather than installed.
 #[test]
 fn test_reports_broken_when_binary_vanished() {
-    // The install resolves `current_exe`, but that binary is never on disk
-    // — the state a user reaches by moving or deleting it after installing.
+    // The binary `current_exe` names is never put on disk here.
     let system = MemorySystem::new()
         .with_current_exe(Path::new(EXE))
         .unwrap();
@@ -276,9 +272,6 @@ fn test_reports_broken_when_binary_vanished() {
     );
 }
 
-/// An entry left by an install that predates the absolute path is
-/// recognized, reported as `PATH`-relative, and left exactly as found —
-/// only `install` rewrites a user's settings.
 #[test]
 fn test_reports_path_relative_legacy_entry_without_rewriting_it() {
     let body = serde_json::to_string_pretty(&json!({
@@ -303,8 +296,6 @@ fn test_reports_path_relative_legacy_entry_without_rewriting_it() {
     assert_eq!(system.read_to_string(&path).unwrap(), body);
 }
 
-/// Reinstalling over an entry whose absolute path went stale rewrites it in
-/// place rather than adding a second entry.
 #[test]
 fn install_rewrites_drifted_command_in_place() {
     let stale = "/gone/remargin claude session-guard";

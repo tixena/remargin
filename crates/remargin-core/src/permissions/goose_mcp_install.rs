@@ -50,65 +50,55 @@ use serde_yaml::{Mapping, Value};
 
 use self::config_splice::Edit;
 
-/// Env var naming extra config files for goose to read. goose discovers no
-/// project-scoped config on its own, so a `--local` install only reaches a
-/// session through this variable.
+/// goose discovers no project-scoped config on its own, so a `--local` install reaches a
+/// session only through this variable.
 pub const ADDITIONAL_CONFIG_ENV: &str = "GOOSE_ADDITIONAL_CONFIG_FILES";
 
-/// The argument that starts remargin's stdio MCP server.
 pub const EXTENSION_ARG: &str = "mcp";
 
-/// remargin's key in goose's `extensions` mapping. Identity for install and
-/// uninstall; it does *not* set the tool prefix, which is
-/// [`EXTENSION_NAME`]'s job.
+/// Identity for install and uninstall; the tool prefix comes from [`EXTENSION_NAME`], not this.
 pub const EXTENSION_KEY: &str = "remargin";
 
-/// The entry's `name`. goose builds every tool name as `<name>__<tool>`, so
-/// this is the string the guard's `remargin__` allow-prefix matches on.
+/// goose builds every tool name as `<name>__<tool>`, so the guard's `remargin__` allow-prefix
+/// matches on this.
 pub const EXTENSION_NAME: &str = "remargin";
 
-/// Mapping under the config root that holds every extension entry.
 const EXTENSIONS_KEY: &str = "extensions";
 
-/// goose's directory under a config home.
 const CONFIG_DIR: &str = "goose";
 
-/// goose's config file inside [`CONFIG_DIR`].
 const CONFIG_FILE: &str = "config.yaml";
 
-/// Description shown to the agent alongside the extension's tools.
 const EXTENSION_DESCRIPTION: &str = "Read, write, and comment on remargin-managed markdown. Use \
                                      these instead of shell/edit/write tools for any managed .md \
                                      file.";
 
-/// Seconds goose allows the server before abandoning it.
 const EXTENSION_TIMEOUT_SECS: u64 = 300;
 
 /// Transport discriminant telling goose to spawn `cmd` and speak stdio.
 const EXTENSION_TYPE: &str = "stdio";
 
-/// Directory a `--local` install writes into, relative to the project root.
+/// Relative to the project root.
 const LOCAL_CONFIG_DIR: &str = ".goose";
 
-/// Suffix of the sibling file every write lands in before its rename.
 const TEMP_SUFFIX: &str = ".remargin-tmp";
 
-/// Config home used when `XDG_CONFIG_HOME` is unset, relative to `$HOME`.
+/// Relative to `$HOME`; used when `XDG_CONFIG_HOME` is unset.
 const XDG_CONFIG_FALLBACK: &str = ".config";
 
-/// The env var overriding the config home.
 const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
 
 /// The config file as one probe found it.
 enum ConfigState {
-    /// No file there — goose has no extension registered from it.
     Absent,
-    /// Present but not a YAML mapping, so it describes nothing and must
-    /// not be overwritten. Carries the reason.
+    /// Present but not a YAML mapping, so it must not be overwritten; carries the reason.
     Unusable(String),
     /// Carries the raw text alongside the parse: an edit is applied to
     /// those bytes, not to a re-serialization of the parse.
-    Usable { body: String, mapping: Mapping },
+    Usable {
+        body: String,
+        mapping: Mapping,
+    },
 }
 
 /// What the config says about remargin's entry.
@@ -121,8 +111,7 @@ enum EntryState {
     ConfigAbsent,
     /// The config cannot be read as a mapping. Carries the reason.
     ConfigUnusable(String),
-    /// Declared, but shaped so goose loads no remargin tools from it.
-    /// Carries the specific fault.
+    /// Declared, but shaped so goose loads no remargin tools from it; carries the fault.
     Unusable(String),
     /// Declared, well-shaped, and the binary it names exists.
     Wired,
@@ -131,39 +120,37 @@ enum EntryState {
 /// The bytes a write is about to land, and what producing them cost.
 struct ConfigWrite {
     body: String,
-    /// `true` when the body is a re-serialization of the whole document
-    /// rather than an edit of remargin's own lines, which is where the
-    /// file's comments and layout are lost.
+    /// The body re-serializes the whole document, which loses the file's comments and layout.
     normalizes: bool,
 }
 
+/// Whether an install wrote the config.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InstallOutcome {
     AlreadyInstalled,
-    /// `normalized_layout` reports a write that had to re-serialize the
-    /// document: the config's content survives, its formatting does not.
+    /// `normalized_layout`: the write re-serialized the document, so its formatting is gone.
     Installed {
         normalized_layout: bool,
     },
 }
 
+/// Whether goose would load remargin's tools from a config.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TestOutcome {
-    /// The entry is there but goose would load no remargin tools from it.
-    /// Carries the specific fault so the caller can name it.
+    /// The entry is there but goose would load no remargin tools from it; carries the fault.
     Broken(String),
     Installed,
     NotInstalled,
 }
 
+/// Whether an uninstall found an entry to remove.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum UninstallOutcome {
     NotInstalled,
-    /// `normalized_layout` carries the same meaning it does on
-    /// [`InstallOutcome::Installed`].
+    /// `normalized_layout`: the write re-serialized the document, so its formatting is gone.
     Uninstalled {
         normalized_layout: bool,
     },
@@ -262,10 +249,7 @@ pub fn uninstall(system: &dyn System, path: &Path) -> Result<UninstallOutcome> {
 
     let mut extensions = child_mapping(&config, EXTENSIONS_KEY);
     let _removed: Option<Value> = extensions.remove(Value::from(EXTENSION_KEY));
-    // The now-possibly-empty `extensions` mapping stays. Uninstall changes
-    // exactly remargin's entry; whether goose treats an absent mapping
-    // differently from an empty one is not this command's question to
-    // answer on the user's config.
+    // The possibly-empty `extensions` mapping stays: uninstall changes exactly remargin's entry.
     insert(&mut config, EXTENSIONS_KEY, Value::Mapping(extensions));
     let write = config_body(&original, Edit::Remove, &config)?;
     write_config(system, path, &write.body)?;
@@ -470,9 +454,8 @@ fn load_config(system: &dyn System, path: &Path) -> ConfigState {
         return ConfigState::Absent;
     };
     match serde_yaml::from_str::<Value>(&body) {
-        // goose writes an empty file before its first `configure`, and an
-        // empty YAML document is a null, not a mapping — an absence to
-        // fill rather than a fault.
+        // goose writes an empty file before its first `configure`, and an empty YAML document is a
+        // null: an absence to fill, not a fault.
         Ok(Value::Null) => ConfigState::Usable {
             body,
             mapping: Mapping::new(),

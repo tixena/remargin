@@ -50,8 +50,7 @@
 
 /* ------ Fonts ------
    Loaded from Google Fonts via <link> in src/pages/index.astro <head>.
-   Both families are SIL OFL — fine to redistribute if you ever switch
-   to self-hosting later. Keep /public/fonts/ empty until then. */
+   Both families are SIL OFL. */
 
 /* ------ Base ------ */
 * {

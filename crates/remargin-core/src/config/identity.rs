@@ -10,10 +10,6 @@
 //!    `--identity`, `--type`, `--key` that is supplied must match the
 //!    candidate `.remargin.yaml`'s corresponding field; missing field in
 //!    the file never matches a concrete value in the flag.
-//!
-//! Replaces the earlier field-by-field CLI overlay onto a walked config,
-//! which let silently misattribute by mixing halves of two
-//! different identities.
 
 use core::fmt;
 use std::path::{Path, PathBuf};
@@ -40,31 +36,19 @@ const CONFIG_FILENAME: &str = ".remargin.yaml";
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct IdentityFlags {
-    /// Explicit author type (`human` or `agent`).
     pub author_type: Option<AuthorType>,
 
-    /// Explicit `--config <path>` pointing at the file that declares the
-    /// identity. `~` and `$VAR` are expanded by the adapter before this
-    /// reaches the resolver.
+    /// Already expanded for `~` and `$VAR` by the adapter.
     pub config_path: Option<PathBuf>,
 
-    /// Explicit identity (author) name.
     pub identity: Option<String>,
 
-    /// Explicit signing key path. `~` / `$VAR` expanded by the adapter.
-    /// Bare-name shorthand (`mykey` → `~/.ssh/mykey`) is still resolved
-    /// by [`resolve_key_path`] inside this module.
+    /// Already expanded for `~` and `$VAR`; a bare name still resolves under `~/.ssh`.
     pub key: Option<String>,
 }
 
 impl IdentityFlags {
     /// Construct a flags struct that names only `--config <path>`.
-    ///
-    /// Convenience for adapters (CLI / MCP) that already have a path
-    /// they want to push through branch 1 of the resolver and don't
-    /// need the full default-and-mutate dance — the struct is
-    /// `#[non_exhaustive]` so out-of-crate callers can't build it via
-    /// the literal expression syntax.
     #[must_use]
     pub const fn for_config_path(config_path: PathBuf) -> Self {
         Self {
@@ -114,14 +98,10 @@ pub struct ResolvedIdentity {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum IdentitySource {
-    /// Branch 1: `--config <path>`. The `PathBuf` is the file that
-    /// declared the identity.
+    /// The file `--config` named.
     ConfigFlag(PathBuf),
-    /// Branch 2: manual declaration via `--identity` + `--type`
-    /// (+ `--key` when strict). No file was consulted.
     Manual,
-    /// Branch 3: walk-up from CWD. The `PathBuf` is the file that
-    /// matched all supplied filters.
+    /// The file that matched every supplied filter.
     Walk(PathBuf),
 }
 
@@ -188,8 +168,8 @@ impl IdentityReport {
     }
 }
 
-/// Resolve the effective identity for `cwd` under the given [`Mode`]
-/// using the three-branch flow described in the module docs.
+/// Resolves the effective identity for `cwd` under the given [`Mode`] through one of three
+/// branches: `--config`, a complete manual declaration, or a filtered walk up from `cwd`.
 ///
 /// `registry` is used for membership checks in registered/strict mode
 /// (branches 1 and 2 always check; branch 3 checks after the walk
@@ -197,18 +177,9 @@ impl IdentityReport {
 ///
 /// # Errors
 ///
-/// Every error path in the three-branch flow:
-///
-/// - Branch 1: `--config` file cannot be read, parsed, or is missing
-///   required fields (`identity`, `type`, or `key` when strict); when
-///   mode is registered/strict, the declared identity is not active in
-///   the registry.
-/// - Branch 2: `--identity` + `--type` not both supplied; `--key`
-///   missing when strict; author type is not `human` or `agent`; same
-///   registry membership check as branch 1.
-/// - Branch 3: walk exhausts without finding a file that matches every
-///   supplied filter; the matching file is then run through the same
-///   validation as branch 1 and may fail there too.
+/// Returns an error when the declaring file cannot be read or lacks a field the mode requires, a
+/// manual declaration is incomplete, the walk matches no file, or the identity is not active in
+/// the registry.
 pub fn resolve_identity(
     system: &dyn System,
     cwd: &Path,
@@ -216,9 +187,7 @@ pub fn resolve_identity(
     flags: &IdentityFlags,
     registry: Option<&Registry>,
 ) -> Result<ResolvedIdentity> {
-    // Belt-and-braces check: the clap layer declares
-    // `conflicts_with_all`, but non-clap adapters could in theory
-    // construct the forbidden combination.
+    // Clap already refuses this combination; other adapters can still build it.
     if flags.config_path.is_some()
         && (flags.identity.is_some() || flags.author_type.is_some() || flags.key.is_some())
     {
@@ -232,12 +201,8 @@ pub fn resolve_identity(
         return resolve_from_config_flag(system, config_path, mode, registry);
     }
 
-    // Branch 2 is entered ONLY when --identity AND --type are both
-    // given (AND --key when strict). Anything else — including
-    // "--identity alone", "--type alone", or "--key alone" — falls
-    // through to branch 3 filtered walk. This is what lets a caller
-    // say "find the walked config belonging to alice" without also
-    // re-declaring alice's full identity.
+    // A partial declaration falls through to the filtered walk, so a caller can ask for the walked
+    // config belonging to one identity without redeclaring it.
     if is_complete_manual_declaration(mode, flags) {
         return resolve_from_manual(system, mode, flags, registry);
     }
@@ -378,7 +343,6 @@ fn resolve_from_walk(
     }
 }
 
-/// Read + parse a `.remargin.yaml` at `path`.
 fn read_and_parse_config(system: &dyn System, path: &Path) -> Result<Config> {
     let content = system
         .read_to_string(path)
@@ -424,21 +388,9 @@ fn validate_declared_identity(
     Ok((identity, author_type, key_path))
 }
 
-/// Anchor a `key:` value to the config file's directory when it would
-/// otherwise resolve against CWD.
-///
-/// `resolve_key_path` only handles `~` / `$VAR` expansion; relative
-/// paths like `.remargin/agent_key` pass through unchanged and are
-/// later resolved by the OS against the process's CWD. That works by
-/// accident when the operator's own config is found by walking up from
-/// CWD (config dir == CWD), but fails for any config loaded by absolute
-/// path (e.g. `--config /elsewhere/.remargin.yaml`) where the relative
-/// `key:` path is meant to be relative to the config file, not the CWD.
-///
-/// This helper prepends `source_path.parent()` when the resolved key
-/// path is still relative. Absolute paths (and paths that started with
-/// `~` / `$` and were already expanded to absolute) pass through
-/// unchanged.
+/// Anchors a still-relative `key:` path to the directory of the config file that declared it, so
+/// a config loaded by absolute path from another working directory finds its key. Absolute
+/// paths, including expanded `~` and `$VAR` forms, pass through unchanged.
 pub(crate) fn anchor_key_path_to_config_dir(key_path: PathBuf, source_path: &Path) -> PathBuf {
     if key_path.is_absolute() {
         return key_path;
@@ -480,8 +432,6 @@ fn walk_filter_matches(config: &Config, flags: &IdentityFlags) -> bool {
     true
 }
 
-/// In registered/strict mode, the declared identity must correspond to
-/// an `active` registry entry. Used by every branch.
 /// Cheap heuristic for the branch-3 walk-exhaust error message
 /// emitted by `resolve_identity`. Distinguishes "walk didn't match"
 /// (soft - map to `found: false`) from every other resolver error
@@ -492,6 +442,7 @@ fn looks_like_walk_miss(err: &anyhow::Error) -> bool {
         || msg.contains("no .remargin.yaml matched the supplied filters")
 }
 
+/// Outside open mode the identity must be in the registry and not revoked.
 fn check_registry_membership(
     identity: &str,
     mode: &Mode,

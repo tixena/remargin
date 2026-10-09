@@ -286,23 +286,14 @@ fn signature_with_all_fields() {
     assert!(result, "full-field signature should verify");
 }
 
-/// Back-compat hinge: with no kinds, [`compute_checksum`] returns the
-/// exact hash that a pre-`remargin_kind` CLI would have produced. This
-/// test pins down that behaviour so any future refactor that accidentally
-/// alters the empty-kinds hash contribution will fail loudly instead of
-/// silently invalidating every comment on disk.
+/// With no kinds the checksum is the exact hash of the normalized content alone.
 #[test]
 fn empty_kinds_produce_legacy_checksum() {
-    // Pre-computed on 0.1.6 via the old one-arg API.
     let expected_hello = "sha256:64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c";
     assert_eq!(compute_checksum("Hello world", &[]), expected_hello);
 }
 
-/// The canonicalization payloads are frozen on bare `to_rfc3339()`, which
-/// renders a zero offset as `+00:00` — unlike everything the tool now puts
-/// on disk or on the wire, which renders `Z`. These two tests pin the exact
-/// bytes so a future "consistency cleanup" cannot silently invalidate every
-/// stored signature and reaction checksum.
+/// Pins the frozen payload bytes: a zero offset renders as `+00:00`, never `Z`.
 #[test]
 fn signature_payload_renders_zero_offset_as_plus_zero() {
     let mut comment = make_comment("Frozen payload");
@@ -332,9 +323,7 @@ fn reaction_checksum_renders_zero_offset_as_plus_zero() {
     );
 }
 
-/// Legacy `+00:00` on disk and its `Z` twin parse to the same instant, so
-/// both canonicalize to the same payload — that equivalence is what makes
-/// the on-disk format change signature-safe.
+/// `+00:00` and `Z` on disk parse to the same instant, so both canonicalize to one payload.
 #[test]
 fn z_and_plus_zero_disk_forms_canonicalize_identically() {
     let mut from_z = make_comment("Same instant");
@@ -361,9 +350,6 @@ fn z_and_plus_zero_disk_forms_canonicalize_identically() {
     );
 }
 
-/// Non-empty kinds change the checksum — otherwise the field would not
-/// actually protect against tag swaps and the signature would be the
-/// only line of defence.
 #[test]
 fn kinds_affect_checksum() {
     let without = compute_checksum("same content", &[]);
@@ -371,9 +357,6 @@ fn kinds_affect_checksum() {
     assert_ne!(without, with);
 }
 
-/// Canonical ordering: `[a, b]` and `[b, a]` hash identically so that
-/// a rewrite which reorders the stored list does not invalidate
-/// checksums or signatures.
 #[test]
 fn kinds_order_does_not_affect_checksum() {
     let ab = compute_checksum("body", &[String::from("a"), String::from("b")]);
@@ -381,8 +364,7 @@ fn kinds_order_does_not_affect_checksum() {
     assert_eq!(ab, ba);
 }
 
-/// Signature covers `remargin_kind`: swapping a kind after signing
-/// must break verification. Mirrors the `signature_tamper_*` tests.
+/// Swapping a kind after signing must break verification.
 #[test]
 fn signature_tamper_kind() {
     let system = system_with_key();
@@ -397,44 +379,31 @@ fn signature_tamper_kind() {
     assert!(!result, "verification should fail after kind tampering");
 }
 
-/// Back-compat verify: a comment signed before `remargin_kind` existed
-/// continues to verify after the field lands, because an empty list
-/// contributes zero bytes to the signature payload.
+/// An empty kind list contributes zero bytes to the signature payload.
 #[test]
 fn signature_back_compat_with_empty_kinds() {
     let system = system_with_key();
 
     let mut comment = make_comment("Body");
-    // Sign exactly as the pre-field code path would: field absent.
     assert!(comment.remargin_kind.is_none());
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
-    // The stored signature still verifies against the (still-empty)
-    // kinds list — this is the guarantee that keeps existing comments
-    // verifiable.
     let result = verify_signature(&comment, TEST_PUBLIC_KEY).unwrap();
     assert!(result, "signature with empty kinds should verify");
 }
 
-/// Checksum back-compat: two calls with the same content and no
-/// kinds must be byte-identical — and adding a kind must change the
-/// hash. Without this equivalence every earlier comment on disk
-/// would fail `verify_checksum` after the field landed.
 #[test]
 fn compute_checksum_with_empty_kinds_ignores_the_suffix() {
     let content = "hello world";
     let with_empty = compute_checksum(content, &[]);
 
-    // The no-kinds branch is stable across calls — same input, same hash.
     assert_eq!(
         with_empty,
         compute_checksum(content, &[]),
         "compute_checksum with &[] must be deterministic"
     );
 
-    // Adding a kind must shift the hash; the empty-kinds branch is NOT
-    // silently folding a suffix in.
     let with_kind = compute_checksum(content, &[String::from("question")]);
     assert_ne!(
         with_empty, with_kind,
@@ -443,24 +412,17 @@ fn compute_checksum_with_empty_kinds_ignores_the_suffix() {
     );
 }
 
-/// A comment whose `remargin_kind` is `None` must produce the same
-/// checksum as one with `Some(Vec::new())` and the same as passing
-/// `&[]` directly. This is the surface `verify_checksum` relies on
-/// when it reads back a comment via `cm.kinds()`.
 #[test]
 fn verify_checksum_equivalent_for_none_and_empty_vec() {
     let mut comment = make_comment("Hello, world.");
-    // Baseline: make_comment wired the checksum for the None case.
     assert!(verify_checksum(&comment), "baseline None case must verify");
 
-    // Explicit Some(empty) must also verify — same hash input.
     comment.remargin_kind = Some(Vec::new());
     assert!(
         verify_checksum(&comment),
         "Some(empty vec) must hash the same as None for back-compat"
     );
 
-    // And a kinds-carrying version doesn't accidentally match.
     comment.remargin_kind = Some(vec![String::from("question")]);
     assert!(
         !verify_checksum(&comment),
@@ -468,9 +430,6 @@ fn verify_checksum_equivalent_for_none_and_empty_vec() {
     );
 }
 
-/// Round-trips the fixture private key through our own writer/reader:
-/// re-serializing the parsed key and re-parsing it must reproduce the
-/// same public key, proving the `openssh-key-v1` encoder is self-consistent.
 #[test]
 fn openssh_private_key_round_trips() {
     use crate::crypto::ssh::{PrivateKey, PublicKey};
@@ -483,14 +442,12 @@ fn openssh_private_key_round_trips() {
     let reparsed_pub = reparsed.public_key().to_openssh();
     assert_eq!(original_pub, reparsed_pub);
 
-    // The serialized public half matches the canonical fixture blob.
     let fixture_blob = TEST_PUBLIC_KEY.split_whitespace().nth(1).unwrap();
     let ours_blob = PublicKey::from_openssh(&original_pub).unwrap().to_openssh();
     assert!(ours_blob.contains(fixture_blob));
 }
 
-/// Interop: a signature produced by remargin must verify under the
-/// system `ssh-keygen -Y verify`. Skips when `ssh-keygen` is absent.
+/// Skips when `ssh-keygen` is absent.
 #[test]
 fn ssh_keygen_accepts_our_signature() {
     use std::fs::{File, write};
@@ -538,8 +495,7 @@ fn ssh_keygen_accepts_our_signature() {
     );
 }
 
-/// Interop: a keypair generated by remargin must be readable by the
-/// system `ssh-keygen`. Skips when `ssh-keygen` is absent.
+/// Skips when `ssh-keygen` is absent.
 #[test]
 fn ssh_keygen_accepts_our_keypair() {
     use std::fs::{Permissions, set_permissions, write};
@@ -560,8 +516,6 @@ fn ssh_keygen_accepts_our_keypair() {
     write(&key_path, &private_pem).unwrap();
     set_permissions(&key_path, Permissions::from_mode(0o600)).unwrap();
 
-    // ssh-keygen derives the public key from the private file; the
-    // derived line must match what remargin emitted to `<out>.pub`.
     let output = Command::new("ssh-keygen")
         .arg("-y")
         .arg("-f")

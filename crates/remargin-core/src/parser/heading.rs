@@ -15,13 +15,13 @@ use crate::parser::ParsedDocument;
 #[derive(Debug, Clone)]
 struct Heading {
     level: usize,
-    /// 1-indexed line number of the heading in the source markdown.
+    /// 1-indexed.
     line: usize,
-    /// Heading text after the leading `#`s and any matching trailing
-    /// `#`s have been stripped, with surrounding whitespace trimmed.
+    /// With the leading and trailing `#` runs stripped and whitespace trimmed.
     text: String,
 }
 
+/// An open fenced code block, remembered by the length of its backtick run.
 #[derive(Debug)]
 struct FenceState {
     ticks: usize,
@@ -83,8 +83,6 @@ fn match_path(headings: &[Heading], segments: &[String]) -> Option<usize> {
     for segment in segments {
         let mut found: Option<usize> = None;
         for (offset, heading) in headings[start_idx..end_idx].iter().enumerate() {
-            // Each non-root segment must sit STRICTLY DEEPER than the
-            // previous segment's heading.
             if let Some(parent) = parent_level
                 && heading.level <= parent
             {
@@ -98,9 +96,7 @@ fn match_path(headings: &[Heading], segments: &[String]) -> Option<usize> {
         let idx = found?;
         last_match_idx = Some(idx);
         parent_level = Some(headings[idx].level);
-        // Restrict the next segment's search to the matched section:
-        // from the heading after the match through the next heading
-        // at the matched level or shallower.
+        // The next segment is searched only inside the matched section.
         start_idx = idx + 1;
         end_idx = headings[start_idx..]
             .iter()
@@ -138,8 +134,7 @@ fn parse_atx_heading(line: &str) -> Option<(usize, String)> {
         return None;
     }
 
-    // ATX requires either EOL right after the hashes, or at least one
-    // space/tab separating the hashes from the heading text.
+    // ATX needs end of line or whitespace right after the hashes.
     if idx == bytes.len() {
         return Some((level, String::new()));
     }
@@ -185,9 +180,6 @@ fn scan_headings(markdown: &str) -> Vec<Heading> {
         let line_no = idx + 1;
         let trimmed_full = raw_line.trim();
 
-        // YAML frontmatter handling: only at the very top of the file,
-        // a line of exactly `---` opens the block; the next exact `---`
-        // closes it. Anything inside is YAML, not markdown body.
         if !frontmatter_done {
             if idx == 0 && trimmed_full == "---" {
                 in_frontmatter = true;
@@ -200,17 +192,13 @@ fn scan_headings(markdown: &str) -> Vec<Heading> {
                 }
                 continue;
             }
-            // First non-frontmatter line locks frontmatter detection
-            // off so a stray `---` deeper in the doc cannot reopen it.
+            // The first non-frontmatter line turns detection off, so a later `---` cannot reopen it.
             if !trimmed_full.is_empty() {
                 frontmatter_done = true;
             }
         }
 
-        // Fenced code block tracking. Match by exact tick count; a
-        // closing fence must use at least as many ticks as the opener
-        // and have no info string. Mirrors the rule in
-        // [`crate::parser::scan_fences`] for the body walker.
+        // A closing fence needs at least as many ticks as the opener and no info string.
         if let Some(state) = &fence {
             if let Some(close_ticks) = leading_backtick_count(raw_line)
                 && close_ticks >= state.ticks

@@ -1,3 +1,5 @@
+//! `remargin activity` cutoffs, empty results and caller identity, read back from `--json`.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -50,8 +52,7 @@ fn doc_with_one_comment(id: &str, author: &str, ts: &str) -> String {
     )
 }
 
-/// E1: initial-touch fallback returns everything for a caller
-/// who has never acted in the file.
+/// A caller who has never acted in the file gets everything back.
 #[test]
 fn initial_touch_fallback() {
     let realm = realm();
@@ -69,7 +70,7 @@ fn initial_touch_fallback() {
     assert_eq!(value["files"].as_array().unwrap().len(), 1);
 }
 
-/// E3: --since explicit cutoff filters across all files.
+/// An explicit `--since` cutoff filters across all files.
 #[test]
 fn since_explicit_cutoff_filters_globally() {
     let realm = realm();
@@ -102,8 +103,7 @@ fn since_explicit_cutoff_filters_globally() {
     assert!(files[0]["path"].as_str().unwrap().ends_with("b.md"));
 }
 
-/// E11: empty result. With no managed `.md` files in the realm,
-/// `files` is empty and `newest_ts_overall` is null.
+/// With no managed `.md` files in the realm, `files` is empty and `newest_ts_overall` is null.
 #[test]
 fn empty_result_when_no_changes() {
     let realm = realm();
@@ -120,8 +120,7 @@ fn empty_result_when_no_changes() {
     assert!(value["newest_ts_overall"].is_null());
 }
 
-/// E12: a path outside any realm errors with a clear message
-/// and a non-zero exit code.
+/// A path outside any realm is an error with a non-zero exit code.
 #[test]
 fn path_outside_realm_errors() {
     let outsider = TempDir::new().unwrap();
@@ -130,7 +129,6 @@ fn path_outside_realm_errors() {
         "note.md",
         &doc_with_one_comment("c1", "bob", "2026-04-06T12:00:00-04:00"),
     );
-    // No .remargin.yaml in the tempdir: the realm walk fails.
     let out = run_in(
         outsider.path(),
         &["activity", "--identity", "alice", "--type", "human"],
@@ -143,10 +141,7 @@ fn path_outside_realm_errors() {
     );
 }
 
-/// E13: --identity drives the caller. With carol declared,
-/// the per-file last-action cutoff uses carol's activity (and
-/// since carol has none, the initial-touch fallback returns
-/// everything).
+/// `--identity` drives the caller: the per-file cutoff uses that identity's own activity.
 #[test]
 fn identity_flag_drives_caller() {
     let realm = realm();

@@ -1,3 +1,5 @@
+/** Tests for reading a verify-gate refusal out of an error message. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { parseVerifyFailure } from "./verifyFailure.ts";

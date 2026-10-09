@@ -1,3 +1,5 @@
+//! Tests for heading-path resolution: prefix match, nesting, duplicates and the skipped regions.
+
 use super::*;
 use crate::parser::parse;
 
@@ -23,7 +25,6 @@ fn first_match_wins_at_same_path() {
 ### Item\n\
 ";
     let parsed = doc(md);
-    // Bare path returns the first ### Item in document order.
     assert_eq!(resolve_heading_path(&parsed, "Item").unwrap(), 2);
     assert_eq!(resolve_heading_path(&parsed, "Other > Item").unwrap(), 5);
 }

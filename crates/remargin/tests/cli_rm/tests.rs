@@ -1,3 +1,5 @@
+//! `remargin rm` on files, directory trees, hidden files, an unreadable file and a symlink.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -32,8 +34,7 @@ fn doc_with_one_comment() -> &'static str {
     "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n\n```remargin\n---\nid: aaa111\nauthor: alice\ntype: human\nts: 2026-04-29T10:00:00+00:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment.\n```\n"
 }
 
-/// Single-file `rm` on a commented markdown file is refused, names the
-/// file, points at purge, and leaves the file on disk.
+/// `rm` on a commented file is refused: it names the file, points at purge and deletes nothing.
 #[test]
 fn refuses_commented_file_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -50,8 +51,7 @@ fn refuses_commented_file_via_cli() {
     assert!(realm.path().join("note.md").exists(), "file must survive");
 }
 
-/// Directory `rm` aborts when any nested file has comments; nothing is
-/// deleted and the error names the offending file.
+/// A directory `rm` aborts when any nested file has comments, naming it and deleting nothing.
 #[test]
 fn dir_with_commented_file_aborts_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -93,8 +93,7 @@ fn purge_then_rm_deletes_tree_via_cli() {
     assert!(!realm.path().join("tree").exists());
 }
 
-/// A managed directory with mixed visible contents is removed
-/// recursively; the JSON report names the files and folders.
+/// A managed directory is removed recursively; the JSON report names the files and folders.
 #[test]
 fn removes_directory_tree_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -114,8 +113,7 @@ fn removes_directory_tree_via_cli() {
     assert!(!realm.path().join("tree").exists());
 }
 
-/// A directory holding a hidden file: the visible file is removed, the
-/// folder is left behind (still holds the dotfile), and no error.
+/// The visible file is removed and the folder, still holding the dotfile, is left with no error.
 #[test]
 fn leaves_folder_with_hidden_file_behind_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -135,8 +133,7 @@ fn leaves_folder_with_hidden_file_behind_via_cli() {
     assert!(realm.path().join("box").exists());
 }
 
-/// All-or-nothing: an unreadable file in the tree aborts the call before
-/// any deletion. The whole tree stays intact.
+/// An unreadable file in the tree aborts the call before any deletion.
 #[cfg(unix)]
 #[test]
 fn unreadable_file_aborts_and_leaves_tree_intact() {
@@ -147,8 +144,7 @@ fn unreadable_file_aborts_and_leaves_tree_intact() {
     fs::write(realm.path().join("docs/ok.md"), b"ok").unwrap();
     let bad = realm.path().join("docs/bad.md");
     fs::write(&bad, b"bad").unwrap();
-    // A `000`-mode file stats fine but cannot be opened for read; the
-    // open-based readability pre-flight trips on it and aborts the call.
+    // A `000`-mode file stats fine but cannot be opened, which trips the readability pre-flight.
     let mut perms = fs::metadata(&bad).unwrap().permissions();
     perms.set_mode(0o000);
     fs::set_permissions(&bad, perms).unwrap();
@@ -166,13 +162,11 @@ fn unreadable_file_aborts_and_leaves_tree_intact() {
         stderr.contains("bad.md"),
         "error must name the blocking path, got: {stderr}"
     );
-    // Nothing deleted.
     assert!(realm.path().join("docs/ok.md").exists());
     assert!(realm.path().join("docs/bad.md").exists());
 }
 
-/// A symlink inside the tree pointing outside is unlinked, not followed:
-/// the link's target survives.
+/// A symlink pointing outside the tree is unlinked, not followed: its target survives.
 #[cfg(unix)]
 #[test]
 fn symlink_is_unlinked_not_followed_via_cli() {
@@ -191,14 +185,12 @@ fn symlink_is_unlinked_not_followed_via_cli() {
     let out = run_in(realm.path(), &["rm", "links", "--json"]);
     assert_status(&out, 0);
 
-    // The link is gone; the target it pointed at is untouched.
     assert!(!realm.path().join("links/ptr.md").exists());
     assert!(target.exists(), "symlink target must survive");
     assert_eq!(fs::read_to_string(&target).unwrap(), "survive");
     assert!(!realm.path().join("links").exists());
 }
 
-/// Empty directory is removed.
 #[test]
 fn removes_empty_directory_via_cli() {
     let realm = TempDir::new().unwrap();

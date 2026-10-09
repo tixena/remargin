@@ -26,16 +26,10 @@ use regex::Regex;
 use crate::advice::{self, Advice};
 use crate::parser::AuthorType;
 
-/// Prose characters a blank-line-free body may run to before it warns.
-///
-/// A guess, and generous on purpose: the threshold is the weakest part of
-/// this check, so it should only fire on a body that is unarguably a slab.
+/// Generous on purpose: the check should fire only on a body that is unarguably a slab.
 const DENSE_BODY_CHARS: usize = 600;
 
-/// Openers that mark a closing addendum rather than part of the answer.
-///
-/// Matched against the start of the body's last block, so the same words
-/// mid-comment — where the point is being made, not parked — pass.
+/// Matched only at the start of the body's last block, so the same words mid-comment pass.
 const TRAILING_METADATA_OPENERS: &[&str] = &[
     "as an aside",
     "for context",
@@ -49,11 +43,7 @@ const TRAILING_METADATA_OPENERS: &[&str] = &[
     "worth noting",
 ];
 
-/// A reference cue followed by something short enough to be a comment id.
-///
-/// Capture 1 is the opening backtick, if any; capture 2 is the candidate
-/// id. Backticks are the strong signal — a bare token still has to look
-/// like an id to count, see [`looks_like_id`].
+/// Capture 1 is the opening backtick, if any; capture 2 is the candidate id.
 static BARE_ID_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i:\b(?:comments|comment|replies|reply|thread|as in|see|per)\s+(?:to |at |on |the )?)(`?)([a-z0-9]{3,4})\b",
@@ -61,6 +51,7 @@ static BARE_ID_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// Whether a finding refuses the comment or is only reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Severity {
     Reject,
@@ -88,6 +79,7 @@ impl FindingKind {
     }
 }
 
+/// One style fault found in a comment body, with the line it sits on and what to do about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StyleFinding {
     kind: FindingKind,

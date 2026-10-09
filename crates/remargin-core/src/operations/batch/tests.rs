@@ -24,7 +24,6 @@ author: eduardo
 Some body text.
 ";
 
-/// A longer document with numbered lines for precise `after_line` testing.
 const MULTILINE_DOC: &str = "\
 ---
 title: Test
@@ -229,7 +228,6 @@ fn batch_failure_rolls_back() {
     let result = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops);
     result.unwrap_err();
 
-    // Original document should be unchanged (all-or-nothing).
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
@@ -289,12 +287,11 @@ fn batch_two_after_line_comments_both_placed_correctly() {
     let system = system_with_doc(MULTILINE_DOC);
     let config = open_config();
 
-    // Insert comment A after "Line one." and comment B after "Line four."
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(9), // after "Line one."
+            after_line: Some(9),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line one."),
@@ -306,7 +303,7 @@ fn batch_two_after_line_comments_both_placed_correctly() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(13), // after "Line three."
+            after_line: Some(13),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line three."),
@@ -326,13 +323,11 @@ fn batch_two_after_line_comments_both_placed_correctly() {
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 2);
 
-    // Both comments must exist and be distinct.
     let cm_a = doc.find_comment(&ids[0]).unwrap();
     let cm_b = doc.find_comment(&ids[1]).unwrap();
     assert_eq!(cm_a.content, "Comment after line one.");
     assert_eq!(cm_b.content, "Comment after line three.");
 
-    // Comment A must appear before Comment B in the document.
     assert!(
         cm_a.line < cm_b.line,
         "Comment A (line {}) should be before Comment B (line {})",
@@ -355,12 +350,11 @@ fn batch_after_line_reverse_order() {
     let system = system_with_doc(MULTILINE_DOC);
     let config = open_config();
 
-    // Insert in reverse order: higher line first, lower line second.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(13), // after "Line three." (higher)
+            after_line: Some(13),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line three."),
@@ -372,7 +366,7 @@ fn batch_after_line_reverse_order() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(9), // after "Line one." (lower)
+            after_line: Some(9),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Comment after line one."),
@@ -394,8 +388,6 @@ fn batch_after_line_reverse_order() {
     let cm_three = doc.find_comment(&ids[0]).unwrap();
     let cm_one = doc.find_comment(&ids[1]).unwrap();
 
-    // Even though "after line three" was submitted first, "after line one"
-    // should appear earlier in the document.
     assert!(
         cm_one.line < cm_three.line,
         "Comment at line one ({}) should be before comment at line three ({})",
@@ -409,12 +401,11 @@ fn batch_three_after_line_same_region() {
     let system = system_with_doc(MULTILINE_DOC);
     let config = open_config();
 
-    // Three comments targeting consecutive lines.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(9), // after "Line one."
+            after_line: Some(9),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("First."),
@@ -426,7 +417,7 @@ fn batch_three_after_line_same_region() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(11), // after "Line two."
+            after_line: Some(11),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Second."),
@@ -438,7 +429,7 @@ fn batch_three_after_line_same_region() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(13), // after "Line three."
+            after_line: Some(13),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Third."),
@@ -462,7 +453,6 @@ fn batch_three_after_line_same_region() {
     let cm_2 = doc.find_comment(&ids[1]).unwrap();
     let cm_3 = doc.find_comment(&ids[2]).unwrap();
 
-    // All three must be in document order matching their target lines.
     assert!(
         cm_1.line < cm_2.line,
         "First ({}) should be before Second ({})",
@@ -482,12 +472,11 @@ fn batch_mixed_after_line_and_append() {
     let system = system_with_doc(MULTILINE_DOC);
     let config = open_config();
 
-    // Mix: one after_line, one append, one after_line.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(9), // after "Line one."
+            after_line: Some(9),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Positioned comment."),
@@ -499,7 +488,7 @@ fn batch_mixed_after_line_and_append() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: None, // append
+            after_line: None,
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Appended comment."),
@@ -511,7 +500,7 @@ fn batch_mixed_after_line_and_append() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(13), // after "Line three."
+            after_line: Some(13),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Another positioned comment."),
@@ -535,7 +524,6 @@ fn batch_mixed_after_line_and_append() {
     let cm_append = doc.find_comment(&ids[1]).unwrap();
     let cm_pos2 = doc.find_comment(&ids[2]).unwrap();
 
-    // Positioned comments in body, appended at end.
     assert!(
         cm_pos1.line < cm_pos2.line,
         "Positioned at line 9 ({}) should be before positioned at line 13 ({})",
@@ -576,12 +564,11 @@ Line after comment.
     let system = system_with_doc(doc_with_comment);
     let config = open_config();
 
-    // One positioned comment + one reply to existing comment.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(19), // after "Line after comment."
+            after_line: Some(19),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("New comment at end."),
@@ -611,13 +598,12 @@ Line after comment.
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
-    assert_eq!(doc.comments().len(), 3); // root + 2 new
+    assert_eq!(doc.comments().len(), 3);
 
     let reply = doc.find_comment(&ids[1]).unwrap();
     assert_eq!(reply.reply_to.as_deref(), Some("root"));
     assert_eq!(reply.thread.as_deref(), Some("root"));
 
-    // The reply should be after the root comment (placed by reply_to logic).
     let root = doc.find_comment("root").unwrap();
     assert!(
         reply.line > root.line,
@@ -632,12 +618,11 @@ fn batch_two_after_same_line() {
     let system = system_with_doc(MULTILINE_DOC);
     let config = open_config();
 
-    // Two comments both targeting the same line.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(9), // after "Line one."
+            after_line: Some(9),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("First at line 9."),
@@ -649,7 +634,7 @@ fn batch_two_after_same_line() {
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(9), // also after "Line one."
+            after_line: Some(9),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Second at line 9."),
@@ -672,7 +657,6 @@ fn batch_two_after_same_line() {
     let cm_1 = doc.find_comment(&ids[0]).unwrap();
     let cm_2 = doc.find_comment(&ids[1]).unwrap();
 
-    // Both should be near line 9, and first should come before second.
     assert!(
         cm_1.line < cm_2.line,
         "First ({}) should be before second ({})",
@@ -689,7 +673,7 @@ fn batch_after_line_beyond_document_length() {
     let ops = vec![BatchCommentOp {
         after_comment: None,
         after_heading: None,
-        after_line: Some(9999), // way beyond document length — clamps to append
+        after_line: Some(9999),
         attachments: Vec::new(),
         auto_ack: Some(false),
         content: String::from("Appended at end."),
@@ -714,7 +698,6 @@ fn batch_after_line_zero() {
     let system = system_with_doc(MULTILINE_DOC);
     let config = open_config();
 
-    // Line 0 is before the first line — should insert at the very top.
     let ops = vec![BatchCommentOp {
         after_comment: None,
         after_heading: None,
@@ -728,7 +711,6 @@ fn batch_after_line_zero() {
         to: Vec::new(),
     }];
 
-    // This should either work (insert at top) or error gracefully — not corrupt.
     let result = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops);
     if let Ok(outcome) = result {
         assert_eq!(outcome.ids.len(), 1);
@@ -736,7 +718,6 @@ fn batch_after_line_zero() {
         let doc = parser::parse(&content).unwrap();
         assert_eq!(doc.comments().len(), 1);
     }
-    // If it errors, that's also acceptable — just not corruption.
 }
 
 /// A document with one existing comment for auto-ack reply tests.
@@ -801,7 +782,6 @@ fn batch_auto_ack_mixed_ops() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
-    // op0: create new comment, op1: reply to abc with auto_ack, op2: reply to abc without auto_ack
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
@@ -849,7 +829,6 @@ fn batch_auto_ack_mixed_ops() {
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
 
-    // Parent abc should have exactly 1 ack (from op1, not op2).
     let parent = doc.find_comment("abc").unwrap();
     assert_eq!(parent.ack.len(), 1);
     assert_eq!(parent.ack[0].author, "eduardo");
@@ -905,10 +884,6 @@ fn batch_auto_ack_forward_reference() {
 
 #[test]
 fn batch_auto_ack_shifts_subsequent_after_line() {
-    // Document with body text first, then an existing comment.
-    // The after_line target is in the body area BEFORE the comment,
-    // so it is not affected by the reply insertion but IS affected
-    // by ack-induced shifts if any occur above it.
     let doc_content = "\
 ---
 title: Test
@@ -935,11 +910,6 @@ Line after comment.
     let system = system_with_doc(doc_content);
     let config = open_config();
 
-    // op0: reply to abc with auto_ack (adds ack metadata, shifting lines)
-    // op1: insert after "Line after comment." using after_line
-    // Since op0 is AfterComment (not AfterLine), only the ack shift is
-    // tracked. We use Append for op1 instead to avoid the pre-existing
-    // limitation that AfterComment insertions don't contribute to line_shifts.
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
@@ -956,7 +926,7 @@ Line after comment.
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(8), // after "Line before comment." (before the comment)
+            after_line: Some(8),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("Positioned comment."),
@@ -975,21 +945,17 @@ Line after comment.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
 
-    // All three comments should exist.
     assert_eq!(doc.comments().len(), 3);
 
-    // The positioned comment should still land in the right area.
     let positioned = doc.find_comment(&ids[1]).unwrap();
     assert_eq!(positioned.content, "Positioned comment.");
 
-    // Parent abc should be acked.
     let parent = doc.find_comment("abc").unwrap();
     assert_eq!(parent.ack.len(), 1);
 }
 
 #[test]
 fn batch_auto_ack_multiple_shifts() {
-    // A document with two existing comments at different positions.
     let doc_content = "\
 ---
 title: Test
@@ -1027,9 +993,6 @@ End text.
     let system = system_with_doc(doc_content);
     let config = open_config();
 
-    // op0: reply to aaa with auto_ack
-    // op1: reply to bbb with auto_ack
-    // op2: after_line targeting "End text."
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
@@ -1058,7 +1021,7 @@ End text.
         BatchCommentOp {
             after_comment: None,
             after_heading: None,
-            after_line: Some(31), // after "End text." in original doc
+            after_line: Some(31),
             attachments: Vec::new(),
             auto_ack: Some(false),
             content: String::from("End positioned."),
@@ -1077,20 +1040,16 @@ End text.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
 
-    // 2 original + 3 new = 5 comments
     assert_eq!(doc.comments().len(), 5);
 
-    // Both parents should be acked.
     let parent_a = doc.find_comment("aaa").unwrap();
     assert_eq!(parent_a.ack.len(), 1);
     let parent_b = doc.find_comment("bbb").unwrap();
     assert_eq!(parent_b.ack.len(), 1);
 
-    // The positioned comment should exist.
     let end_cm = doc.find_comment(&ids[2]).unwrap();
     assert_eq!(end_cm.content, "End positioned.");
 
-    // The replies should come after their respective parents.
     let reply_a = doc.find_comment(&ids[0]).unwrap();
     assert!(
         reply_a.line > parent_a.line,
@@ -1133,17 +1092,12 @@ fn batch_auto_ack_without_reply_to_errors() {
         "unexpected error: {err_msg}"
     );
 
-    // File should not be modified.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(content, MINIMAL_DOC);
 }
 
 #[test]
 fn batch_auto_ack_none_acks_others_skips_self() {
-    // Fixture: two parent comments — `abc` by alice, `xyz` by eduardo
-    // (the caller). A batch with one reply to each, auto_ack=None on
-    // both. Smart default: alice's parent gets acked, eduardo's does
-    // not (don't ack your own).
     let doc = "\
 ---
 title: Test
@@ -1223,10 +1177,6 @@ By eduardo (the caller).
     );
 }
 
-// ===========================================================================
-// Batch reply-to auto-populate `to` tests
-// ===========================================================================
-
 #[test]
 fn batch_reply_auto_populates_to() {
     let system = system_with_doc(&doc_with_comment());
@@ -1258,8 +1208,6 @@ fn batch_reply_auto_populates_to() {
         "batch reply should auto-populate to from parent author (alice)"
     );
 }
-
-// Recipient registry gate — batch_comment.
 
 #[test]
 fn batch_reply_explicit_to() {
@@ -1324,7 +1272,6 @@ fn batch_registered_caller_config() -> ResolvedConfig {
     }
 }
 
-/// Scenario 10: batch with one bad recipient — whole batch refused, no disk write.
 #[test]
 fn batch_recipient_gate_bad_op_aborts_whole_batch() {
     let system = registered_recipient_batch_system(MINIMAL_DOC);
@@ -1338,7 +1285,7 @@ fn batch_recipient_gate_bad_op_aborts_whole_batch() {
         },
         BatchCommentOp {
             content: String::from("Bad comment."),
-            to: vec![String::from("eduardo_burgos")], // underscore — not in registry
+            to: vec![String::from("eduardo_burgos")],
             ..BatchCommentOp::new(String::from("Bad comment."))
         },
     ];
@@ -1350,7 +1297,6 @@ fn batch_recipient_gate_bad_op_aborts_whole_batch() {
         "batch should be refused for bad recipient: {msg}"
     );
 
-    // No disk write should have happened — doc stays unchanged.
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(
@@ -1359,25 +1305,18 @@ fn batch_recipient_gate_bad_op_aborts_whole_batch() {
     );
 }
 
-/// Scenario 11: batch with in-batch reply to a prior op's comment.
-/// The in-batch reply prepends the active author of op A as the recipient
-/// for op B — this active author is valid and should be accepted.
+/// An in-batch reply prepends the active author of the earlier op as a recipient.
 #[test]
 fn batch_recipient_gate_in_batch_reply_to_active_author_allowed() {
     let system = registered_recipient_batch_system(MINIMAL_DOC);
     let config = batch_registered_caller_config();
 
-    // Op A is written by `eduardo-burgos` (active). Op B replies to op A,
-    // so `eduardo-burgos` is prepended as recipient. The batch reply
-    // mechanism computes this dynamically from the in-memory doc.
     let ops = vec![
         BatchCommentOp {
             content: String::from("First comment by active author."),
             to: Vec::new(),
             ..BatchCommentOp::new(String::from("First comment by active author."))
         },
-        // Note: reply_to references the FIRST op's id, but we don't know it
-        // in advance — so we test with an explicit to: for an active recipient.
         BatchCommentOp {
             content: String::from("Second comment to active recipient."),
             to: vec![String::from("alice")],
@@ -1475,8 +1414,7 @@ fn a_batch_of_clean_bodies_has_nothing_to_warn_about() {
     assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
 }
 
-/// A human author is exempt from the reject tier but not from the warn
-/// tier — advice is offered to everyone, it just never blocks anyone.
+/// A human author is exempt from the reject tier but not from the warn tier.
 #[test]
 fn a_human_authored_batch_still_earns_its_warn_tier_notes() {
     let system = system_with_doc(MINIMAL_DOC);

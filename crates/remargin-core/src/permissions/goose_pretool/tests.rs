@@ -1,7 +1,5 @@
-//! Unit tests for `permissions::goose_pretool` — the ten-scenario QA
-//! matrix for the goose adapter, minus the two scenarios that can only be
-//! observed from the CLI (the two-channel verdict render and the
-//! install/uninstall lifecycle).
+//! Unit tests for `permissions::goose_pretool`. The two-channel verdict render and the
+//! install/uninstall lifecycle can only be observed from the CLI and are not covered here.
 //!
 //! Every test feeds a synthetic goose `PreToolUse` envelope through
 //! `goose_pretool()` against a `MemorySystem` realm. The core function is
@@ -74,10 +72,6 @@ fn assert_goose_namespaced(reason: &str) {
     );
 }
 
-// ---- 1. managed path via the text editor -------------------------------
-
-/// A `write` onto a managed path blocks and the reason names the remargin
-/// write op and the path, so the agent has its next call spelled out.
 #[test]
 fn text_editor_write_on_managed_path_blocks_with_write_guidance() {
     let stdin = event_json(
@@ -91,8 +85,7 @@ fn text_editor_write_on_managed_path_blocks_with_write_guidance() {
     assert_goose_namespaced(&reason);
 }
 
-/// `str_replace` and `insert` are edit-class verbs, so they redirect to the
-/// edit op rather than the whole-file write op.
+/// Edit-class verbs redirect to the edit op, not the whole-file write op.
 #[test]
 fn text_editor_str_replace_and_insert_block_with_edit_guidance() {
     for command in ["str_replace", "insert"] {
@@ -123,8 +116,6 @@ fn text_editor_view_on_managed_path_blocks_with_get_guidance() {
     assert_goose_namespaced(&reason);
 }
 
-/// A relative path is rooted at `working_dir`, so the realm is found even
-/// though the envelope never names it absolutely.
 #[test]
 fn text_editor_relative_path_is_rooted_at_working_dir() {
     let stdin = event_json(
@@ -136,10 +127,6 @@ fn text_editor_relative_path_is_rooted_at_working_dir() {
     assert!(reason.contains("/r/secret/foo.md"), "reason: {reason}");
 }
 
-// ---- 2. shell touching a managed path ----------------------------------
-
-/// A shell word that lands inside the managed subtree blocks, with the
-/// per-verb redirect the engine already owns.
 #[test]
 fn shell_word_inside_managed_subtree_blocks() {
     let stdin = event_json(
@@ -167,10 +154,6 @@ fn shell_from_in_realm_working_dir_follows_per_word_scan() {
     assert_goose_namespaced(&reason);
 }
 
-// ---- 3. unmanaged paths ------------------------------------------------
-
-/// An unmanaged path is allowed for both gated tools — the guard is silent
-/// outside the managed subtree.
 #[test]
 fn unmanaged_path_allows_on_both_gated_tools() {
     let system = realm();
@@ -189,11 +172,7 @@ fn unmanaged_path_allows_on_both_gated_tools() {
     assert_allow(&goose_pretool(&system, &shell));
 }
 
-// ---- 4. remargin's own MCP tools ---------------------------------------
-
-/// The remargin extension is the sanctioned surface and is never
-/// intercepted, even when its argument is a managed path — intercepting it
-/// would leave the agent with no way to touch managed content at all.
+/// Intercepting remargin's own tools would leave no way to touch managed content.
 #[test]
 fn remargin_mcp_tools_are_never_intercepted() {
     let system = realm();
@@ -203,24 +182,18 @@ fn remargin_mcp_tools_are_never_intercepted() {
     }
 }
 
-// ---- 5. malformed / uncertain payloads (fail closed) -------------------
-
-/// Truncated JSON is not a payload the guard can reason about, and goose
-/// treats a silent hook as permission to proceed — so it blocks.
+/// goose treats a silent hook as permission to proceed, so an unreadable payload blocks.
 #[test]
 fn truncated_payload_blocks() {
     let reason = expect_block(goose_pretool(&realm(), b"{\"tool_name\": \"developer__"));
     assert!(reason.contains("remargin"), "reason: {reason}");
 }
 
-/// An empty payload blocks for the same reason.
 #[test]
 fn empty_payload_blocks() {
     let _reason = expect_block(goose_pretool(&realm(), b""));
 }
 
-/// A gated tool missing the field that names its target is an uncertain
-/// state, not a safe one.
 #[test]
 fn gated_tool_missing_required_field_blocks() {
     let system = realm();
@@ -243,8 +216,6 @@ fn gated_tool_missing_required_field_blocks() {
     let _shell = expect_block(goose_pretool(&system, &shell_no_command));
 }
 
-/// A text-editor verb the adapter does not recognize could touch the path
-/// in a way the engine has no mapping for, so it blocks rather than guess.
 #[test]
 fn unrecognized_text_editor_command_blocks() {
     let stdin = event_json(
@@ -256,8 +227,7 @@ fn unrecognized_text_editor_command_blocks() {
     assert!(reason.contains("teleport"), "reason: {reason}");
 }
 
-/// Without `working_dir` a relative target cannot be rooted, so a gated
-/// tool blocks instead of resolving against an assumed directory.
+/// Without `working_dir` a relative target cannot be rooted.
 #[test]
 fn gated_tool_without_working_dir_blocks() {
     let envelope = json!({
@@ -270,9 +240,7 @@ fn gated_tool_without_working_dir_blocks() {
     assert!(reason.contains("working_dir"), "reason: {reason}");
 }
 
-/// A tool outside the gated set still goes through the engine when its
-/// input names a shape the engine gates — an unknown extension reaching a
-/// managed path is the same reach by another name.
+/// An unknown extension reaching a managed path is the same reach under another name.
 #[test]
 fn ungated_tool_naming_a_managed_path_blocks() {
     let system = realm();
@@ -286,22 +254,13 @@ fn ungated_tool_naming_a_managed_path_blocks() {
     let _reason = expect_block(goose_pretool(&system, &shell_shaped));
 }
 
-/// A tool outside the gated set that names no path or command shape has
-/// nothing for the engine to resolve and is allowed.
 #[test]
 fn ungated_tool_without_a_gated_shape_allows() {
     let stdin = event_json("other__tool", "/r/secret", &json!({ "query": "hello" }));
     assert_allow(&goose_pretool(&realm(), &stdin));
 }
 
-// ---- 6. host tool namespacing ------------------------------------------
-
-/// Every deny family reachable from goose renders its op names in goose's
-/// namespacing. Walks the families one by one — the per-tool message, the
-/// per-verb shell redirect, the ancestor-destructive deny, and the
-/// `cli_allowed` deny — because each builds its own string off the shared
-/// registry and a missed one would still hand the agent a tool it cannot
-/// call.
+/// Each deny family builds its own string, so each is checked for goose's namespacing.
 #[test]
 fn every_deny_family_names_goose_namespaced_ops() {
     let system = realm();
@@ -337,8 +296,6 @@ fn every_deny_family_names_goose_namespaced_ops() {
     assert_goose_namespaced(&reason);
 }
 
-/// No `cli_allowed` declared in the walk → the CLI is denied by default,
-/// and the reason renders goose's tool namespacing with the opt-in hint.
 #[test]
 fn cli_default_deny_names_goose_namespaced_ops() {
     let stdin = event_json(
@@ -351,8 +308,6 @@ fn cli_default_deny_names_goose_namespaced_ops() {
     assert!(!reason.contains("cli_allowed: false"), "reason: {reason}");
     assert_goose_namespaced(&reason);
 }
-
-// ---- 7. verdict payload shape ------------------------------------------
 
 /// The stdout channel carries goose's documented block object verbatim.
 #[test]

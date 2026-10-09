@@ -1,3 +1,5 @@
+/** Tests for the pure helpers that drive every render branch of the Updates section. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { ComponentCheck } from "@/lib/githubReleases.ts";
@@ -9,14 +11,6 @@ import {
   statusLabel,
   tailText,
 } from "./updatesSection.helpers.ts";
-
-/**
- * The UpdatesSection component is driven by four pure helpers. Covering
- * them individually is enough to prove every render branch — the
- * component's JSX is a thin shell over these functions, and wiring
- * React + jsdom into node's strip-only test loader would add more risk
- * than coverage for branches this deterministic.
- */
 
 const check = (overrides: Partial<ComponentCheck> = {}): ComponentCheck => ({
   status: "up-to-date",

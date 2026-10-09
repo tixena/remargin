@@ -7,7 +7,6 @@ use os_shim::mock::MemorySystem;
 
 use super::{AuthorType, Segment, parse, parse_file};
 
-/// Build a minimal valid remargin block.
 fn minimal_block(id: &str) -> String {
     format!(
         "```remargin\n\
@@ -22,7 +21,6 @@ fn minimal_block(id: &str) -> String {
     )
 }
 
-/// Build a remargin block with custom content.
 fn block_with_content(id: &str, content: &str) -> String {
     format!(
         "```remargin\n\
@@ -48,7 +46,6 @@ fn test_simple_comment() {
     assert_eq!(comments[0].author, "testuser");
     assert_eq!(comments[0].author_type, AuthorType::Human);
     assert_eq!(comments[0].checksum, "sha256:abc123");
-    // fence_depth is no longer stored on Comment; it is computed at serialization time.
 }
 
 #[test]
@@ -66,7 +63,6 @@ fn test_multiple_comments_with_body() {
     assert_eq!(comments[1].id, "b02");
     assert_eq!(comments[2].id, "c03");
 
-    // Body segments should exist between comments.
     let body_count = parsed
         .segments
         .iter()
@@ -135,7 +131,6 @@ This is the comment body.
     assert_eq!(c.ack[0].author, "jorge");
     assert_eq!(c.ack[1].author, "claude");
     assert_eq!(c.signature.as_deref(), Some("ed25519:base64signature=="));
-    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert_eq!(c.content, "This is the comment body.");
 }
 
@@ -155,7 +150,6 @@ fn test_round_trip_simple() {
     );
     let parsed = parse(&doc).unwrap();
     let reconstructed = parsed.to_markdown().unwrap();
-    // Re-parse the reconstructed document and verify it matches.
     let reparsed = parse(&reconstructed).unwrap();
     assert_eq!(reparsed.comments().len(), 1);
     assert_eq!(reparsed.comments()[0].id, "rt1");
@@ -202,7 +196,6 @@ End of comment.
     let parsed = parse(doc).unwrap();
     let c = parsed.comments()[0];
     assert_eq!(c.id, "deep");
-    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert!(c.content.contains("```python"));
     assert!(c.content.contains("print(\"hello\")"));
 }
@@ -231,7 +224,6 @@ Done quoting.
     let comments = parsed.comments();
     assert_eq!(comments.len(), 1);
     assert_eq!(comments[0].id, "v6wrap");
-    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert!(comments[0].content.contains("`````remargin"));
 }
 
@@ -239,13 +231,11 @@ Done quoting.
 fn test_three_backtick_minimal() {
     let doc = minimal_block("min3");
     let parsed = parse(&doc).unwrap();
-    // fence_depth is no longer stored on Comment; verify the comment parsed successfully.
     assert_eq!(parsed.comments()[0].id, "min3");
 }
 
 #[test]
 fn test_same_depth_not_confused() {
-    // A 4-backtick wrapper; the inner ``` (3 backticks) is content, not a closer.
     let doc = "\
 ````remargin
 ---
@@ -267,7 +257,6 @@ More text.
     let parsed = parse(doc).unwrap();
     let c = parsed.comments()[0];
     assert_eq!(c.id, "sd4");
-    // fence_depth is no longer stored on Comment; it is computed at serialization time.
     assert!(c.content.contains("```"));
     assert!(c.content.contains("some code"));
 }
@@ -377,7 +366,6 @@ fn test_line_number_round_trip() {
     let original_line = parsed.comments()[0].line;
     assert_eq!(original_line, 3);
 
-    // Round-trip through serialize and re-parse.
     let reconstructed = parsed.to_markdown().unwrap();
     let reparsed = parse(&reconstructed).unwrap();
     assert_eq!(
@@ -389,9 +377,6 @@ fn test_line_number_round_trip() {
 
 #[test]
 fn test_comment_json_shape_matches_schema() {
-    // Build a block that exercises every optional field: `reply_to`,
-    // `thread`, `signature`, plus a non-empty `ack`, `reactions`,
-    // `attachments`, and `to` list.
     let doc = "```remargin\n\
          ---\n\
          id: full\n\
@@ -414,13 +399,9 @@ fn test_comment_json_shape_matches_schema() {
     let parsed = parse(doc).unwrap();
     let comment = parsed.comments()[0].clone();
 
-    // Serialize the comment through serde (which is what the CLI's
-    // `--json comments` output relies on) and inspect the resulting
-    // JSON object.
     let value = serde_json::to_value(&comment).unwrap();
     let obj = value.as_object().unwrap();
 
-    // Required keys must always be present.
     for key in [
         "ack",
         "attachments",
@@ -440,31 +421,21 @@ fn test_comment_json_shape_matches_schema() {
         );
     }
 
-    // `author_type` must use the lowercase enum value the schema
-    // declares (`human`/`agent`) — matching the fence wire format,
-    // checksum input, and human display. Not the legacy `type` key
-    // the CLI used to hand-write.
     assert_eq!(obj["author_type"], serde_json::json!("human"));
     assert!(
         !obj.contains_key("type"),
         "legacy `type` key must not appear in serialized Comment"
     );
 
-    // Optional fields with values should be present.
     assert_eq!(obj["reply_to"], serde_json::json!("abc"));
     assert_eq!(obj["thread"], serde_json::json!("t1"));
     assert_eq!(obj["signature"], serde_json::json!("ed25519:deadbeef"));
 
-    // Timestamp must be RFC3339 (the format the generated
-    // `z.iso.datetime()` schema expects).
     assert_eq!(obj["ts"], serde_json::json!("2026-04-06T14:32:00-04:00"));
 }
 
 #[test]
 fn test_minimal_comment_json_skips_none_and_defaults_collections() {
-    // A block with only the required YAML fields should still
-    // serialize to all required schema keys, including empty
-    // collections for `ack`, `attachments`, `to`, and `reactions`.
     let doc = minimal_block("abc");
     let parsed = parse(&doc).unwrap();
     let comment = parsed.comments()[0].clone();
@@ -477,9 +448,6 @@ fn test_minimal_comment_json_skips_none_and_defaults_collections() {
     assert_eq!(obj["to"], serde_json::json!([]));
     assert_eq!(obj["reactions"], serde_json::json!({}));
 
-    // Optional fields with no value should be omitted entirely so the
-    // Zod `strictObject` schema accepts them as `undefined` instead of
-    // rejecting an explicit `null`.
     for key in ["reply_to", "thread", "signature"] {
         assert!(
             !obj.contains_key(key),
@@ -503,8 +471,6 @@ fn test_author_type_serializes_lowercase() {
     );
 }
 
-/// Parsing a block without the `remargin_kind` field yields an empty
-/// vector — the field is additive and old blocks must keep round-tripping.
 #[test]
 fn test_remargin_kind_absent_parses_to_none() {
     let doc = minimal_block("abc");
@@ -519,10 +485,7 @@ fn test_remargin_kind_absent_parses_to_none() {
     );
 }
 
-/// An explicit empty list on disk (`remargin_kind: []`) must also parse
-/// to `None` so the writer omits the line on the next serialize —
-/// preserving byte-identical round-trip for any in-flight document
-/// that might land in the empty-list shape during hand-editing.
+/// `remargin_kind: []` on disk parses to `None`, so the next write omits the line.
 #[test]
 fn test_remargin_kind_explicit_empty_list_normalizes_to_none() {
     let doc = "\
@@ -550,10 +513,6 @@ body
     );
 }
 
-/// Round-trip guarantee: a pre-field block (no `remargin_kind:` line)
-/// serializes back out with no line either. This is the byte-for-byte
-/// back-compat hinge the `#[serde(skip_serializing_if)]` guard depends
-/// on for both the YAML writer and the zod schema consumers.
 #[test]
 fn test_remargin_kind_absent_round_trip_omits_line() {
     let doc = minimal_block("abc");
@@ -565,8 +524,6 @@ fn test_remargin_kind_absent_round_trip_omits_line() {
     );
 }
 
-/// A block that declares `remargin_kind` round-trips through parse +
-/// `to_markdown` with the same values in the same order.
 #[test]
 fn test_remargin_kind_round_trip() {
     let doc = "\
@@ -596,8 +553,6 @@ body text
     );
 }
 
-/// The parser must reject a block with a malformed kind so downstream
-/// code never sees a value that would break signature reproducibility.
 #[test]
 fn test_remargin_kind_invalid_value_rejected() {
     let doc = "\
@@ -623,9 +578,6 @@ body
 
 #[test]
 fn legacy_reactions_round_trip_to_new_shape() {
-    // A doc written under the earlier schema (`reactions: {emoji: [author]}`)
-    // must parse, then serialize back in the new shape with a synthesized
-    // ts taken from the comment's own ts (no matching ack).
     let doc = "\
 ```remargin
 ---
@@ -643,7 +595,6 @@ hello
     let parsed = parse(doc).unwrap();
     let cm = parsed.comments()[0];
 
-    // Both legacy entries land with the comment's own ts (no ack list).
     let entries = &cm.reactions["thumbsup"];
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].author, "eduardo");
@@ -651,8 +602,6 @@ hello
     assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
     assert_eq!(entries[1].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
 
-    // Serialize back. New shape (`- author:` / ` ts:`) must appear; the
-    // legacy `[eduardo, claude]` flow form must NOT.
     let written = parsed.to_markdown().unwrap();
     assert!(
         written.contains("- author: eduardo"),
@@ -670,8 +619,6 @@ hello
 
 #[test]
 fn legacy_reaction_uses_ack_ts_when_author_acked() {
-    // When the comment has an ack from the same author as a legacy
-    // reaction, the synthesized reaction ts comes from the ack.
     let doc = "\
 ```remargin
 ---
@@ -874,8 +821,6 @@ trailing outer body text
 
 #[test]
 fn comment_spans_track_exact_block_lines() {
-    // A block whose header carries a YAML comment (`#x`) the parser keeps
-    // but re-serialization drops — the case line attribution used to drift on.
     let drifting = "```remargin\n\
          ---\n\
          id: aaa\n\
@@ -888,7 +833,6 @@ fn comment_spans_track_exact_block_lines() {
          first\n\
          ```\n";
     let plain = block_with_content("bbb", "second");
-    // Multi-byte chars (em dash) before, between, and after the blocks.
     let doc = format!("intro \u{2014}\n{drifting}mid \u{2014}\n{plain}tail \u{2014}\n");
 
     let parsed = parse(&doc).unwrap();
@@ -941,11 +885,8 @@ fn comment_span_handles_block_at_eof_without_trailing_newline() {
 fn pending_broadcast_for_exempts_the_author() {
     use crate::parser::is_pending_broadcast_for;
     let broadcast: [String; 0] = [];
-    // The author never owes their own broadcast.
     assert!(!is_pending_broadcast_for("alice", &broadcast, &[], "alice"));
-    // Anyone else does, until they ack.
     assert!(is_pending_broadcast_for("alice", &broadcast, &[], "bob"));
-    // Directed comments are never broadcasts.
     let directed = [String::from("bob")];
     assert!(!is_pending_broadcast_for("alice", &directed, &[], "bob"));
 }

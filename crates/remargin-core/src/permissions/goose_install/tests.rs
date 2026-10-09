@@ -1,5 +1,5 @@
-//! Unit tests for `permissions::goose_install` — QA scenarios 7 (install /
-//! uninstall lifecycle) and 8 (the `test` subcommand's three verdicts).
+//! Unit tests for `permissions::goose_install`: the install and uninstall lifecycle and the
+//! three verdicts of `test`.
 
 use std::path::{Path, PathBuf};
 
@@ -86,8 +86,7 @@ fn install_writes_both_manifests() {
     assert!(hook["timeout"].is_number());
 }
 
-/// `matcher` is a regex to goose and a bare `*` is silently dropped, so the
-/// generated entry must carry no `matcher` key at all.
+/// goose reads `matcher` as a regex and silently drops a bare `*`.
 #[test]
 fn generated_hook_entry_carries_no_matcher_key() {
     let system = mock();
@@ -99,8 +98,7 @@ fn generated_hook_entry_carries_no_matcher_key() {
     );
 }
 
-/// A `PATH` miss at spawn time fails open upstream, so the command names
-/// the binary absolutely.
+/// A `PATH` miss at spawn time fails open, so the command names the binary absolutely.
 #[test]
 fn generated_hook_command_is_the_absolute_binary_plus_subcommand() {
     let system = mock();
@@ -126,8 +124,6 @@ fn install_is_idempotent() {
     );
 }
 
-/// A plugin left over from an install under a different binary path is
-/// rewritten in place rather than left pointing at the stale command.
 #[test]
 fn install_rewrites_a_drifted_hook_command() {
     let system = seed(
@@ -190,9 +186,7 @@ fn test_reports_not_installed_when_absent() {
     );
 }
 
-/// Three corrupt shapes, all distinguishable from both "wired" and
-/// "absent": unparseable JSON, a manifest with no `PreToolUse` entry, and a
-/// command whose binary has since been removed.
+/// Unparseable JSON, a manifest with no `PreToolUse` entry, and a command whose binary is gone.
 #[test]
 fn test_reports_broken_for_each_corrupt_shape() {
     let hooks_file = guard_dir().join("hooks/hooks.json");
@@ -215,8 +209,6 @@ fn test_reports_broken_for_each_corrupt_shape() {
     );
 }
 
-// ---- SessionStart entry ------------------------------------------------
-
 fn session_entries(system: &dyn System) -> Vec<Value> {
     hooks_json(system)["hooks"][SESSION_HOOK_EVENT]
         .as_array()
@@ -231,8 +223,6 @@ fn pretool_entries(system: &dyn System) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// The `SessionStart` entry lands beside the `PreToolUse` one in the same
-/// manifest, with the same no-matcher / absolute-binary shape.
 #[test]
 fn session_guard_install_adds_its_entry_beside_the_pretool_one() {
     let system = mock();
@@ -258,7 +248,6 @@ fn session_guard_install_adds_its_entry_beside_the_pretool_one() {
     );
 }
 
-/// The plugin does not have to exist first — the guard installs it.
 #[test]
 fn session_guard_install_creates_the_plugin_when_absent() {
     let system = mock();
@@ -274,9 +263,7 @@ fn session_guard_install_creates_the_plugin_when_absent() {
     );
 }
 
-/// Both entries live in one manifest, so installing either must merge
-/// rather than rewrite: a pretool install after a session-guard install
-/// used to take the guard down with it.
+/// Both entries live in one manifest, so an install must merge, not rewrite.
 #[test]
 fn pretool_install_preserves_the_session_guard_entry() {
     let system = mock();
@@ -323,8 +310,6 @@ fn install_preserves_entries_it_does_not_own() {
     );
 }
 
-/// Uninstalling the guard leaves the `PreToolUse` entry — and the plugin
-/// itself — in place.
 #[test]
 fn session_guard_uninstall_removes_only_its_own_entry() {
     let system = mock();
@@ -341,8 +326,6 @@ fn session_guard_uninstall_removes_only_its_own_entry() {
     assert_eq!(test(&system, &guard_dir()).unwrap(), TestOutcome::Installed);
 }
 
-/// The reverse direction: removing the `PreToolUse` entry leaves the
-/// `SessionStart` one wired.
 #[test]
 fn pretool_uninstall_leaves_the_session_guard_entry() {
     let system = mock();
@@ -357,8 +340,6 @@ fn pretool_uninstall_leaves_the_session_guard_entry() {
     assert_eq!(session_entries(&system).len(), 1);
 }
 
-/// The last managed entry takes the plugin directory with it — nothing is
-/// left behind for goose to discover.
 #[test]
 fn session_guard_uninstall_removes_the_plugin_when_it_was_the_last_entry() {
     let system = mock();
@@ -370,7 +351,6 @@ fn session_guard_uninstall_removes_the_plugin_when_it_was_the_last_entry() {
     assert!(!system.exists(&guard_dir()).unwrap());
 }
 
-/// A pretool-only plugin is untouched by a session-guard uninstall.
 #[test]
 fn session_guard_uninstall_is_a_no_op_on_a_pretool_only_plugin() {
     let system = mock();
@@ -382,8 +362,6 @@ fn session_guard_uninstall_is_a_no_op_on_a_pretool_only_plugin() {
     assert_eq!(pretool_entries(&system).len(), 1);
 }
 
-/// A pretool-only plugin means the session guard is simply not installed —
-/// the shared directory's presence says nothing about this entry.
 #[test]
 fn session_guard_test_reports_not_installed_for_a_pretool_only_plugin() {
     let system = mock();
@@ -404,8 +382,7 @@ fn session_guard_test_reports_installed_when_wired() {
     );
 }
 
-/// The two corrupt shapes that are not "absent": an unreadable manifest and
-/// an entry whose binary has since been removed.
+/// An unreadable manifest, and an entry whose binary is gone.
 #[test]
 fn session_guard_test_reports_broken_for_corrupt_shapes() {
     let unparseable = seed(mock(), &guard_dir().join("hooks/hooks.json"), "{ not json");

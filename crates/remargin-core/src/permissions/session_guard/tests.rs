@@ -1,3 +1,6 @@
+//! Tests for the Claude Code `SessionStart` guard: hook liveness, the `PATH` probe and the
+//! realm config check.
+
 use std::path::Path;
 
 use os_shim::mock::MemorySystem;
@@ -71,8 +74,6 @@ fn expect_fail(outcome: GuardOutcome) -> GuardDiagnostic {
     diagnostic
 }
 
-/// Case 4: an unparseable realm `.remargin.yaml` above cwd → the guard
-/// fails and surfaces a diagnostic naming the parse failure.
 #[test]
 fn unparseable_realm_config_fails() {
     let system = realm_with_live_hook(mock_with_remargin_on_path())
@@ -95,7 +96,6 @@ fn unparseable_realm_config_fails() {
     );
 }
 
-/// A live hook entry + parseable config → the session proceeds clean.
 #[test]
 fn live_hook_and_config_parses_is_ok() {
     let system = realm_with_live_hook(mock_with_remargin_on_path())
@@ -108,8 +108,7 @@ fn live_hook_and_config_parses_is_ok() {
     assert_eq!(session_guard(&system, Path::new("/r")), GuardOutcome::Ok);
 }
 
-/// No `.remargin.yaml` on the walk is not a failure — an absent realm
-/// config parses vacuously.
+/// An absent realm config parses vacuously.
 #[test]
 fn no_realm_config_is_ok_with_a_live_hook() {
     let system = realm_with_live_hook(mock_with_remargin_on_path());
@@ -117,10 +116,7 @@ fn no_realm_config_is_ok_with_a_live_hook() {
     assert_eq!(session_guard(&system, Path::new("/r")), GuardOutcome::Ok);
 }
 
-/// Neither settings scope declares an entry → the guard fails and names
-/// both scopes plus the install command. A `remargin` that resolves on
-/// `PATH` proves nothing here: nothing is registered to spawn it, so no
-/// tool call is gated.
+/// With no entry registered, a `remargin` on `PATH` gates nothing.
 #[test]
 fn no_hook_entry_in_either_scope_fails() {
     let system = mock_with_remargin_on_path()
@@ -141,8 +137,6 @@ fn no_hook_entry_in_either_scope_fails() {
     );
 }
 
-/// A missing `PATH` variable is treated as "not resolvable" → the entry
-/// that resolves through it cannot spawn, so the guard fails.
 #[test]
 fn missing_path_var_fails() {
     let system =
@@ -154,9 +148,7 @@ fn missing_path_var_fails() {
     ));
 }
 
-/// The installed entry names an absolute binary that is on disk, so the
-/// hook will spawn — `PATH` says nothing about it, and an empty `PATH` is
-/// no longer a failure.
+/// An absolute command whose binary is on disk spawns whatever `PATH` holds.
 #[test]
 fn absolute_hook_command_is_ok_without_the_binary_on_path() {
     let system = realm_with_live_hook(MemorySystem::new().with_env("PATH", "/usr/bin").unwrap());
@@ -164,9 +156,7 @@ fn absolute_hook_command_is_ok_without_the_binary_on_path() {
     assert_eq!(session_guard(&system, Path::new("/r")), GuardOutcome::Ok);
 }
 
-/// The installed entry names an absolute binary that is gone: the hook
-/// cannot spawn, so the guard fails and names the binary — even though
-/// another `remargin` does resolve on `PATH`.
+/// The guard names the missing binary even though another `remargin` resolves on `PATH`.
 #[test]
 fn stale_absolute_hook_command_fails_and_names_the_binary() {
     let system = realm_with_hook_command(
@@ -182,9 +172,7 @@ fn stale_absolute_hook_command_fails_and_names_the_binary() {
     );
 }
 
-/// An entry an older install left behind resolves through `PATH`, so that
-/// is what the guard checks it against — present here, so the session is
-/// clean.
+/// A bare-name entry resolves through `PATH`, so that is what it is checked against.
 #[test]
 fn path_relative_hook_command_falls_back_to_the_path_probe() {
     let legacy = format!("remargin {HOOK_SUBCOMMAND}");

@@ -1,6 +1,6 @@
 //! Integration tests for path expansion.
 //!
-//! Covers the adapter-boundary behaviour described in the task:
+//! Covers the adapter-boundary behaviour:
 //!
 //! - CLI string/PathBuf args (`get`, `metadata`, `ls`, `rm`, `obsidian`
 //!   `--vault-path`) expand `~`, `$VAR`, `${VAR}` before the command

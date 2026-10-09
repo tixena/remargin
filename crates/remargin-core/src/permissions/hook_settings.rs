@@ -22,16 +22,13 @@ use serde_json::{Map, Value};
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CommandState {
-    /// No entry declares this subcommand.
     Absent,
     /// Declared with an absolute path, and that binary is on disk.
     Live,
-    /// Declared, but the command names the binary by bare name — the form
-    /// installs wrote before they embedded the absolute path. It runs only
-    /// while `PATH` resolves it. Carries the command as found.
+    /// Declared, but naming the binary by bare name, so it runs only while `PATH` resolves it.
+    /// Carries the command as found.
     PathRelative(String),
-    /// Declared with an absolute path that is no longer on disk, so the
-    /// hook cannot spawn at all. Carries the binary.
+    /// Declared with an absolute path that is gone from disk, so the hook cannot spawn; carries it.
     StaleBinary(String),
 }
 

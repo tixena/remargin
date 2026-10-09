@@ -1,3 +1,5 @@
+//! `remargin get` with only `--start` or only `--end`.
+
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;

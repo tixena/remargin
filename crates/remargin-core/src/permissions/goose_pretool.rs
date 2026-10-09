@@ -39,18 +39,13 @@ use serde_json::Value;
 
 use crate::permissions::pretool::{PretoolOutcome, ToolPrefix, ToolTarget, decide};
 
-/// goose's builtin file-editing tool. Its `tool_input.command` carries the
-/// editing verb, which selects the Claude-side tool class the engine's
-/// per-tool guidance is keyed on.
+/// goose's builtin file-editing tool; its `tool_input.command` carries the editing verb.
 const TOOL_TEXT_EDITOR: &str = "developer__text_editor";
 
-/// goose's builtin shell tool — the same reach as Claude Code's `Bash`,
-/// including the in-realm fail-closed contract.
 const TOOL_SHELL: &str = "developer__shell";
 
-/// Tool-name prefixes identifying remargin's own MCP extension. goose
-/// namespaces a tool as `<extension>__<tool>`; a host that re-prefixes MCP
-/// extensions yields the second form.
+/// goose namespaces a tool as `<extension>__<tool>`; a host that re-prefixes MCP extensions
+/// yields the second form.
 const REMARGIN_TOOL_PREFIXES: &[&str] = &[ToolPrefix::GOOSE.as_str(), ToolPrefix::CLAUDE.as_str()];
 
 /// Input keys naming a filesystem path on a tool outside the gated set.
@@ -79,8 +74,7 @@ impl BlockDecision {
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GooseVerdict {
-    /// No managed path touched, or the tool is not one the guard gates.
-    /// Emit nothing; exit 0.
+    /// No managed path touched, or the tool is not gated: emit nothing and exit 0.
     Allow,
     /// Emit the block object on stdout and `reason` on stderr; exit 2.
     Block { reason: String },

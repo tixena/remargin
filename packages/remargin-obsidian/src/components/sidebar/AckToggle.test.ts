@@ -1,3 +1,5 @@
+/** Static-markup tests for the ack label's arrow and color rules. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -10,9 +12,6 @@ import type RemarginPlugin from "../../main.ts";
 import { DEFAULT_SETTINGS } from "../../types.ts";
 import { AckToggle } from "./AckToggle.tsx";
 
-// Minimal plugin + backend stand-ins, mirroring CommentHeader.test.ts.
-// `useParticipants` only reads `plugin.settings` and calls
-// `backend.registryShow()`.
 const pluginStub = { settings: DEFAULT_SETTINGS } as unknown as RemarginPlugin;
 const backendStub = {
   registryShow: (): Promise<Participant[]> => Promise.resolve([]),
@@ -68,9 +67,7 @@ describe("AckToggle", () => {
     assert.ok(html.includes('title="No acknowledgments yet"'), `got: ${html}`);
   });
 
-  // Ack-visual precedence (see ackVisualFor): these tests lock the four
-  // rules down at the DOM-class level so a regression in the helper or
-  // the toTargets threading surfaces here.
+  // The four `ackVisualFor` rules, pinned at the DOM-class level.
   it("renders green double arrow when directed to no one and anyone acked (rule 1)", () => {
     const html = render({ ack: ["alice"], me: "eduardo", toTargets: [] });
     assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
@@ -84,8 +81,6 @@ describe("AckToggle", () => {
   });
 
   it("renders green single arrow when to=[me] and only an outsider acked (rule 3)", () => {
-    // Eduardo's concrete example: directed to me (eduardo), acked by
-    // Adrian — must render green single arrow, not double.
     const html = render({ ack: ["adrian"], me: "eduardo", toTargets: ["eduardo"] });
     assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);
     assert.ok(!html.includes("lucide-check-check"), `expected single arrow, got: ${html}`);

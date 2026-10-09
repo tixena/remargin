@@ -1,12 +1,6 @@
-import type { ComponentCheck } from "@/lib/githubReleases";
+/** Pure helpers behind `UpdatesSection`: status text, chip classes and action messages. */
 
-/**
- * Pure helpers used by `UpdatesSection.tsx`, factored out so they can
- * be unit-tested without instantiating React — the test runner uses
- * a strip-only TS loader that struggles with full React component
- * rendering, and every path through the UI is deterministically driven
- * by these three functions.
- */
+import type { ComponentCheck } from "@/lib/githubReleases";
 
 /** Human-readable status string for the chip next to each component. */
 export function statusLabel(check: ComponentCheck): string {
@@ -16,9 +10,8 @@ export function statusLabel(check: ComponentCheck): string {
 }
 
 /**
- * Tailwind class bundle for the status chip. Matches the design doc
- * (accent-filled for update-available, red-tinted for check-failed,
- * muted for up-to-date).
+ * Tailwind class bundle for the status chip: accent-filled for update-available, red-tinted for
+ * check-failed, muted for up-to-date.
  */
 export function statusChipClasses(check: ComponentCheck): string {
   if (check.status === "update-available") {
@@ -41,12 +34,7 @@ export function tailText(text: string, max = 200): string {
   return `…${trimmed.slice(trimmed.length - max)}`;
 }
 
-/**
- * `true` when the plugin row's Update button should be clickable. Kept
- * as a named predicate so the intent — "chip reads update-available" —
- * stays explicit everywhere it matters (test harness, button `disabled`
- * wiring, future UI variants).
- */
+/** Whether the plugin row's Update button is clickable: its chip reads update-available. */
 export function canUpdatePlugin(check: ComponentCheck | undefined): boolean {
   return check?.status === "update-available";
 }
@@ -59,9 +47,7 @@ export type UpdateActionMessage = { ok: boolean; text: string } | null;
 
 /**
  * Map the result of `onUpdatePlugin` to the inline-banner text the
- * section should render. Extracted so the click flow has a single
- * place to own the success + failure copy, and so the branch can
- * be unit-tested directly without booting React.
+ * section should render.
  */
 export function messageForUpdate(
   result: { ok: boolean; stderr: string } | Error

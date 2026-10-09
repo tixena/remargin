@@ -17,10 +17,6 @@ fn mock_with(files: &[(&str, &str)]) -> MemorySystem {
     system
 }
 
-// ---------------------------------------------------------------------
-// show()
-// ---------------------------------------------------------------------
-
 #[test]
 fn show_empty_when_no_config() {
     let system = MemorySystem::new().with_dir(Path::new("/r")).unwrap();
@@ -140,10 +136,6 @@ fn show_allow_dot_folders_source_file_survives_json_roundtrip() {
     assert!(!json.contains("\"source_file\":\"\""));
 }
 
-// ---------------------------------------------------------------------
-// check()
-// ---------------------------------------------------------------------
-
 #[test]
 fn check_no_restrict_anywhere_is_unrestricted() {
     let system = mock_with(&[("/r/.remargin.yaml", "identity: alice\n")]);
@@ -152,7 +144,6 @@ fn check_no_restrict_anywhere_is_unrestricted() {
     assert!(result.matching_rule.is_none());
 }
 
-/// Inside the allow-list — not restricted.
 #[test]
 fn check_path_inside_allow_list_is_not_restricted() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
@@ -167,7 +158,6 @@ fn check_path_inside_allow_list_is_not_restricted() {
     assert!(!result.restricted);
 }
 
-/// Outside the allow-list — restricted.
 #[test]
 fn check_path_outside_allow_list_is_restricted() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
@@ -217,7 +207,6 @@ fn check_why_populates_matching_rule_for_outside_allow_list() {
 
 #[test]
 fn check_non_existent_path_matched_lexically() {
-    // Outside the allow-list → restricted.
     let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
     let result = check(
@@ -242,37 +231,26 @@ fn check_canonicalised_match_inside_allow_list() {
 fn check_round_trips_through_json() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: src\n";
     let system = mock_with(&[("/r/.remargin.yaml", yaml)]);
-    // `/r/foo.md` is OUTSIDE the allow-list `/r/src`.
     let result = check(&system, Path::new("/r"), Path::new("/r/foo.md"), true).unwrap();
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"restricted\":true"));
     assert!(json.contains("\"kind\":\"trusted_roots\""));
 }
 
-// ---------------------------------------------------------------------
-// inspect::check and op_guard agree (the bug fix lands here)
-// ---------------------------------------------------------------------
-
-/// `permissions check` and `op_guard::check_against_resolved` MUST give
-/// the same answer for any path. They share the predicate
-/// `target_is_sanctioned`, so this test pins that the two layers
-/// cannot drift again.
+/// Both share `target_is_sanctioned`, so they must give the same answer for any path.
 #[test]
 fn inspect_check_and_op_guard_agree_on_allow_list_membership() {
     use crate::config::permissions::resolve::resolve_permissions;
     use crate::permissions::op_guard::check_against_resolved;
 
-    // Vault realm: `restrict '*'` → the whole realm is allow-listed.
     let inner = "permissions:\n  trusted_roots:\n    - path: '*'\n";
     let system = mock_with(&[("/home/user/vault/.remargin.yaml", inner)]);
 
     let inside = Path::new("/home/user/vault/foo.md");
     let resolved = resolve_permissions(&system, Path::new("/home/user/vault")).unwrap();
 
-    // op_guard allows this write.
     check_against_resolved(&system, "write", inside, &resolved).unwrap();
 
-    // permissions check must agree: not restricted.
     let out = check(&system, Path::new("/home/user/vault"), inside, true).unwrap();
     assert!(
         !out.restricted,
@@ -280,10 +258,6 @@ fn inspect_check_and_op_guard_agree_on_allow_list_membership() {
         out.matching_rule,
     );
 
-    // Now a path OUTSIDE the allow-list (it shouldn't ever resolve here
-    // from the vault cwd, but exercising the logic): walk from cwd of a
-    // file outside any realm. Since the cwd has no `.remargin.yaml`, the
-    // walk returns empty and the path is unrestricted (open mode).
     let outside_open = Path::new("/elsewhere/foo.md");
     let resolved_open = resolve_permissions(&system, Path::new("/elsewhere")).unwrap();
     check_against_resolved(&system, "write", outside_open, &resolved_open).unwrap();

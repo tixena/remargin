@@ -2,10 +2,8 @@
 /**
  * <CodeBlock lang="bash" filename="bash">…</CodeBlock>
  *
- * The default slot is rendered inside <pre><code>. For now we expect the
- * consumer to pass pre-tokenized HTML (using the .tk-* spans below). When the
- * Shiki pipeline lands, swap this with `<Code lang={lang} code={code} theme={theme} />`
- * and drop the manual spans.
+ * The default slot is rendered inside <pre><code>; the consumer passes
+ * pre-tokenized HTML using the .tk-* spans below.
  */
 interface Props {
   lang?: string;

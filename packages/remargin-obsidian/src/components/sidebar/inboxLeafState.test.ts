@@ -1,3 +1,5 @@
+/** Tests for the visual state of an inbox leaf. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { Acknowledgment, ExpandedComment } from "../../generated/types.ts";

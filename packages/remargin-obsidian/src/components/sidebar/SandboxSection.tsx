@@ -1,3 +1,5 @@
+/** The sidebar's Sandbox section: staged files grouped by their resolved system prompt. */
+
 import { ChevronDown, ChevronRight, CircleDashed, Folder, Send, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ResolvedSystemPrompt } from "@/backend/types";
@@ -21,55 +23,21 @@ import type { ViewMode } from "@/types";
 
 export type { PromptGroup, StagedGroup };
 
+/** Props for {@link SandboxSection}. */
 interface SandboxSectionProps {
-  /**
-   * Bumped by the parent whenever the sandbox list should be refetched
-   * (e.g. after a successful inline-comment submit or a sidepanel refresh
-   * button click). The value itself is opaque — any change triggers a
-   * refetch.
-   */
+  /** Opaque: any change triggers a refetch of the sandbox list. */
   refreshKey?: number;
-  /** View mode owned by RemarginSidebar (persisted in plugin settings). */
   viewMode?: ViewMode;
-  /**
-   * Called to open a staged file in the editor when the user clicks on it.
-   * Receives the path exactly as the CLI reported it.
-   */
   onOpenFile?: (path: string) => void;
-  /**
-   * Forwarded Submit handler. Receives the staged files grouped by
-   * resolved system prompt. The handler launches a terminal running
-   * the composed commands, fire-and-forget — no completion tracking.
-   */
+  /** Receives the staged files grouped by resolved system prompt; fire-and-forget. */
   onSubmit?: (groups: StagedGroup[]) => Promise<void> | void;
-  /**
-   * Persist a `system_prompt:` block to the owning `.remargin.yaml`.
-   * Receives the target path, name, and body. Returning resolves the
-   * inline editor; rejecting surfaces the error in the editor footer
-   * and keeps the buffer.
-   */
+  /** Resolving closes the inline editor; rejecting shows the error there and keeps the buffer. */
   onSavePrompt?: (args: InlinePromptEditorSaveArgs) => Promise<void>;
-  /**
-   * Strip the `system_prompt:` block from the owning `.remargin.yaml`.
-   * Resolves when the write succeeds; rejecting surfaces the error
-   * inline.
-   */
   onDeletePrompt?: (source: string) => Promise<void>;
-  /**
-   * Tooltip / disabled-reason for the Save button (e.g. strict mode
-   * without a key). When set, the button is disabled.
-   */
+  /** When set, Save is disabled and this is its tooltip. */
   savePromptDisabledReason?: string;
-  /**
-   * Vault folders the create-mode picker can offer. Forwarded to
-   * `<InlinePromptEditor>` via `<PromptGroupSection>`.
-   */
   availableFolders?: string[];
-  /**
-   * Absolute filesystem path of the vault root. When set, per-prompt
-   * headers strip it from `group.scope` so the second row renders as a
-   * vault-relative path (e.g. `./src/01_personal/remargin/`).
-   */
+  /** When set, per-prompt headers strip it from `group.scope` to show a vault-relative path. */
   vaultRoot?: string;
 }
 
@@ -114,21 +82,15 @@ export function SandboxSection({
   const [resolveErrors, setResolveErrors] = useState<Map<string, string>>(new Map());
   const [staged, setStaged] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Per-group open state. Keys are PromptGroup.source ?? DEFAULT_GROUP_KEY.
   const [stagedOpenByGroup, setStagedOpenByGroup] = useState<Map<string, boolean>>(new Map());
   const [unstagedOpenByGroup, setUnstagedOpenByGroup] = useState<Map<string, boolean>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // A removal invalidates the list just like a parent bump does, so it
-  // advances a counter of our own and re-lists through the same effect —
-  // earning its own token instead of racing the parent's listing.
+  // A removal re-lists through the same effect by advancing a counter of its own.
   const [localRefresh, setLocalRefresh] = useState(0);
-  // Token of the newest listing issued. Every run tags itself and
-  // re-checks the tag before touching state, so a slow response a newer
-  // listing has superseded is dropped rather than overwriting it — the
-  // `resolvePrompt` fan-out especially, which can finish out of order.
+  // Token of the newest listing: a slow response that a newer listing superseded is dropped.
   const newestListing = useRef<string | null>(null);
 
   const refresh = useCallback(
@@ -160,8 +122,7 @@ export function SandboxSection({
           return next;
         });
 
-        // Resolve prompts in parallel; capture per-file errors so a
-        // single bad walk doesn't black-hole the whole sidebar.
+        // Per-file errors are captured so one bad walk does not blank the whole section.
         const nextPrompts = new Map<string, ResolvedSystemPrompt>();
         const nextErrors = new Map<string, string>();
         await Promise.all(
@@ -186,8 +147,7 @@ export function SandboxSection({
         setResolveErrors(new Map());
         setError(errorMessage(err));
       } finally {
-        // A superseded run leaves the loading state to the listing that
-        // replaced it, so the section never flashes an empty sandbox.
+        // A superseded run leaves the loading state to the listing that replaced it.
         if (newestListing.current === token) setLoading(false);
       }
     },
@@ -414,6 +374,7 @@ function toggleSelectAll(
   });
 }
 
+/** Props for {@link PromptGroupSection}. */
 export interface PromptGroupSectionProps {
   group: PromptGroup;
   viewMode: ViewMode;
@@ -431,11 +392,8 @@ export interface PromptGroupSectionProps {
   onSavePrompt?: (args: InlinePromptEditorSaveArgs) => Promise<void>;
   onDeletePrompt?: (source: string) => Promise<void>;
   savePromptDisabledReason?: string;
-  /** Forwarded to the create-mode folder picker in `<InlinePromptEditor>`. */
   availableFolders?: string[];
-  /** Forwarded so the header's second row can render a vault-relative scope. */
   vaultRoot?: string;
-  /** Per-group Submit. Renders inside the Staged sub-section. */
   onSubmitGroup?: (group: PromptGroup) => void | Promise<void>;
   /** True while any group's Submit is in flight; disables every group's Submit. */
   submitting?: boolean;
@@ -479,9 +437,6 @@ export function PromptGroupSection({
     onStageBulk(targets.length > 0 ? targets : group.unstaged);
   }, [group.unstaged, selected, onStageBulk]);
 
-  // Derive a folder hint for the create flow on the Default group.
-  // Falls back to the vault root when no Staged file is around to
-  // anchor a target folder.
   const folderHint = useCallback((): string => {
     const sample = group.staged[0] ?? group.files[0];
     if (sample) {
@@ -586,7 +541,6 @@ export function PromptGroupSection({
 
       {headerOpen && (
         <>
-          {/* ====== L3: Staged ====== */}
           <section className="rmg-l3 rmg-l3--staged" aria-label="Staged files">
             <SandboxGroupHeader
               label="Staged"
@@ -643,7 +597,6 @@ export function PromptGroupSection({
             )}
           </section>
 
-          {/* ====== L3: Unstaged ====== */}
           <section className="rmg-l3 rmg-l3--unstaged" aria-label="Unstaged files">
             <SandboxGroupHeader
               label="Unstaged"
@@ -691,6 +644,7 @@ export function PromptGroupSection({
   );
 }
 
+/** Props for {@link SandboxTreeGroup}. */
 interface SandboxTreeGroupProps {
   files: string[];
   variant: "staged" | "unstaged";
@@ -717,6 +671,7 @@ function SandboxTreeGroup(props: SandboxTreeGroupProps) {
   );
 }
 
+/** Props for {@link SandboxTreeNode}. */
 interface SandboxTreeNodeProps {
   node: FileTreeNode;
   depth: number;

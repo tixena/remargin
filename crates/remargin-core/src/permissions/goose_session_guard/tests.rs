@@ -65,7 +65,6 @@ fn expect_fail(outcome: GuardOutcome) -> String {
     diagnostic
 }
 
-/// A wired plugin plus a parseable realm config is silence.
 #[test]
 fn wired_plugin_and_parseable_config_is_ok() {
     let system = mock_with_user_plugin()
@@ -81,8 +80,7 @@ fn wired_plugin_and_parseable_config_is_ok() {
     );
 }
 
-/// No realm config on the walk is not a failure — an absent config parses
-/// vacuously, exactly as the Claude guard treats it.
+/// An absent realm config parses vacuously.
 #[test]
 fn no_realm_config_is_ok_when_the_plugin_is_wired() {
     assert_eq!(
@@ -91,8 +89,6 @@ fn no_realm_config_is_ok_when_the_plugin_is_wired() {
     );
 }
 
-/// A project-scope install is a supported wiring, so it clears the check on
-/// its own.
 #[test]
 fn project_scope_plugin_satisfies_the_wiring_check() {
     let system = mock()
@@ -108,8 +104,7 @@ fn project_scope_plugin_satisfies_the_wiring_check() {
     );
 }
 
-/// No plugin in either scope: the diagnostic names both scopes it looked in
-/// and the event that is going unguarded.
+/// The diagnostic names both scopes it looked in and the event going unguarded.
 #[test]
 fn absent_plugin_fails_and_names_both_scopes() {
     let diagnostic = expect_fail(goose_session_guard(
@@ -131,9 +126,7 @@ fn absent_plugin_fails_and_names_both_scopes() {
     );
 }
 
-/// The fail-open trap this guard exists for: the plugin is present and
-/// parses, but the binary its command names is gone, so goose spawns
-/// nothing and waves every tool call through.
+/// The plugin parses but its binary is gone, so goose spawns nothing and passes every call.
 #[test]
 fn plugin_pointing_at_a_missing_binary_fails_and_names_it() {
     let system = mock_with_user_plugin();
@@ -150,8 +143,6 @@ fn plugin_pointing_at_a_missing_binary_fails_and_names_it() {
     );
 }
 
-/// A plugin whose manifest declares no `PreToolUse` entry is a guard that
-/// does not guard.
 #[test]
 fn plugin_without_the_pretool_entry_fails() {
     let system = mock()
@@ -172,8 +163,7 @@ fn plugin_without_the_pretool_entry_fails() {
     );
 }
 
-/// An unparseable realm config fails even with the plugin wired, and the
-/// diagnostic points at `remargin doctor`.
+/// The diagnostic points at `remargin doctor`.
 #[test]
 fn unparseable_realm_config_fails() {
     let system = mock_with_user_plugin()
@@ -195,9 +185,7 @@ fn unparseable_realm_config_fails() {
     );
 }
 
-/// The envelope's `working_dir` roots the realm walk, not the process cwd:
-/// the broken config lives under the session's directory, and the guard is
-/// invoked from somewhere else entirely.
+/// The envelope's `working_dir` roots the realm walk, not the process cwd.
 #[test]
 fn working_dir_from_the_envelope_roots_the_realm_check() {
     let system = mock_with_user_plugin()
@@ -217,9 +205,7 @@ fn working_dir_from_the_envelope_roots_the_realm_check() {
     );
 }
 
-/// An envelope the guard cannot read falls back to the process cwd and says
-/// nothing about its own input — a healthy session must stay silent, or the
-/// diagnostic stops being believed when it matters.
+/// A healthy session stays silent about an envelope the guard cannot read.
 #[test]
 fn unreadable_envelope_falls_back_to_cwd_and_stays_silent_when_healthy() {
     assert_eq!(
@@ -232,8 +218,7 @@ fn unreadable_envelope_falls_back_to_cwd_and_stays_silent_when_healthy() {
     );
 }
 
-/// Every failure is reported in one diagnostic rather than the first one
-/// found — a session start is the only shot the guard gets.
+/// A session start is the only shot the guard gets, so every failure is reported at once.
 #[test]
 fn all_failures_land_in_one_diagnostic() {
     let system = mock()

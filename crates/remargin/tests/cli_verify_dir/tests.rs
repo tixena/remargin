@@ -1,3 +1,5 @@
+//! `verify` over a directory with one clean and one tampered document, on the CLI and over MCP.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -11,8 +13,7 @@ use remargin_core::mcp;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-/// A document whose comment's stored checksum matches "hello", so it
-/// verifies clean in open mode.
+/// The stored checksum matches "hello", so it verifies clean in open mode.
 const CLEAN_DOC: &str = "\
 ---
 title: Doc
@@ -32,8 +33,7 @@ hello
 ```
 ";
 
-/// Same shape as [`CLEAN_DOC`] but the stored checksum does not match the
-/// body, so it fails the checksum check (bad in every mode).
+/// The stored checksum does not match the body, so it fails in every mode.
 const TAMPERED_DOC: &str = "\
 ---
 title: Doc
@@ -69,7 +69,6 @@ fn build_workspace() -> TempDir {
     tmp
 }
 
-/// Run the `remargin` binary in the workspace and capture its output.
 fn run_cli(cwd: &Path, args: &[&str]) -> Output {
     Command::cargo_bin("remargin")
         .unwrap()
@@ -131,7 +130,6 @@ fn strip_volatile(v: &mut Value) {
 fn cli_verify_dir_json_is_failures_only_summary() {
     let tmp = build_workspace();
     let out = run_cli(tmp.path(), &["verify", "notes", "--json"]);
-    // A directory with a damaged file exits non-zero.
     assert!(!out.status.success(), "expected failure exit: {out:?}");
 
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -173,7 +171,6 @@ fn cli_verify_dir_text_lists_only_damaged_files() {
         !stdout.contains("clean.md"),
         "clean file must NOT be listed in text mode: {stdout:?}"
     );
-    // The summary line carries the verified / passed counts.
     assert!(
         stdout.contains("2 file(s)") && stdout.contains("1 passed"),
         "text summary must report verified + passed counts: {stdout:?}"
@@ -183,8 +180,6 @@ fn cli_verify_dir_text_lists_only_damaged_files() {
 #[test]
 fn cli_verify_single_file_unchanged() {
     let tmp = build_workspace();
-    // A single clean file verifies successfully and emits the
-    // per-comment summary (no `files` wrapper).
     let out = run_cli(tmp.path(), &["verify", "notes/clean.md"]);
     assert!(out.status.success(), "clean single file must pass: {out:?}");
     let stdout = str::from_utf8(&out.stdout).unwrap();
@@ -193,7 +188,6 @@ fn cli_verify_single_file_unchanged() {
         "single-file text lists the comment id: {stdout:?}"
     );
 
-    // JSON single-file shape carries `results`, not `files`.
     let out_json = run_cli(tmp.path(), &["verify", "notes/clean.md", "--json"]);
     assert!(out_json.status.success());
     let json: Value = serde_json::from_slice(&out_json.stdout).unwrap();
@@ -206,9 +200,8 @@ fn cli_verify_single_file_unchanged() {
 
 #[test]
 fn mcp_verify_dir_matches_cli_json() {
-    // CLI and MCP run on independently-seeded workspaces so the
-    // first-touch frontmatter self-heal does not shift one surface's
-    // line numbers relative to the other.
+    // Each surface gets its own workspace so the first-touch frontmatter self-heal does not shift
+    // one surface's line numbers against the other's.
     let cli_tmp = build_workspace();
     let cli = run_cli(cli_tmp.path(), &["verify", "notes", "--json"]);
     let mut cli_json: Value = serde_json::from_slice(&cli.stdout).unwrap();
@@ -226,10 +219,7 @@ fn mcp_verify_dir_matches_cli_json() {
 
 #[test]
 fn cli_verify_dir_honors_gitignore() {
-    // A gitignored .md file is skipped by the `ignore`-crate-backed
-    // walk_dir, exactly as `replace`/`search` skip it. The `ignore`
-    // crate only activates `.gitignore` inside a git repo, so seed a
-    // `.git` marker at the workspace root.
+    // The `ignore` crate honors `.gitignore` only inside a git repo, hence the `.git` marker.
     let tmp = build_workspace();
     fs::create_dir_all(tmp.path().join(".git")).unwrap();
     let notes = tmp.path().join("notes");
@@ -240,8 +230,6 @@ fn cli_verify_dir_honors_gitignore() {
         tmp.path(),
         json!({ "path": "notes" }).as_object().unwrap().clone(),
     );
-    // The gitignored file (tampered) would have surfaced as a failure had
-    // it been swept; it must not appear, and only 2 files are verified.
     assert_eq!(
         mcp_json["files_verified"], 2_u64,
         "only clean.md + damaged.md swept: {mcp_json}"
@@ -258,7 +246,6 @@ fn cli_verify_dir_honors_gitignore() {
 #[test]
 fn mcp_verify_legacy_file_alias_walks_directory() {
     let tmp = build_workspace();
-    // The backward-compatible `file` alias must also accept a directory.
     let mcp_json = run_mcp(
         tmp.path(),
         json!({ "file": "notes" }).as_object().unwrap().clone(),

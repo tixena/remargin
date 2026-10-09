@@ -1,12 +1,10 @@
+/** React context and hook for the element that hosts Radix portals. */
+
 import { createContext, useContext } from "react";
 
 /**
- * Holds a reference to the `.remargin-container` DOM element so that Radix UI
- * portals render **inside** it rather than at `document.body`.
- *
- * Without this, the `important: ".remargin-container"` rule in
- * `tailwind.config.ts` scopes every Tailwind rule under that ancestor — but
- * portals mount outside it, so none of the utility classes apply.
+ * The `.remargin-container` element, so Radix portals render inside it: Tailwind's rules are
+ * scoped under that ancestor and would not reach a portal mounted at `document.body`.
  */
 export const PortalContainerContext = createContext<HTMLElement | null>(null);
 

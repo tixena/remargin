@@ -20,7 +20,6 @@ use crate::kind::canonical_kinds;
 use crate::parser::Comment;
 use crate::reactions::{Reactions, ReactionsExt as _};
 
-/// Namespace used for SSH signature operations (PROTOCOL.sshsig).
 const SIGNATURE_NAMESPACE: &str = "remargin";
 
 /// Normalize whitespace for deterministic checksumming.
@@ -39,26 +38,16 @@ pub fn normalize_whitespace(content: &str) -> String {
 
 /// Applies whitespace normalization before hashing; returns `sha256:<hex>`.
 ///
-/// When `kinds` is empty, the hash input is exactly
-/// `normalize_whitespace(content)` — byte-for-byte what the
-/// pre-`remargin_kind` implementation produced. That equivalence is the
-/// back-compat hinge for every comment created before the field
-/// existed: they all carry `remargin_kind: []` post-parse, so their
-/// stored checksum keeps matching [`verify_checksum`].
-///
-/// When `kinds` is non-empty, a separator-plus-canonical-list suffix
-/// is appended to the normalised content before hashing. The list is
-/// [`canonical_kinds`] — sorted + de-duplicated — so `[a, b]` and
-/// `[b, a]` produce identical checksums.
+/// With no kinds the hash input is exactly `normalize_whitespace(content)`, so a comment that
+/// carries no kinds keeps the checksum it would have without the field. With kinds, a separator
+/// and the [`canonical_kinds`] list are appended first, so `[a, b]` and `[b, a]` produce
+/// identical checksums.
 #[must_use]
 pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
     let mut payload = normalize_whitespace(content);
     if !kinds.is_empty() {
         let canonical = canonical_kinds(kinds);
-        // `\x00remargin_kind:` is a structural separator: the NUL byte
-        // cannot appear in `content` (it is not a valid markdown
-        // character and `normalize_whitespace` leaves no zero bytes
-        // either), so a crafted content string cannot forge the same
+        // The NUL byte cannot appear in normalized content, so no crafted content can forge this
         // suffix.
         payload.push_str("\x00remargin_kind:");
         payload.push_str(&canonical.join(","));
@@ -78,8 +67,7 @@ pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
 pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
     let mut payload = String::new();
     for (emoji, entries) in reactions.entries_by_emoji() {
-        // Frozen: bare `to_rfc3339()` (zero offset as `+00:00`). Rendering
-        // this payload the way disk now renders (`Z`) would invalidate every
+        // Frozen on bare `to_rfc3339()` (`+00:00`, not `Z`): any other rendering invalidates every
         // stored reaction checksum.
         let mut projected: Vec<String> = entries
             .iter()
@@ -96,10 +84,8 @@ pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The private key file cannot be read
-/// - The key is not a valid OpenSSH private key
-/// - Signing fails
+/// Returns an error if the private key file cannot be read, is not a valid OpenSSH private
+/// key, or signing fails.
 pub fn compute_signature(
     comment: &Comment,
     private_key_path: &Path,
@@ -144,10 +130,8 @@ pub fn verify_checksum(comment: &Comment) -> bool {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The public key string cannot be parsed
-/// - The signature string is malformed
-/// - PEM decoding fails
+/// Returns an error if the public key cannot be parsed, the signature string is malformed, or
+/// PEM decoding fails.
 pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool> {
     let signature_str = comment
         .signature
@@ -181,27 +165,19 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
 /// Signed fields (in order): id, author, type, ts, to, reply-to, thread,
 /// attachments, `remargin_kind`, content.
 ///
-/// Excluded: reactions, ack, checksum (these are mutable after
-/// creation), AND `edited_at` — the signature promises content
-/// authorship, not edit metadata; including `edited_at` would force
-/// every edit to invalidate the prior signature instead of cleanly
-/// re-signing the new content.
+/// Excluded: reactions, ack and checksum, which change after creation, and `edited_at`: the
+/// signature promises content authorship, not edit metadata.
 ///
-/// `remargin_kind` contributes zero bytes when the vector is empty, so
-/// pre-`remargin_kind` comments sign and verify identically to how they
-/// did before the field existed — see the analogous back-compat note on
-/// [`compute_checksum`]. Non-empty lists are emitted in
-/// [`canonical_kinds`] order so rewrites that reorder the stored list
-/// preserve signature validity.
+/// An empty `remargin_kind` contributes zero bytes, so a comment without kinds signs the same
+/// with or without the field. A non-empty list is emitted in [`canonical_kinds`] order, so
+/// reordering the stored list keeps the signature valid.
 fn signature_payload(comment: &Comment) -> String {
     let mut payload = String::new();
     let _ = writeln!(payload, "id:{}", comment.id);
     let _ = writeln!(payload, "author:{}", comment.author);
     let _ = writeln!(payload, "type:{}", comment.author_type.as_str());
-    // Frozen: bare `to_rfc3339()` (zero offset as `+00:00`). The payload is
-    // rebuilt from the *parsed* ts at verify time, so `Z` and `+00:00` on
-    // disk both land here as `+00:00` — which is what makes the disk-format
-    // change signature-safe. Re-rendering it would break every signature.
+    // Frozen on bare `to_rfc3339()`: the payload is rebuilt from the parsed ts, so `Z` and
+    // `+00:00` on disk both sign as `+00:00`.
     let _ = writeln!(payload, "ts:{}", comment.ts.to_rfc3339());
     for recipient in &comment.to {
         let _ = writeln!(payload, "to:{recipient}");

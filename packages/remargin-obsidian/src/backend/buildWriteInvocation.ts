@@ -1,3 +1,5 @@
+/** Argv and stdin builder for `remargin write`. */
+
 import type { WriteOpts } from "./types";
 
 /**

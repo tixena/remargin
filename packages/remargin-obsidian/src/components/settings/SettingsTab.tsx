@@ -1,3 +1,5 @@
+/** The plugin's settings tab. */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,28 +28,23 @@ import {
 import { SettingsField } from "./SettingsField";
 import { UpdatesSection } from "./UpdatesSection";
 
+/** Props for {@link SettingsTab}. */
 interface SettingsTabProps {
   settings: RemarginSettings;
   onSave: (settings: RemarginSettings) => void;
-  /**
-   * Force a GitHub-releases update probe and return the fresh settings
-   * snapshot. Delegates to `RemarginPlugin.runUpdateCheck(true)` so cache
-   * invalidation and persistence stay consolidated inside the plugin —
-   * the settings tab only owns the "user clicked Check now" trigger and
-   * re-seeds its local state with the returned settings.
-   */
+  /** Forces an update probe and resolves to the fresh settings the tab re-seeds itself from. */
   onCheckUpdates: () => Promise<RemarginSettings>;
 }
 
+/** State of the "Test CLI" probe. */
 type TestState = "idle" | "loading" | "success" | "error";
 
+/** Props for {@link PathInput}. */
 interface PathInputProps {
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
-  /** File-type filters passed to the native open dialog. */
   filters?: FilePickerFilter[];
-  /** Window title for the native dialog. */
   dialogTitle?: string;
   className?: string;
 }
@@ -75,8 +72,6 @@ function PathInput({
   const handleBrowse = useCallback(async () => {
     try {
       const picked = await pickFile({
-        // Feed the existing value so the dialog opens next to the current
-        // path; the helper falls back to the OS default when empty.
         defaultPath: expandPath(value) || undefined,
         filters,
         title: dialogTitle,
@@ -121,6 +116,7 @@ const YAML_CONFIG_FILTERS: FilePickerFilter[] = [
   { name: "All Files", extensions: ["*"] },
 ];
 
+/** The enforcement modes a vault can declare. */
 type ModeValue = "open" | "registered" | "strict";
 const MODE_OPTIONS: readonly ModeValue[] = ["open", "registered", "strict"];
 const isModeValue = (value: string): value is ModeValue =>
@@ -131,30 +127,22 @@ export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabPro
   const [current, setCurrent] = useState(settings);
   const [testState, setTestState] = useState<TestState>("idle");
   const [testMessage, setTestMessage] = useState("");
-  // Vault mode is sourced from the CLI's identity probe, not from
-  // plugin-level settings. `undefined` means "not yet probed"; a real value
-  // (`open`/`registered`/`strict`) drives the Select.
+  // Sourced from the CLI, not plugin settings; `undefined` means not yet probed.
   const [vaultMode, setVaultMode] = useState<ModeValue | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        // `resolveMode` is the purpose-built probe for vault-mode display:
-        // it walks up from the working directory without any `type:` filter,
-        // because mode is a directory-tree property, not an identity
-        // property. Previously we inferred mode off the identity envelope,
-        // which could return the wrong config when the walk-up passed
-        // through a different-typed `.remargin.yaml`.
+        // `resolveMode` walks up from the working directory with no `type:` filter: mode is a property
+        // of the directory tree, not of an identity.
         const info = await backend.resolveMode();
         if (cancelled) return;
         const raw = info.mode;
         if (raw && isModeValue(raw)) {
           setVaultMode(raw);
         } else {
-          // CLI walk-up found no mode anywhere — default the dropdown to
-          // `open` so the user sees a concrete option without us claiming
-          // that's what's on disk.
+          // No mode found anywhere: show `open` without claiming it is what is on disk.
           setVaultMode("open");
         }
       } catch {
@@ -174,8 +162,7 @@ export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabPro
       try {
         backend.setVaultMode(value);
       } catch (err) {
-        // Surface the error through the existing Test CLI status slot so we
-        // do not silently swallow a failed filesystem write.
+        // Shown through the Test CLI status slot so a failed write is never silent.
         setTestState("error");
         setTestMessage(
           err instanceof Error ? `setVaultMode: ${err.message}` : "setVaultMode: failed"
@@ -201,8 +188,6 @@ export function SettingsTab({ settings, onSave, onCheckUpdates }: SettingsTabPro
     setTestMessage("Testing...");
     try {
       const { exec } = require("child_process") as typeof import("child_process");
-      // Expand ~ / $HOME so the Test CLI button honours portable paths.
-      // Fall back to a bare 'remargin' when the field is empty.
       const binary = expandPath(current.remarginPath) || "remargin";
       const result = await new Promise<string>((resolve, reject) => {
         exec(

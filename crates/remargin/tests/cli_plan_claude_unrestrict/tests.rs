@@ -1,3 +1,5 @@
+//! `plan claude unrestrict` runs, read back from `--json` and from the files left on disk.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,15 +45,12 @@ fn parse_json(out: &Output) -> Value {
     serde_json::from_str(stdout).unwrap()
 }
 
-/// Plan does not write. A hook-only restrict creates only the
-/// `.remargin.yaml`; plan unrestrict leaves it byte-identical and creates
-/// none of the settings/sidecar files.
+/// Plan leaves the `.remargin.yaml` byte-identical and creates no settings or sidecar file.
 #[test]
 fn plan_unprotect_does_not_write() {
     let realm = realm_with_claude();
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
     let user_settings = user_settings_arg(&realm);
-    // Apply restrict so there's actual state (the .remargin.yaml entry).
     let apply = run_in(
         realm.path(),
         &[
@@ -83,7 +82,6 @@ fn plan_unprotect_does_not_write() {
     );
     assert_status(&out, 0);
 
-    // The only artifact stays byte-identical; nothing else is created.
     assert_eq!(fs::read_to_string(&yaml_path).unwrap(), before_yaml);
     assert!(
         !project_settings.exists(),
@@ -96,11 +94,7 @@ fn plan_unprotect_does_not_write() {
     assert!(!sidecar.exists(), "plan must not create the sidecar");
 }
 
-/// Plan-then-act parity: plan unprotect under a hook-only restrict
-/// reports `would_commit: true` and `noop: false` (the YAML entry would
-/// be removed); the sidecar is absent (never written). The live
-/// `unprotect` run immediately after removes the YAML entry, and the
-/// replan reports a noop.
+/// Plan reports `would_commit: true` and `noop: false`; after the live run the replan is a noop.
 #[test]
 fn plan_then_apply_then_replan_reports_noop() {
     let realm = realm_with_claude();
@@ -139,10 +133,8 @@ fn plan_then_apply_then_replan_reports_noop() {
         cd["remargin_yaml"]["entry_action"],
         json!("would_be_removed")
     );
-    // Hook-only realm: no sidecar was ever written, so it is absent.
     assert_eq!(cd["sidecar"]["entry_action"], json!("absent"));
 
-    // Unprotect, then replan — the second plan should be a noop.
     let unprotect = run_in(
         realm.path(),
         &[
@@ -175,13 +167,7 @@ fn plan_then_apply_then_replan_reports_noop() {
     assert_eq!(replan_cd["sidecar"]["entry_action"], json!("absent"));
 }
 
-/// Drift detection on a migrated (legacy-sidecar) realm: a sidecar-tracked
-/// deny rule is present in the user-scope file but hand-deleted from the
-/// project-scope file. `plan unrestrict` surfaces the miss in the
-/// `rule_already_absent` conflicts. `would_commit` stays true (conflicts
-/// are advisory) and `noop` is false (the user-scope copy still needs
-/// removal). Since the current `restrict` projects nothing, the legacy
-/// state is seeded directly here.
+/// A tracked rule hand-deleted from one settings file is an advisory `rule_already_absent`.
 #[test]
 fn drift_detection_surfaces_rule_already_absent() {
     let realm = realm_with_claude();
@@ -189,9 +175,7 @@ fn drift_detection_surfaces_rule_already_absent() {
     let user_settings = user_settings_arg(&realm);
     let project_settings = realm.path().join(".claude/settings.local.json");
 
-    // Seed a legacy realm: yaml entry + a sidecar tracking one deny rule
-    // across both settings files; the rule is present in user-scope but
-    // hand-deleted from project-scope (the drift).
+    // `restrict` projects nothing, so the sidecar-tracked state is seeded by hand.
     let canonical_realm = fs::canonicalize(realm.path()).unwrap();
     let target_key = format!("{}/src/secret", canonical_realm.display());
     let tracked_rule = format!("Edit({target_key}/**)");
@@ -253,10 +237,7 @@ fn drift_detection_surfaces_rule_already_absent() {
     );
 }
 
-/// Wildcard end-to-end: restrict `*`, plan unprotect `*`, then
-/// apply unprotect `*`. The plan's projection lines up with the
-/// post-apply state (sidecar empty, YAML stripped of the
-/// wildcard entry).
+/// The wildcard plan's projection matches the post-apply state: sidecar empty, entry stripped.
 #[test]
 fn wildcard_plan_then_apply() {
     let realm = realm_with_claude();
@@ -324,9 +305,7 @@ fn wildcard_plan_then_apply() {
     assert_eq!(replan_report["noop"], json!(true));
 }
 
-/// Multi-path independence: restrict A and B, then
-/// `plan unprotect A` only describes A's reversal. B is not
-/// surfaced in any field of the diff.
+/// With A and B restricted, `plan unrestrict A` describes only A's reversal.
 #[test]
 fn multi_path_independence() {
     let realm = realm_with_claude();
@@ -381,8 +360,6 @@ fn multi_path_independence() {
         .to_string();
     let cd = &report["unprotect_diff"];
     assert_eq!(cd["absolute_path"].as_str().unwrap(), canonical_a);
-    // None of the rules in `rules_to_remove` should mention B's
-    // absolute path — B's restrict entry is independent.
     for sf in cd["settings_files"].as_array().unwrap() {
         for rule in sf["rules_to_remove"].as_array().unwrap() {
             let rule_str = rule.as_str().unwrap();
@@ -394,10 +371,7 @@ fn multi_path_independence() {
     }
 }
 
-/// Path was never restricted: noop signals via both `Absent`
-/// entry actions and both `YamlEntryMissing` +
-/// `SidecarEntryMissing` conflicts. `would_commit: false`
-/// because the projection would do nothing.
+/// A never-restricted path: both entries `Absent`, both missing-entry conflicts, no commit.
 #[test]
 fn never_restricted_reports_noop_with_both_missing_conflicts() {
     let realm = realm_with_claude();

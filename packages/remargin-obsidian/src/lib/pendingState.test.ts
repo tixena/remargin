@@ -1,3 +1,5 @@
+/** Tests for the pending predicates, the thread summary and auto-expand. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { Comment } from "@/generated/types";
@@ -9,6 +11,7 @@ import {
 } from "./pendingState.ts";
 import { buildThreadTree } from "./threadTree.ts";
 
+/** Options for the `mk` comment fixture. */
 interface MkOpts {
   to?: string[];
   ackBy?: string[];

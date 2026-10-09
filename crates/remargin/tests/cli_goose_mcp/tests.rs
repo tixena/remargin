@@ -1,3 +1,5 @@
+//! `remargin goose mcp` lifecycle, `test` and `doctor` runs against a temp home.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -90,10 +92,7 @@ fn seed_flow_style_config(path: &Path) {
     .unwrap();
 }
 
-// ---- 1-3. install / uninstall lifecycle --------------------------------
-
-/// `install` writes the entry, `uninstall` removes exactly it, and every
-/// sibling extension plus goose's own provider settings survive both.
+/// `uninstall` removes exactly what `install` wrote; siblings and provider settings survive both.
 #[test]
 fn install_then_uninstall_round_trips_and_preserves_the_rest_of_the_config() {
     let home = TempDir::new().unwrap();
@@ -144,10 +143,7 @@ fn install_then_uninstall_round_trips_and_preserves_the_rest_of_the_config() {
     );
 }
 
-/// goose namespaces an extension's tools as `<name>__<tool>` from the
-/// `name` field, so this is what makes the guard's `remargin__` redirect
-/// target exist. The `cmd` is absolute because goose warns and continues
-/// past an extension it cannot spawn.
+/// goose namespaces tools as `<name>__<tool>`, and warns and continues past a `cmd` it cannot spawn.
 #[test]
 fn generated_entry_pins_the_name_and_an_absolute_binary() {
     let home = TempDir::new().unwrap();
@@ -171,10 +167,7 @@ fn generated_entry_pins_the_name_and_an_absolute_binary() {
     assert!(Path::new(&command).is_file(), "entry command must exist");
 }
 
-/// goose discovers no project-scoped config, so `--local` writes a file
-/// that only reaches a session through `GOOSE_ADDITIONAL_CONFIG_FILES` —
-/// and every `--local` outcome says so rather than implying a scope goose
-/// would find on its own.
+/// goose finds no project config on its own, so `--local` names `GOOSE_ADDITIONAL_CONFIG_FILES`.
 #[test]
 fn local_install_targets_the_project_file_and_names_the_env_var() {
     let home = TempDir::new().unwrap();
@@ -212,8 +205,7 @@ fn local_install_targets_the_project_file_and_names_the_env_var() {
     );
 }
 
-/// A user-scope install carries no such caveat: it is the one config goose
-/// reads on its own.
+/// The user config is the one goose reads on its own, so the install carries no such requirement.
 #[test]
 fn user_install_reports_no_env_requirement() {
     let home = TempDir::new().unwrap();
@@ -227,9 +219,7 @@ fn user_install_reports_no_env_requirement() {
     assert_eq!(report_of(&out)["requires_env"], Value::Null);
 }
 
-/// goose reads its provider from this same file, so a config it cannot
-/// parse costs the user every session rather than just remargin's tools.
-/// install refuses it instead of rewriting from scratch.
+/// goose reads its provider from this file, so an unparseable config is refused, never rewritten.
 #[test]
 fn install_refuses_to_overwrite_an_unparseable_config() {
     let home = TempDir::new().unwrap();
@@ -251,10 +241,7 @@ fn install_refuses_to_overwrite_an_unparseable_config() {
     );
 }
 
-/// A layout the in-place editor does not model — a flow-style `extensions`
-/// value — still gets the entry written, by re-serializing the document.
-/// That costs the file its comments and its spacing, so the write says so
-/// instead of leaving the user to notice the reflow themselves.
+/// A flow-style config is re-serialized, losing comments and spacing, and the write says so.
 #[test]
 fn install_warns_when_the_write_normalizes_the_config_layout() {
     let home = TempDir::new().unwrap();
@@ -279,7 +266,6 @@ fn install_warns_when_the_write_normalizes_the_config_layout() {
         "the normalizing write must warn and name the file: {stderr}",
     );
 
-    // The entry landed and the rest of the config came with it.
     let after = config_yaml(&config);
     assert_eq!(after.get("active_provider").unwrap(), &Yaml::from("ollama"));
     assert!(
@@ -292,9 +278,7 @@ fn install_warns_when_the_write_normalizes_the_config_layout() {
     );
 }
 
-/// The ordinary path edits remargin's own lines and leaves the file's
-/// layout alone, so there is nothing to warn about — and a run that writes
-/// nothing at all has even less.
+/// An in-place edit keeps the layout, so no warning; neither does a run that writes nothing.
 #[test]
 fn install_stays_quiet_when_the_write_preserves_the_layout() {
     let home = TempDir::new().unwrap();
@@ -343,10 +327,7 @@ fn install_stays_quiet_when_the_write_preserves_the_layout() {
     assert_eq!(report_of(&absent)["normalized_layout"], Value::Bool(false));
 }
 
-// ---- 4. test subcommand ------------------------------------------------
-
-/// The three verdicts `test` distinguishes: registered, absent, and
-/// present but a dead end.
+/// The three verdicts `test` distinguishes: registered, absent, and present but a dead end.
 #[test]
 fn test_subcommand_reports_installed_absent_and_broken() {
     let home = TempDir::new().unwrap();
@@ -367,8 +348,7 @@ fn test_subcommand_reports_installed_absent_and_broken() {
     );
     assert_eq!(status_of(&wired), "installed");
 
-    // An entry goose loads no tools from, exactly as a live goose behaves:
-    // it warns about the extension and starts the session without it.
+    // goose warns about an extension it cannot start and opens the session without its tools.
     let config = user_config(home.path());
     fs::write(
         &config,
@@ -388,8 +368,7 @@ fn test_subcommand_reports_installed_absent_and_broken() {
         "broken detail should name the missing binary: {detail}",
     );
 
-    // A renamed entry still loads, but its tools arrive under the wrong
-    // prefix and the guard's redirect target does not exist.
+    // A renamed entry still loads, but its tools arrive under a prefix the guard does not redirect to.
     fs::write(
         &config,
         "extensions:\n  remargin:\n    enabled: true\n    type: stdio\n    name: notremargin\n    \
@@ -411,12 +390,7 @@ fn test_subcommand_reports_installed_absent_and_broken() {
     );
 }
 
-// ---- 5. doctor ---------------------------------------------------------
-
-/// A goose machine whose guard is wired but whose extension is absent is
-/// the dead end this command exists to remove: the guard blocks and names
-/// remargin ops the session never received. `doctor` must be loud about
-/// it, and `--check=goose-mcp` must select it on its own.
+/// A wired guard with no extension redirects to ops the session never received; `doctor` flags it.
 #[test]
 fn doctor_flags_a_wired_guard_without_the_extension() {
     let home = TempDir::new().unwrap();
@@ -459,9 +433,7 @@ fn doctor_flags_a_wired_guard_without_the_extension() {
     assert_status(&clean, 0);
 }
 
-/// Without the guard there is no redirect yet, so the missing extension is
-/// not this check's finding — `goose-guard` owns that repair, and it comes
-/// first.
+/// With no guard there is no redirect yet; `goose-guard` owns that repair and comes first.
 #[test]
 fn doctor_stays_quiet_about_the_extension_when_the_guard_is_absent() {
     let home = TempDir::new().unwrap();

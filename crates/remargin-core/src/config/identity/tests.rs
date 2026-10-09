@@ -28,8 +28,6 @@ fn registry_with(author: &str, status: RegistryParticipantStatus) -> Registry {
     Registry { participants }
 }
 
-// ---------- Branch 1: --config ----------
-
 #[test]
 fn branch1_config_flag_happy_path() {
     let system = MemorySystem::new()
@@ -167,9 +165,6 @@ fn branch1_config_flag_revoked_fails_registered() {
 
 #[test]
 fn branch1_config_flag_with_tilde_path_expansion() {
-    // The adapter is responsible for expanding `~` before it reaches the
-    // resolver. This test documents that the resolver receives an
-    // already-expanded path and just uses it as-is.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/home/user/custom.yaml"),
@@ -184,8 +179,6 @@ fn branch1_config_flag_with_tilde_path_expansion() {
     let resolved = resolve_identity(&system, Path::new("/p"), &Mode::Open, &flags, None).unwrap();
     assert_eq!(resolved.identity, "alice");
 }
-
-// ---------- Branch 2: manual declaration ----------
 
 #[test]
 fn branch2_manual_happy_path_open() {
@@ -205,9 +198,6 @@ fn branch2_manual_happy_path_open() {
 
 #[test]
 fn branch2_strict_without_key_falls_to_walk() {
-    // --identity + --type without --key in strict mode is NOT a complete
-    // manual declaration; it falls through to branch 3 (walk with
-    // filters). With no matching file, the walk exhausts.
     let system = MemorySystem::new();
     let flags = IdentityFlags {
         author_type: Some(AuthorType::Human),
@@ -254,10 +244,6 @@ fn branch2_manual_strict_with_key_succeeds() {
 
 #[test]
 fn type_only_falls_to_walk_as_type_filter() {
-    // Only --type given: not a manual declaration (no --identity).
-    // Falls to branch 3 where --type filters the walk. With only a
-    // human config present, a --type=agent filter skips it and the
-    // walk exhausts.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/.remargin.yaml"),
@@ -278,8 +264,6 @@ fn type_only_falls_to_walk_as_type_filter() {
 
 #[test]
 fn identity_only_falls_to_walk_as_identity_filter() {
-    // Only --identity given: not a manual declaration (no --type).
-    // Falls to branch 3 where --identity filters the walk.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/.remargin.yaml"),
@@ -300,8 +284,6 @@ fn identity_only_falls_to_walk_as_identity_filter() {
 
 #[test]
 fn identity_only_filter_picks_matching_file_on_walk() {
-    // Walk from /project/src: inner .remargin.yaml is bob; root is
-    // alice. Filter --identity=alice skips bob's file and matches root.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/src/.remargin.yaml"),
@@ -351,8 +333,6 @@ fn branch2_manual_unregistered_fails_registered() {
     );
 }
 
-// ---------- Branch 3: filtered walk ----------
-
 #[test]
 fn branch3_walk_happy_path_no_filters() {
     let system = MemorySystem::new()
@@ -376,7 +356,6 @@ fn branch3_walk_happy_path_no_filters() {
 
 #[test]
 fn branch3_walk_filter_by_identity_skips_nonmatch() {
-    // Inner file is Bob; walk should skip it and pick Alice at the root.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/inner/.remargin.yaml"),
@@ -389,11 +368,6 @@ fn branch3_walk_filter_by_identity_skips_nonmatch() {
         )
         .unwrap();
 
-    // Note: walk from inner, with filter identity=alice. We cannot call
-    // resolve_identity directly with identity-only (that triggers branch
-    // 2, not branch 3). Branch 3 is entered when no identity/type flags
-    // are set. For filter semantics we need author_type filter AND no
-    // identity — exercise that path instead.
     let flags = IdentityFlags::default();
     let resolved = resolve_identity(
         &system,
@@ -403,14 +377,11 @@ fn branch3_walk_filter_by_identity_skips_nonmatch() {
         None,
     )
     .unwrap();
-    // With no filters, closest wins.
     assert_eq!(resolved.identity, "bob");
 }
 
 #[test]
 fn branch3_walk_filter_by_key_skips_nonmatch() {
-    // Inner file has no key; outer has key=outer_key. Filter --key=outer_key
-    // should skip inner and land on outer.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -431,8 +402,6 @@ fn branch3_walk_filter_by_key_skips_nonmatch() {
         key: Some(String::from("outer_key")),
         ..IdentityFlags::default()
     };
-    // Branch 3 entry requires identity AND author_type to be None. Key-only
-    // filter enters branch 3 (walk with key filter).
     let resolved = resolve_identity(
         &system,
         Path::new("/project/inner"),
@@ -468,7 +437,6 @@ fn branch3_walk_exhausted_errors() {
 
 #[test]
 fn branch3_walk_filter_mismatch_exhausts() {
-    // Only file has identity=alice; filter requires key=nonexistent.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/.remargin.yaml"),
@@ -495,9 +463,6 @@ fn branch3_walk_filter_mismatch_exhausts() {
 
 #[test]
 fn branch3_filter_field_missing_in_file_never_matches() {
-    // File has no `key:` field; filter `--key=some_key` requires the
-    // field to be present AND equal. Missing-in-file never matches a
-    // concrete filter, so the walk continues and exhausts.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/project/.remargin.yaml"),
@@ -518,11 +483,8 @@ fn branch3_filter_field_missing_in_file_never_matches() {
     );
 }
 
-// ---------- Branch 1 conflict with branch 2 flags ----------
-
 #[test]
 fn config_flag_plus_manual_flags_bails() {
-    // Non-clap adapter could construct this; resolver defends.
     let system = MemorySystem::new();
     let flags = IdentityFlags {
         config_path: Some(PathBuf::from("/x.yaml")),
@@ -537,22 +499,8 @@ fn config_flag_plus_manual_flags_bails() {
     );
 }
 
-// ---------- Relative `key:` anchoring (config-dir, not CWD) ----------
-//
-// Pre-existing bug surfaced by absolute-path `--config` resolution: a
-// relative `key:` value in a `.remargin.yaml` was passed straight to
-// the OS, which resolves it against the process's CWD. That happens to
-// work when the config is found by walking up from CWD (config dir ==
-// CWD) but breaks when the config is loaded by absolute path from a
-// different CWD. The fix anchors relative key paths to the config
-// file's parent directory.
-
 #[test]
 fn branch1_relative_key_anchors_to_config_dir_not_cwd() {
-    // Config at /vault/.remargin.yaml says `key: keys/agent_key`.
-    // The actual key file lives at /vault/keys/agent_key. The CWD is
-    // /elsewhere — completely unrelated. Resolution must end up with
-    // /vault/keys/agent_key, not /elsewhere/keys/agent_key.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -580,9 +528,6 @@ fn branch1_relative_key_anchors_to_config_dir_not_cwd() {
 
 #[test]
 fn branch1_dotted_relative_key_anchors_to_config_dir() {
-    // The exact shape that tripped the user in the wild: `.remargin/agent_key`
-    // next to a `.remargin.yaml` in some other folder, run from a
-    // separate working directory.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -615,8 +560,6 @@ fn branch1_dotted_relative_key_anchors_to_config_dir() {
 
 #[test]
 fn branch1_absolute_key_passes_through_unchanged() {
-    // Absolute `key:` paths must NOT be re-anchored under the config's
-    // parent — they are already where the user pointed.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -643,9 +586,6 @@ fn branch1_absolute_key_passes_through_unchanged() {
 
 #[test]
 fn branch1_tilde_key_expands_to_home_not_config_dir() {
-    // `~`-prefixed keys must continue to expand to $HOME (existing
-    // behaviour). The anchor step only fires for paths that are still
-    // relative *after* `resolve_key_path` has done its work.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -672,9 +612,6 @@ fn branch1_tilde_key_expands_to_home_not_config_dir() {
 
 #[test]
 fn branch1_plain_name_key_still_resolves_to_ssh_dir() {
-    // The "plain name" branch (no `/`, `~`, or `$`) maps to
-    // `~/.ssh/<name>`. After `resolve_key_path` produces an absolute
-    // path under $HOME, the anchor step must leave it alone.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -701,11 +638,6 @@ fn branch1_plain_name_key_still_resolves_to_ssh_dir() {
 
 #[test]
 fn branch3_walk_relative_key_anchors_to_walked_config_dir() {
-    // The walk picks up `/notes/.remargin.yaml` because CWD is under it.
-    // Even when CWD is a deeper subdirectory than the config's dir, the
-    // relative key path must still anchor to the config's parent — not
-    // CWD — so a deeper subdirectory of the config tree resolves the
-    // key correctly.
     let system = MemorySystem::new()
         .with_env("HOME", "/home/user")
         .unwrap()
@@ -732,10 +664,6 @@ fn branch3_walk_relative_key_anchors_to_walked_config_dir() {
         "walked config's relative key must anchor to the config's dir",
     );
 }
-
-// ===========================================================================
-// IdentitySource Display impl, IdentityReport variants, exclusivity guard
-// ===========================================================================
 
 #[test]
 fn identity_source_display_renders_each_variant() {
@@ -799,10 +727,7 @@ fn identity_report_not_found_has_all_fields_empty() {
     assert!(report.path.is_none());
 }
 
-/// Belt-and-braces guard at the resolver entry: clap rejects this
-/// combination at the CLI layer, but non-clap callers (the MCP
-/// adapter) might construct it. The resolver bails before touching
-/// any disk.
+/// Clap refuses this combination; the resolver must too, for adapters that bypass clap.
 #[test]
 fn resolve_identity_rejects_config_path_mixed_with_manual_flags() {
     let system = MemorySystem::new();

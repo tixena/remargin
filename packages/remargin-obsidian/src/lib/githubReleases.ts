@@ -1,3 +1,5 @@
+/** The update check against GitHub releases: tag classification, comparison and caching. */
+
 import { isNewer } from "./semver";
 
 /**
@@ -13,7 +15,6 @@ export interface GithubRelease {
   published_at?: string | null;
 }
 
-/** Repository coordinates for the remargin project's GitHub releases. */
 export const REMARGIN_RELEASES_URL =
   "https://api.github.com/repos/tixena/remargin/releases";
 
@@ -29,6 +30,7 @@ export type UpdateComponent = "plugin" | "cli";
 /** Per-component status tracked in the cache + reported to the UI. */
 export type UpdateStatus = "up-to-date" | "update-available" | "check-failed";
 
+/** The update status of one component: installed and latest versions, tag and release link. */
 export interface ComponentCheck {
   status: UpdateStatus;
   installed: string;
@@ -39,10 +41,10 @@ export interface ComponentCheck {
   error?: string;
 }
 
+/** One update-check snapshot for both components. */
 export interface UpdateCheckState {
   plugin: ComponentCheck;
   cli: ComponentCheck;
-  /** ISO timestamp of when this snapshot was produced. */
   lastCheckedAt: string;
 }
 
@@ -61,9 +63,7 @@ export interface ReleasesFetcher {
 
 /**
  * Tag-convention hook. `obsidian-v*` tags track the plugin; every other
- * tag (including the canonical `vX.Y.Z`) tracks the CLI. This matches the
- * repo's historical release practice — verified against git tags before
- * implementing.
+ * tag (including the canonical `vX.Y.Z`) tracks the CLI.
  */
 export function classifyTag(tag: string): UpdateComponent | null {
   if (!tag) return null;
@@ -163,11 +163,7 @@ export function compareComponent(
   };
 }
 
-/**
- * Arguments to `runUpdateCheck`. Kept as an options object so the plugin
- * can add future knobs (alternate repo, custom fetcher, injected clock)
- * without breaking the call site.
- */
+/** Arguments to `runUpdateCheck`. */
 export interface RunUpdateCheckArgs {
   installedPlugin: string;
   installedCli: string;
@@ -268,10 +264,7 @@ export function detectNewUpdates(
     const nextCheck = after[component];
     if (nextCheck.status !== "update-available") continue;
     const prevCheck = before?.[component];
-    // Fire when:
-    //   - we've never observed an update before, or
-    //   - the previous snapshot wasn't flagging this component, or
-    //   - the latest tag advanced (a new release landed).
+    // Fire on a first sighting, a component not flagged before, or a latest tag that advanced.
     if (
       !prevCheck ||
       prevCheck.status !== "update-available" ||

@@ -1,3 +1,5 @@
+/** Shortens a directory path for display. */
+
 /**
  * Abbreviate a directory path by progressively truncating leading segments
  * to their first character until the total length fits within `maxChars`.
@@ -17,10 +19,8 @@ export function abbreviatePath(dirPath: string, maxChars: number): string {
   const segments = dirPath.split("/").filter(Boolean);
   if (segments.length === 0) return "";
 
-  // Already fits — return as-is.
   if (joined(segments) <= maxChars) return segments.join("/");
 
-  // Abbreviate from the leftmost segment inward.
   const abbreviated = [...segments];
   for (let i = 0; i < abbreviated.length; i++) {
     if (abbreviated[i].length > 1) {
@@ -34,6 +34,5 @@ export function abbreviatePath(dirPath: string, maxChars: number): string {
 
 /** Total character length of segments joined by `/`. */
 function joined(segments: string[]): number {
-  // Each segment contributes its own length, plus one "/" between each pair.
   return segments.reduce((acc, s) => acc + s.length, 0) + Math.max(0, segments.length - 1);
 }

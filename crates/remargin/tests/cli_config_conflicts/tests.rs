@@ -1,3 +1,5 @@
+//! Runs every identity-aware subcommand with `--config` plus a conflicting identity flag.
+
 use core::str;
 use std::collections::HashSet;
 use std::fs;
@@ -5,16 +7,8 @@ use std::path::Path;
 
 use assert_cmd::Command;
 
-/// Representative invocation for each identity-aware subcommand. The
-/// args after the subcommand are the minimum needed to get past
-/// clap's required-arg check so the `--config` vs `--identity/type/key`
-/// conflict surfaces. We don't execute the command; clap exits with
-/// code 2 before anything touches the filesystem.
-///
-/// Kept honest by `subcommands_table_matches_identity_flattening_commands`
-/// below, which parses `cli.rs` and fails the build if this table and
-/// the `Commands` enum's `IdentityArgs`-flattening variants diverge —
-/// no need to eyeball dispatch.rs's `subcommand_identity` by hand.
+/// One invocation per identity-aware subcommand, with the minimum arguments that get past clap's
+/// required-argument check. Nothing executes: clap exits with code 2 first.
 const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("ack", &["foo"]),
     ("activity", &[]),
@@ -180,10 +174,7 @@ fn identity_flattening_subcommands() -> HashSet<String> {
         .collect()
 }
 
-/// Drift guard: fails the moment `Commands` in `cli.rs` gains or loses
-/// an `IdentityArgs`-flattening variant that `SUBCOMMANDS` above
-/// doesn't track — the failure this whole file exists to prevent (a
-/// subcommand silently missing the `--config` conflict test).
+/// Fails when `SUBCOMMANDS` and the `IdentityArgs`-flattening variants of `Commands` diverge.
 #[test]
 fn subcommands_table_matches_identity_flattening_commands() {
     let expected = identity_flattening_subcommands();

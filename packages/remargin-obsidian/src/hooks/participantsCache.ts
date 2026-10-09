@@ -1,19 +1,7 @@
+/** Pure helpers behind the `useParticipants` hook, testable without a React renderer. */
+
 import type { Participant, RemarginBackend } from "@/backend";
 import type { RemarginSettings } from "@/types";
-
-/**
- * Pure helpers backing the `useParticipants` React hook. Factored out of
- * the hook file so they can be unit-tested without a React renderer:
- *
- * - `participantsCacheKey` — settings fingerprint used to invalidate the
- *   module-level fetch promise when the relevant settings change.
- * - `resolveDisplayNameFrom` — maps an id to the registered display name,
- *   falling back to the id itself (safe to call with `undefined` for
- *   "not yet fetched").
- * - `loadParticipants` — thin `RemarginBackend.registryShow()` adapter
- *   that swallows rejections to an empty list, so the hook never has to
- *   deal with an unhandled promise rejection.
- */
 
 /**
  * Build a stable cache key from the subset of settings that could change
@@ -62,9 +50,7 @@ export async function loadParticipants(backend: RemarginBackend): Promise<Partic
   try {
     return await backend.registryShow();
   } catch (err) {
-    // Intentional console.error: the hook has no user-facing error channel
-    // (components render "" display names by default), so we surface the
-    // underlying problem in devtools for the user to diagnose.
+    // The hook has no user-facing error channel, so the failure goes to the devtools console.
     console.error("useParticipants: failed to load registry:", err);
     return [];
   }

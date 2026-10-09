@@ -1,10 +1,9 @@
 //! Minimal OpenSSH wire-format support for unencrypted Ed25519 keys.
 //!
-//! Reimplements exactly the slice of OpenSSH key handling that remargin
+//! Implements exactly the part of OpenSSH key handling that remargin
 //! needs — parsing `openssh-key-v1` private keys and `ssh-ed25519`
 //! public keys, plus producing and verifying `PROTOCOL.sshsig`
-//! signatures — directly on `ed25519-dalek`, so the dependency graph no
-//! longer pulls in `ssh-key` (and its optional, advisory-flagged `rsa`).
+//! signatures — directly on `ed25519-dalek`.
 //!
 //! The on-disk encodings here are byte-compatible with `ssh-keygen`:
 //! private keys round-trip through `ssh-keygen`, and signatures verify
@@ -18,15 +17,10 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier as _, VerifyingKey};
 use sha2::{Digest as _, Sha256};
 
-/// Algorithm identifier for Ed25519 keys and signatures.
 const ED25519_ID: &[u8] = b"ssh-ed25519";
-/// Magic prefix for the `openssh-key-v1` private-key container.
 const OPENSSH_MAGIC: &[u8] = b"openssh-key-v1\0";
-/// PEM label for an `SSHSIG` signature.
 const SSHSIG_LABEL: &str = "SSH SIGNATURE";
-/// Magic preamble for the `PROTOCOL.sshsig` blob (6 literal bytes).
 const SSHSIG_MAGIC: &[u8] = b"SSHSIG";
-/// `SSHSIG` wire-format version.
 const SSHSIG_VERSION: u32 = 1;
 
 /// A parsed Ed25519 signing key.
@@ -115,7 +109,6 @@ impl PrivateKey {
         })
     }
 
-    /// Returns the matching public key.
     #[must_use]
     pub fn public_key(&self) -> PublicKey {
         PublicKey {

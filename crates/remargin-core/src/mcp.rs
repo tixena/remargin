@@ -47,61 +47,32 @@ use crate::permissions::op_guard::{CallerInfo, check_against_resolved_for_caller
 use crate::responses;
 use crate::writer::InsertPosition;
 
-/// Standard JSON-RPC: invalid params.
 const INVALID_PARAMS: i64 = -32602;
 
-/// Standard JSON-RPC: method not found.
 const METHOD_NOT_FOUND: i64 = -32601;
 
-/// Standard JSON-RPC: parse error.
 const PARSE_ERROR: i64 = -32700;
 
-/// MCP protocol version supported by this server.
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// Server name reported in the initialize response.
 const SERVER_NAME: &str = "remargin";
 
-/// Seed for a session's [`SessionState::spill_cap`], in UTF-8 bytes of
-/// emitted tool-result text. This is a self-consistent proxy for the
-/// client's token limit, NOT an equivalent — remargin measures bytes, the
-/// client counts tokens. Seeded conservatively near Claude Code's ~10k-token
-/// soft-warn boundary and well under its 25k-token default hard spill, so a
-/// fresh session rarely spills before it learns; the cap only ratchets DOWN
-/// from here via [`handle_report_spill`].
+/// In UTF-8 bytes of emitted tool-result text: a proxy for the client's token limit, seeded low
+/// so a fresh session rarely spills. The cap only ratchets down from here.
 const DEFAULT_SPILL_CAP: usize = 40_000;
 
-/// Fraction of [`SessionState::spill_cap`] held back for the response
-/// envelope (matches wrapper, `total`, `effective_limit`, injected
-/// `elapsed_ms`) and pretty-print indentation when sizing a search page.
+/// One part in this many of the cap is held back for the response envelope and indentation.
 const SPILL_MARGIN_DIVISOR: usize = 10;
 
-/// Path-like top-level fields that every tool accepts. Each is run through
-/// [`expand_path`] before the dispatch hands the params off to the per-tool
-/// handler so `~` / `$VAR` behave identically to the CLI side. The list is
-/// deliberately narrow — adding a new path-shaped field to an MCP schema is
-/// a deliberate act, and it belongs here.
-///
-/// `config_path` and `key` are the per-tool identity-declaration fields
-///: they are pre-expanded here so the identity resolver sees the
-/// same already-canonical paths the CLI feeds to [`resolve_identity`].
+/// Top-level path fields, expanded for `~` and `$VAR` before dispatch. `config_path` and `key`
+/// are included so the identity resolver sees the paths the CLI would feed it.
 const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "dst", "file", "key", "path", "src"];
 
-/// Array-valued path fields — each element is expanded independently.
+/// Each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
 
-/// Tools that take no path-shaped argument OR whose semantics
-/// require querying paths outside the dispatch-time boundary.
-/// Listed alphabetically.
-///
-/// `permissions_check` is the read-only inspection surface — it is
-/// expected to answer "is this path restricted?" for any path the
-/// caller hands in, even one outside `trusted_roots`. Gating it
-/// would defeat its purpose. Other listed tools take no path at all.
-///
-/// `claude_restrict` and `claude_unrestrict` are intentionally absent
-/// from the MCP surface: they mutate permission policy and must only
-/// be invokable by the human via the CLI.
+/// Tools exempt from the dispatch-time boundary check: they take no path or, like
+/// `permissions_check`, must answer for a path outside `trusted_roots`. Alphabetical.
 const NO_PATH_TOOLS: &[&str] = &[
     "doctor",
     "identity_create",
@@ -112,33 +83,22 @@ const NO_PATH_TOOLS: &[&str] = &[
     "whoami",
 ];
 
-/// Tools whose handler defaults the target to MCP `cwd` when the
-/// caller omits `path`. The dispatch-time boundary check synthesises
-/// `"."` for these so an unconstrained `ls` (or `query`, `search`, …)
-/// cannot read cwd when cwd is not in `trusted_roots`. `ack`'s
-/// folder-walk fallback only fires when both `file` and `path` are
-/// absent, so it is handled inline rather than via this list.
+/// Tools that default the target to cwd when `path` is omitted; the boundary check uses `"."`
+/// for them, so cwd cannot be read when it is not in `trusted_roots`.
 const PATH_DEFAULTS_TO_CWD_TOOLS: &[&str] = &["activity", "ls", "query", "sandbox_list", "search"];
 
-/// Identity-declaration flags the MCP surface rejects. An MCP server
-/// is launched per session with a stable startup identity, so per-call
-/// identity flips are out of scope. The CLI keeps these flags.
+/// A server runs under one startup identity, so per-call identity declarations are refused.
 const REJECTED_IDENTITY_FLAGS: &[&str] = &["config_path", "identity", "key", "type"];
 
-/// Tools that stay callable when the resolved identity is `type:
-/// human`. The MCP surface is an agent surface, so a human identity
-/// is rejected at dispatch — except the two tools that let the agent
-/// diagnose the refusal (`whoami`) and render the agent identity the
-/// rejection tells it to create (`identity_create`).
+/// Callable under a human identity, which the MCP surface otherwise refuses: `whoami` to
+/// diagnose the refusal and `identity_create` to render the agent identity it asks for.
 const HUMAN_IDENTITY_EXEMPT_TOOLS: &[&str] = &["identity_create", "whoami"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
-    /// Human-readable description.
     description: &'static str,
     /// Tool name (short, no prefix).
     name: &'static str,
-    /// JSON Schema for the tool's input parameters.
     schema: Value,
 }
 
@@ -150,9 +110,7 @@ struct ToolDesc {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct McpIdentityFlagRejected {
-    /// Offending parameter the caller sent.
     pub flag: String,
-    /// MCP tool the caller invoked (short name, no prefix).
     pub tool: String,
 }
 
@@ -164,9 +122,7 @@ pub struct McpIdentityFlagRejected {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct McpHumanIdentityRejected {
-    /// Identity the config walk resolved to.
     pub identity: String,
-    /// MCP tool the caller invoked (short name, no prefix).
     pub tool: String,
 }
 
@@ -274,16 +230,14 @@ impl McpHumanIdentityRejected {
     }
 }
 
-/// Reject any identity-declaration flag in `params`. Returns the
-/// structured rejection on the first hit. Defense against clients
-/// that ignore the schema (which no longer advertises these flags).
+/// Reject any identity-declaration flag in `params`, returning the structured rejection on the
+/// first hit. A client that ignores the schema can still send one.
 fn reject_identity_flags(
     tool: &str,
     params: &Map<String, Value>,
 ) -> Option<McpIdentityFlagRejected> {
-    // `identity_create` is exempt: its `identity` / `type` / `key`
-    // params name the NEW identity being rendered, not a per-call
-    // re-declaration of the caller's identity.
+    // `identity_create` is exempt: its `identity` / `type` / `key` name the new identity being
+    // rendered, not the caller's.
     if tool == "identity_create" {
         return None;
     }
@@ -341,7 +295,6 @@ fn reject_unknown_arguments(tool: &str, params: &Map<String, Value>) -> Option<S
     ))
 }
 
-/// Build the `activity` tool descriptor.
 fn desc_activity() -> ToolDesc {
     ToolDesc {
         name: "activity",
@@ -376,7 +329,6 @@ fn desc_activity() -> ToolDesc {
     }
 }
 
-/// Build the ack tool descriptor.
 fn desc_ack() -> ToolDesc {
     ToolDesc {
         name: "ack",
@@ -398,7 +350,6 @@ fn desc_ack() -> ToolDesc {
     }
 }
 
-/// Build the batch tool descriptor.
 fn desc_batch() -> ToolDesc {
     ToolDesc {
         name: "batch",
@@ -443,7 +394,6 @@ fn desc_batch() -> ToolDesc {
     }
 }
 
-/// Build the cp tool descriptor.
 fn desc_cp() -> ToolDesc {
     ToolDesc {
         name: "cp",
@@ -464,7 +414,6 @@ fn desc_cp() -> ToolDesc {
     }
 }
 
-/// Build the comment tool descriptor.
 fn desc_comment() -> ToolDesc {
     ToolDesc {
         name: "comment",
@@ -510,7 +459,6 @@ fn desc_comment() -> ToolDesc {
     }
 }
 
-/// Build the comments tool descriptor.
 fn desc_comments() -> ToolDesc {
     ToolDesc {
         name: "comments",
@@ -558,7 +506,6 @@ fn desc_comments() -> ToolDesc {
     }
 }
 
-/// Build the delete tool descriptor.
 fn desc_delete() -> ToolDesc {
     ToolDesc {
         name: "delete",
@@ -578,7 +525,6 @@ fn desc_delete() -> ToolDesc {
     }
 }
 
-/// Build the doctor tool descriptor.
 fn desc_doctor() -> ToolDesc {
     ToolDesc {
         name: "doctor",
@@ -610,7 +556,6 @@ fn desc_doctor() -> ToolDesc {
     }
 }
 
-/// Build the edit tool descriptor.
 fn desc_edit() -> ToolDesc {
     ToolDesc {
         name: "edit",
@@ -632,7 +577,6 @@ fn desc_edit() -> ToolDesc {
     }
 }
 
-/// Build the get tool descriptor.
 fn desc_get() -> ToolDesc {
     ToolDesc {
         name: "get",
@@ -666,7 +610,6 @@ fn desc_get() -> ToolDesc {
     }
 }
 
-/// Build the lint tool descriptor.
 fn desc_lint() -> ToolDesc {
     ToolDesc {
         name: "lint",
@@ -681,7 +624,6 @@ fn desc_lint() -> ToolDesc {
     }
 }
 
-/// Build the ls tool descriptor.
 fn desc_ls() -> ToolDesc {
     ToolDesc {
         name: "ls",
@@ -696,7 +638,6 @@ fn desc_ls() -> ToolDesc {
     }
 }
 
-/// Build the metadata tool descriptor.
 fn desc_metadata() -> ToolDesc {
     ToolDesc {
         name: "metadata",
@@ -715,7 +656,6 @@ fn desc_metadata() -> ToolDesc {
     }
 }
 
-/// Build the `mv` tool descriptor.
 fn desc_mv() -> ToolDesc {
     ToolDesc {
         name: "mv",
@@ -732,7 +672,6 @@ fn desc_mv() -> ToolDesc {
     }
 }
 
-/// Build the plan tool descriptor.
 fn desc_plan() -> ToolDesc {
     ToolDesc {
         name: "plan",
@@ -805,7 +744,6 @@ fn desc_plan() -> ToolDesc {
     }
 }
 
-/// Build the purge tool descriptor.
 fn desc_purge() -> ToolDesc {
     ToolDesc {
         name: "purge",
@@ -821,7 +759,6 @@ fn desc_purge() -> ToolDesc {
     }
 }
 
-/// Build the `prompt_resolve` tool descriptor.
 fn desc_prompt_resolve() -> ToolDesc {
     ToolDesc {
         name: "prompt_resolve",
@@ -838,7 +775,6 @@ fn desc_prompt_resolve() -> ToolDesc {
     }
 }
 
-/// Build the `prompt_set` tool descriptor.
 fn desc_prompt_set() -> ToolDesc {
     ToolDesc {
         name: "prompt_set",
@@ -859,7 +795,6 @@ fn desc_prompt_set() -> ToolDesc {
     }
 }
 
-/// Build the `prompt_delete` tool descriptor.
 fn desc_prompt_delete() -> ToolDesc {
     ToolDesc {
         name: "prompt_delete",
@@ -876,7 +811,6 @@ fn desc_prompt_delete() -> ToolDesc {
     }
 }
 
-/// Build the `prompt_list` tool descriptor.
 fn desc_prompt_list() -> ToolDesc {
     ToolDesc {
         name: "prompt_list",
@@ -892,12 +826,8 @@ fn desc_prompt_list() -> ToolDesc {
     }
 }
 
-/// Build the `identity_create` tool descriptor.
-///
-/// Mirrors the CLI `remargin identity create` surface: prints a
-/// ready-to-use identity YAML block. `mode:` is deliberately omitted
-/// (tree property, resolved by walk). No `--write` equivalent — MCP
-/// writes to `.remargin.yaml` are banned.
+/// The `identity_create` descriptor. The tool prints a ready-to-use identity YAML block and
+/// omits `mode:`, a tree property resolved by the walk. It never writes `.remargin.yaml`.
 fn desc_identity_create() -> ToolDesc {
     ToolDesc {
         name: "identity_create",
@@ -916,7 +846,6 @@ fn desc_identity_create() -> ToolDesc {
     }
 }
 
-/// Build the query tool descriptor.
 fn desc_query() -> ToolDesc {
     ToolDesc {
         name: "query",
@@ -981,7 +910,6 @@ fn desc_query() -> ToolDesc {
     }
 }
 
-/// Build the react tool descriptor.
 fn desc_react() -> ToolDesc {
     ToolDesc {
         name: "react",
@@ -999,7 +927,6 @@ fn desc_react() -> ToolDesc {
     }
 }
 
-/// Build the reply tool descriptor.
 fn desc_reply() -> ToolDesc {
     ToolDesc {
         name: "reply",
@@ -1052,7 +979,6 @@ fn desc_reply() -> ToolDesc {
     }
 }
 
-/// Build the `report_spill` tool descriptor.
 fn desc_report_spill() -> ToolDesc {
     ToolDesc {
         name: "report_spill",
@@ -1071,7 +997,6 @@ fn desc_report_spill() -> ToolDesc {
     }
 }
 
-/// Build the rm tool descriptor.
 fn desc_rm() -> ToolDesc {
     ToolDesc {
         name: "rm",
@@ -1138,7 +1063,6 @@ fn desc_get_image() -> ToolDesc {
     }
 }
 
-/// Build the search tool descriptor.
 fn desc_search() -> ToolDesc {
     ToolDesc {
         name: "search",
@@ -1169,7 +1093,6 @@ fn desc_search() -> ToolDesc {
     }
 }
 
-/// Build the replace tool descriptor.
 fn desc_replace() -> ToolDesc {
     ToolDesc {
         name: "replace",
@@ -1194,7 +1117,6 @@ fn desc_replace() -> ToolDesc {
     }
 }
 
-/// Build the sign tool descriptor.
 fn desc_sign() -> ToolDesc {
     ToolDesc {
         name: "sign",
@@ -1224,7 +1146,6 @@ fn desc_sign() -> ToolDesc {
     }
 }
 
-/// Build the verify tool descriptor.
 fn desc_verify() -> ToolDesc {
     ToolDesc {
         name: "verify",
@@ -1245,7 +1166,6 @@ fn desc_verify() -> ToolDesc {
     }
 }
 
-/// Build the `whoami` tool descriptor.
 fn desc_whoami() -> ToolDesc {
     ToolDesc {
         name: "whoami",
@@ -1260,7 +1180,6 @@ fn desc_whoami() -> ToolDesc {
     }
 }
 
-/// Build the `permissions_show` tool descriptor.
 fn desc_permissions_show() -> ToolDesc {
     ToolDesc {
         name: "permissions_show",
@@ -1275,7 +1194,6 @@ fn desc_permissions_show() -> ToolDesc {
     }
 }
 
-/// Build the `permissions_check` tool descriptor.
 fn desc_permissions_check() -> ToolDesc {
     ToolDesc {
         name: "permissions_check",
@@ -1294,7 +1212,6 @@ fn desc_permissions_check() -> ToolDesc {
     }
 }
 
-/// Build the `sandbox_add` tool descriptor.
 fn desc_sandbox_add() -> ToolDesc {
     ToolDesc {
         name: "sandbox_add",
@@ -1313,7 +1230,6 @@ fn desc_sandbox_add() -> ToolDesc {
     }
 }
 
-/// Build the `sandbox_remove` tool descriptor.
 fn desc_sandbox_remove() -> ToolDesc {
     ToolDesc {
         name: "sandbox_remove",
@@ -1332,7 +1248,6 @@ fn desc_sandbox_remove() -> ToolDesc {
     }
 }
 
-/// Build the `sandbox_list` tool descriptor.
 fn desc_sandbox_list() -> ToolDesc {
     ToolDesc {
         name: "sandbox_list",
@@ -1346,7 +1261,6 @@ fn desc_sandbox_list() -> ToolDesc {
     }
 }
 
-/// Build the write tool descriptor.
 fn desc_write() -> ToolDesc {
     ToolDesc {
         name: "write",
@@ -1371,7 +1285,6 @@ fn desc_write() -> ToolDesc {
     }
 }
 
-/// Build the list of all tool descriptors.
 fn tool_descriptors() -> Vec<ToolDesc> {
     vec![
         desc_ack(),
@@ -1415,7 +1328,6 @@ fn tool_descriptors() -> Vec<ToolDesc> {
     ]
 }
 
-/// Build a JSON-RPC success response.
 fn success_response(id: &Value, result: &Value) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -1424,7 +1336,6 @@ fn success_response(id: &Value, result: &Value) -> Value {
     })
 }
 
-/// Build a JSON-RPC error response.
 fn error_response(id: &Value, code: i64, message: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -1436,7 +1347,6 @@ fn error_response(id: &Value, code: i64, message: &str) -> Value {
     })
 }
 
-/// Build an MCP tool result (success).
 fn tool_result_success(content: &Value) -> Value {
     json!({
         "content": [{
@@ -1467,7 +1377,6 @@ fn tool_emits_minified(tool_name: &str) -> bool {
     )
 }
 
-/// Build an MCP tool result (error).
 fn tool_result_error(message: &str) -> Value {
     json!({
         "content": [{
@@ -1494,7 +1403,6 @@ fn tool_result_error_json(payload: &Value) -> Value {
     })
 }
 
-/// Extract an optional bool field from a JSON object.
 fn optional_bool(params: &Map<String, Value>, field: &str) -> bool {
     params.get(field).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -1544,18 +1452,15 @@ fn normalize_path_fields(
     Ok(out)
 }
 
-/// Extract an optional string field from a JSON object.
 fn optional_str<'val>(params: &'val Map<String, Value>, field: &str) -> Option<&'val str> {
     params.get(field).and_then(Value::as_str)
 }
 
-/// Extract an optional integer field from a JSON object.
 fn optional_usize(params: &Map<String, Value>, field: &str) -> Option<usize> {
     let val = params.get(field).and_then(Value::as_u64)?;
     usize::try_from(val).ok()
 }
 
-/// Extract a required string field from a JSON object.
 fn required_str<'val>(params: &'val Map<String, Value>, field: &str) -> Result<&'val str> {
     params
         .get(field)
@@ -1577,19 +1482,12 @@ fn string_array(params: &Map<String, Value>, field: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Dispatch-time boundary check. Mirrors the historic `McpSandbox` for
-/// unconstrained sessions (cwd fallback) and routes constrained / locked
-/// sessions through `op_guard` so `trusted_roots` and `deny_ops` drive
-/// the verdict. The per-tool handler still re-runs `op_guard` on the
-/// canonical target — this dispatch hop catches paths handlers like
-/// `lint` / `query` / `search` would not otherwise gate.
+/// Dispatch-time boundary check. An unconstrained session falls back to cwd; a constrained or
+/// locked one goes through `op_guard`, so `trusted_roots` and `deny_ops` drive the verdict.
 ///
-/// Per-tool special cases:
-///
-/// - `permissions_check`: the `path` field IS the target; we still
-///   gate it so callers cannot probe arbitrary filesystem paths.
-/// - `search`, `query`, `ls`, `sandbox_list`: the `path` field is a
-///   base directory the op walks; the boundary check applies.
+/// The per-tool handler still re-runs `op_guard` on the canonical target; this hop catches the
+/// paths handlers like `lint`, `query` and `search` would not otherwise gate.
+/// `permissions_check` is gated on its `path` too, so callers cannot probe arbitrary paths.
 fn ensure_path_in_scope(
     system: &dyn System,
     base_dir: &Path,
@@ -1602,12 +1500,8 @@ fn ensure_path_in_scope(
     }
 
     for field in SCALAR_PATH_FIELDS {
-        // `config_path` and `key` are identity-declaration paths that
-        // legitimately point outside the sandbox (e.g. `~/.ssh/id_ed25519`
-        // or a `.remargin.yaml` in the user's home). They are not the
-        // op's target, so the boundary check skips them. The identity
-        // resolver's own validation handles their existence and
-        // reachability.
+        // `config_path` and `key` legitimately point outside the sandbox and are not the op's target;
+        // the identity resolver validates them.
         if matches!(*field, "config_path" | "key") {
             continue;
         }
@@ -1616,9 +1510,7 @@ fn ensure_path_in_scope(
         }
     }
     for field in ARRAY_PATH_FIELDS {
-        // `attachments` are write-side asset sources whose existence
-        // is checked at the asset-copy step; the boundary check focuses
-        // on the canonical target paths in `files`.
+        // `attachments` are asset sources, checked when the asset is copied.
         if *field == "attachments" {
             continue;
         }
@@ -1631,9 +1523,8 @@ fn ensure_path_in_scope(
         }
     }
 
-    // Folder-walk tools that omit `path` fall back to cwd at handler
-    // time; mirror that fallback at the boundary so cwd cannot be read
-    // when it is not in `trusted_roots`.
+    // A folder-walk tool that omits `path` falls back to cwd in its handler; mirror that here so
+    // cwd cannot be read when it is not in `trusted_roots`.
     let needs_cwd_fallback = PATH_DEFAULTS_TO_CWD_TOOLS.contains(&tool_name)
         || (tool_name == "ack" && !params.contains_key("file"));
     if needs_cwd_fallback && !params.contains_key("path") {
@@ -1643,11 +1534,9 @@ fn ensure_path_in_scope(
     Ok(())
 }
 
-/// Boundary check for a single path. UNCONSTRAINED sessions get the
-/// cwd-fallback shape that `McpSandbox` used to enforce: the path must
-/// canonicalise under `base_dir`. CONSTRAINED / LOCKED sessions route
-/// through `op_guard` so violations carry the canonical
-/// `trusted_roots` / `deny_ops` error wording.
+/// Boundary check for a single path. In an unconstrained session the path must canonicalise
+/// under `base_dir`; a constrained or locked session goes through `op_guard`, so a violation
+/// carries the canonical `trusted_roots` / `deny_ops` wording.
 fn check_one_path(
     system: &dyn System,
     base_dir: &Path,
@@ -1736,10 +1625,7 @@ fn dispatch_tool(
     tool_name: &str,
     params: &Map<String, Value>,
 ) -> Value {
-    // Normalize path-like fields (`~`, `$VAR`, `${VAR}`) before dispatch
-    // so every downstream handler sees already-expanded paths. Keeps CLI +
-    // MCP in lockstep. A normalization failure is reported as a
-    // tool-level error with the same surface as any other invalid param.
+    // Expand path fields before dispatch so every handler sees the paths the CLI would.
     let normalized = match normalize_path_fields(system, params) {
         Ok(map) => map,
         Err(err) => return tool_result_error(&format!("{err:#}")),
@@ -1750,10 +1636,6 @@ fn dispatch_tool(
         return refusal;
     }
 
-    // The MCP surface is an agent surface: a human identity resolved
-    // from the config walk must never act here. `whoami` and
-    // `identity_create` stay callable so the agent can diagnose and
-    // render the agent identity the rejection asks for.
     if matches!(config.author_type, Some(parser::AuthorType::Human))
         && !HUMAN_IDENTITY_EXEMPT_TOOLS.contains(&tool_name)
     {
@@ -1769,13 +1651,6 @@ fn dispatch_tool(
         );
     }
 
-    // Dispatch-time boundary check. UNCONSTRAINED sessions get the
-    // cwd-fallback behaviour the historic `McpSandbox` enforced;
-    // CONSTRAINED / LOCKED sessions surface `op_guard` violations
-    // with the canonical `trusted_roots` / `deny_ops` wording. The
-    // per-tool handler still re-runs `op_guard` on the canonical
-    // target — this hop catches handlers like `lint` / `query` /
-    // `search` that would not otherwise gate.
     if let Err(err) = ensure_path_in_scope(system, base_dir, permissions, tool_name, p) {
         return tool_result_error(&format!("{err:#}"));
     }
@@ -1835,9 +1710,7 @@ fn dispatch_tool(
 
     match result {
         Ok(value) => {
-            // If the handler returned a pre-built MCP response (has "content"
-            // array), pass it through unchanged. Otherwise wrap it —
-            // minified for the compact columnar tools, pretty otherwise.
+            // A handler that returns a pre-built MCP response (a "content" array) is passed through.
             if value.get("content").is_some_and(Value::is_array) {
                 value
             } else if tool_emits_minified(tool_name) {
@@ -1860,7 +1733,6 @@ fn dispatch_tool(
     }
 }
 
-/// Handle the `activity` tool.
 fn handle_activity(
     system: &dyn System,
     base_dir: &Path,
@@ -1887,9 +1759,6 @@ fn handle_activity(
         None => None,
     };
     let result = activity::gather_activity(system, &target, cutoff, config)?;
-    // Compact columnar shape, hardcoded on the MCP surface: changes become
-    // positional rows named by `change_cols`. Serialized minified by
-    // `tool_result_success_min`.
     let mut envelope = activity::to_compact_activity(&result);
     let files = envelope
         .get_mut("files")
@@ -1905,7 +1774,6 @@ fn handle_activity(
     Ok(envelope)
 }
 
-/// Handle the `ack` tool: acknowledge one or more comments.
 fn handle_ack(
     system: &dyn System,
     base_dir: &Path,
@@ -1917,12 +1785,10 @@ fn handle_ack(
     let cfg = config;
 
     if let Some(file) = optional_str(params, "file") {
-        // Direct file path provided.
         let path = base_dir.join(file);
         let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
         operations::ack_comments(system, &path, cfg, &id_refs, remove)?;
     } else {
-        // Folder-wide ack: resolve each ID across the folder tree.
         let search_path = optional_str(params, "path").unwrap_or(".");
         let search_dir = base_dir.join(search_path);
         for comment_id in &ids {
@@ -1950,7 +1816,6 @@ fn handle_ack(
     Ok(responses::ack(&ids, remove))
 }
 
-/// Handle the `batch` tool: create multiple comments atomically.
 /// MCP-only gate: a reply that explicitly opts out of acking *another author's*
 /// comment (`auto_ack: false`) must justify it via `ack_skip_reason`. The smart
 /// default and self-replies are exempt; the reason is validated, never stored.
@@ -2144,14 +2009,11 @@ fn handle_batch(
 
     let path = base_dir.join(file);
     let outcome = operations::batch::batch_comment(system, &path, cfg, &batch_ops)?;
-    // The same advisory pass the single-comment path runs, with each note
-    // naming the operation whose body earned it.
     let mut result = responses::batch(&outcome.ids);
     advice::attach_op_notes(&mut result, &outcome.warnings);
     Ok(result)
 }
 
-/// Handle the `comment` tool: create a single comment.
 fn handle_comment(
     system: &dyn System,
     base_dir: &Path,
@@ -2166,7 +2028,6 @@ fn handle_comment(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    // Validation happens inside `create_comment`.
     let remargin_kind = string_array(params, "kind");
     let cfg = config;
 
@@ -2196,7 +2057,6 @@ fn handle_comment(
     Ok(result)
 }
 
-/// Handle the `comments` tool: list all comments in a document.
 fn handle_comments(
     system: &dyn System,
     base_dir: &Path,
@@ -2224,7 +2084,6 @@ fn handle_comments(
     Ok(envelope)
 }
 
-/// Handle the `delete` tool: delete one or more comments.
 fn handle_delete(
     system: &dyn System,
     base_dir: &Path,
@@ -2241,7 +2100,6 @@ fn handle_delete(
     Ok(responses::comments_deleted(&ids))
 }
 
-/// Handle the `edit` tool: edit a comment's content.
 fn handle_edit(
     system: &dyn System,
     base_dir: &Path,
@@ -2251,9 +2109,7 @@ fn handle_edit(
     let file = required_str(params, "file")?;
     let comment_id = required_str(params, "id")?;
     let new_content = required_str(params, "content")?;
-    // optional replacement kind list. When the key is absent
-    // we pass `None` so the stored list is preserved; an empty array
-    // explicitly clears (validate_kinds accepts `[]`).
+    // An absent key preserves the stored kinds; an empty array clears them.
     let new_kinds: Option<Vec<String>> = match params.get("kind") {
         Some(Value::Array(arr)) => Some(
             arr.iter()
@@ -2275,8 +2131,6 @@ fn handle_edit(
         new_kinds.as_deref(),
     )?;
     let mut result = responses::comment_edited(comment_id);
-    // The same advisory pass a created body gets, so a warn-tier finding
-    // reaches an editor too.
     advice::attach_notes(&mut result, &comment_style::notes(new_content));
     Ok(result)
 }
@@ -2384,9 +2238,7 @@ fn get_envelope(
     line_numbers: bool,
     effective_end_line: Option<usize>,
 ) -> Value {
-    // Compact columnar shape, hardcoded on the MCP surface: rows are
-    // positional `[alias, lines, target, title]`, `count` / `path` dropped
-    // (both derivable). Serialized minified by `tool_result_success_min`.
+    // Link rows are positional `[alias, lines, target, title]`; `count` and `path` are derivable.
     let rows = operations::links::to_compact_rows(result.links);
     let mut envelope = if line_numbers {
         // Line numbers are contiguous, so state the start once and drop the
@@ -2440,7 +2292,6 @@ fn handle_identity_create(params: &Map<String, Value>) -> Result<Value> {
     }))
 }
 
-/// Handle the `lint` tool: run structural lint checks.
 fn handle_lint(
     system: &dyn System,
     base_dir: &Path,
@@ -2452,7 +2303,6 @@ fn handle_lint(
     Ok(linter::lint_doc(system, &path, config)?.to_json())
 }
 
-/// Handle the `ls` tool: list files and directories.
 fn handle_ls(
     system: &dyn System,
     base_dir: &Path,
@@ -2467,7 +2317,6 @@ fn handle_ls(
     Ok(json!({ "entries": entries }))
 }
 
-/// Handle the `metadata` tool: get document metadata.
 fn handle_metadata(
     system: &dyn System,
     base_dir: &Path,
@@ -2482,10 +2331,8 @@ fn handle_metadata(
     Ok(meta.to_json(true))
 }
 
-/// Build the canonical "this plan op is CLI-only" error returned when
-/// `mcp__remargin__plan` is called with `op="claude_restrict"` or
-/// `op="claude_unrestrict"`. Pulled out so [`handle_plan`] stays
-/// under the adapter LOC cap.
+/// The error returned when `plan` is called with `op="claude_restrict"` or
+/// `op="claude_unrestrict"`, which only the CLI accepts.
 fn plan_op_cli_only_error(op: &str) -> anyhow::Error {
     let cli = match op {
         "claude_restrict" => "remargin plan claude restrict",
@@ -2606,10 +2453,8 @@ fn parse_plan_src_dst(params: &Map<String, Value>) -> Result<(PathBuf, PathBuf, 
 /// Parse the `ops` array from a `plan.batch` MCP request into
 /// [`projections::ProjectBatchOp`] values.
 ///
-/// Each entry is an object with the same shape as the `batch` tool's sub-op
-/// (`content`, `reply_to`, `after_comment`, `after_line`, `attach_names`,
-/// `auto_ack`, `to`). Unknown fields are ignored; missing `content`
-/// rejects the whole batch.
+/// Each entry is an object with the same shape as the `batch` tool's sub-op. A key outside
+/// [`projections::PLAN_OP_FIELDS`] or a missing `content` rejects the whole batch.
 fn parse_plan_batch_ops(params: &Map<String, Value>) -> Result<Vec<projections::ProjectBatchOp>> {
     let ops_val = params
         .get("ops")
@@ -2737,7 +2582,6 @@ fn handle_purge(
     Ok(result.to_json())
 }
 
-/// Handle the `query` tool: search across documents.
 fn handle_query(
     system: &dyn System,
     base_dir: &Path,
@@ -2752,9 +2596,6 @@ fn handle_query(
     let is_file = system.is_file(&target).unwrap_or(false);
     let results = query::query(system, &target, &filter, config)?;
 
-    // Compact columnar shape, hardcoded on the MCP surface: comments become
-    // positional rows named by `comment_cols`, dropping checksum / signature
-    // / file. Serialized minified by `tool_result_success_min`.
     let compact: Vec<Value> = results
         .iter()
         .map(|result| query::to_compact_result(result, include_integrity))
@@ -2770,8 +2611,6 @@ fn handle_query(
     Ok(envelope)
 }
 
-/// Translate `query` tool params into a [`QueryFilter`]. Pulled out so
-/// `handle_query` stays under the adapter LOC cap.
 fn build_query_filter_from_params(
     params: &Map<String, Value>,
     caller_identity: Option<String>,
@@ -2805,12 +2644,6 @@ fn build_query_filter_from_params(
     Ok(filter)
 }
 
-/// Handle the `permissions_show` tool.
-///
-/// Pure read-only inspection — no identity resolution, no config
-/// load. Returns the parent-walked `.remargin.yaml` permissions tree
-/// rooted at `base_dir` (the MCP server's working directory).
-/// Handle the `doctor` tool.
 fn handle_doctor(
     system: &dyn System,
     base_dir: &Path,
@@ -2835,6 +2668,8 @@ fn handle_doctor(
     serde_json::to_value(&report).context("serializing doctor report")
 }
 
+/// The parent-walked permissions tree rooted at `base_dir`, with no identity resolution and no
+/// config load.
 fn handle_permissions_show(system: &dyn System, base_dir: &Path) -> Result<Value> {
     let report = permissions_inspect::show(system, base_dir)?;
     serde_json::to_value(&report).context("serializing permissions show output")
@@ -2862,7 +2697,6 @@ fn handle_permissions_check(
     serde_json::to_value(&report).context("serializing permissions check output")
 }
 
-/// Handle the `react` tool: add or remove an emoji reaction.
 fn handle_react(
     system: &dyn System,
     base_dir: &Path,
@@ -2895,7 +2729,6 @@ fn handle_reply(
     handle_comment(system, base_dir, config, &translated)
 }
 
-/// Handle the `rm` tool: remove a file from the managed document tree.
 fn handle_rm(
     system: &dyn System,
     base_dir: &Path,
@@ -2908,7 +2741,6 @@ fn handle_rm(
     Ok(result.to_json(path_str))
 }
 
-/// Handle the `mv` tool: move or rename a tracked file.
 fn handle_mv(
     system: &dyn System,
     base_dir: &Path,
@@ -2924,7 +2756,6 @@ fn handle_mv(
     Ok(outcome.to_json())
 }
 
-/// Handle the `cp` tool: copy a tracked file.
 fn handle_cp(
     system: &dyn System,
     base_dir: &Path,
@@ -2961,12 +2792,8 @@ fn handle_get_image(
 
     let result = image_ops::get_image(system, base_dir, target, config, &options)?;
 
-    // Return a content array so the dispatcher passes it through unchanged:
-    // a real MCP image block (Claude Code renders it as vision input) plus a
-    // trailing text block carrying the metadata envelope. `data` is bare
-    // base64 (no `data:` URI prefix) and `mimeType` is the detected output
-    // MIME, not the extension. get_image always produces a raster image
-    // (SVG/PDF/audio/video are rejected upstream), so no branching is needed.
+    // A content array is passed through by the dispatcher: an MCP image block, then a text block
+    // with the metadata. `data` is bare base64 and `mimeType` is the detected output MIME.
     let metadata = result.to_json_without_content();
     let data = BASE64_STANDARD.encode(&result.bytes);
     Ok(json!({
@@ -2977,7 +2804,6 @@ fn handle_get_image(
     }))
 }
 
-/// Handle the `sandbox_add` tool: stage files in the caller's sandbox.
 fn handle_sandbox_add(
     system: &dyn System,
     base_dir: &Path,
@@ -2997,7 +2823,6 @@ fn handle_sandbox_add(
     Ok(result.to_json(base_dir, "added"))
 }
 
-/// Handle the `sandbox_remove` tool: unstage files from the caller's sandbox.
 fn handle_sandbox_remove(
     system: &dyn System,
     base_dir: &Path,
@@ -3017,7 +2842,6 @@ fn handle_sandbox_remove(
     Ok(result.to_json(base_dir, "removed"))
 }
 
-/// Handle the `sandbox_list` tool: list files staged for the caller.
 fn handle_sandbox_list(
     system: &dyn System,
     base_dir: &Path,
@@ -3040,7 +2864,6 @@ fn handle_sandbox_list(
     Ok(json!({ "files": files }))
 }
 
-/// Handle the `search` tool: search across documents for text matches.
 fn handle_search(
     system: &dyn System,
     base_dir: &Path,
@@ -3064,8 +2887,6 @@ fn handle_search(
         .scope(scope);
 
     let results = search::search(system, base_dir, &target, &options, config)?;
-    // Compact columnar shape, hardcoded on the MCP surface; serialized minified
-    // by `tool_result_success_min`.
     Ok(search_compact_envelope(
         &results,
         spill_cap,
@@ -3257,9 +3078,7 @@ fn handle_replace(
     let path_str = required_str(params, "path")?;
     let target = base_dir.join(path_str);
 
-    // `dry_run` is deliberately not exposed on the MCP surface — preview
-    // migrated to `plan` for every tool (see
-    // `no_mode_or_dry_run_in_any_schema`); the CLI keeps `--dry-run`.
+    // `dry_run` is not exposed over MCP: `plan` is the preview for every tool.
     let options = replace::ReplaceOptions::new(String::from(pattern), String::from(replacement))
         .regex(optional_bool(params, "regex"))
         .ignore_case(optional_bool(params, "ignore_case"));
@@ -3310,23 +3129,19 @@ fn handle_sign(
     Ok(result.to_json())
 }
 
-/// Handle the `verify` tool: verify comment integrity.
 fn handle_verify(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
     params: &Map<String, Value>,
 ) -> Result<Value> {
-    // `path` is canonical (matches `search`/`replace`); `file` is a
-    // backward-compatible alias. Prefer `path`, fall back to `file`.
+    // `path` is canonical; `file` is accepted as an alias.
     let path_str = optional_str(params, "path")
         .or_else(|| optional_str(params, "file"))
         .with_context(|| String::from("missing required field: path"))?;
     let target = base_dir.join(path_str);
 
-    // A directory target sweeps the tree and returns the folder report;
-    // a single file keeps today's `VerifyReport::to_json` shape so
-    // existing callers are unaffected.
+    // A directory sweeps the tree and returns the folder report; a file returns the single report.
     if system.is_dir(&target).unwrap_or(false) {
         let report = operations::verify::verify_path(system, base_dir, &target, config)?;
         return Ok(report.to_json());
@@ -3344,7 +3159,6 @@ fn handle_whoami(system: &dyn System, base_dir: &Path) -> Result<Value> {
     serde_json::to_value(&report).context("serializing whoami report")
 }
 
-/// Handle the `write` tool: write document contents.
 fn handle_write(
     system: &dyn System,
     base_dir: &Path,
@@ -3414,9 +3228,8 @@ fn inject_elapsed_ms_and_measure(result: &mut Value, elapsed_ms: u64) -> usize {
             continue;
         };
         obj.insert(String::from("elapsed_ms"), Value::from(elapsed_ms));
-        // Preserve the incoming style: a minified payload (compact tools)
-        // carries no literal newline, a pretty one always does. Re-serialize
-        // with the matching serializer so minified stays minified.
+        // A minified payload carries no literal newline and a pretty one always does; re-serialize
+        // with the matching serializer.
         let reserialized = if text_str.contains('\n') {
             serde_json::to_string_pretty(&parsed)
         } else {
@@ -3520,8 +3333,6 @@ fn process_message(
             );
             let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-            // Decorate with elapsed_ms and record the emitted payload size so a
-            // later `report_spill` can infer the offending size.
             session.last_response_size = inject_elapsed_ms_and_measure(&mut result, elapsed_ms);
 
             Some(success_response(request_id, &result))
@@ -3549,9 +3360,7 @@ fn process_message(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - Config or registry loading fails
-/// - stdin/stdout I/O fails
+/// Returns an error if config or registry loading fails, or stdin/stdout I/O fails.
 pub fn run(
     system: &dyn System,
     base_dir: &Path,
@@ -3563,8 +3372,6 @@ pub fn run(
     let reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    // Adaptive spill cap lives for the life of the stdio session — it
-    // ratchets down as the client reports spills and re-learns on restart.
     let mut session = SessionState::default();
 
     for raw_line in reader.lines() {
@@ -3585,10 +3392,8 @@ pub fn run(
             }
         };
 
-        // Re-resolve on every request so changes to .remargin.yaml are
-        // picked up without restarting the MCP server. The same walk
-        // feeds the dispatch-time boundary check so the boundary
-        // mirrors the per-op `op_guard` view of the world.
+        // Re-resolve on every request so a changed `.remargin.yaml` takes effect without a restart;
+        // the same walk feeds the dispatch-time boundary check.
         let config = ResolvedConfig::resolve(system, base_dir, startup_flags, startup_assets_dir)?;
         let permissions = resolve_permissions(system, base_dir)?;
 

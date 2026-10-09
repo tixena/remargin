@@ -1,3 +1,5 @@
+//! `prompt resolve` and `prompt set` runs against temp trees of `.remargin.yaml` files.
+
 use core::str;
 use std::fs;
 

@@ -1,8 +1,7 @@
 //! Tests for `verify_document` and `commit_with_verify`.
 //!
-//! The severity matrix is exercised as one test per (status × mode) cell
-//! 's acceptance criteria. `RowStatus` / `SignatureStatus`
-//! rendering is also exercised.
+//! The severity matrix is exercised as one test per (status × mode) cell. `RowStatus` /
+//! `SignatureStatus` rendering is also exercised.
 
 extern crate alloc;
 
@@ -28,10 +27,8 @@ use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
 use crate::reactions::Reactions;
 use crate::writer::InsertPosition;
 
-/// Document carrying a directed comment with a partial ack and
-/// frontmatter that would be wrong under the (correct, post-fix)
-/// `is_pending` rule. Models a doc written by a buggy older version of
-/// remargin that thought any ack closed a directed comment.
+/// A directed comment with a partial ack, carrying frontmatter the current `is_pending` rule
+/// would not produce.
 const STALE_FRONTMATTER_DOC: &str = "\
 ---
 title: Test
@@ -104,9 +101,7 @@ participants:
     pubkeys: []
 ";
 
-/// A document whose stored checksum does NOT match its content, so it
-/// fails the checksum check (bad in every mode). Used by the
-/// `verify_path` folder-sweep tests.
+/// The stored checksum does not match the content, which is bad in every mode.
 const TAMPERED_DOC: &str = "\
 ---
 title: Test
@@ -126,10 +121,7 @@ hello
 ```
 ";
 
-/// A document with a complete remargin fence whose body has no YAML
-/// header, so `parse_remargin_block` errors ("missing YAML header") and
-/// `verify_and_refresh` returns `Err`. Used to exercise the
-/// `verify_path` continue-on-failure path.
+/// A complete remargin fence with no YAML header, so the block fails to parse.
 const MALFORMED_DOC: &str = "\
 # Hello
 
@@ -196,9 +188,8 @@ fn alice_active_registry() -> Registry {
     registry_with(ALICE_ACTIVE_REGISTRY_YAML)
 }
 
-// WHY: commit_with_verify now derives mode and registry from the doc's
-// realm. Tests that hand it a (mode, registry) pair must also stage a
-// matching realm at /d/ so the realm walk doesn't replace either.
+/// Stages a realm at `/d/` matching `mode` and the registry, since `commit_with_verify` takes
+/// both from the doc's realm.
 fn realm_at_d(mode: &Mode, registry_yaml: Option<&str>) -> MemorySystem {
     let yaml = format!("mode: {}\n", mode.as_str());
     let mut sys = MemorySystem::new()
@@ -212,8 +203,6 @@ fn realm_at_d(mode: &Mode, registry_yaml: Option<&str>) -> MemorySystem {
     sys
 }
 
-// ---------- status.as_str rendering ----------
-
 #[test]
 fn signature_status_as_str_matches_cli_vocabulary() {
     assert_eq!(SignatureStatus::Missing.as_str(), "missing");
@@ -221,9 +210,6 @@ fn signature_status_as_str_matches_cli_vocabulary() {
     assert_eq!(SignatureStatus::Valid.as_str(), "valid");
     assert_eq!(SignatureStatus::UnknownAuthor.as_str(), "unknown_author");
 }
-
-// ---------- severity: Open mode ----------
-// Every status but Invalid (and bad checksum) is neutral in Open.
 
 #[test]
 fn open_mode_missing_is_neutral() {
@@ -237,8 +223,6 @@ fn open_mode_missing_is_neutral() {
 
 #[test]
 fn open_mode_unknown_author_is_neutral() {
-    // Registry present, author not in registry => UnknownAuthor, but Open
-    // mode tolerates unknown authors.
     let doc = doc_with(vec![make_comment("a", "charlie", "hello")]);
     let cfg = make_config(Mode::Open, Some(alice_active_registry()));
     let rep = verify_document(&doc, &cfg);
@@ -248,8 +232,6 @@ fn open_mode_unknown_author_is_neutral() {
 
 #[test]
 fn open_mode_invalid_is_bad() {
-    // Alice is registered with a real-shaped key; an `ed25519:` payload
-    // that cannot be decoded as a valid sshsig resolves to Invalid.
     let mut cm = make_comment("a", "alice", "hello");
     cm.signature = Some(String::from("ed25519:garbage-not-a-valid-signature"));
     let doc = doc_with(vec![cm]);
@@ -269,8 +251,6 @@ fn open_mode_bad_checksum_is_bad() {
     assert!(!rep.results[0].checksum_ok);
     assert!(!rep.ok, "Bad checksum is always bad, even in Open");
 }
-
-// ---------- severity: Registered mode ----------
 
 #[test]
 fn registered_mode_missing_is_neutral() {
@@ -301,8 +281,6 @@ fn registered_mode_invalid_is_bad() {
     assert!(!rep.ok);
 }
 
-// ---------- severity: Strict mode ----------
-
 #[test]
 fn strict_mode_missing_for_registered_active_is_bad() {
     let doc = doc_with(vec![make_comment("a", "alice", "hello")]);
@@ -314,8 +292,6 @@ fn strict_mode_missing_for_registered_active_is_bad() {
 
 #[test]
 fn strict_mode_missing_for_unknown_author_is_bad_via_unknown_author() {
-    // Author isn't in registry at all → resolves to UnknownAuthor (always
-    // bad in Strict), not Missing. The bad-ness comes from UnknownAuthor.
     let doc = doc_with(vec![make_comment("a", "charlie", "hello")]);
     let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
     let rep = verify_document(&doc, &cfg);
@@ -343,8 +319,6 @@ fn strict_mode_invalid_is_bad() {
     assert!(!rep.ok);
 }
 
-// ---------- aggregation ----------
-
 #[test]
 fn empty_document_is_ok_in_every_mode() {
     let doc = doc_with(vec![]);
@@ -369,8 +343,6 @@ fn one_bad_row_marks_whole_report_bad() {
     assert!(rep.results[1].checksum_ok);
     assert!(!rep.ok, "one bad row poisons the aggregate");
 }
-
-// ---------- commit_with_verify gate ----------
 
 #[test]
 fn commit_with_verify_invokes_writer_when_ok() {
@@ -436,8 +408,6 @@ fn commit_with_verify_blocks_in_registered_for_unknown_author() {
     );
 }
 
-// ---------- VerifyFailure: typed-error rendering ----------
-
 #[test]
 fn verify_failure_headline_singular() {
     let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
@@ -483,8 +453,6 @@ fn verify_failure_summary_groups_by_status() {
 
 #[test]
 fn verify_failure_summary_truncates_after_five_ids() {
-    // Strict + alice-registered-no-key path: alice with Missing
-    // signature is bad in Strict.
     let doc = doc_with(vec![
         make_comment("id01", "alice", "a"),
         make_comment("id02", "alice", "b"),
@@ -540,10 +508,6 @@ fn verify_failure_human_text_has_three_blocks() {
 
 #[test]
 fn commit_with_verify_returns_typed_subset_gate_failure() {
-    // Fresh file (no on-disk state → P = ∅). The in-memory doc has a
-    // charlie comment, which under strict+alice-registry is
-    // unknown_author. Q = {(abc, SignatureUnknownAuthor)}. Q ⊄ P →
-    // SubsetGateFailure.
     let doc = doc_with(vec![make_comment("abc", "charlie", "hi")]);
     let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
     let system = realm_at_d(&Mode::Strict, Some(ALICE_ACTIVE_REGISTRY_YAML));
@@ -555,8 +519,6 @@ fn commit_with_verify_returns_typed_subset_gate_failure() {
     assert_eq!(sg.introduced[0].id, "abc");
 }
 
-// ---------- row rendering sanity ----------
-
 #[test]
 fn row_status_struct_preserves_comment_id() {
     let doc = doc_with(vec![make_comment("myid123", "alice", "hello")]);
@@ -565,8 +527,6 @@ fn row_status_struct_preserves_comment_id() {
     let row: &RowStatus = &rep.results[0];
     assert_eq!(row.id, "myid123");
 }
-
-// ---------- reality check: parse + verify round-trip ----------
 
 #[test]
 fn parse_then_verify_plain_open_mode() {
@@ -581,12 +541,6 @@ fn parse_then_verify_plain_open_mode() {
     assert_eq!(rep.results[0].signature, SignatureStatus::Missing);
     assert!(rep.ok);
 }
-
-// ---------- op-level gate: file stays byte-identical when gate trips ----------
-//
-// The spec: a failing mutation must leave the on-disk file byte-identical
-// to before the call. Each of these tests mutates a file under a config
-// where the gate will trip and asserts the file contents are unchanged.
 
 /// A minimal valid document with a real-checksum comment authored by
 /// `alice` (who is present in `alice_active_registry`). Used to assert
@@ -629,7 +583,6 @@ fn open_cfg_as(author: &str) -> ResolvedConfig {
     cfg
 }
 
-/// Helper: put the document on a mock filesystem.
 fn mock_with_doc(content: &str) -> MemorySystem {
     MemorySystem::new()
         .with_file(Path::new("/d/a.md"), content.as_bytes())
@@ -646,9 +599,7 @@ fn outcome_for<'rep>(report: &'rep FolderVerifyReport, path: &str) -> &'rep File
         .unwrap()
 }
 
-// WHY: file's realm is the source of truth for mode AND registry. Tests
-// that rely on strict-mode op gating need /d/ to declare strict
-// explicitly AND carry the registry the realm's gate consults.
+/// A strict realm at `/d/` carrying the registry its gate consults.
 fn mock_with_doc_in_strict_realm(content: &str) -> MemorySystem {
     MemorySystem::new()
         .with_file(Path::new("/d/.remargin.yaml"), b"mode: strict\n")
@@ -677,8 +628,6 @@ fn mock_with_doc_in_registered_realm(content: &str) -> MemorySystem {
 
 #[test]
 fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
-    // Open mode + fresh unregistered identity should be accepted by the
-    // gate (unknown_author is neutral in Open).
     let system = mock_with_doc(&alice_doc_content());
     let cfg = open_cfg_as("charlie");
 
@@ -710,17 +659,9 @@ fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
 
 #[test]
 fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
-    // Post-xc8x the primary gate is at resolve time (see
-    // `config::tests::resolve_bails_when_revoked_identity_in_strict_mode`
-    // for the resolver-level test). This test covers the belt-and-braces
-    // case: if a caller somehow hands `create_comment` a hand-built
-    // config whose identity is not in the registry, the post-write
-    // verify gate still catches the bad artifact and the file stays
-    // byte-identical.
     let before = alice_doc_content();
     let system = mock_with_doc_in_registered_realm(&before);
     let mut bad_cfg = registered_cfg_with_alice();
-    // Force-swap identity to a non-registered author.
     bad_cfg.identity = Some(String::from("charlie"));
 
     let pos = InsertPosition::Append;
@@ -750,8 +691,6 @@ fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
 
 #[test]
 fn ack_op_open_mode_identity_not_in_registry_succeeds() {
-    // `ack_comments` with an unregistered identity in Open mode: the gate
-    // tolerates unknown_author rows, and the ack write lands.
     let system = mock_with_doc(&alice_doc_content());
     let cfg = open_cfg_as("charlie");
 
@@ -766,10 +705,6 @@ fn ack_op_open_mode_identity_not_in_registry_succeeds() {
 
 #[test]
 fn ack_op_passes_when_existing_comment_has_bad_checksum() {
-    // Under the subset gate, a pre-existing bad checksum (in P) does
-    // not block a mutating op that doesn't introduce new anomalies.
-    // ack only adds to the comment's ack list — Q has the same
-    // checksum_invalid anomaly P does, so Q ⊆ P. Allowed.
     let corrupted = "\
 ---
 title: Test
@@ -800,14 +735,6 @@ alice's note
     );
 }
 
-// ----------: strict mode fails fast at creation time ----------
-//
-// Creation-time fail-fast is paired with the post-write verify gate. The
-// verify gate catches unsigned artifacts on the NEXT mutation (too late,
-// because nine orphans have already been written). These tests exercise
-// the pre-write fail-fast path: strict + registered active + no key →
-// the op bails before touching disk.
-
 /// Strict-mode config with `alice` registered active, no key path set.
 /// The identity field is blank by default; each test sets it to the
 /// relevant author.
@@ -820,15 +747,6 @@ fn strict_cfg_with_alice_no_key() -> ResolvedConfig {
 
 #[test]
 fn create_comment_strict_registered_active_no_key_file_byte_identical() {
-    // The headline scenario: strict + registered active + no key
-    // configured must never corrupt disk.
-    //
-    // Post-xc8x the primary gate is at resolve time (the paired test
-    // `config::tests::resolve_bails_when_strict_identity_has_no_key`
-    // asserts the resolver error surface). Here we exercise the
-    // belt-and-braces path: a hand-built invalid config reaches
-    // `create_comment`, the post-write verify gate catches the unsigned
-    // artifact, and the file stays byte-identical.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
@@ -865,11 +783,6 @@ fn create_comment_strict_registered_active_no_key_file_byte_identical() {
 
 #[test]
 fn create_comment_strict_unregistered_author_file_byte_identical() {
-    // Strict + unregistered author via a hand-built config (bypassing
-    // the resolver). The resolver-level rejection is the primary gate
-    // (see `config::tests::resolve_bails_when_revoked_identity_in_strict_mode`);
-    // this test confirms that even if an invalid config reaches the op,
-    // the verify gate still refuses to write a bad artifact.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let mut cfg = strict_cfg_with_alice_no_key();
@@ -900,8 +813,6 @@ fn create_comment_strict_unregistered_author_file_byte_identical() {
 
 #[test]
 fn create_comment_open_mode_no_key_still_writes_unsigned() {
-    // Open mode is the explicit non-strict regression guard. No key
-    // configured, registered or not — the op must land, unsigned.
     let system = mock_with_doc(&alice_doc_content());
     let cfg = open_cfg_as("alice");
 
@@ -933,11 +844,6 @@ fn create_comment_open_mode_no_key_still_writes_unsigned() {
 
 #[test]
 fn edit_comment_strict_registered_active_no_key_passes_under_subset_gate() {
-    // alice_doc_content has an unsigned alice comment. Under strict +
-    // alice-registered-active, P = {(alc, signature_missing)}. The
-    // edit recomputes the checksum to match the new content but
-    // produces no new signature (no key). Q still = {(alc,
-    // signature_missing)}. Q ⊆ P → allowed. The edit lands.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
@@ -961,10 +867,6 @@ fn edit_comment_strict_registered_active_no_key_passes_under_subset_gate() {
 
 #[test]
 fn batch_comment_strict_registered_active_no_key_file_byte_identical() {
-    // Pre-xc8x the op had its own fail-fast. After xc8x the resolver
-    // rejects this combination at construction; if a hand-built config
-    // sneaks past, the post-write verify gate catches the unsigned
-    // batch before any byte reaches disk.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let cfg = strict_cfg_with_alice_no_key();
@@ -986,10 +888,6 @@ fn batch_comment_strict_registered_active_no_key_file_byte_identical() {
 
 #[test]
 fn delete_op_passes_over_corrupted_doc_under_subset_gate() {
-    // P contains (bad, checksum_invalid). Deleting `alc` leaves only
-    // the still-corrupted `bad` row → Q = {(bad, checksum_invalid)}.
-    // Q ⊆ P → allowed. Pre-existing anomalies are not magnified into
-    // a block; the op proceeds.
     let corrupted = "\
 ---
 title: Test
@@ -1035,11 +933,6 @@ surviving corrupt row
     );
 }
 
-// ===========================================================================
-// verify_and_refresh: self-healing frontmatter on a stale file, no-op on a
-// fresh file.
-// ===========================================================================
-
 #[test]
 fn verify_and_refresh_rewrites_stale_frontmatter() {
     let system = mock_with_doc(STALE_FRONTMATTER_DOC);
@@ -1076,23 +969,8 @@ fn verify_and_refresh_is_a_no_op_when_frontmatter_is_already_current() {
     );
 }
 
-// ---------- realm-mode-bypass exploits ----------
-//
-// Each test below mutates a file whose realm declares mode: strict, using
-// a hand-built caller config that says mode: Open. The realm's mode is
-// the source of truth; the caller's mode is irrelevant. The op must
-// refuse to write under the realm's strict gate.
-//
-// Regression coverage: until commit_with_verify did the realm walk,
-// these ops silently ran under the caller's mode and the gate did not
-// fire on the realm's rules.
-
 #[test]
 fn realm_walk_passes_through_yamls_without_a_mode_field() {
-    // An intermediate .remargin.yaml that only declares system_prompt
-    // (no `mode:`) must NOT short-circuit the realm walk. The default
-    // mode is Open; if the walk stops at this file, a strict realm
-    // root one level higher is silently ignored and ops run as Open.
     let private_key = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -1212,9 +1090,6 @@ title: T
         .with_file(Path::new("/keys/alice"), private_key.as_bytes())
         .unwrap();
 
-    // Caller mirrors what handle_comment hands to create_comment: mode
-    // and registry inherited from the MCP startup walk (Open here),
-    // identity + key_path resolved from the --config target.
     let mut cfg = make_config(Mode::Open, None);
     cfg.identity = Some(String::from("alice"));
     cfg.key_path = Some(PathBuf::from("/keys/alice"));
@@ -1248,10 +1123,6 @@ title: T
 
 #[test]
 fn create_comment_signs_when_realm_yaml_is_several_dirs_above_doc() {
-    // Real-world shape: vault declares strict at the root; the doc lives
-    // several levels deep; the registry sits one level above the vault.
-    // The walks must traverse all those intermediate empty directories
-    // to find both the realm config and the registry.
     let private_key = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -1323,9 +1194,6 @@ title: T
 
 #[test]
 fn ack_allowed_under_realm_strict_when_no_new_anomalies() {
-    // Realm declares strict + alice registered active; the on-disk doc
-    // carries an unsigned alice comment (in P). ack only touches the
-    // ack list — Q has the same anomaly. Q ⊆ P → allowed.
     let before = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&before);
     let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
@@ -1358,9 +1226,6 @@ fn react_allowed_under_realm_strict_when_no_new_anomalies() {
 
 #[test]
 fn delete_allowed_under_realm_strict_when_no_new_anomalies() {
-    // Two unsigned alice comments → P has two signature_missing entries.
-    // Delete one; the surviving one's anomaly was already in P. Q ⊆ P
-    // → allowed.
     let content1 = "alice's first note";
     let content2 = "alice's second note";
     let cksum1 = crypto::compute_checksum(content1, &[]);
@@ -1415,10 +1280,6 @@ checksum: {cksum2}
 
 #[test]
 fn commit_with_verify_passes_when_in_memory_doc_matches_disk() {
-    // Identity transformation: parse the on-disk file, re-pass the
-    // parsed doc back to commit_with_verify. P == Q (same anomaly
-    // set), so the subset gate allows it regardless of what the
-    // realm's mode says.
     let doc_content = alice_doc_content();
     let system = mock_with_doc_in_strict_realm(&doc_content);
     let mut cfg = make_config(Mode::Open, Some(alice_active_registry()));
@@ -1433,14 +1294,6 @@ fn commit_with_verify_passes_when_in_memory_doc_matches_disk() {
 
 #[test]
 fn escalate_mode_for_doc_keeps_caller_registry_today() {
-    // The caller's registry knows alice and treats her as active.
-    // The realm registry is a different one — say, empty.
-    // After escalation, the resulting config's mode IS the realm's, but
-    // the registry is still the caller's. So `requires_signature(alice)`
-    // returns true based on the caller's registry, not the realm's.
-    //
-    // Per the rule (file's realm is the source of truth), the registry
-    // should also come from the realm's anchor.
     let system = MemorySystem::new()
         .with_file(Path::new("/realm/.remargin.yaml"), b"mode: strict\n")
         .unwrap()
@@ -1466,12 +1319,6 @@ fn escalate_mode_for_doc_keeps_caller_registry_today() {
          caller's registry, which has her as active"
     );
 }
-
-// ===========================================================================
-// Subset gate (Q ⊆ P) scenarios. The gate refuses iff the in-memory
-// post-mutation anomaly set introduces an entry not present in the
-// on-disk pre-mutation set.
-// ===========================================================================
 
 #[test]
 fn anomalies_open_mode_returns_empty_for_clean_doc() {
@@ -1507,7 +1354,6 @@ fn anomalies_reports_missing_signature_under_strict_for_registered_active() {
 
 #[test]
 fn subset_gate_allows_op_when_q_equals_p() {
-    // P == Q. Identity transformation: rewrite the same bytes.
     let corrupted = "\
 ---
 title: Test
@@ -1535,9 +1381,6 @@ alice's note
 
 #[test]
 fn subset_gate_refuses_op_that_introduces_new_anomaly() {
-    // Pre-clean doc → P = ∅. Synthesise an in-memory doc with a bad
-    // checksum on a NEW comment. Q = {(b, checksum_invalid)}. Q ⊄ P
-    // → refuse with SubsetGateFailure.
     let before = "\
 ---
 title: Test
@@ -1559,12 +1402,9 @@ alice's note
     let system = mock_with_doc(before);
     let cfg = open_cfg_as("alice");
 
-    // Hand-craft an in-memory doc that introduces a new bad-checksum
-    // comment.
     let mut new = make_comment("b", "alice", "new comment");
     new.checksum = String::from("sha256:deadbeef");
     let doc = doc_with(vec![
-        // Re-parse the existing alice comment so its checksum stays good.
         parser::parse_file(&system, Path::new("/d/a.md"))
             .unwrap()
             .find_comment("alc")
@@ -1583,8 +1423,6 @@ alice's note
 
 #[test]
 fn subset_gate_allows_repair_op_that_reduces_anomaly_set() {
-    // P contains a bad checksum. The op produces a clean doc (Q = ∅).
-    // Q ⊆ P → allowed.
     let corrupted = "\
 ---
 title: Test
@@ -1606,26 +1444,20 @@ alice's note
     let system = mock_with_doc(corrupted);
     let cfg = open_cfg_as("alice");
 
-    // Hand a clean in-memory doc to the gate (the checksum now matches
-    // the content).
     let doc = doc_with(vec![make_comment("alc", "alice", "alice's note")]);
     commit_with_verify(&system, &doc, &cfg, Path::new("/d/a.md"), |_| Ok(())).unwrap();
 }
 
 #[test]
 fn subset_gate_allows_op_when_pre_file_missing_and_post_is_clean() {
-    // Fresh file (P = ∅). Clean Q. Q ⊆ P (both empty). Allowed.
     let system = MemorySystem::new();
     let cfg = open_cfg_as("alice");
     let doc = doc_with(vec![make_comment("alc", "alice", "alice's note")]);
     commit_with_verify(&system, &doc, &cfg, Path::new("/d/new.md"), |_| Ok(())).unwrap();
 }
 
-// Recipient status in verify.
-
 #[test]
 fn anomaly_kind_pair_distinguishes_checksum_from_signature() {
-    // Same id, different kind = different anomaly identity.
     let mut cm_bad_checksum = make_comment("a", "alice", "hello");
     cm_bad_checksum.checksum = String::from("sha256:deadbeef");
     let doc_bad_checksum = doc_with(vec![cm_bad_checksum]);
@@ -1651,7 +1483,6 @@ fn recipient_verify_registry() -> Registry {
     registry_with(RECIPIENT_VERIFY_REGISTRY)
 }
 
-/// Scenario 18: unknown recipient in strict → row bad, report.ok = false.
 #[test]
 fn verify_unknown_recipient_strict_row_bad() {
     let reg = recipient_verify_registry();
@@ -1670,7 +1501,6 @@ fn verify_unknown_recipient_strict_row_bad() {
     );
 }
 
-/// Scenario 19: unknown recipient in registered → row bad.
 #[test]
 fn verify_unknown_recipient_registered_row_bad() {
     let reg = recipient_verify_registry();
@@ -1688,7 +1518,6 @@ fn verify_unknown_recipient_registered_row_bad() {
     );
 }
 
-/// Scenario 20: unknown recipient in open → row neutral (ok=true).
 #[test]
 fn verify_unknown_recipient_open_row_neutral() {
     let reg = recipient_verify_registry();
@@ -1696,8 +1525,6 @@ fn verify_unknown_recipient_open_row_neutral() {
     let doc = doc_with(vec![cm]);
     let cfg = make_config(Mode::Open, Some(reg));
     let report = verify_document(&doc, &cfg);
-    // Open mode: unknown recipient is neutral (not bad unless checksum/sig fails).
-    // alice has no keys so signature is Missing, and Missing is neutral in Open.
     assert!(report.ok, "open mode: unknown recipient is neutral");
     assert_eq!(
         report.results[0].recipients,
@@ -1706,7 +1533,6 @@ fn verify_unknown_recipient_open_row_neutral() {
     );
 }
 
-/// Scenario 21: revoked recipient in strict → row bad.
 #[test]
 fn verify_revoked_recipient_strict_row_bad() {
     let reg = recipient_verify_registry();
@@ -1724,20 +1550,17 @@ fn verify_revoked_recipient_strict_row_bad() {
     );
 }
 
-/// Scenario 22: empty to: in strict → row ok.
 #[test]
 fn verify_empty_to_strict_row_ok() {
     let reg = recipient_verify_registry();
-    let cm = make_comment("a", "alice", "hi"); // to: Vec::new() by default
+    let cm = make_comment("a", "alice", "hi");
     let doc = doc_with(vec![cm]);
     let cfg = make_config(Mode::Strict, Some(reg));
     let report = verify_document(&doc, &cfg);
-    // Broadcast — no recipients to check, recipients = Ok.
     assert_eq!(report.results[0].recipients, RecipientStatus::Ok);
 }
 
-/// Scenario 23: `commit_with_verify` allows write that fixes a bad recipient
-/// (Q ⊂ P: removes the bad recipient anomaly from the pre-state).
+/// A write that removes a bad recipient shrinks the anomaly set, so it is allowed.
 #[test]
 fn commit_with_verify_repair_removes_bad_recipient_succeeds() {
     let reg_yaml = RECIPIENT_VERIFY_REGISTRY;
@@ -1759,7 +1582,6 @@ fn commit_with_verify_repair_removes_bad_recipient_succeeds() {
 
     let cfg = make_config(Mode::Registered, Some(registry_with(reg_yaml)));
 
-    // Post-state: same comment but with a valid recipient.
     let post_doc = doc_with(vec![make_comment_with_to(
         "a",
         "alice",
@@ -1767,11 +1589,9 @@ fn commit_with_verify_repair_removes_bad_recipient_succeeds() {
         vec![String::from("eduardo-burgos")],
     )]);
 
-    // Repair: P has RecipientUnknown for "a"; Q does not → Q ⊆ P.
     commit_with_verify(&system, &post_doc, &cfg, Path::new("/d/a.md"), |_| Ok(())).unwrap();
 }
 
-/// Scenario 24: `commit_with_verify` blocks write that introduces a bad recipient.
 #[test]
 fn commit_with_verify_introducing_bad_recipient_blocked() {
     let reg_yaml = RECIPIENT_VERIFY_REGISTRY;
@@ -1785,7 +1605,6 @@ fn commit_with_verify_introducing_bad_recipient_blocked() {
 
     let cfg = make_config(Mode::Registered, Some(registry_with(reg_yaml)));
 
-    // Post-state: comment with unknown recipient — introduces RecipientUnknown.
     let post_doc = doc_with(vec![make_comment_with_to(
         "a",
         "alice",
@@ -1802,15 +1621,12 @@ fn commit_with_verify_introducing_bad_recipient_blocked() {
     );
 }
 
-/// `RecipientStatus::as_str` renders correctly.
 #[test]
 fn recipient_status_as_str() {
     assert_eq!(RecipientStatus::Ok.as_str(), "ok");
     assert_eq!(RecipientStatus::Unknown(vec![]).as_str(), "unknown");
 }
 
-/// `AnomalyKind::RecipientUnknown` is present in the anomaly set for a doc
-/// with an unknown recipient in registered mode.
 #[test]
 fn anomaly_kind_recipient_unknown_in_anomaly_set() {
     let reg = recipient_verify_registry();
@@ -1826,10 +1642,6 @@ fn anomaly_kind_recipient_unknown_in_anomaly_set() {
         "anomaly set should include RecipientUnknown: {anomalies:?}"
     );
 }
-
-// ===========================================================================
-// verify_path: folder / recursive sweep around verify_and_refresh.
-// ===========================================================================
 
 #[test]
 fn verify_path_single_file_all_valid_one_outcome_ok() {
@@ -1847,11 +1659,6 @@ fn verify_path_single_file_all_valid_one_outcome_ok() {
 
 #[test]
 fn verify_path_single_file_serializes_to_today_shape() {
-    // A single-file target's outcome report must serialize through
-    // VerifyReport::to_json (no `files` wrapper) so existing callers are
-    // unaffected. Each surface runs on a fresh mock so the self-healing
-    // frontmatter rewrite does not perturb one read's line numbers
-    // relative to the other.
     let cfg = open_cfg_as("alice");
 
     let direct_sys = mock_with_doc(SIMPLE_DOC);
@@ -2062,7 +1869,6 @@ fn verify_path_folder_json_parse_error_file_carries_error_only() {
 
 #[test]
 fn verify_path_folder_json_all_bad_file_lists_every_row() {
-    // A file whose every comment is not-clean enumerates them all in `bad`.
     const TWO_TAMPERED: &str = "\
 ---
 title: Test
@@ -2115,8 +1921,6 @@ two
 
 #[test]
 fn verify_path_folder_json_summary_is_smaller_than_per_file_form() {
-    // Size-regression guard: a large mostly-passing directory serializes
-    // far smaller as a failures-only summary than the per-file form would.
     let mut system = MemorySystem::new().with_dir(Path::new("/d")).unwrap();
     for i in 0_u32..200 {
         let path = format!("/d/f{i}.md");
@@ -2134,7 +1938,6 @@ fn verify_path_folder_json_summary_is_smaller_than_per_file_form() {
 
     assert_eq!(report.to_json()["files_verified"], 201_u64);
     assert_eq!(report.to_json()["files_passed"], 200_u64);
-    // 201 files but the summary stays tiny — only the one failure is enumerated.
     assert!(
         summary_len < 2_000,
         "failures-only summary must stay small, was {summary_len} bytes"

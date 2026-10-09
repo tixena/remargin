@@ -78,8 +78,6 @@ fn doc_with_sandbox(entries: &[&str]) -> String {
     format!("---\ntitle: t\n{sandbox_block}---\n\n# Body.\n")
 }
 
-/// Scenario 1: file with no comments and no sandbox returns no
-/// changes; the file is omitted from the result entirely.
 #[test]
 fn empty_file_is_omitted() {
     let body = "---\ntitle: t\n---\n\n# Body.\n";
@@ -89,8 +87,6 @@ fn empty_file_is_omitted() {
     assert!(result.newest_ts_overall.is_none());
 }
 
-/// Scenario 2: caller has no prior activity in the file → the
-/// initial-touch fallback returns every change.
 #[test]
 fn initial_touch_fallback_returns_everything() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -113,8 +109,6 @@ fn initial_touch_fallback_returns_everything() {
     ));
 }
 
-/// Scenario 3: an explicit `since` cutoff surfaces changes after
-/// the cutoff.
 #[test]
 fn explicit_since_cutoff_surfaces_after_only() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -131,7 +125,6 @@ fn explicit_since_cutoff_surfaces_after_only() {
     assert_eq!(result.files[0].changes.len(), 1);
 }
 
-/// Scenario 4: a comment that pre-dates `since` is dropped.
 #[test]
 fn comment_before_since_is_dropped() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -147,8 +140,6 @@ fn comment_before_since_is_dropped() {
     assert_eq!(result.files, [] as [FileChanges; 0]);
 }
 
-/// Scenario 5: an edited comment surfaces with the carried ts =
-/// `edited_at` when the edit is past the cutoff.
 #[test]
 fn edited_comment_surfaces_with_edited_ts() {
     let body = doc_with_comment(
@@ -198,7 +189,6 @@ fn edited_comment_surfaces_with_edited_ts() {
     }
 }
 
-/// Scenario 6: an edit that pre-dates `since` is dropped.
 #[test]
 fn edit_before_since_is_dropped() {
     let body = doc_with_comment(
@@ -220,8 +210,7 @@ fn edit_before_since_is_dropped() {
     assert_eq!(result.files, [] as [FileChanges; 0]);
 }
 
-/// Scenario 7: an ack on a comment surfaces independently of the
-/// comment itself.
+/// An ack surfaces on its own, whether or not its comment does.
 #[test]
 fn ack_surfaces_after_cutoff() {
     let body = doc_with_comment(
@@ -258,8 +247,6 @@ fn ack_surfaces_after_cutoff() {
     assert_eq!(ack_count, 1);
 }
 
-/// Scenario 8: multiple acks on the same comment produce
-/// per-author `Change::Ack` entries.
 #[test]
 fn multiple_acks_each_produce_a_change() {
     let body = doc_with_comment(
@@ -299,7 +286,6 @@ fn multiple_acks_each_produce_a_change() {
     assert_eq!(ack_count, 2);
 }
 
-/// Scenario 9: a sandbox-roster entry surfaces as `Change::Sandbox`.
 #[test]
 fn sandbox_entry_surfaces() {
     let body = doc_with_sandbox(&["bob@2026-04-06T12:00:00-04:00"]);
@@ -329,10 +315,7 @@ fn sandbox_entry_surfaces() {
     assert_eq!(sandbox_count, 1);
 }
 
-/// Scenario 11: caller's last action drives the cutoff. Alice
-/// commented at T1, acked at T3, and sandboxed at T2; the cutoff
-/// is T3 (the latest), so a bob comment at T2 is dropped but a
-/// new comment at T4 is surfaced.
+/// The cutoff is the latest of the caller's comment, ack and sandbox timestamps.
 #[test]
 fn caller_last_action_derives_cutoff() {
     let prefix = "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T13:00:00-04:00\n---\n\n# Body\n";
@@ -376,8 +359,6 @@ fn caller_last_action_derives_cutoff() {
     );
 }
 
-/// Scenario 13: directory walk returns one `FileChanges` per file
-/// with activity.
 #[test]
 fn directory_walk_returns_one_entry_per_file_with_activity() {
     let a_body = doc_with_comment("a1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -394,8 +375,6 @@ fn directory_walk_returns_one_entry_per_file_with_activity() {
     assert_eq!(result.files[1].path, PathBuf::from("/r/c.md"));
 }
 
-/// Scenario 16: a path outside any realm errors with a clear
-/// message.
 #[test]
 fn path_outside_realm_errors() {
     let system = MemorySystem::new()
@@ -415,8 +394,6 @@ fn path_outside_realm_errors() {
     );
 }
 
-/// Scenario 17: tie-breaker sorts by kind then id when timestamps
-/// match.
 #[test]
 fn tie_breaker_sorts_by_kind_then_id() {
     let a = "```remargin\n---\nid: zzz\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:t\n---\nA.\n```";
@@ -454,8 +431,6 @@ fn tie_breaker_sorts_by_kind_then_id() {
     assert_eq!(ids, vec!["aaa", "zzz"]);
 }
 
-/// Scenario 19: a comment without `reply_to` serialises without
-/// the field.
 #[test]
 fn comment_without_reply_to_omits_field_in_json() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -465,9 +440,6 @@ fn comment_without_reply_to_omits_field_in_json() {
     assert!(!json.contains("reply_to"), "{json}");
 }
 
-/// Every change-kind exposes the actor under the field name
-/// `author` (uniform JSON shape) so consumers do not case-analyse on
-/// `kind`.
 #[test]
 fn every_change_kind_serialises_actor_as_author() {
     let prefix = "---\ntitle: t\nsandbox:\n  - bob@2026-04-06T13:00:00-04:00\n---\n\n# Body\n";
@@ -495,9 +467,7 @@ fn every_change_kind_serialises_actor_as_author() {
     }
 }
 
-/// When the registry resolves the actor, sandbox and ack records
-/// carry `author_type`. When the registry is silent, the field is
-/// omitted (skipped on serialise) rather than guessed.
+/// With no registry entry for the actor, `author_type` is omitted, not guessed.
 #[test]
 fn sandbox_and_ack_carry_author_type_when_registry_resolves() {
     let registry =
@@ -578,9 +548,6 @@ fn sandbox_and_ack_carry_author_type_when_registry_resolves() {
     );
 }
 
-/// Implicit cutoff for a caller whose most recent action was an
-/// edit pins to `edited_at`, not the original `ts`. Earlier
-/// activity from the same caller is excluded from the cutoff fold.
 #[test]
 fn cutoff_uses_edited_at_when_caller_last_action_was_an_edit() {
     let alice_edit = "```remargin\n---\nid: a1\nauthor: alice\ntype: human\nts: 2026-04-06T08:00:00-04:00\nedited_at: 2026-04-06T16:00:00-04:00\nchecksum: sha256:t\n---\nMine.\n```";
@@ -631,9 +598,7 @@ fn cutoff_uses_edited_at_when_caller_last_action_was_an_edit() {
     );
 }
 
-/// Explicit `--since` propagates `cutoff_explicit=true` onto the
-/// result and the same explicit cutoff lands on every per-file
-/// record.
+/// The explicit cutoff also lands on every per-file record.
 #[test]
 fn explicit_since_marks_result_cutoff_explicit() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -650,9 +615,6 @@ fn explicit_since_marks_result_cutoff_explicit() {
     assert_eq!(result.files[0].cutoff_applied, Some(cutoff));
 }
 
-/// Implicit cutoff with no prior caller activity surfaces
-/// `cutoff_applied=None` (the initial-touch fallback) and
-/// `cutoff_explicit=false`.
 #[test]
 fn implicit_initial_touch_records_no_cutoff() {
     let body = doc_with_comment("c1", "bob", "2026-04-06T12:00:00-04:00", None, &[]);
@@ -662,8 +624,6 @@ fn implicit_initial_touch_records_no_cutoff() {
     assert_eq!(result.files[0].cutoff_applied, None);
 }
 
-/// Scenario 21: per-file `newest_ts` matches the largest ts in
-/// the changes list.
 #[test]
 fn newest_ts_matches_largest_change_ts() {
     let a = "```remargin\n---\nid: a1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:t\n---\nA.\n```";
@@ -682,9 +642,7 @@ fn newest_ts_matches_largest_change_ts() {
     );
 }
 
-/// Compact projection: each kind fills its columns and nulls the rest.
-/// `kind` keeps the serde tag values; comment-only columns are null for
-/// acks / sandboxes; sandboxes also null `comment_id`.
+/// Each kind fills its own columns and nulls the rest; a sandbox row also nulls `comment_id`.
 #[test]
 fn compact_row_columns_per_kind() {
     use crate::activity::{CHANGE_COLS, to_compact_row};
@@ -758,9 +716,7 @@ fn compact_row_columns_per_kind() {
     assert!(sandbox_row.8.is_none(), "sandbox to null");
 }
 
-/// A broadcast comment (empty `to`) compacts to `Some([])`, preserving the
-/// broadcast signal against acks / sandboxes whose `to` is not-applicable
-/// (`null`).
+/// A broadcast comment's empty `to` stays `[]`, distinct from the `null` of acks and sandboxes.
 #[test]
 fn compact_row_broadcast_to_is_some_empty_vs_null() {
     use crate::activity::to_compact_row;
@@ -792,9 +748,7 @@ fn compact_row_broadcast_to_is_some_empty_vs_null() {
     );
 }
 
-/// End-to-end envelope: comment + ack + sandbox in one file surface as
-/// three positional rows under one `change_cols` header; per-file summary
-/// keys stay named, `cutoff_applied` is named under an explicit `since`.
+/// Comment, ack and sandbox become three positional rows under one `change_cols` header.
 #[test]
 fn compact_activity_envelope_shape() {
     use crate::activity::{CHANGE_COLS, to_compact_activity};
@@ -827,7 +781,6 @@ fn compact_activity_envelope_shape() {
 
     let rows = file["changes"].as_array().unwrap();
     assert_eq!(rows.len(), 3);
-    // Sorted by ts ascending: comment (12:00), ack (14:00), sandbox (17:00).
     let comment = rows[0].as_array().unwrap();
     assert_eq!(comment.len(), 9);
     assert_eq!(comment[1], "comment");
@@ -846,8 +799,7 @@ fn compact_activity_envelope_shape() {
     assert!(sandbox[8].is_null(), "sandbox to null");
 }
 
-/// An unset `newest_ts` is absent from the wire, never `null`, on both
-/// serialization surfaces (hand-built compact map and derived `Serialize`).
+/// Holds for both the hand-built compact map and the derived `Serialize`.
 #[test]
 fn unset_newest_ts_is_omitted_not_nulled() {
     use crate::activity::{CompactFileChanges, FileChanges, to_compact_file};
@@ -873,10 +825,7 @@ fn unset_newest_ts_is_omitted_not_nulled() {
     assert!(!json.contains("newest_ts"), "{json}");
 }
 
-/// Codegen contract: the compact change-row alias renders its `Option`
-/// tuple columns as nullable in TS and Zod (relies on the pinned tixschema
-/// nullable-in-tuple support), and the per-file record carries the row by
-/// reference.
+/// The row alias renders its `Option` tuple columns as nullable in TypeScript and Zod.
 #[test]
 fn compact_change_row_schema_renders_nullable_columns() {
     use crate::activity::{compact_change_row_schema, compact_file_changes_schema};

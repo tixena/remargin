@@ -11,10 +11,9 @@
  * --after-line`). `lines` is the file content split on `\n`.
  */
 
+/** The 1-indexed fence lines of one remargin block. */
 interface BlockRange {
-  /** 1-indexed line number of the opening ```remargin fence. */
   startLine: number;
-  /** 1-indexed line number of the matching closing fence. */
   endLine: number;
 }
 
@@ -50,8 +49,7 @@ function findRemarginBlocks(lines: string[]): BlockRange[] {
   }
 
   if (inBlock) {
-    // Unclosed block: treat it as running to end of file so a cursor anywhere
-    // inside still snaps past it (which lands at EOF).
+    // An unclosed block runs to end of file, so a cursor inside it snaps to EOF.
     blocks.push({ startLine, endLine: lines.length });
   }
 
@@ -79,17 +77,14 @@ export function snapAfterCommentBlock(lines: string[], targetLine: number): numb
   if (blocks.length === 0) return targetLine;
 
   let snapped = targetLine;
-  // Multiple passes handle stacked/adjacent blocks: each snap might land us
-  // inside the next block, which needs another snap, and so on.
-  // Bounded by the number of blocks (each block can only be crossed once).
+  // A snap can land inside the next stacked block; bounded by the number of blocks.
   for (let i = 0; i < blocks.length; i++) {
     const enclosing = blocks.find((b) => snapped >= b.startLine && snapped <= b.endLine);
     if (!enclosing) break;
     snapped = enclosing.endLine + 1;
   }
 
-  // Cap at file length: `--after-line N` where N > lines.length still appends
-  // at EOF, but returning a stable number keeps callers predictable.
+  // Capped at the file length so callers get a stable number; the CLI appends at EOF either way.
   if (snapped > lines.length) return lines.length;
   return snapped;
 }

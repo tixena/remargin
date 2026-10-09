@@ -192,7 +192,6 @@ fn force_overwrites_destination() {
 
 #[test]
 fn idempotent_when_source_already_at_destination() {
-    // src is missing, dst exists — pretend a previous mv already succeeded.
     let system = MemorySystem::new()
         .with_dir(base())
         .unwrap()
@@ -272,16 +271,12 @@ fn refuses_existing_destination_without_force() {
     let err = mv(&system, base(), &open_config(), &args).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("destination exists"), "got: {msg}");
-    // Both files survive untouched.
     assert_eq!(system.read_to_string(&base().join("a.md")).unwrap(), "src");
     assert_eq!(system.read_to_string(&base().join("b.md")).unwrap(), "dst");
 }
 
 #[test]
 fn refuses_forbidden_source_basename() {
-    // `.remargin.yaml` is on the forbidden-target list — moving it
-    // would let an agent route around the config-file write
-    // protection.
     let system = MemorySystem::new()
         .with_dir(base())
         .unwrap()
@@ -308,8 +303,6 @@ fn refuses_path_escape_on_source() {
     assert!(msg.contains("path escapes"), "got: {msg}");
 }
 
-/// directory sources are now supported. Renaming an empty
-/// directory succeeds and reports `is_directory = true`.
 #[test]
 fn renames_empty_directory() {
     let system = MemorySystem::new()
@@ -355,18 +348,11 @@ fn same_path_is_noop() {
     assert!(outcome.topology.noop_same_path);
     assert!(!outcome.action.overwritten);
     assert_eq!(outcome.bytes_moved, 9);
-    // File still there with same bytes.
     assert_eq!(
         system.read_to_string(&base().join("a.md")).unwrap(),
         "unchanged"
     );
 }
-
-// ---------------------------------------------------------------------
-// Directory rename coverage. The op auto-detects a directory
-// source and renames the dir + nested files atomically. Same op_guard /
-// sandbox / forbidden-target gates as the file path.
-// ---------------------------------------------------------------------
 
 #[test]
 fn renames_directory_with_nested_md_files() {
@@ -467,7 +453,6 @@ fn directory_refuses_existing_destination_without_force() {
     let err = mv(&system, base(), &open_config(), &args).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("destination exists"), "got: {msg}");
-    // Source still in place.
     assert!(system.is_dir(&base().join("src")).unwrap());
     assert!(system.is_dir(&base().join("dst")).unwrap());
 }
@@ -496,7 +481,6 @@ fn directory_force_overwrites_existing_destination() {
         system.read_to_string(&base().join("dst/a.md")).unwrap(),
         "new"
     );
-    // Old destination wiped before the rename.
     assert!(!system.exists(&base().join("dst/old.md")).unwrap());
 }
 
@@ -534,7 +518,6 @@ fn directory_refused_when_deny_ops_covers_source() {
         chain.contains("denied by `deny_ops`"),
         "expected deny_ops refusal, got: {chain}"
     );
-    // No movement happened.
     assert!(system.is_dir(&base().join("notes")).unwrap());
     assert!(!system.exists(&base().join("archive")).unwrap());
 }

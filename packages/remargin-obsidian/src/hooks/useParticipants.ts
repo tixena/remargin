@@ -1,3 +1,5 @@
+/** Hook exposing the vault's registered participants. */
+
 import { useEffect, useState } from "react";
 import type { Participant } from "@/backend";
 import {
@@ -8,21 +10,17 @@ import {
 import { useBackend } from "./useBackend";
 import { usePlugin } from "./usePlugin";
 
+/** What {@link useParticipants} returns. */
 export interface UseParticipantsResult {
   participants: Participant[];
-  /**
-   * Map a participant id to the registered display name, or back to the
-   * id when the registry is silent on it. Safe to call before the fetch
-   * settles — it returns the id as a fallback in that case.
-   */
+  /** Falls back to the id when the registry has no entry or the fetch has not settled. */
   resolveDisplayName: (id: string) => string;
   loading: boolean;
   error: string | null;
 }
 
-// Module-level cache so all hook consumers in a plugin session share a
-// single fetch promise. Invalidated when the fingerprint of relevant
-// settings changes (see `participantsCacheKey`).
+// One fetch promise shared by every hook consumer in a plugin session, invalidated when the
+// settings fingerprint changes.
 let cachedKey: string | null = null;
 let cachedPromise: Promise<Participant[]> | null = null;
 
@@ -39,8 +37,7 @@ let cachedPromise: Promise<Participant[]> | null = null;
  * - `resolveDisplayName(id)` — returns the display name, or the id when
  *   no match is found or the fetch has not yet resolved.
  * - `loading` — `true` until the first fetch settles.
- * - `error` — `null` today; reserved for when task 33 wires up the
- *   user-facing error banner.
+ * - `error` — currently always `null`.
  */
 export function useParticipants(): UseParticipantsResult {
   const backend = useBackend();
@@ -62,8 +59,7 @@ export function useParticipants(): UseParticipantsResult {
     const currentKey = key;
     void currentPromise?.then((result) => {
       if (cancelled) return;
-      // Guard against a settings flip that happened while we were
-      // awaiting — only accept the result if the cache is still ours.
+      // Accept the result only if the cache is still ours: settings may have flipped mid-await.
       if (cachedKey !== currentKey) return;
       setParticipants(result);
       setLoading(false);

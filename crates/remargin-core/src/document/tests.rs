@@ -17,7 +17,6 @@ use crate::operations::purge::{purge, purge_dir};
 use crate::parser::AuthorType;
 use crate::writer::FORBIDDEN_TARGETS;
 
-/// A markdown document with comments for metadata testing.
 const DOC_WITH_COMMENTS: &str = "\
 ---
 title: Test
@@ -51,14 +50,10 @@ Second comment (acked).
 ```
 ";
 
-/// A `/project` realm whose `.remargin.yaml` declares `mode: registered`.
 const REGISTERED_REALM_YAML: &str = "identity: eduardo-burgos\ntype: human\nmode: registered\n";
 
-/// A `/project` realm whose `.remargin.yaml` declares `mode: strict`.
 const STRICT_REALM_YAML: &str = "identity: eduardo-burgos\ntype: human\nmode: strict\n";
 
-/// Registry for the author-gate seam tests: `eduardo-burgos` and `alice`
-/// active; `nobody` absent.
 const AUTHOR_REALM_REGISTRY_YAML: &str = "\
 participants:
   eduardo-burgos:
@@ -193,7 +188,6 @@ fn allowlist_is_visible_base() {
 
 #[test]
 fn allowlist_source_code_extensions_visible_and_text() {
-    // One representative extension per added language family.
     let cases = &[
         "main.rs",
         "main.ts",
@@ -252,7 +246,6 @@ fn allowlist_unsupported_extension_not_visible() {
 
 #[test]
 fn allowlist_dotfile_still_hidden_even_for_env() {
-    // Named env/conf files are visible, but dotfiles are still hidden.
     assert!(!allowlist::is_visible(Path::new(".env"), false));
     assert!(allowlist::is_visible(Path::new("app.env"), false));
     assert!(allowlist::is_visible(Path::new("server.conf"), false));
@@ -283,7 +276,6 @@ fn not_visible_message_names_disallowed_extension() {
 
 #[test]
 fn not_visible_message_bare_for_dotfile() {
-    // A dotfile is hidden regardless of extension; don't blame the extension.
     let msg = allowlist::not_visible_message(Path::new(".secret.md"));
     assert_eq!(msg, "file not visible: .secret.md");
 }
@@ -382,9 +374,6 @@ fn get_markdown() {
 
 #[test]
 fn get_with_links_excludes_comment_blocks() {
-    // A link inside a remargin comment block must NOT be surfaced; a link
-    // in the body must be. The body link's line number stays aligned with
-    // the file even though the comment block sits above it.
     let doc = "\
 # Doc
 
@@ -422,7 +411,6 @@ Body links to [[Real]].
     )
     .unwrap();
 
-    // Content is unchanged: same bytes the file holds.
     assert_eq!(result.content, doc);
     assert_eq!(result.links.len(), 1);
     assert_eq!(result.links[0].target, "Real");
@@ -442,7 +430,6 @@ fn get_with_links_slice_relative_references() {
         .with_file(Path::new("/project/Beta.md"), b"# Beta")
         .unwrap();
 
-    // Whole-file: references are file-relative.
     let whole = document::get_with_links(
         &system,
         Path::new("/project"),
@@ -456,7 +443,6 @@ fn get_with_links_slice_relative_references() {
     let whole_alpha = whole.links.iter().find(|l| l.target == "Alpha").unwrap();
     assert_eq!(whole_alpha.lines[0], 3);
 
-    // Slice lines 3..=5: Alpha now on slice line 1, Beta on slice line 3.
     let sliced = document::get_with_links(
         &system,
         Path::new("/project"),
@@ -601,8 +587,8 @@ fn metadata_correct_counts() {
     )
     .unwrap();
     assert_eq!(meta.comment_count, Some(2));
-    assert_eq!(meta.pending_count, Some(1)); // abc is unacked
-    assert_eq!(meta.pending_for, vec!["alice"]); // abc has to: [alice]
+    assert_eq!(meta.pending_count, Some(1));
+    assert_eq!(meta.pending_for, vec!["alice"]);
     assert!(meta.last_activity.is_some());
     assert!(meta.frontmatter.is_some());
     assert!(!meta.binary);
@@ -612,7 +598,6 @@ fn metadata_correct_counts() {
 
 #[test]
 fn metadata_binary_file_returns_file_level_fields_only() {
-    // PNG file: is allowlisted, binary, no markdown parse step.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -630,7 +615,6 @@ fn metadata_binary_file_returns_file_level_fields_only() {
     assert!(meta.binary);
     assert_eq!(meta.mime, "image/png");
     assert!(meta.path.ends_with("pic.png"));
-    // Markdown-shaped fields must be absent for binary files.
     assert_eq!(meta.comment_count, None);
     assert_eq!(meta.line_count, None);
     assert_eq!(meta.pending_count, None);
@@ -641,7 +625,6 @@ fn metadata_binary_file_returns_file_level_fields_only() {
 
 #[test]
 fn metadata_non_md_text_file_returns_markdown_fields() {
-    // .txt is text/plain — still text, so we parse it (no comments expected).
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -686,13 +669,6 @@ fn metadata_pdf_is_binary() {
 
 #[test]
 fn metadata_directed_with_third_party_ack_is_pending_for_addressee() {
-    // Reproduces the index.md `57m` shape: `to: [eduardo]` plus a
-    // third-party ack from `agent`. Eduardo himself has not acked,
-    // so the conversation is still open from his perspective.
-    // metadata() must report pending_count == 1 and surface eduardo
-    // in pending_for. Without the fix, the broad `ack.is_empty()`
-    // rule treats the third-party ack as enough to close the comment
-    // and silently drops eduardo from pending_for.
     const DOC: &str = "\
 ---
 title: Test
@@ -793,7 +769,6 @@ fn read_binary_unknown_extension_is_octet_stream() {
         .with_file(Path::new("/project/blob.bin"), b"raw")
         .unwrap();
 
-    // `.bin` is NOT allowlisted — this should error on visibility.
     let result = document::read_binary(
         &system,
         Path::new("/project"),
@@ -849,7 +824,6 @@ fn write_preserves_comments() {
 
     let config = open_config();
 
-    // Modify body text but keep comments intact.
     let modified = DOC_WITH_COMMENTS.replace("# Test", "# Updated Test");
     document::write(
         &system,
@@ -875,7 +849,6 @@ fn write_missing_comment_rejected() {
 
     let config = open_config();
 
-    // Content with one comment removed.
     let stripped = "\
 ---
 title: Test
@@ -940,8 +913,6 @@ fn write_create_new_file() {
 
 #[test]
 fn write_skips_frontmatter_injection_for_non_md_extensions() {
-    // Frontmatter injection is a markdown-only concern; writing to a
-    // `.pen` (or any non-.md/.mdx) file must round-trip byte-for-byte.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -1026,13 +997,11 @@ fn write_create_auto_creates_parent_dirs() {
     )
     .unwrap();
 
-    // File was created with correct content.
     let result = system
         .read_to_string(Path::new("/project/newdir/subdir/file.md"))
         .unwrap();
     assert!(result.contains("Nested Document"));
 
-    // Parent directories were created.
     assert!(system.is_dir(Path::new("/project/newdir")).unwrap());
     assert!(system.is_dir(Path::new("/project/newdir/subdir")).unwrap());
 }
@@ -1066,7 +1035,6 @@ fn write_create_deeply_nested() {
         .unwrap();
     assert!(result.contains("Deep Document"));
 
-    // All intermediate directories exist.
     assert!(system.is_dir(Path::new("/project/a")).unwrap());
     assert!(system.is_dir(Path::new("/project/a/b")).unwrap());
     assert!(system.is_dir(Path::new("/project/a/b/c")).unwrap());
@@ -1320,8 +1288,6 @@ fn write_raw_create_new_file() {
 
 #[test]
 fn write_raw_create_terraform_file() {
-    // A .tf authored raw+create must land byte-for-byte: no frontmatter
-    // injection, no comment wrapping.
     let raw_content = "resource \"null_resource\" \"x\" {}\n";
     let system = MemorySystem::new()
         .with_current_dir("/project")
@@ -1468,7 +1434,6 @@ fn write_binary_implies_raw() {
     .unwrap();
 
     let on_disk = read_bytes(&system, Path::new("/project/data.json"));
-    // No frontmatter should be added since binary implies raw.
     assert_eq!(on_disk.as_slice(), content_bytes);
 }
 
@@ -1613,7 +1578,6 @@ fn write_non_binary_still_text() {
     .unwrap();
 
     let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
-    // Normal text write adds frontmatter.
     assert!(
         result.contains("---"),
         "expected frontmatter, got: {result}"
@@ -1802,11 +1766,6 @@ fn unrestricted_create_absolute() {
     assert_eq!(result, Path::new("/tmp/new.md"));
 }
 
-// ---------------------------------------------------------------------
-// — per-op sandbox consults trusted_roots
-// ---------------------------------------------------------------------
-
-/// a path inside `base_dir` is allowed (existing behaviour).
 #[test]
 fn sandbox_under_base_allowed_with_no_trusted_roots() {
     let system = MemorySystem::new()
@@ -1825,8 +1784,6 @@ fn sandbox_under_base_allowed_with_no_trusted_roots() {
     assert_eq!(result, Path::new("/project/doc.md"));
 }
 
-/// an absolute path INSIDE a declared trusted root that
-/// lives OUTSIDE `base_dir` is allowed.
 #[test]
 fn sandbox_under_trusted_root_outside_base_allowed() {
     let system = MemorySystem::new()
@@ -1848,8 +1805,6 @@ fn sandbox_under_trusted_root_outside_base_allowed() {
     assert_eq!(result, Path::new("/notes/widening.md"));
 }
 
-/// an absolute path NEITHER under base nor any trusted root
-/// is rejected.
 #[test]
 fn sandbox_outside_base_and_trusted_roots_rejected() {
     let system = MemorySystem::new()
@@ -1874,8 +1829,6 @@ fn sandbox_outside_base_and_trusted_roots_rejected() {
     );
 }
 
-/// a brand-new file under a trusted root that lives outside
-/// `base_dir` is allowed by `resolve_sandboxed_create`.
 #[test]
 fn sandbox_create_under_trusted_root_outside_base_allowed() {
     let system = MemorySystem::new()
@@ -1897,7 +1850,6 @@ fn sandbox_create_under_trusted_root_outside_base_allowed() {
 
 #[test]
 fn sandboxed_absolute_blocked_but_unrestricted_allows() {
-    // Same path: sandboxed blocks it, unrestricted allows it.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -1906,7 +1858,6 @@ fn sandboxed_absolute_blocked_but_unrestricted_allows() {
         .with_file(Path::new("/home/user/notes.md"), b"# Notes")
         .unwrap();
 
-    // Sandboxed: blocked.
     let err = allowlist::resolve_sandboxed(
         &system,
         Path::new("/project"),
@@ -1920,7 +1871,6 @@ fn sandboxed_absolute_blocked_but_unrestricted_allows() {
         "expected 'path escapes sandbox', got: {err}"
     );
 
-    // Unrestricted: allowed.
     let result = allowlist::resolve_sandboxed(
         &system,
         Path::new("/project"),
@@ -2211,7 +2161,6 @@ fn rm_deletes_non_markdown_binary_file() {
         .unwrap();
     let config = open_config();
 
-    // The read layer sees it (same bytes get_image would return).
     let payload = document::read_binary(
         &system,
         Path::new("/project"),
@@ -2225,7 +2174,6 @@ fn rm_deletes_non_markdown_binary_file() {
         "read layer must see the binary file"
     );
 
-    // rm must really delete it and report it as removed.
     let outcome = document::rm(
         &system,
         Path::new("/project"),
@@ -2247,8 +2195,6 @@ fn rm_deletes_non_markdown_binary_file() {
 
 #[test]
 fn rm_can_delete_anything_the_read_layer_sees() {
-    // A visible non-markdown file (binary, non-UTF-8 bytes) in an allowed
-    // root — seen by a *different* read tool (metadata) than test 1.
     let bytes: &[u8] = &[0x00, 0x01, 0xfe, 0xff, 0x80, 0x90];
     let system = MemorySystem::new()
         .with_current_dir("/project")
@@ -2257,7 +2203,6 @@ fn rm_can_delete_anything_the_read_layer_sees() {
         .unwrap();
     let config = open_config();
 
-    // If the read layer reports it (metadata returns its real size)...
     let meta = document::metadata(
         &system,
         Path::new("/project"),
@@ -2267,7 +2212,6 @@ fn rm_can_delete_anything_the_read_layer_sees() {
     .unwrap();
     assert_eq!(meta.size_bytes, bytes.len() as u64);
 
-    // ...then rm must be able to delete it (read/delete scope parity).
     let outcome = document::rm(
         &system,
         Path::new("/project"),
@@ -2283,10 +2227,6 @@ fn rm_can_delete_anything_the_read_layer_sees() {
         "read-visible file must be deletable"
     );
 }
-
-// ---------------------------------------------------------------------
-// Directory rm: recursive, ls-driven, all-or-nothing, with a report.
-// ---------------------------------------------------------------------
 
 #[test]
 fn rm_dir_removes_all_visible_files_and_reports_them() {
@@ -2327,7 +2267,6 @@ fn rm_dir_removes_nested_subdirs_bottom_up() {
 
     let report = rm_dir(&outcome).unwrap();
     assert_eq!(report.files_deleted.len(), 3);
-    // Deepest directory removed before its parents; root last.
     assert_eq!(
         report.folders_removed,
         vec![
@@ -2354,8 +2293,6 @@ fn rm_dir_with_only_hidden_file_leaves_folder_behind() {
     let outcome = document::rm(&system, Path::new("/project"), Path::new("box"), &config).unwrap();
 
     let report = rm_dir(&outcome).unwrap();
-    // The visible file is removed; the folder survives (still holds the
-    // hidden file remargin cannot list). No error.
     assert_eq!(
         report.files_deleted,
         vec![PathBuf::from("/project/box/visible.md")]
@@ -2371,8 +2308,6 @@ fn rm_dir_with_only_hidden_file_leaves_folder_behind() {
 
 #[test]
 fn rm_dir_with_nested_realm_config_leaves_realm_folder_intact() {
-    // A nested realm's `.remargin.yaml` is a dotfile: ls never lists it,
-    // so the folder looks empty to the no-force remove and survives.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2391,9 +2326,6 @@ fn rm_dir_with_nested_realm_config_leaves_realm_folder_intact() {
         document::rm(&system, Path::new("/project"), Path::new("outer"), &config).unwrap();
 
     let report = rm_dir(&outcome).unwrap();
-    // The visible docs are removed; the realm folder is left behind
-    // because its `.remargin.yaml` keeps it non-empty. The outer folder
-    // is therefore also left behind (it still contains the realm folder).
     assert!(
         report
             .files_deleted
@@ -2424,9 +2356,6 @@ fn rm_dir_with_nested_realm_config_leaves_realm_folder_intact() {
 
 #[test]
 fn rm_dir_leaves_folder_holding_registry_dotfile_intact() {
-    // `.remargin-registry.yaml` is a forbidden target AND a dotfile, so
-    // ls never lists it: it does not block the pre-flight, and its folder
-    // is left behind because the no-force remove sees it as non-empty.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2435,9 +2364,6 @@ fn rm_dir_leaves_folder_holding_registry_dotfile_intact() {
         .with_file(Path::new("/project/cfg/.remargin-registry.yaml"), b"x")
         .unwrap();
 
-    // The registry file is a dotfile: invisible to ls, so it does NOT
-    // block the pre-flight. The folder is left behind because it still
-    // holds the dotfile.
     let config = open_config();
     let outcome = document::rm(&system, Path::new("/project"), Path::new("cfg"), &config).unwrap();
     let report = rm_dir(&outcome).unwrap();
@@ -2488,12 +2414,6 @@ fn rm_dir_report_to_json_shape() {
     assert_eq!(value["folders_removed"].as_array().unwrap().len(), 1);
     assert_eq!(value["folders_left_behind"].as_array().unwrap().len(), 0);
 }
-
-// ---------------------------------------------------------------------
-// rm refuses to delete a commented markdown file (single + directory),
-// pointing the caller at `purge`. Comment-free / non-markdown files are
-// unaffected.
-// ---------------------------------------------------------------------
 
 #[test]
 fn rm_refuses_commented_markdown_file() {
@@ -2647,77 +2567,56 @@ fn rm_purge_dir_then_rm_dir_deletes_tree() {
     assert!(!system.exists(Path::new("/project/tree")).unwrap());
 }
 
-// ---------------------------------------------------------------------
-// Partial writes: `--lines START-END` replaces a range of
-// lines in place, leaving every other byte identical. Comment blocks
-// inside the range must be re-included by id, and the post-write verify
-// gate still runs. Tests cover the happy path, preservation rejects,
-// boundary conditions, and incompatibility with create/raw/binary.
-// ---------------------------------------------------------------------
-
 #[test]
 fn splice_lines_replaces_single_line() {
-    // Replacing one line with one line leaves the rest byte-identical.
     let out = document::splice_lines("A\nB\nC\nD\nE", 3, 3, "X");
     assert_eq!(out, "A\nB\nX\nD\nE");
 }
 
 #[test]
 fn splice_lines_expanding_range_inserts_lines() {
-    // Replacing one line with three lines grows the file by two lines.
     let out = document::splice_lines("A\nB\nC\nD\nE", 3, 3, "X\nY\nZ");
     assert_eq!(out, "A\nB\nX\nY\nZ\nD\nE");
 }
 
 #[test]
 fn splice_lines_shrinking_range_removes_lines() {
-    // Replacing three lines with one drops two lines net.
     let out = document::splice_lines("A\nB\nC\nD\nE", 2, 4, "Q");
     assert_eq!(out, "A\nQ\nE");
 }
 
 #[test]
 fn splice_lines_strips_one_trailing_newline() {
-    // `--lines 3-3 "X"` and `--lines 3-3 "X\n"` must behave identically,
-    // so a single trailing newline is stripped before splicing.
     let out = document::splice_lines("A\nB\nC\nD", 3, 3, "X\n");
     assert_eq!(out, "A\nB\nX\nD");
 }
 
 #[test]
 fn splice_lines_preserves_trailing_newline_in_existing() {
-    // If the existing file ends with `\n`, the spliced output must too.
     let out = document::splice_lines("A\nB\nC\n", 2, 2, "Q");
     assert_eq!(out, "A\nQ\nC\n");
 }
 
 #[test]
 fn splice_lines_clamps_end_past_eof() {
-    // Overshooting end clamps to the real line count rather than erroring.
     let out = document::splice_lines("A\nB\nC", 2, 99, "Q");
     assert_eq!(out, "A\nQ");
 }
 
 #[test]
 fn splice_lines_first_line() {
-    // Boundary: line 1 is a legal start.
     let out = document::splice_lines("A\nB\nC", 1, 1, "X");
     assert_eq!(out, "X\nB\nC");
 }
 
 #[test]
 fn splice_lines_last_line() {
-    // Boundary: the final line is a legal end.
     let out = document::splice_lines("A\nB\nC", 3, 3, "X");
     assert_eq!(out, "A\nB\nX");
 }
 
 #[test]
 fn write_partial_replaces_range_only() {
-    // Acceptance: lines outside [start..=end] are byte-identical after
-    // a partial write. We use a document whose frontmatter already
-    // carries every field `ensure_frontmatter` would otherwise inject,
-    // so the post-parse -> to_markdown round-trip is a no-op.
     let original = "\
 ---
 title: Test
@@ -2743,12 +2642,9 @@ more content here
 
     let config = open_config();
 
-    // Count lines: the frontmatter occupies lines 1..=7, blank line 8,
-    // `# Header` line 9, blank line 10, `line 10` at line 11.
     let line_eleven_original = original.lines().nth(10).unwrap();
     assert_eq!(line_eleven_original, "line 10");
 
-    // Replace line 11 only.
     document::write(
         &system,
         Path::new("/project"),
@@ -2760,23 +2656,16 @@ more content here
     .unwrap();
 
     let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
-    // Everything outside the range is byte-identical; only the target
-    // line changed.
     assert!(
         result.contains("\n\nLINE 10 NEW\nline 11\nline 12\n"),
         "unexpected slice around line 13: {result}"
     );
-    // Prefix (frontmatter + header) is untouched.
     assert!(result.starts_with("---\ntitle: Test\n"));
-    // Suffix is untouched.
     assert!(result.contains("more content here"));
 }
 
 #[test]
 fn write_partial_rejects_destroyed_comment() {
-    // A partial write whose range overlaps a comment block and DOES NOT
-    // reinclude the comment must fail with a preservation diagnostic
-    // that names the destroyed comment id.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2785,9 +2674,6 @@ fn write_partial_rejects_destroyed_comment() {
 
     let config = open_config();
 
-    // Find the line range that covers the first comment block (id=abc).
-    // DOC_WITH_COMMENTS has the block at lines 7..=17 (fence + frontmatter
-    // + body + closing fence). We replace with plain text — no comment.
     let err = document::write(
         &system,
         Path::new("/project"),
@@ -2807,8 +2693,6 @@ fn write_partial_rejects_destroyed_comment() {
 
 #[test]
 fn write_partial_accepts_reincluded_comment() {
-    // A partial write whose range covers a comment block IS accepted
-    // as long as the replacement reincludes the comment verbatim.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2817,9 +2701,6 @@ fn write_partial_accepts_reincluded_comment() {
 
     let config = open_config();
 
-    // Replace the block covering comment abc with the same block back
-    // (verbatim), and nothing else — the fence markers are part of the
-    // replacement so preservation round-trips.
     let replacement = "\
 ```remargin
 ---
@@ -2833,8 +2714,6 @@ checksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfd
 First comment.
 ```";
 
-    // The `abc` block in DOC_WITH_COMMENTS spans lines 7..=17. Replace
-    // that range with the same block — preservation must pass.
     document::write(
         &system,
         Path::new("/project"),
@@ -2845,7 +2724,6 @@ First comment.
     )
     .unwrap();
 
-    // Sanity: both comments still present after the write.
     let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
     assert!(result.contains("id: abc"));
     assert!(result.contains("id: def"));
@@ -2853,8 +2731,6 @@ First comment.
 
 #[test]
 fn write_partial_rejects_with_create() {
-    // `--lines` and `--create` are mutually exclusive: partial writes
-    // require an existing file to splice into.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2880,7 +2756,6 @@ fn write_partial_rejects_with_create() {
 
 #[test]
 fn write_partial_rejects_invalid_range() {
-    // Start > end is nonsense; caller must get a specific diagnostic.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2902,8 +2777,6 @@ fn write_partial_rejects_invalid_range() {
 
 #[test]
 fn write_partial_rejects_with_raw() {
-    // `--lines` and `--raw` are mutually exclusive: partial writes own
-    // the comment-preservation invariant and need to parse the result.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2928,7 +2801,6 @@ fn write_partial_rejects_with_raw() {
 
 #[test]
 fn write_partial_rejects_start_zero() {
-    // 0-indexed callers are a common mistake; reject explicitly.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2950,8 +2822,6 @@ fn write_partial_rejects_start_zero() {
 
 #[test]
 fn write_whole_file_unchanged_when_lines_omitted() {
-    // Regression guard: omitting --lines preserves the earlier
-    // whole-file write semantics exactly.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -2976,14 +2846,8 @@ fn write_whole_file_unchanged_when_lines_omitted() {
     assert!(result.contains("id: def"));
 }
 
-// ---------- no-op detection ----------
-
 #[test]
 fn write_noop_when_identical_bytes_back_to_back() {
-    // First write: canonical content gets written. Second write: same
-    // input content, so the serialized output is byte-identical — must
-    // return noop=true without touching the file. We verify the file
-    // bytes are preserved exactly across the no-op.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3000,9 +2864,6 @@ fn write_noop_when_identical_bytes_back_to_back() {
         WriteOptions::default(),
     )
     .unwrap();
-    // The first write may or may not be a true no-op depending on
-    // whether the input is already canonical; either way, capture what
-    // ended up on disk so we can assert the next call doesn't change it.
     let after_first = system.read_to_string(Path::new("/project/doc.md")).unwrap();
 
     let second = document::write(
@@ -3015,7 +2876,6 @@ fn write_noop_when_identical_bytes_back_to_back() {
     )
     .unwrap();
 
-    // Second call with the on-disk canonical bytes must be a no-op.
     assert!(
         second.noop,
         "expected second write of canonical content to be a no-op"
@@ -3025,16 +2885,11 @@ fn write_noop_when_identical_bytes_back_to_back() {
         after_first, after_second,
         "no-op write must not touch the file bytes"
     );
-    // And the first write itself: its outcome tells the caller whether
-    // the input already matched disk. No other assertion here — the
-    // round-trip equality above is the behavioural contract.
     let _: bool = first.noop;
 }
 
 #[test]
 fn write_noop_reports_false_when_content_differs() {
-    // Baseline: two distinct writes must each report noop=false so
-    // callers can reliably branch on the flag.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3059,9 +2914,6 @@ fn write_noop_reports_false_when_content_differs() {
 
 #[test]
 fn write_noop_raw_when_bytes_match() {
-    // Raw writes bypass the markdown pipeline but still honor the
-    // byte-identical no-op guard so `remargin write --raw` is retry-safe
-    // for plain text / source files too.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3104,10 +2956,6 @@ fn write_noop_raw_when_bytes_match() {
 
 #[test]
 fn write_noop_binary_when_bytes_match() {
-    // Mirror of the raw case for binary mode. MemorySystem exposes
-    // `read_to_string` only, so the no-op short-circuit for binary
-    // files only trips when the existing bytes are valid UTF-8 — good
-    // enough for this test since the payload decodes to ASCII.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3143,8 +2991,6 @@ fn write_noop_binary_when_bytes_match() {
 
 #[test]
 fn write_create_never_reports_noop() {
-    // `create` writes a brand-new file — the noop short-circuit
-    // must not fire (file doesn't exist yet to compare against).
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3179,12 +3025,10 @@ fn list_entry_json_shape_matches_schema() {
     let value = serde_json::to_value(&entry).unwrap();
     let obj = value.as_object().unwrap();
 
-    // Required keys always present.
     assert!(obj.contains_key("is_dir"));
     assert!(obj.contains_key("path"));
     assert_eq!(obj["path"], serde_json::json!("foo/bar.md"));
 
-    // Populated optionals serialize their values.
     assert_eq!(obj["size"], serde_json::json!(1024_u64));
     assert_eq!(obj["remargin_pending"], serde_json::json!(2_u32));
     assert_eq!(
@@ -3192,9 +3036,6 @@ fn list_entry_json_shape_matches_schema() {
         serde_json::json!("2026-04-06T12:00:00-04:00")
     );
 
-    // Empty optionals are omitted entirely so the generated Zod
-    // `strictObject` schema treats them as `undefined` rather than
-    // rejecting an explicit `null`.
     let bare = document::ListEntry {
         is_dir: true,
         path: PathBuf::from("dir"),
@@ -3212,18 +3053,6 @@ fn list_entry_json_shape_matches_schema() {
     }
 }
 
-// --- project_write tests ---
-//
-// `project_write` is the projection-only sibling of `write` used by the
-// `remargin plan write` subcommand. These tests pin three invariants:
-//
-// 1. The disk state is never mutated (file bytes stay byte-identical).
-// 2. Binary / raw modes degrade to `WriteProjection::Unsupported` with a
-// human-readable reason, never to a bogus `Markdown` projection.
-// 3. The returned `before` / `after` pair mirrors what `write` would
-// actually parse — same frontmatter normalization, same comment-
-// preservation rejection, same empty-doc shape for `--create`.
-
 #[test]
 fn project_write_happy_path_projects_markdown_without_mutating_disk() {
     let system = MemorySystem::new()
@@ -3235,7 +3064,6 @@ fn project_write_happy_path_projects_markdown_without_mutating_disk() {
     let config = open_config();
     let before_bytes = read_bytes(&system, Path::new("/project/doc.md"));
 
-    // Write appends a new body line; preserves both existing comments.
     let new_content = format!("{DOC_WITH_COMMENTS}\nA trailing paragraph.\n");
     let projection = document::project_write(
         &system,
@@ -3278,7 +3106,6 @@ fn project_write_happy_path_projects_markdown_without_mutating_disk() {
         "after should still carry the preserved comments"
     );
 
-    // Core invariant: on-disk bytes are byte-identical post-projection.
     let after_bytes = read_bytes(&system, Path::new("/project/doc.md"));
     assert_eq!(
         before_bytes, after_bytes,
@@ -3288,9 +3115,6 @@ fn project_write_happy_path_projects_markdown_without_mutating_disk() {
 
 #[test]
 fn project_write_detects_noop_when_content_matches() {
-    // Seed a file and do a real write first, so the on-disk bytes are
-    // already in the shape `ensure_frontmatter` produces. Re-submitting
-    // the same content should then trip the byte-identical noop path.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3309,14 +3133,9 @@ fn project_write_detects_noop_when_content_matches() {
     )
     .unwrap();
 
-    // Capture the canonicalized on-disk bytes after the real write.
     let canonical = system.read_to_string(Path::new("/project/doc.md")).unwrap();
     let before_bytes = canonical.clone().into_bytes();
 
-    // Now project_write with those exact bytes — this is the true noop
-    // case a caller would observe (planning a re-save of the current
-    // document). `ensure_frontmatter` is idempotent on an already-
-    // normalized document, so `after.to_markdown().unwrap()` should match disk.
     let projection = document::project_write(
         &system,
         Path::new("/project"),
@@ -3348,7 +3167,6 @@ fn project_write_detects_noop_when_content_matches() {
     };
     assert!(noop, "re-submitting canonical bytes should be a noop");
 
-    // And project_write still must not mutate disk on a noop.
     let after_bytes = read_bytes(&system, Path::new("/project/doc.md"));
     assert_eq!(before_bytes, after_bytes);
 }
@@ -3396,17 +3214,13 @@ fn project_write_create_returns_empty_before_and_leaves_disk_untouched() {
     else {
         return;
     };
-    // `before` is the parsed empty doc for --create.
     assert!(
         before.comments().is_empty(),
         "create projections must have an empty before-doc"
     );
     assert_eq!(after.comments().len(), 0);
-    // --create projections are never considered noop: the file
-    // does not exist yet, so the byte-identical shortcut is skipped.
     assert!(!noop);
 
-    // Core invariant: plan must not create the file.
     assert!(
         system.read_to_string(Path::new("/project/new.md")).is_err(),
         "project_write(--create) must not touch disk"
@@ -3459,8 +3273,7 @@ fn project_write_binary_mode_returns_unsupported() {
 
     let config = open_config();
 
-    // base64("new") — content is irrelevant because binary mode bails
-    // out before parsing.
+    // base64("new"); binary mode bails out before parsing it.
     let projection = document::project_write(
         &system,
         Path::new("/project"),
@@ -3496,7 +3309,6 @@ fn project_write_missing_comment_rejected_like_real_write() {
         .unwrap();
 
     let config = open_config();
-    // Strip both comments — comment-preservation must refuse this.
     let new_content = "---\ntitle: Test\n---\n\n# Test\n";
     let before_bytes = read_bytes(&system, Path::new("/project/doc.md"));
 
@@ -3515,22 +3327,12 @@ fn project_write_missing_comment_rejected_like_real_write() {
         "expected comment-preservation error, got: {err}"
     );
 
-    // Even on rejection, disk must stay byte-identical.
     let after_bytes = read_bytes(&system, Path::new("/project/doc.md"));
     assert_eq!(
         before_bytes, after_bytes,
         "project_write rejection must not mutate disk"
     );
 }
-
-// ---------------------------------------------------------------------
-// Document author is authenticated at the write/replace/plan
-// seams. Each seam escalates to the doc's realm (the realm is the sole
-// source of truth for the mode), stamps the caller identity on create,
-// and gates author changes on edit. These tests exercise the escalation
-// end-to-end through a realm staged on disk. (The realm/registry YAML
-// constants live at the top of this module with `DOC_WITH_COMMENTS`.)
-// ---------------------------------------------------------------------
 
 fn caller_config(identity: &str, mode: Mode) -> ResolvedConfig {
     ResolvedConfig {
@@ -3557,8 +3359,6 @@ fn realm_with_doc(realm_yaml: &str, doc: &str) -> MemorySystem {
         .unwrap()
 }
 
-/// Rows 1 + 2: create stamps the authenticated caller identity and drops a
-/// spoofed `author` from the payload.
 #[test]
 fn write_create_stamps_caller_identity_ignoring_spoof() {
     let system = MemorySystem::new()
@@ -3566,7 +3366,7 @@ fn write_create_stamps_caller_identity_ignoring_spoof() {
         .unwrap()
         .with_dir(Path::new("/project"))
         .unwrap();
-    let config = open_config(); // identity `eduardo`, open realm
+    let config = open_config();
 
     document::write(
         &system,
@@ -3589,9 +3389,7 @@ fn write_create_stamps_caller_identity_ignoring_spoof() {
     );
 }
 
-/// Escalation proof + row 8: an OPEN caller writing into a REGISTERED realm
-/// cannot change the author to an unregistered value — the realm's mode
-/// governs, and the disk is untouched.
+/// The realm's mode governs, not the open caller's; the disk is untouched.
 #[test]
 fn write_edit_author_change_to_unregistered_rejected_in_registered_realm() {
     let doc = "---\ntitle: Doc\nauthor: alice\n---\n\n# Doc\n\nBody.\n";
@@ -3619,7 +3417,6 @@ fn write_edit_author_change_to_unregistered_rejected_in_registered_realm() {
     );
 }
 
-/// Row 7: a registered-realm edit to an active participant is allowed.
 #[test]
 fn write_edit_author_change_to_active_allowed_in_registered_realm() {
     let doc = "---\ntitle: Doc\nauthor: alice\n---\n\n# Doc\n\nBody.\n";
@@ -3640,14 +3437,10 @@ fn write_edit_author_change_to_active_allowed_in_registered_realm() {
     assert!(disk.contains("author: eduardo-burgos"), "got:\n{disk}");
 }
 
-/// Row 5 (spec regression test): a strict-realm edit that changes an
-/// existing author is rejected and the disk is untouched.
 #[test]
 fn write_edit_existing_author_immutable_in_strict_realm() {
     let doc = "---\ntitle: Doc\nauthor: alice\n---\n\n# Doc\n\nBody.\n";
     let system = realm_with_doc(STRICT_REALM_YAML, doc);
-    // Caller already resolves in strict mode (matching the realm), so
-    // escalation targets the author gate rather than the identity gate.
     let config = caller_config("eduardo-burgos", Mode::Strict);
 
     let err = document::write(
@@ -3672,8 +3465,6 @@ fn write_edit_existing_author_immutable_in_strict_realm() {
     );
 }
 
-/// Row 6a: a strict-realm authorless doc may gain an author equal to the
-/// caller identity; the disk gains that author.
 #[test]
 fn write_edit_first_author_matching_caller_allowed_in_strict_realm() {
     let doc = "---\ntitle: Doc\n---\n\n# Doc\n\nBody.\n";
@@ -3694,8 +3485,6 @@ fn write_edit_first_author_matching_caller_allowed_in_strict_realm() {
     assert!(disk.contains("author: eduardo-burgos"), "got:\n{disk}");
 }
 
-/// Row 6b: a strict-realm authorless doc gaining an author that is not the
-/// caller identity is rejected and the disk is untouched.
 #[test]
 fn write_edit_first_author_mismatch_rejected_in_strict_realm() {
     let doc = "---\ntitle: Doc\n---\n\n# Doc\n\nBody.\n";
@@ -3724,8 +3513,7 @@ fn write_edit_first_author_mismatch_rejected_in_strict_realm() {
     );
 }
 
-/// Row 14: the `plan write` projection reports the same author-gate refusal
-/// as a real write and never touches disk.
+/// The `plan write` projection reports the same refusal as a real write and never touches disk.
 #[test]
 fn project_write_author_change_rejected_in_registered_realm() {
     let doc = "---\ntitle: Doc\nauthor: alice\n---\n\n# Doc\n\nBody.\n";
@@ -3754,8 +3542,6 @@ fn project_write_author_change_rejected_in_registered_realm() {
     );
 }
 
-/// Replace seam (dry-run): `project_commit_markdown` rejects an author
-/// change under the realm mode, exactly like the live path.
 #[test]
 fn project_commit_markdown_author_change_rejected_in_registered_realm() {
     let doc = "---\ntitle: Doc\nauthor: alice\n---\n\n# Doc\n\nBody.\n";
@@ -3776,9 +3562,6 @@ fn project_commit_markdown_author_change_rejected_in_registered_realm() {
     );
 }
 
-/// Row 15: a body-only rewrite that leaves the author unchanged commits
-/// cleanly through the replace seam (`commit_markdown`) and preserves the
-/// on-disk author.
 #[test]
 fn commit_markdown_body_only_preserves_author_in_registered_realm() {
     let doc = "---\ntitle: Doc\nauthor: alice\n---\n\n# Doc\n\nOld body.\n";
@@ -3799,16 +3582,6 @@ fn commit_markdown_body_only_preserves_author_in_registered_realm() {
     assert!(disk.contains("author: alice"), "got:\n{disk}");
     assert!(disk.contains("New body."), "got:\n{disk}");
 }
-
-// ---------------------------------------------------------------------
-// Writer ban: remargin must refuse to modify its own config
-// and participant registry under any circumstances. The ban is on exact
-// basenames — `.remargin.yaml` and `.remargin-registry.yaml` — and
-// fires before any bytes hit disk on every mutating entry point. The
-// authoritative basename list lives at [`crate::writer::FORBIDDEN_TARGETS`];
-// tests iterate over that same slice so adding a new forbidden file in
-// one place automatically extends coverage.
-// ---------------------------------------------------------------------
 
 fn assert_forbidden_error(err: &anyhow::Error, basename: &str) {
     let msg = format!("{err:#}");
@@ -3850,8 +3623,6 @@ fn write_refuses_forbidden_targets() {
 
 #[test]
 fn write_refuses_forbidden_targets_nested() {
-    // Exact-basename match fires regardless of directory depth: an agent
-    // cannot smuggle a write by nesting the file under another folder.
     for basename in FORBIDDEN_TARGETS {
         let nested = format!("/project/nested/{basename}");
         let system = MemorySystem::new()
@@ -3881,8 +3652,6 @@ fn write_refuses_forbidden_targets_nested() {
 
 #[test]
 fn write_allows_differently_named_yaml() {
-    // Files with different basenames (e.g. backup.remargin.yaml) are NOT
-    // subject to the ban.
     let system = MemorySystem::new()
         .with_current_dir("/project")
         .unwrap()
@@ -3926,7 +3695,6 @@ fn write_create_refuses_forbidden_targets() {
 
         assert_forbidden_error(&err, basename);
 
-        // File must not have been created.
         assert!(
             system
                 .read_to_string(&Path::new("/project").join(basename))
@@ -3952,7 +3720,6 @@ fn rm_refuses_forbidden_targets() {
 
         assert_forbidden_error(&err, basename);
 
-        // File must still exist.
         system.read_to_string(Path::new(&path)).unwrap();
     }
 }
@@ -3982,10 +3749,7 @@ fn project_write_refuses_forbidden_targets() {
     }
 }
 
-// --- Advisory warnings on the write path ---------------------------------
-
-/// Hard-wrapped prose still writes, byte-for-byte as supplied; the advice
-/// rides back on the successful outcome instead of blocking anything.
+/// The advice rides back on the successful outcome; the prose is written as supplied.
 #[test]
 fn write_advises_on_hard_wrapped_prose_without_blocking() {
     let system = MemorySystem::new()
@@ -4019,7 +3783,6 @@ fn write_advises_on_hard_wrapped_prose_without_blocking() {
         outcome.warnings[0].message
     );
 
-    // The advice changed nothing: the wrapped prose is on disk as written.
     let written = system
         .read_to_string(Path::new("/project/wrapped.md"))
         .unwrap();
@@ -4029,8 +3792,7 @@ fn write_advises_on_hard_wrapped_prose_without_blocking() {
     );
 }
 
-/// Continuous prose says nothing, and the JSON payload keeps exactly the
-/// shape it had before advice existed.
+/// With no advice the JSON payload carries no `warnings` key.
 #[test]
 fn write_stays_silent_on_continuous_prose() {
     let system = MemorySystem::new()
@@ -4064,8 +3826,7 @@ fn write_stays_silent_on_continuous_prose() {
     );
 }
 
-/// A partial write is advised only about the fragment the caller supplied,
-/// with line numbers shifted onto the file's own numbering.
+/// Advice covers only the supplied fragment, with line numbers shifted onto the file's own.
 #[test]
 fn write_partial_offsets_advice_onto_file_lines() {
     let system = MemorySystem::new()
@@ -4101,8 +3862,7 @@ fn write_partial_offsets_advice_onto_file_lines() {
     );
 }
 
-/// Comment blocks are stored as fenced `remargin` code blocks, so an
-/// existing thread in the document never draws advice.
+/// Stored comment blocks are fenced code, so an existing thread never draws advice.
 #[test]
 fn write_never_advises_about_stored_comment_blocks() {
     let system = MemorySystem::new()

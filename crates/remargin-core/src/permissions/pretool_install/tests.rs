@@ -1,3 +1,6 @@
+//! Tests for the `PreToolUse` hook installer: install, uninstall, drift repair and the `test`
+//! verdicts.
+
 use std::path::{Path, PathBuf};
 
 use os_shim::System;
@@ -244,10 +247,7 @@ fn test_reports_not_installed_when_entry_absent() {
     assert_eq!(test(&system, &path).unwrap(), TestOutcome::NotInstalled);
 }
 
-/// A remargin entry whose matcher has drifted from the current
-/// `HOOK_MATCHER` (an older installation) is still recognized — detection
-/// keys on `HOOK_SUBCOMMAND` — and `install` upgrades the matcher in place
-/// without duplicating the entry.
+/// Detection keys on `HOOK_SUBCOMMAND`, so an entry with a stale matcher is upgraded in place.
 #[test]
 fn install_upgrades_drifted_matcher_in_place() {
     let stale_matcher = "Read|Write|Edit|Bash|NotebookEdit";
@@ -267,13 +267,11 @@ fn install_upgrades_drifted_matcher_in_place() {
     let path = settings_path();
     let system = seed(mock(), &path, &body);
 
-    // Recognized despite the stale matcher string.
     assert_eq!(
         test(&system, &path).unwrap(),
         TestOutcome::PathRelative(String::from(LEGACY_HOOK_COMMAND)),
     );
 
-    // Install rewrites the matcher in place and reports the write.
     assert_eq!(install(&system, &path).unwrap(), InstallOutcome::Installed);
 
     let value = read_json(&system, &path);
@@ -285,20 +283,16 @@ fn install_upgrades_drifted_matcher_in_place() {
         hook_command(),
     );
 
-    // A second install is now a no-op.
     assert_eq!(
         install(&system, &path).unwrap(),
         InstallOutcome::AlreadyInstalled,
     );
 }
 
-/// The binary the entry names is gone: the hook cannot spawn, and Claude
-/// Code treats that as non-blocking, so `test` reports it as broken rather
-/// than installed. The fault names the settings file and the binary.
+/// A hook that cannot spawn is non-blocking to Claude Code, so it is reported as broken.
 #[test]
 fn test_reports_broken_when_binary_vanished() {
-    // The install resolves `current_exe`, but that binary is never on disk
-    // — the state a user reaches by moving or deleting it after installing.
+    // The binary `current_exe` names is never put on disk here.
     let system = MemorySystem::new()
         .with_current_exe(Path::new(EXE))
         .unwrap();
@@ -312,9 +306,6 @@ fn test_reports_broken_when_binary_vanished() {
     );
 }
 
-/// An entry left by an install that predates the absolute path is
-/// recognized, reported as `PATH`-relative, and left exactly as found —
-/// only `install` rewrites a user's settings.
 #[test]
 fn test_reports_path_relative_legacy_entry_without_rewriting_it() {
     let body = serde_json::to_string_pretty(&json!({
@@ -340,9 +331,7 @@ fn test_reports_path_relative_legacy_entry_without_rewriting_it() {
     assert_eq!(system.read_to_string(&path).unwrap(), body);
 }
 
-/// Reinstalling over a legacy entry rewrites its command in place — one
-/// entry, now absolute — and a stale absolute path is repaired the same
-/// way.
+/// A bare-name command and a stale absolute path are both rewritten in place.
 #[test]
 fn install_rewrites_drifted_command_in_place() {
     let stale = "/gone/remargin claude pretool";
@@ -374,8 +363,6 @@ fn install_rewrites_drifted_command_in_place() {
     assert_eq!(test(&system, &path).unwrap(), TestOutcome::Installed);
 }
 
-/// `uninstall` removes a remargin entry even when its matcher has drifted
-/// from the current `HOOK_MATCHER`.
 #[test]
 fn uninstall_removes_entry_with_drifted_matcher() {
     let stale_matcher = "Read|Write|Edit|Bash|NotebookEdit";

@@ -16,7 +16,6 @@ const CONFIG_FILENAME: &str = ".remargin.yaml";
 
 const LEGACY_TO_MIGRATION_HINT: &str = "legacy `to:` field on deny_ops is removed; replace entry-level `to: [identities]` with per-op `exceptions: [identities]` on each item in `ops:` (deny EXCEPT for the listed identities)";
 
-/// Wildcard sentinel preserved from `trusted_roots[].path = "*"`.
 const TRUSTED_ROOT_WILDCARD: &str = "*";
 
 /// Minimal projection used to extract just the `permissions:` block
@@ -39,20 +38,14 @@ struct PermissionsOnly {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PermissionsLintError {
-    /// 1-indexed column where the offending value starts; `None`
-    /// when `serde_yaml` did not surface a location.
+    /// 1-indexed; `None` when `serde_yaml` gave no location.
     pub column: Option<usize>,
 
-    /// 1-indexed line where the offending value starts; `None` when
-    /// `serde_yaml` did not surface a location.
+    /// 1-indexed; `None` when `serde_yaml` gave no location.
     pub line: Option<usize>,
 
-    /// User-facing diagnostic — the raw `serde_yaml` message, which
-    /// already names the offending value and lists the valid ops on
-    /// an unknown-variant failure.
     pub message: String,
 
-    /// Absolute path of the `.remargin.yaml` that failed to parse.
     pub source_file: PathBuf,
 }
 
@@ -61,11 +54,8 @@ pub struct PermissionsLintError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedAllowDotFolders {
-    /// Folder names declared in the source file's
-    /// `allow_dot_folders:` list, in declaration order.
     pub names: Vec<String>,
 
-    /// `.remargin.yaml` that declared the entry.
     pub source_file: PathBuf,
 }
 
@@ -73,14 +63,10 @@ pub struct ResolvedAllowDotFolders {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedDenyOps {
-    /// Per-op items to deny on `path`. Each item is either a blanket
-    /// deny (empty `exceptions`) or a deny with an identity allowlist.
     pub ops: Vec<ResolvedDenyOpsItem>,
 
-    /// Resolved absolute path.
     pub path: PathBuf,
 
-    /// `.remargin.yaml` that declared the entry.
     pub source_file: PathBuf,
 }
 
@@ -101,10 +87,7 @@ pub struct ResolvedDenyOpsItem {
 pub struct ResolvedPermissions {
     pub allow_dot_folders: Vec<ResolvedAllowDotFolders>,
 
-    /// Effective folder-level CLI policy resolved by nearest-wins
-    /// parent-walk. `None` means no `.remargin.yaml` in the walk
-    /// declared `cli_allowed`; callers treat `None` as denied
-    /// (effective default = false).
+    /// `None` when no walked file declared it; callers treat that as denied.
     pub cli_allowed: Option<bool>,
 
     pub deny_ops: Vec<ResolvedDenyOps>,
@@ -112,9 +95,7 @@ pub struct ResolvedPermissions {
     /// Walk order, deepest first.
     pub trusted_roots: Vec<ResolvedTrustedRoot>,
 
-    /// `Some` = some `.remargin.yaml` in the walk declared
-    /// `trusted_roots: []`, locking the realm. Records the deepest
-    /// locker so refusal messages can name it.
+    /// The deepest `.remargin.yaml` that declared `trusted_roots: []`, locking the realm.
     pub trusted_roots_lock: Option<PathBuf>,
 }
 
@@ -156,6 +137,7 @@ impl ResolvedPermissions {
     }
 }
 
+/// A `trusted_roots` entry after path resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResolvedTrustedRoot {
@@ -179,17 +161,12 @@ pub struct ResolvedTrustedRoot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TrustedRootEscape {
-    /// Resolved absolute anchor that fell outside the realm.
     pub anchor: PathBuf,
 
-    /// The entry exactly as written in the `.remargin.yaml`.
     pub entry: String,
 
-    /// Directory of the declaring `.remargin.yaml` — the realm the
-    /// anchor had to stay at or below.
     pub realm_dir: PathBuf,
 
-    /// `.remargin.yaml` that declared the offending entry.
     pub source_file: PathBuf,
 }
 
@@ -211,15 +188,12 @@ impl TrustedRootEscape {
     }
 }
 
+/// Where a trusted root points: one absolute path, or the whole realm of the declaring file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TrustedRootPath {
     Absolute(PathBuf),
-    /// `"*"` — the entire realm anchored at the declaring
-    /// `.remargin.yaml`'s parent directory.
-    Wildcard {
-        realm_root: PathBuf,
-    },
+    Wildcard { realm_root: PathBuf },
 }
 
 fn canonicalize_or_passthrough(system: &dyn System, path: PathBuf) -> PathBuf {
@@ -232,10 +206,8 @@ fn extend_resolved(
     block: &Permissions,
     source_file: &Path,
 ) -> Result<()> {
-    // Fail closed before recording anything: an out-of-realm anchor must
-    // not silently invert enforcement (protect a sibling, deny the realm's
-    // own files). Named loudly here so the pretool hook maps it to Fail and
-    // the op guard surfaces it as an op error.
+    // Fail closed before recording anything: an out-of-realm anchor would protect a sibling and
+    // deny the realm's own files.
     if let Some(escape) = block_trusted_root_escapes(system, block, source_file)
         .into_iter()
         .next()
@@ -245,9 +217,7 @@ fn extend_resolved(
 
     let source_dir = source_file.parent().unwrap_or(source_file);
 
-    // Nearest-wins: only record the first declaration found (deepest,
-    // since walk is deepest-first). Shallower files are skipped when
-    // a deeper one already set the policy.
+    // Nearest wins: the walk is deepest-first, so only the first declaration is recorded.
     if acc.cli_allowed.is_none() && block.cli_allowed.is_some() {
         acc.cli_allowed = block.cli_allowed;
     }

@@ -1,5 +1,8 @@
+/** The `remargin_kind` chips on a comment card. */
+
 import { Tag } from "lucide-react";
 
+/** Props for {@link KindChips}. */
 interface KindChipsProps {
   kinds: readonly string[] | undefined;
 }

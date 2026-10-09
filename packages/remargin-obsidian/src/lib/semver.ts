@@ -12,6 +12,7 @@
  * lets the tests run without a network or any browser shim.
  */
 
+/** A version split into its numeric triple and optional prerelease suffix. */
 export interface ParsedVersion {
   major: number;
   minor: number;
@@ -63,7 +64,6 @@ export function compareVersions(a: ParsedVersion, b: ParsedVersion): number {
   if (a.major !== b.major) return a.major - b.major;
   if (a.minor !== b.minor) return a.minor - b.minor;
   if (a.patch !== b.patch) return a.patch - b.patch;
-  // Stable > prerelease.
   if (a.prerelease === undefined && b.prerelease !== undefined) return 1;
   if (a.prerelease !== undefined && b.prerelease === undefined) return -1;
   if (a.prerelease === undefined && b.prerelease === undefined) return 0;

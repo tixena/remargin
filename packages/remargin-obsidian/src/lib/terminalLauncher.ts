@@ -1,3 +1,5 @@
+/** Finds a terminal emulator and launches the Submit shell line in it. */
+
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { spawn } from "child_process";
@@ -13,7 +15,6 @@ export const LINUX_TERMINALS: string[][] = [
   ["xterm", "-e"],
 ];
 
-/** Sentinel prefix for the macOS Terminal.app osascript launch path. */
 const OSASCRIPT_PREFIX = ["osascript"];
 
 function isOnPath(bin: string): boolean {

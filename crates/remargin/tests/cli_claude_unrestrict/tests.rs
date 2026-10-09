@@ -1,3 +1,5 @@
+//! `claude unrestrict` runs against temp realms, including one seeded with projected rules.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,17 +60,13 @@ fn run_restrict(realm: &TempDir, path: &str) {
     assert_status(&out, 0);
 }
 
-/// End-to-end restrict + unprotect on a hook-only realm: restrict writes
-/// no projected deny rules (no settings file at all — the `PreToolUse`
-/// hook is the single source of truth), and unprotect removes the
-/// `.remargin.yaml` entry. No sidecar is ever created.
+/// Unrestrict removes the `.remargin.yaml` entry; no settings file or sidecar ever existed.
 #[test]
 fn restrict_then_unprotect_clears_state() {
     let realm = realm_with_claude();
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
     run_restrict(&realm, "src/secret");
 
-    // Hook-only restrict writes no project-scope settings file.
     let project_scope = realm.path().join(".claude/settings.local.json");
     assert!(
         !project_scope.exists(),
@@ -78,14 +76,12 @@ fn restrict_then_unprotect_clears_state() {
     let out = run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
     assert_status(&out, 0);
 
-    // The .remargin.yaml entry is gone.
     let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap_or_default();
     assert!(
         !yaml.contains("src/secret"),
         "yaml still references the removed entry:\n{yaml}"
     );
 
-    // No sidecar was ever created (nothing to track).
     assert!(
         !realm
             .path()
@@ -95,18 +91,12 @@ fn restrict_then_unprotect_clears_state() {
     );
 }
 
-/// Layer 1 stops enforcing after unprotect. Post-polarity-flip:
-/// `restrict src/secret` allow-lists that subpath; writes
-/// elsewhere in the realm are refused. After `unprotect src/secret`
-/// the realm is open mode and writes outside the (former) allow-list
-/// succeed because the per-op guard re-resolves on each call.
+/// After unrestrict, writes outside the former allow-list succeed: the guard re-resolves per call.
 #[test]
 fn layer_1_stops_enforcing_after_unprotect() {
     let realm = realm_with_claude();
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
     fs::create_dir_all(realm.path().join("src/public")).unwrap();
-    // Markdown doc — raw mode is not allowed on .md so the
-    // comment-preserving write path applies.
     fs::write(
         realm.path().join("src/public/foo.md"),
         "---\ntitle: test\n---\n\n# Hi\n",
@@ -114,7 +104,6 @@ fn layer_1_stops_enforcing_after_unprotect() {
     .unwrap();
     run_restrict(&realm, "src/secret");
 
-    // Outside the allow-list → refused.
     let blocked = run_in(
         realm.path(),
         &[
@@ -138,7 +127,6 @@ fn layer_1_stops_enforcing_after_unprotect() {
     let unprotect = run_in(realm.path(), &["claude", "unrestrict", "src/secret"]);
     assert_status(&unprotect, 0);
 
-    // No restrict declared → open mode → write proceeds.
     let allowed = run_in(
         realm.path(),
         &[
@@ -157,9 +145,7 @@ fn layer_1_stops_enforcing_after_unprotect() {
     assert!(body.contains("# Updated"));
 }
 
-/// Scenario 14: wildcard restrict + wildcard unprotect cycle.
-/// the YAML compaction prunes the empty restrict
-/// array AND the now-empty permissions block.
+/// The wildcard cycle prunes the empty restrict array and the then-empty permissions block.
 #[test]
 fn wildcard_restrict_and_unprotect_cycle() {
     let realm = realm_with_claude();
@@ -176,8 +162,7 @@ fn wildcard_restrict_and_unprotect_cycle() {
     );
 }
 
-/// Scenario 15: --json output parses to the documented
-/// `UnprotectOutcome` shape.
+/// `--json` output parses to the `UnprotectOutcome` shape.
 #[test]
 fn unprotect_json_output_round_trips() {
     let realm = realm_with_claude();
@@ -197,10 +182,7 @@ fn unprotect_json_output_round_trips() {
     assert!(value.get("warnings").and_then(Value::as_array).is_some());
 }
 
-/// `unprotect` is intentionally absent from the MCP
-/// surface. `tools/list` must not advertise it, and dispatching it
-/// must return a CLI-pointing tool error. Replaces the previous
-/// MCP-parity test (`mcp_unprotect_matches_cli_json`).
+/// `tools/list` does not advertise it, and calling `claude_unrestrict` returns a CLI-pointing error.
 #[test]
 fn unprotect_absent_from_mcp_surface() {
     let realm = realm_with_claude();
@@ -209,7 +191,6 @@ fn unprotect_absent_from_mcp_surface() {
     let base = system.canonicalize(realm.path()).unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
-    // tools/list does not advertise `unprotect`.
     let list_request = json!({
         "jsonrpc": "2.0",
         "id": 1_i32,
@@ -228,8 +209,6 @@ fn unprotect_absent_from_mcp_surface() {
         "claude_unrestrict must not appear in tools/list, got: {names:?}"
     );
 
-    // tools/call with name=claude_unrestrict returns a CLI-pointing tool
-    // error.
     let call_request = json!({
         "jsonrpc": "2.0",
         "id": 2_i32,
@@ -259,12 +238,7 @@ fn unprotect_absent_from_mcp_surface() {
     assert!(text.contains("remargin claude unrestrict"), "got: {text}");
 }
 
-/// Migration edge: a legacy realm (sidecar tracking projected rules)
-/// whose tracked deny rule has been hand-deleted from BOTH the
-/// realm-local and the user-scope settings file. `unprotect` must
-/// surface both misses — one warning per file — and still complete the
-/// yaml + sidecar reversal cleanly. Since the current `restrict` no
-/// longer projects, the legacy state is seeded directly here.
+/// A tracked rule hand-deleted from both settings files earns one warning per file.
 #[test]
 fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
     let realm = realm_with_claude();
@@ -272,9 +246,7 @@ fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
     let realm_local = realm.path().join(".claude/settings.local.json");
     let user_scope = user_settings_arg(&realm);
 
-    // Seed a legacy realm: .remargin.yaml entry + a sidecar tracking one
-    // projected deny rule across both settings files, but with the rule
-    // already hand-deleted from each (empty deny arrays).
+    // `restrict` projects nothing, so the sidecar-tracked state is seeded by hand.
     let canonical_realm = fs::canonicalize(realm.path()).unwrap();
     let target_key = format!("{}/src/secret", canonical_realm.display());
     let tracked_rule = format!("Edit({target_key}/**)");
@@ -316,10 +288,7 @@ fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
     assert_status(&out, 0);
     let stderr = str::from_utf8(&out.stderr).unwrap();
 
-    // Two warnings expected: one per file, each referencing the
-    // missing rule. The phrasing is owned by `revert_rules` —
-    // matching on `not present in` keeps the assertion stable
-    // against minor wording changes.
+    // `revert_rules` owns the wording; matching on `not present in` survives small changes to it.
     let warning_count = stderr.matches("not present in").count();
     assert_eq!(
         warning_count, 2,
@@ -334,14 +303,12 @@ fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
         "stderr should name the user-scope file: {stderr}"
     );
 
-    // Yaml entry was removed.
     let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
     assert!(
         !yaml.contains("src/secret"),
         "restrict entry should have been removed from yaml: {yaml}"
     );
 
-    // Sidecar entry was removed — no dangling entry left behind.
     let sidecar_body =
         fs::read_to_string(realm.path().join(".claude/.remargin-restrictions.json")).unwrap();
     let sidecar: Value = serde_json::from_str(&sidecar_body).unwrap();
@@ -351,8 +318,7 @@ fn unprotect_warns_per_settings_file_when_both_have_hand_deleted_rules() {
     );
 }
 
-/// Idempotency on the CLI surface: a second `unprotect` is a
-/// warn + no-op (exit 0).
+/// A second `unrestrict` warns and exits 0.
 #[test]
 fn cli_unprotect_is_idempotent() {
     let realm = realm_with_claude();
@@ -368,8 +334,7 @@ fn cli_unprotect_is_idempotent() {
     );
 }
 
-/// `--strict` against an unrestricted path exits
-/// non-zero with a clear error. The yaml stays untouched.
+/// `--strict` against an unrestricted path exits non-zero and leaves the yaml untouched.
 #[test]
 fn cli_unprotect_strict_unrestricted_path_fails() {
     let realm = realm_with_claude();
@@ -387,47 +352,20 @@ fn cli_unprotect_strict_unrestricted_path_fails() {
     assert!(!yaml_path.exists(), "no .remargin.yaml should be created");
 }
 
-// The previous `mcp_unprotect_strict_unrestricted_path_returns_error`
-// is gone — `unprotect` is no longer exposed via MCP. Strict-mode
-// error coverage now lives in the CLI-only
-// `cli_unprotect_strict_unrestricted_path_fails` above; the surface
-// removal itself is asserted by `unprotect_absent_from_mcp_surface`.
-
-// -----------------------------------------------------------------
-// — legacy projected rules scrubbed by unprotect via the
-// existing sidecar mechanism.
-// -----------------------------------------------------------------
-
-/// acceptance: the legacy ~80 projected deny rules
-/// emitted by older `restrict` runs (per-tool path denies,
-/// dot-folder defaults, ~70 Bash-mutator entries, source-side mv
-/// patterns) are scrubbed cleanly when `unprotect` runs against
-/// the matching sidecar.
-///
-/// Migration story: users who restrict-then-unprotect-after-upgrade
-/// get all their legacy rules cleaned up via the existing sidecar
-/// machinery, with no special-case migration code. The drift
-/// detector flags users who never run unprotect.
+/// Unrestrict scrubs every deny rule an older `restrict` projected, through the matching sidecar.
 #[test]
 fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
-    // Load the fixture files.
     let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_unprotect");
     let legacy_settings_body =
         fs::read_to_string(fixture_dir.join("legacy-settings.json")).unwrap();
     let sidecar_body = fs::read_to_string(fixture_dir.join("sidecar.json")).unwrap();
 
-    // Build a realm that mirrors the on-disk paths the fixture's
-    // sidecar references. The sidecar names the project-scope
-    // settings file as `/realm/.claude/settings.local.json`, but
-    // we run the test in a tempdir; fix the sidecar path to point
-    // to the temp realm so revert_rules can find the file.
+    // The fixture sidecar names `/realm/...` paths, so it is repointed at the temp realm.
     let realm = realm_with_claude();
     let realm_path = realm.path();
     let project_scope = realm_path.join(".claude/settings.local.json");
     fs::write(&project_scope, &legacy_settings_body).unwrap();
 
-    // Patch the sidecar's `added_to_files` to point at the temp
-    // project-scope settings file path.
     let mut sidecar_value: Value = serde_json::from_str(&sidecar_body).unwrap();
     let entries = sidecar_value["entries"].as_object_mut().unwrap();
     let entry = entries.values_mut().next().unwrap();
@@ -439,12 +377,8 @@ fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
     )
     .unwrap();
 
-    // Stand up the matching `.remargin.yaml` so `unprotect` finds
-    // a YAML entry to remove. The path "/realm/src/secret" in the
-    // sidecar maps to a relative `src/secret` from the realm root.
     let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
     fs::write(realm_path.join(".remargin.yaml"), yaml).unwrap();
-    // Patch the sidecar's entry key to also use the temp realm path.
     let new_key = realm_path.join("src/secret").to_string_lossy().to_string();
     let mut sidecar_value_v2: Value =
         serde_json::from_str(&fs::read_to_string(&sidecar_path).unwrap()).unwrap();
@@ -457,7 +391,6 @@ fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
     )
     .unwrap();
 
-    // Sanity: settings file currently carries the legacy rules.
     let pre_settings: Value =
         serde_json::from_str(&fs::read_to_string(&project_scope).unwrap()).unwrap();
     let pre_deny = pre_settings["permissions"]["deny"].as_array().unwrap();
@@ -467,10 +400,8 @@ fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
         pre_deny.len()
     );
 
-    // Run unprotect.
     let user_settings = realm_path.join("hermetic-user-settings.json");
-    // Touch the user settings file so `unprotect` doesn't think the
-    // path is unset (the sidecar only references the project file).
+    // `unrestrict` needs the user settings file to exist; the sidecar names only the project file.
     fs::write(&user_settings, "{}").unwrap();
     let out = run_in(
         realm_path,
@@ -484,7 +415,6 @@ fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
     );
     assert_status(&out, 0);
 
-    // Settings file is scrubbed of every legacy projected rule.
     let post_settings: Value =
         serde_json::from_str(&fs::read_to_string(&project_scope).unwrap()).unwrap();
     let post_deny = post_settings["permissions"]["deny"].as_array().unwrap();
@@ -493,7 +423,6 @@ fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
         "every legacy rule should be scrubbed; remaining: {post_deny:#?}"
     );
 
-    // Sidecar entries are empty.
     let post_sidecar: Value =
         serde_json::from_str(&fs::read_to_string(&sidecar_path).unwrap()).unwrap();
     let post_entries = post_sidecar["entries"].as_object().unwrap();

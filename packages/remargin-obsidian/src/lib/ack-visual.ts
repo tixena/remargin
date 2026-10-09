@@ -1,3 +1,5 @@
+/** The arrow and tone of the ack badge on a comment card. */
+
 /**
  * Visual variant for the Ack badge on a comment card. The arrow indicates
  * whether the comment has been acked by one of the people it was directed
@@ -5,8 +7,10 @@
  * the ack should be painted green (progress) or the default muted color.
  */
 export type AckArrow = "single" | "double";
+/** Whether the ack is painted green (progress) or the default muted color. */
 export type AckTone = "green" | "normal";
 
+/** The arrow and tone of one ack badge. */
 export interface AckVisual {
   arrow: AckArrow;
   tone: AckTone;

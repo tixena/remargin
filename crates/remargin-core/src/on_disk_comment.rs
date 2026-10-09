@@ -74,19 +74,13 @@ pub struct OnDiskComment {
     pub ts: String,
 }
 
-/// Manual [`Serialize`] impl pinning the canonical on-disk YAML emit
-/// order. Source-field order is alphabetical (per
-/// `arbitrary_source_item_ordering`); this impl emits in the original
-/// wire order so existing markdown documents stay byte-identical when
-/// rewritten.
+/// Emits fields in the wire order, not the alphabetical source order, so rewritten documents
+/// stay byte-identical.
 impl Serialize for OnDiskComment {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Field count includes the always-emitted ones (5) plus any
-        // conditional fields whose `skip_serializing_if` predicate
-        // returns false for this instance.
         let mut count = 5_usize; // id, author, type, ts, checksum
         if self.edited_at.is_some() {
             count += 1;
@@ -154,12 +148,8 @@ impl Serialize for OnDiskComment {
 }
 
 impl From<&Comment> for OnDiskComment {
-    // Bound-but-unused `_content` / `_line` patterns are intentional:
-    // the destructure is the compile-time check that every Comment
-    // field has been consciously routed (or skipped). `..` would let a
-    // future field slip through silently. Underscore-prefixed names
-    // satisfy `clippy::unneeded_field_pattern` (they are bindings, not
-    // wildcards) while still suppressing unused-variable warnings.
+    // The full destructure is the compile-time check that every `Comment` field is routed or
+    // skipped; `..` would let a new field slip through.
     fn from(comment: &Comment) -> Self {
         let Comment {
             ack,
@@ -228,12 +218,8 @@ impl From<&Comment> for OnDiskComment {
 ///
 /// # Errors
 ///
-/// Returns an error when:
-/// - `ts` or `edited_at` is not a valid RFC 3339 timestamp
-/// - `author_type` is not `"human"` or `"agent"`
-/// - any `ack` entry is missing the `@` separator or carries a
-///   non-RFC-3339 timestamp
-/// - any reaction entry's `ts` is not RFC 3339
+/// Returns an error when a timestamp is not RFC 3339, `author_type` is not `"human"` or
+/// `"agent"`, or an `ack` entry lacks the `@` separator.
 pub fn comment_from_on_disk(
     on_disk: OnDiskComment,
     content: String,

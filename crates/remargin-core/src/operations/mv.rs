@@ -44,11 +44,10 @@ use crate::writer::ensure_not_forbidden_target;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MvArgs {
-    /// Destination path (relative to `base_dir` or absolute).
+    /// Relative to `base_dir`, or absolute.
     pub dst: PathBuf,
-    /// Allow overwriting `dst` when it exists.
     pub force: bool,
-    /// Source path (relative to `base_dir` or absolute).
+    /// Relative to `base_dir`, or absolute.
     pub src: PathBuf,
 }
 
@@ -64,9 +63,6 @@ impl MvArgs {
         }
     }
 
-    /// Builder-style mutator: opt the args into `--force` overwrite
-    /// semantics. Returns `self` for chained construction in adapter
-    /// code.
     #[must_use]
     pub const fn with_force(mut self, force: bool) -> Self {
         self.force = force;
@@ -83,29 +79,17 @@ impl MvArgs {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvOutcome {
-    /// What the rename did at the filesystem level. Flattened in JSON.
     #[serde(flatten)]
     pub action: MvAction,
-    /// Bytes moved (file size at the source). `0` for a same-path no-op
-    /// or for an idempotent `src missing, dst already at destination`
-    /// re-run. For the directory case this is the sum of
-    /// the sizes of every regular file inside the directory at rename
-    /// time.
+    /// The source file's size, or the sum over every regular file of a directory; `0` for a no-op
+    /// or an already-settled re-run.
     pub bytes_moved: u64,
-    /// Canonical absolute destination path the bytes now live at.
     pub dst_absolute: PathBuf,
-    /// Number of regular files inside the source directory at rename
-    /// time. `0` for the file-mv case AND for the no-op / already-
-    /// settled branches. Reported in JSON so the caller knows how many
-    /// nested files moved with the directory.
+    /// Regular files inside the source directory at rename time; `0` for a file move or a no-op.
     pub nested_files_moved: usize,
-    /// Canonical absolute source path the bytes lived at before the
-    /// op. For the idempotent `src missing, dst present` re-run case
-    /// this is the lexical join of `base_dir` + `args.src` (since
-    /// canonicalization fails when the source is gone).
+    /// Canonical, except for an already-settled re-run, where the source is gone and this is the
+    /// lexical join of `base_dir` and the requested path.
     pub src_absolute: PathBuf,
-    /// What `src` resolved to + whether the op was a no-op. Flattened
-    /// in JSON.
     #[serde(flatten)]
     pub topology: MvTopology,
 }
@@ -131,11 +115,7 @@ impl MvOutcome {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvTopology {
-    /// `true` when the source resolved to a directory: the
-    /// op renamed the directory + every nested file as a unit.
     pub is_directory: bool,
-    /// `true` when [`MvArgs::src`] and [`MvArgs::dst`] resolved to the
-    /// same canonical path. The op is a no-op in this case.
     pub noop_same_path: bool,
 }
 
@@ -144,11 +124,9 @@ pub struct MvTopology {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvAction {
-    /// `true` when the rename fell back to `copy + remove` because the
-    /// in-process rename returned `EXDEV` (cross-filesystem move).
+    /// The rename returned `EXDEV` and the move fell back to copy and remove.
     pub fallback_copy: bool,
-    /// `true` when the destination existed before the call and was
-    /// overwritten. Only ever `true` when [`MvArgs::force`] was set.
+    /// Only ever `true` when [`MvArgs::force`] was set.
     pub overwritten: bool,
 }
 
@@ -185,20 +163,9 @@ pub struct MvAction {
 ///
 /// # Errors
 ///
-/// Returns an error when:
-///
-/// - Either endpoint is a forbidden target (e.g. `.remargin.yaml`).
-/// - Either endpoint escapes the sandbox.
-/// - Either endpoint is outside `trusted_roots` for the caller (per
-///   [`pre_mutate_check`]).
-/// - `args.src` is missing AND `args.dst` is also missing.
-/// - `args.src` is a file AND `args.dst` is an existing directory
-///   (file-into-directory moves require an explicit destination
-///   path; only directory-into-empty-or-non-existent is supported
-///   without it, ).
-/// - `args.dst` already exists and `args.force` is `false`.
-/// - The underlying `rename` (and, on `EXDEV` fallback, `copy` /
-///   `remove_file`) fails.
+/// Returns an error when an endpoint is a forbidden target, escapes the sandbox or is outside
+/// `trusted_roots`, both endpoints are missing, a file is moved onto an existing directory, the
+/// destination exists without `force`, or the rename or its copy fallback fails.
 pub fn mv(
     system: &dyn System,
     base_dir: &Path,
@@ -215,11 +182,7 @@ pub fn mv(
     let dst_lexical = lexical_join(base_dir, &args.dst);
     let dst_is_dir = system.is_dir(&dst_lexical).unwrap_or(false);
 
-    // For the file-mv path, we historically rejected the call when
-    // the destination was an existing directory. That rejection still
-    // applies — but ONLY when the source is a file. A directory-rename
-    // wants to move a dir into the dst path; an existing dst dir there
-    // is the overwrite-or-conflict case handled below.
+    // A file cannot be moved onto an existing directory; a directory source is handled below.
     if !src_is_dir && dst_is_dir {
         bail!(
             "destination is a directory: {} (this op moves a single file; pass an explicit destination path)",
@@ -227,9 +190,7 @@ pub fn mv(
         );
     }
 
-    // Resolve dst as a create-target. This canonicalises the parent
-    // dir + appends the filename so the sandbox boundary is enforced
-    // even when dst doesn't exist yet.
+    // Resolving `dst` as a create-target enforces the sandbox even when it does not exist yet.
     let dst_resolved = allowlist::resolve_sandboxed_create(
         system,
         base_dir,
@@ -256,10 +217,8 @@ pub fn mv(
         return same_path_noop(system, &src_resolved, dst_resolved, config);
     }
 
-    // Per-op guard on BOTH endpoints. A path outside `trusted_roots`
-    // on either side refuses the move — symmetrically with how
-    // `mv`'s default deny expansion blocks both source-side and
-    // destination-side shell `mv`.
+    // The per-op guard runs on both endpoints: a path outside `trusted_roots` on either side
+    // refuses the move.
     pre_mutate_check_for_caller(system, "mv", &src_resolved, &caller)?;
     pre_mutate_check_for_caller(system, "mv", &dst_resolved, &caller)?;
     config.ensure_can_read(system, &src_resolved)?;
@@ -323,9 +282,7 @@ fn resolve_src(
             &config.trusted_roots,
         )?))
     } else {
-        // Sandbox-validate the requested source even though the file
-        // is missing — escaping the sandbox is the same kind of
-        // boundary violation regardless of whether the file exists.
+        // A missing source is still sandbox-checked: escaping the boundary is a violation either way.
         allowlist::resolve_sandboxed_create(
             system,
             base_dir,
@@ -482,16 +439,11 @@ fn mv_directory(
         );
     }
 
-    // Count nested files + total bytes before the rename so the
-    // outcome can report them. After the rename the source path is
-    // gone.
+    // Counted before the rename: afterwards the source path is gone.
     let (nested_files_moved, bytes_moved) = directory_size_summary(system, src_resolved);
 
     if dst_pre_existed && args.force {
-        // Clear the destination first so the rename can land. We
-        // remove the whole subtree (matching `mv -f` semantics on a
-        // directory destination). If removal fails, surface that
-        // error verbatim — the rename has not started.
+        // Clear the destination subtree first so the rename can land, as `mv -f` does.
         if system.is_dir(&dst_resolved).unwrap_or(false) {
             system.remove_dir_all(&dst_resolved).with_context(|| {
                 format!("removing existing destination {}", dst_resolved.display())

@@ -1,13 +1,12 @@
 //! Session backends for `remargin session launch`.
 //!
 //! A backend renders a validated [`SessionLaunchSpec`] into what a
-//! multiplexer tab needs to bring one identity's session up. Per task 81's
-//! verified findings that is two things, not one: an **interactive** launch
+//! multiplexer tab needs to bring one identity's session up: an **interactive** launch
 //! command (argv) that starts the session, and the `/loop` + `/goal`
 //! slash-command lines that are *typed into* the already-running session via
-//! the multiplexer's send-keys. Rendering only -- starting the session and
-//! typing the seeds is task 86's job, and `remargin` never ends, reaps, or
-//! otherwise babysits the session it starts (design decision 2).
+//! the multiplexer's send-keys. Rendering only: the multiplexer module starts the session and
+//! types the seeds, and `remargin` never ends, reaps, or otherwise babysits the session it
+//! starts.
 
 use anyhow::{Context as _, Result, bail};
 use serde_json::json;
@@ -29,14 +28,12 @@ pub trait SessionBackend {
     /// Stable backend identifier (e.g. `"claude"`).
     fn name(&self) -> &'static str;
     /// Slash-command lines to type into the running session to start the
-    /// loop and set the goal (e.g. `["/loop 30s", "/goal ..."]`). Consumed
-    /// by task 86's send-keys.
+    /// loop and set the goal (e.g. `["/loop 30s", "/goal ..."]`).
     fn seed_inputs(&self, spec: &SessionLaunchSpec) -> Vec<String>;
 }
 
-/// The `claude` backend: an **interactive** `claude` session per task 81's
-/// verified invocation (v2.1.215), seeded with `/loop` + `/goal` through the
-/// multiplexer once the TUI is live.
+/// The `claude` backend: an **interactive** `claude` session, seeded with `/loop` + `/goal`
+/// through the multiplexer once the TUI is live.
 #[non_exhaustive]
 pub struct ClaudeBackend;
 
@@ -47,8 +44,7 @@ impl SessionBackend for ClaudeBackend {
             .argv
             .split_first()
             .context("session mcp argv is empty")?;
-        // Inline, `--strict-mcp-config`-scoped remargin server (task 81):
-        // no global `claude mcp add` is required.
+        // An inline `--strict-mcp-config`-scoped remargin server: no global `claude mcp add` needed.
         let mcp_config = json!({
             "mcpServers": { "remargin": { "command": mcp_command, "args": mcp_args } }
         })
@@ -73,9 +69,8 @@ impl SessionBackend for ClaudeBackend {
         argv.push("-n".to_owned());
         argv.push(spec.identity.clone());
         argv.push("--permission-mode".to_owned());
-        // `auto`, not `acceptEdits`: an unattended loop agent must be able to
-        // call the remargin MCP tools without stalling on a prompt, and
-        // `acceptEdits` only auto-approves file edits, not MCP tool calls.
+        // `auto`, not `acceptEdits`: an unattended loop agent must call the remargin MCP tools without
+        // stalling on a prompt, and `acceptEdits` approves only file edits.
         argv.push("auto".to_owned());
         // `budget.max_turns` rides in the `/goal` seed line (`seed_inputs`);
         // interactive `claude` has no budget flags.

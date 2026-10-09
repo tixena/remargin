@@ -19,7 +19,6 @@ use super::{
     write_document,
 };
 
-/// Build a minimal comment for testing.
 fn make_comment(id: &str, content: &str) -> Comment {
     Comment {
         ack: Vec::new(),
@@ -92,7 +91,6 @@ fn full_serialize() {
 
     let output = serialize_comment(&comment).unwrap();
 
-    // Verify canonical field order by checking relative positions.
     let id_pos = output.find("id: full").unwrap();
     let author_pos = output.find("author: eduardo").unwrap();
     let type_pos = output.find("type: agent").unwrap();
@@ -179,7 +177,6 @@ fn insert_after_line() {
     let comments = parser::parse(&markdown).unwrap().comments().len();
     assert_eq!(comments, 1_usize);
 
-    // Verify the comment appears between line 2 and line 3.
     let line2_pos = markdown.find("Line 2").unwrap();
     let comment_pos = markdown.find("id: ln2").unwrap();
     let line3_pos = markdown.find("Line 3").unwrap();
@@ -197,7 +194,6 @@ fn append_comment() {
     let markdown = doc.to_markdown().unwrap();
     assert!(markdown.contains("id: end1"));
 
-    // The comment should be at the end.
     let text_pos = markdown.find("Some text.").unwrap();
     let comment_pos = markdown.find("id: end1").unwrap();
     assert!(text_pos < comment_pos);
@@ -213,7 +209,6 @@ fn round_trip_serialize() {
     assert_eq!(reparsed.id, "rt1");
     assert_eq!(reparsed.content, "Round-trip test body.");
 
-    // Re-serialize and verify structural equivalence.
     let reserialized = serialize_comment(reparsed).unwrap();
     let doc2 = parser::parse(&reserialized).unwrap();
     assert_eq!(doc2.comments()[0].id, "rt1");
@@ -362,21 +357,14 @@ fn insert_after_last_line() {
     let markdown = doc.to_markdown().unwrap();
     assert!(markdown.contains("id: last"));
 
-    // Comment should appear after all body text.
     let line3_pos = markdown.find("Line 3").unwrap();
     let comment_pos = markdown.find("id: last").unwrap();
     assert!(line3_pos < comment_pos);
 }
 
-/// Regression: when the target file has no trailing newline, inserting a
-/// comment via `AfterLine` at (or beyond) the last line concatenated the
-/// opening fence onto the end of the last body line instead of starting it
-/// on its own line. The lint then reported "unclosed fenced code block"
-/// because the triple backticks were no longer at start-of-line. Reproduced
-/// originally against ~/.../remargin-issues.md (847 bytes, no trailing \n).
+/// With no trailing newline, the opening fence must still start on its own line.
 #[test]
 fn insert_after_line_preserves_fence_when_no_trailing_newline() {
-    // Three lines, NO trailing newline — mirrors the real-world failure case.
     let doc_str = "Line 1\nLine 2\nLine 3";
     assert!(!doc_str.ends_with('\n'));
 
@@ -392,9 +380,6 @@ fn insert_after_line_preserves_fence_when_no_trailing_newline() {
 
     let markdown = doc.to_markdown().unwrap();
 
-    // The rendered output must lint cleanly. Before the fix, this failed
-    // with "unclosed fenced code block" because the opening ```remargin was
-    // glued onto the end of `Line 3`.
     let lint_result = linter::lint_or_fail(&markdown);
     assert!(
         lint_result.is_ok(),
@@ -404,7 +389,6 @@ fn insert_after_line_preserves_fence_when_no_trailing_newline() {
             .map_or_else(String::new, |e| e.to_string()),
     );
 
-    // Belt and suspenders: the opening fence must be at start-of-line.
     assert!(
         markdown.contains("\n```remargin\n"),
         "opening fence should be on its own line; got:\n{markdown}"
@@ -421,7 +405,6 @@ fn insert_after_line_beyond_length_clamps() {
     let markdown = doc.to_markdown().unwrap();
     assert!(markdown.contains("id: far"));
 
-    // Comment should appear after all body text (effectively appended).
     let line2_pos = markdown.find("Line 2").unwrap();
     let comment_pos = markdown.find("id: far").unwrap();
     assert!(line2_pos < comment_pos);
@@ -429,9 +412,6 @@ fn insert_after_line_beyond_length_clamps() {
 
 #[test]
 fn after_comment_with_code_block_content() {
-    // Regression: AfterComment with triple-backtick content previously
-    // corrupted the document because the parser's serialize_comment used a
-    // stored fence_depth of 3 instead of computing from content.
     let doc_str = "\
 ```remargin
 ---
@@ -458,13 +438,11 @@ Some text after.
 
     let markdown = doc.to_markdown().unwrap();
 
-    // The outer fence must use 4+ backticks since content has triple backticks.
     assert!(
         markdown.contains("````remargin"),
         "expected 4-backtick fence for comment with code blocks:\n{markdown}"
     );
 
-    // Re-parse must succeed with both comments intact.
     let reparsed = parser::parse(&markdown).unwrap();
     let ids: Vec<&str> = reparsed
         .comments()
@@ -480,7 +458,6 @@ Some text after.
 
 #[test]
 fn append_with_code_block_content() {
-    // Same regression test as above, but for the Append insert path.
     let doc_str = "# Title\n\nSome text.\n";
     let mut doc = parser::parse(doc_str).unwrap();
 
@@ -490,13 +467,11 @@ fn append_with_code_block_content() {
 
     let markdown = doc.to_markdown().unwrap();
 
-    // The outer fence must use 4+ backticks.
     assert!(
         markdown.contains("````remargin"),
         "expected 4-backtick fence for appended comment with code blocks:\n{markdown}"
     );
 
-    // Re-parse must succeed.
     let reparsed = parser::parse(&markdown).unwrap();
     assert_eq!(reparsed.comments().len(), 1);
     assert_eq!(reparsed.comments()[0].id, "app1");
@@ -505,8 +480,6 @@ fn append_with_code_block_content() {
 
 #[test]
 fn round_trip_after_comment_code_block_all_comments_preserved() {
-    // Full round-trip: parse -> insert (AfterComment, code block content)
-    // -> to_markdown -> re-parse. All comments preserved, content identical.
     let initial_doc = "\
 ```remargin
 ---
@@ -546,8 +519,6 @@ Root comment.
 
 #[test]
 fn round_trip_append_code_block_all_comments_preserved() {
-    // Full round-trip: parse -> insert (Append, code block content)
-    // -> to_markdown -> re-parse.
     let initial_doc = "# Document\n\nBody text.\n";
     let mut doc = parser::parse(initial_doc).unwrap();
 
@@ -557,7 +528,6 @@ fn round_trip_append_code_block_all_comments_preserved() {
 
     let markdown = doc.to_markdown().unwrap();
 
-    // Needs 6+ backtick fence for 5-backtick content.
     assert!(
         markdown.contains("``````remargin"),
         "expected 6-backtick fence for deeply nested content:\n{markdown}"
@@ -570,11 +540,6 @@ fn round_trip_append_code_block_all_comments_preserved() {
         code_content
     );
 }
-
-// writer-side ack dedupe invariant. Every write produces a
-// document whose `ack:` lists carry at most one entry per identity, with
-// the latest timestamp. Reads tolerate legacy duplicates so existing
-// on-disk files do not error; writes self-heal them.
 
 fn ack_at(author: &str, ts_rfc3339: &str) -> Acknowledgment {
     Acknowledgment {
@@ -660,13 +625,8 @@ fn serialize_comment_collapses_duplicate_acks() {
     );
 }
 
-/// Build a minimal parsed document containing one comment whose ack
-/// list carries a same-identity duplicate. The comment is built via
-/// `serialize_comment` and the rest of the document is plain markdown
-/// — but we reach in via `&mut` to inject the duplicate that the
-/// writer would never emit. The point is to drive the writer-side
-/// dedupe path with a doc that LOOKS like one parsed off-disk from a
-/// pre-fix file.
+/// A parsed document whose one comment carries a same-identity duplicate ack, injected in
+/// memory because the writer never emits one.
 fn doc_with_duplicate_acks() -> parser::ParsedDocument {
     let mut comment = make_comment("dup", "body");
     comment.ack = vec![
@@ -674,8 +634,6 @@ fn doc_with_duplicate_acks() -> parser::ParsedDocument {
         ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
     ];
     let serialized = serialize_comment(&comment).unwrap();
-    // After serialization the ack is already deduped; manually splice
-    // the duplicate back in by re-parsing then mutating in-memory.
     let mut doc = parser::parse(&serialized).unwrap();
     let segments = &mut doc.segments;
     for seg in segments.iter_mut() {
@@ -710,8 +668,6 @@ fn write_document_self_heals_legacy_duplicate_acks() {
 
 #[test]
 fn write_then_reparse_then_write_is_byte_stable_for_duped_input() {
-    // Round-trip self-heal scenario: the first write deduplicates, the
-    // second is byte-identical because the input is already clean.
     let system = MemorySystem::new().with_dir(Path::new("/docs")).unwrap();
     let path = Path::new("/docs/rt.md");
     let doc = doc_with_duplicate_acks();
@@ -728,7 +684,6 @@ fn write_then_reparse_then_write_is_byte_stable_for_duped_input() {
 
 #[test]
 fn parse_tolerates_legacy_duplicate_acks_on_disk() {
-    // A pre-fix on-disk doc carries duplicate acks. Reads must succeed.
     let raw = "\
 ```remargin
 ---
@@ -753,9 +708,7 @@ body
     );
 }
 
-/// Pin the writer's emitted key set against `OnDiskComment`'s serde
-/// shape. Adding a field to `OnDiskComment` without teaching the
-/// writer to emit it will trip this test.
+/// Adding a field to `OnDiskComment` without teaching the writer to emit it trips this test.
 #[test]
 fn writer_emits_every_on_disk_comment_field() {
     let mut reactions = Reactions::new();

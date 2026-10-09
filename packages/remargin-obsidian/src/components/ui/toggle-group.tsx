@@ -1,3 +1,5 @@
+/** Toggle group primitives over Radix, sharing the toggle variants through context. */
+
 "use client";
 
 import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";

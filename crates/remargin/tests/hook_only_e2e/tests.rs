@@ -1,13 +1,9 @@
-//! Hook-only enforcement e2e (closer for the pretool single-source-of-truth
-//! epic).
+//! Hook-only enforcement, end to end.
 //!
-//! Proves that once `remargin restrict` stops projecting deny rules, the
-//! `PreToolUse` hook alone denies every native-tool and Bash access to a
-//! managed path that the retired rules used to catch, that `remargin
-//! doctor` flags a realm still carrying legacy projected rules, and that
-//! `unrestrict` on such a (migrated) realm reverses cleanly with no
-//! dangling sidecar entries. The six scenarios map 1:1 to the task's
-//! Testing Plan.
+//! Proves that with `remargin claude restrict` projecting no deny rules, the `PreToolUse` hook
+//! alone denies every native-tool and Bash access to a managed path, that `remargin doctor`
+//! flags a realm still carrying projected rules, and that `unrestrict` on such a realm reverses
+//! cleanly with no dangling sidecar entries.
 
 use std::fs;
 use std::io::Write as _;
@@ -105,9 +101,7 @@ fn assert_allow(out: &Output, ctx: &str) {
     );
 }
 
-/// Scenario 1: a fresh `restrict` writes no hook-covered deny rules — no
-/// settings files, no sidecar, no gitignore. The `.remargin.yaml` entry
-/// is the only artifact.
+/// A fresh `restrict` leaves the `.remargin.yaml` entry as its only artifact.
 #[test]
 fn scenario_1_fresh_restrict_writes_no_hook_covered_rules() {
     let realm = realm_with_claude();
@@ -138,9 +132,7 @@ fn scenario_1_fresh_restrict_writes_no_hook_covered_rules() {
     );
 }
 
-/// Scenario 2: a realm still carrying a legacy projected deny rule is
-/// flagged by `doctor` as leftover drift, and the hook still denies the
-/// managed path regardless.
+/// `doctor` flags a leftover projected deny rule, and the hook denies the managed path regardless.
 #[test]
 fn scenario_2_doctor_flags_legacy_projected_rule_hook_still_denies() {
     let realm = realm_with_claude();
@@ -148,9 +140,7 @@ fn scenario_2_doctor_flags_legacy_projected_rule_hook_still_denies() {
     let home = TempDir::new().unwrap();
     let user = home.path().join(".claude/settings.json");
 
-    // Restrict (writes only the .remargin.yaml entry), then install the
-    // enforcement hooks into the home-scope settings so `doctor` does not
-    // short-circuit on a missing hook.
+    // The hooks go into the home scope so `doctor` does not short-circuit on a missing hook.
     restrict(realm.path(), "secret", &user);
     for cmd in [
         ["claude", "pretool", "install"],
@@ -166,8 +156,6 @@ fn scenario_2_doctor_flags_legacy_projected_rule_hook_still_denies() {
         assert!(out.status.success(), "{cmd:?} failed");
     }
 
-    // Seed a leftover projected editor deny into the project-scope file —
-    // the exact shape an older `restrict` would have written.
     let canonical = fs::canonicalize(realm.path()).unwrap();
     let leftover = format!("Edit({}/secret/**)", canonical.display());
     fs::write(
@@ -197,14 +185,12 @@ fn scenario_2_doctor_flags_legacy_projected_rule_hook_still_denies() {
         "doctor should flag the leftover projected rule: {report}"
     );
 
-    // The hook denies the managed path from `.remargin.yaml` alone.
     let target = canonical.join("secret/foo.md");
     let out = run_pretool(realm.path(), "Read", &json!({ "file_path": target }));
     assert_deny(&out, "scenario 2 hook still denies");
 }
 
-/// Scenario 3: a hook-only realm denies every native path-touching tool
-/// on a managed path.
+/// Every native path-touching tool is denied on a managed path.
 #[test]
 fn scenario_3_native_tools_denied_on_managed_path() {
     let realm = realm_with_claude();
@@ -236,10 +222,7 @@ fn scenario_3_native_tools_denied_on_managed_path() {
     }
 }
 
-/// Scenario 4: a hook-only realm denies every Bash bypass on the
-/// shell-parsing regression list (chained mutator, pipe tee, subshell cd,
-/// plain cd, cat read, quoted prefix, glob segment) plus mv source- and
-/// destination-side shapes. The symlink case is covered by a unit test.
+/// Every Bash bypass on the shell-parsing list is denied, plus `mv` from and to a managed path.
 #[test]
 fn scenario_4_bash_bypasses_denied_on_managed_path() {
     let realm = realm_with_claude();
@@ -255,8 +238,7 @@ fn scenario_4_bash_bypasses_denied_on_managed_path() {
     let commands: [(&str, String); 9] = [
         ("chained mutator", format!("true && rm {secret}/x.md")),
         ("pipe tee", format!("echo hi | tee {secret}/x.md")),
-        // cd into the (unrestricted) realm root, then a relative mutator
-        // that the tracked cwd resolves back into the managed subtree.
+        // The tracked cwd resolves the relative mutator back into the managed subtree.
         ("subshell cd", format!("(cd {root} && rm secret/x.md)")),
         ("plain cd", format!("cd {root} && rm secret/x.md")),
         ("cat read", format!("cat {secret}/x.md")),
@@ -272,9 +254,7 @@ fn scenario_4_bash_bypasses_denied_on_managed_path() {
     }
 }
 
-/// Scenario 5: a dot folder the realm explicitly re-allows via
-/// `allow_dot_folders` is permitted, while other dot folders and non-dot
-/// paths under the (wildcard) realm stay denied.
+/// A dot folder named in `allow_dot_folders` is permitted; the rest of the realm stays denied.
 #[test]
 fn scenario_5_allowed_dot_folder_is_permitted() {
     let realm = realm_with_claude();
@@ -282,7 +262,6 @@ fn scenario_5_allowed_dot_folder_is_permitted() {
     let user = user_settings(&realm);
     restrict(realm.path(), "*", &user);
 
-    // Augment the wildcard realm with an explicit dot-folder re-allow.
     let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
     fs::write(
         realm.path().join(".remargin.yaml"),
@@ -313,10 +292,7 @@ fn scenario_5_allowed_dot_folder_is_permitted() {
     assert_deny(&non_dot, "scenario 5 non-dot path");
 }
 
-/// Scenario 6: `unrestrict` on a migrated realm (a legacy sidecar full of
-/// projected rules that are still present in the settings files) reverses
-/// cleanly — the rules are scrubbed, the sidecar entry is removed with no
-/// dangling entry, and the `.remargin.yaml` entry is gone.
+/// The projected rules are scrubbed and both the sidecar and `.remargin.yaml` entries are removed.
 #[test]
 fn scenario_6_unrestrict_migrated_realm_leaves_no_dangling_sidecar() {
     let realm = realm_with_claude();
@@ -327,8 +303,6 @@ fn scenario_6_unrestrict_migrated_realm_leaves_no_dangling_sidecar() {
     let key = format!("{}/secret", canonical.display());
     let rules = [format!("Edit({key}/**)"), format!("Write({key}/**)")];
 
-    // Seed the legacy state: yaml entry + both settings files carrying the
-    // projected rules + a sidecar tracking them.
     fs::write(
         realm.path().join(".remargin.yaml"),
         "permissions:\n  trusted_roots:\n    - path: secret\n",
@@ -372,7 +346,6 @@ fn scenario_6_unrestrict_migrated_realm_leaves_no_dangling_sidecar() {
         String::from_utf8_lossy(&out.stderr),
     );
 
-    // No dangling sidecar entry.
     let sidecar_after: Value = serde_json::from_str(
         &fs::read_to_string(realm.path().join(".claude/.remargin-restrictions.json")).unwrap(),
     )
@@ -382,7 +355,6 @@ fn scenario_6_unrestrict_migrated_realm_leaves_no_dangling_sidecar() {
         "sidecar entries should be empty after unrestrict: {sidecar_after}"
     );
 
-    // The legacy rules were scrubbed from both settings files.
     for file in [&project, &user] {
         let value: Value = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
         let deny = value["permissions"]["deny"].as_array().unwrap();
@@ -393,7 +365,6 @@ fn scenario_6_unrestrict_migrated_realm_leaves_no_dangling_sidecar() {
         );
     }
 
-    // The .remargin.yaml entry is gone.
     let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap_or_default();
     assert!(
         !yaml.contains("secret"),

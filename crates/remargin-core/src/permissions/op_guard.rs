@@ -111,8 +111,7 @@ impl CallerInfo {
 #[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OpGuardError {
-    /// A `deny_ops` item covers `target` and matches `op` with no
-    /// `exceptions` configured — blanket deny for every identity.
+    /// A `deny_ops` item with no `exceptions` covers `target` and matches `op`.
     #[error(
         "op `{op}` on `{target}` is denied by `deny_ops` rule in {source_file}",
         target = .target.display(),
@@ -124,8 +123,8 @@ pub enum OpGuardError {
         target: PathBuf,
     },
 
-    /// A `deny_ops` item covers `target` and matches `op`, has
-    /// non-empty `exceptions`, but caller is not in that allowlist.
+    /// A `deny_ops` item covers `target` and matches `op`, and the caller is not in its
+    /// `exceptions`.
     #[error(
         "op `{op}` on `{target}` is denied by `deny_ops` rule in {source_file} (caller `{caller}` is not in the exception list)",
         target = .target.display(),
@@ -138,8 +137,7 @@ pub enum OpGuardError {
         target: PathBuf,
     },
 
-    /// The path is inside a dot-folder under a restricted subtree and
-    /// the dot-folder is not in `allow_dot_folders`.
+    /// The path is inside a dot-folder that `allow_dot_folders` does not list.
     #[error("op `{op}` on `{target}` is denied — path is inside dot-folder `{folder}` (not in allow_dot_folders), under restricted subtree from {source_file}", target = .target.display(), source_file = .source_file.display())]
     DotFolderDenied {
         folder: String,
@@ -389,11 +387,8 @@ fn find_trusted_roots_violation(
     target: &Path,
     permissions: &ResolvedPermissions,
 ) -> Option<OpGuardError> {
-    // A realm locked to an empty allow-set denies every target under it;
-    // the shared predicate keeps this in lockstep with the pretool hook.
-    // `target_is_sanctioned` returns `true` for the empty/open set, so the
-    // lock case is decided first; otherwise a non-empty root set denies
-    // only targets no entry covers.
+    // The lock case is decided first: `target_is_sanctioned` returns `true` for the empty set, and
+    // a realm locked to an empty allow-set denies every target under it.
     let source_file = if permissions.locked_to_empty_roots() {
         permissions.trusted_roots_lock.clone()
     } else if target_is_sanctioned(target, &permissions.trusted_roots) {
@@ -424,10 +419,8 @@ pub(crate) fn first_disallowed_dot_folder(
     let suffix = target.strip_prefix(realm_anchor).ok()?;
     let mut components = suffix.components();
 
-    // The final component is the file itself; only intermediate
-    // directory components carry dot-folder semantics for "this file
-    // lives inside <dot-folder>". A leading dot on the file name
-    // alone (e.g. `.envrc`) does not trigger the guard.
+    // The final component is the file itself; only intermediate directories count, so a dotfile
+    // such as `.envrc` does not trigger the guard.
     components.next_back()?;
 
     components.find_map(|comp| {

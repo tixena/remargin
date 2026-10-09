@@ -224,9 +224,9 @@ impl DoctorReport {
 struct ClaudeProbe {
     /// User scope first, then project scope.
     files: [PathBuf; 2],
-    /// `PreToolUse` outcome per scope, in the same order as `files`.
+    /// Per scope, in the order of `files`.
     hook: [TestOutcome; 2],
-    /// `SessionStart` outcome per scope, in the same order as `files`.
+    /// Per scope, in the order of `files`.
     session_guard: [GuardTestOutcome; 2],
 }
 
@@ -341,15 +341,14 @@ impl ClaudeProbe {
 /// one snapshot: a second probe could observe a stack that changed between
 /// them and report a verdict its own findings contradict.
 struct GooseProbe {
-    /// `PreToolUse` outcome per scope — user first, then project.
+    /// Per scope: user first, then project.
     guard: [GooseTestOutcome; 2],
-    /// MCP extension outcome per config file, in the same order as the
-    /// paths below.
+    /// Per config file, in the order of the paths below.
     mcp: [GooseMcpTestOutcome; 2],
     mcp_local_file: PathBuf,
     mcp_user_file: PathBuf,
     project_dir: PathBuf,
-    /// `SessionStart` outcome per scope, in the same order as `guard`.
+    /// Per scope, in the order of `guard`.
     session_guard: [GooseTestOutcome; 2],
     user_dir: PathBuf,
 }
@@ -442,12 +441,10 @@ impl GooseProbe {
 
 /// Why a `permissions.deny` rule is flagged as leftover drift.
 enum LeftoverReason {
-    /// Path rule the hook now covers — it is in [`hook_covered_rules`],
-    /// so the static copy in settings is a duplicate an older restrict
-    /// left behind.
+    /// A path rule in [`hook_covered_rules`]: the hook enforces it, so the settings copy is
+    /// redundant.
     Projected,
-    /// Stale `Bash(remargin *)` CLI deny the synchronizer no longer
-    /// emits — CLI denial is the hook's job via `cli_allowed`.
+    /// A `Bash(remargin *)` deny: CLI denial is the hook's job through `cli_allowed`.
     StaleCli,
 }
 
@@ -466,11 +463,9 @@ pub enum CheckName {
     ConfigSchemaLint,
     /// The goose guard plugin, when a goose installation is present.
     GooseGuard,
-    /// remargin's registration as a goose MCP extension — the guard's
-    /// redirect target — when a goose installation is present.
+    /// remargin's registration as a goose MCP extension, the guard's redirect target.
     GooseMcp,
-    /// The goose `SessionStart` backstop, when a goose installation is
-    /// present.
+    /// The goose `SessionStart` backstop.
     GooseSessionGuard,
     /// The `PreToolUse` enforcement hook — always gates the run.
     Hook,
@@ -489,9 +484,7 @@ pub enum CheckName {
 }
 
 impl CheckName {
-    /// Every check, in a stable order. Single source of truth for
-    /// [`all`](Self::all), [`from_slug`](Self::from_slug), and
-    /// [`valid_slugs`](Self::valid_slugs).
+    /// In a stable order.
     const ALL: [Self; 11] = [
         Self::ConfigSchemaLint,
         Self::GooseGuard,
@@ -603,9 +596,8 @@ pub fn run_doctor(
     let hook_installed = claude.hook_installed();
     let session_guard_installed = claude.session_guard_installed();
 
-    // Probed before the hook gate so the verdicts survive its short-circuit:
-    // a report that dropped them there would say there is no goose
-    // installation at all, which is the one thing `None` means.
+    // Probed before the hook gate so the verdicts survive its short-circuit; without them the
+    // report would read as no goose installation at all.
     let goose = probe_goose(system, cwd)?;
     let goose_guard_installed = goose.as_ref().map(GooseProbe::guard_installed);
     let goose_mcp_installed = goose.as_ref().map(GooseProbe::mcp_installed);
@@ -653,27 +645,16 @@ pub fn run_doctor(
 
     findings.extend(goose_findings(goose.as_ref(), checks));
 
-    // Lint containment before resolving: an out-of-realm entry makes
-    // `resolve_permissions` (which the leftover check walks through)
-    // fail closed, so doctor must name the misconfig here rather than
-    // crash on the very error it exists to explain. `has_escape` is a
-    // safety precondition for the resolve-dependent block below, so the
-    // escape scan runs even when `TrustedRootEscape` is deselected; only
-    // the findings it contributes are gated on selection.
+    // An out-of-realm entry makes `resolve_permissions` fail closed, so the escape scan runs even
+    // when its finding is deselected: `has_escape` gates the resolve-dependent block below.
     let escapes = find_trusted_root_escapes(system, cwd)?;
     let has_escape = !escapes.is_empty();
     if checks.contains(&CheckName::TrustedRootEscape) {
         findings.extend(escapes.iter().map(trusted_root_escape_finding));
     }
 
-    // Schema lint reads configs via `lint_permissions_in_parents`, which
-    // never resolves or bails, so it is safe on a malformed config — and it
-    // must run before the resolve-dependent checks so a parse/schema fault
-    // is named here rather than swallowed by their fail-closed `?`. Escapes
-    // are filtered out (they own `TrustedRootEscape` above), so a non-empty
-    // result means a fault that also makes `resolve_permissions` bail.
-    // `config_resolves` is likewise a safety precondition, so the lint runs
-    // regardless of selection; only its findings are gated.
+    // The schema lint never resolves, so it is safe on a malformed config, and it runs before the
+    // resolve-dependent checks so a parse fault is named here. Only its findings follow selection.
     let schema_lints = config_schema_lint_findings(system, cwd)?;
     let config_resolves = schema_lints.is_empty();
     if checks.contains(&CheckName::ConfigSchemaLint) {
@@ -681,9 +662,7 @@ pub fn run_doctor(
     }
 
     if !has_escape && config_resolves {
-        // Drift lives where the retired projection wrote: restrict emitted
-        // rules into settings.local.json, so that file is scanned alongside
-        // the hook-scope files.
+        // `settings.local.json` is where projected rules were written, so it is scanned as well.
         let settings_files = [
             user_settings_file.to_path_buf(),
             project_settings_file.clone(),
@@ -779,9 +758,7 @@ fn leftover_projected_rule_findings(
         .map(|rule| canonicalize_rule(rule))
         .collect();
 
-    // Reuse the synchronizer's simulator for the file read / JSON parse
-    // and the on-disk deny extraction; the projected `RuleSet` is what
-    // makes its `deny_rules_already_present` split meaningful here.
+    // The synchronizer's simulator does the file read and the on-disk deny extraction.
     let sims = claude_sync::simulate_apply_rules(system, settings_files, &projected)?;
 
     let mut findings = Vec::new();

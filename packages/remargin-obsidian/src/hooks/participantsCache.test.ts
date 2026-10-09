@@ -1,3 +1,5 @@
+/** Tests for the participants cache key, display-name resolution and registry loading. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { Participant, RemarginBackend } from "../backend/index.ts";
@@ -67,8 +69,6 @@ describe("resolveDisplayNameFrom", () => {
   });
 
   it("falls back to the id when no display name is set (CLI fallback already applied)", () => {
-    // The CLI always emits a non-empty `display_name`; this edge case
-    // covers manual construction where the field is empty.
     const participants = [participant({ name: "ci", display_name: "" })];
     assert.strictEqual(resolveDisplayNameFrom(participants, "ci"), "ci");
   });
@@ -101,7 +101,6 @@ describe("loadParticipants", () => {
     const stub: RegistryStub = {
       registryShow: () => Promise.reject(new Error("spawn failure")),
     };
-    // Silence the expected console.error for the duration of this test.
     const originalError = console.error;
     console.error = () => {
       // intentionally empty: loadParticipants logs the error and we

@@ -1,3 +1,5 @@
+/** Reading-mode comment widgets: a post-processor that replaces remargin code blocks. */
+
 import {
   type MarkdownPostProcessor,
   type MarkdownPostProcessorContext,
@@ -14,13 +16,7 @@ import { buildThreadTree, type ThreadNode, walkThread } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
 import { type ParsedBlock, parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
 
-/**
- * Indirection for `createRoot` so unit tests can swap it for a mock
- * without monkey-patching the imported binding. Production code uses
- * the default React 19 implementation; the test seam below is the only
- * non-test caller. Keep this private to the module — exposing it would
- * be an architectural smell.
- */
+/** Test seam for `createRoot`; module-private. */
 let createRootImpl: typeof defaultCreateRoot = defaultCreateRoot;
 
 /**
@@ -40,12 +36,7 @@ export function parseFromInnerContent(inner: string): ReturnType<typeof parseRem
   return parseRemarginBlocks(wrapped);
 }
 
-/**
- * Test-only seam: replace the `createRoot` factory so tests can
- * exercise `ReadingModeCommentChild.onload` / `onunload` without a
- * real DOM. NOT exported via the package barrel; only the unit test
- * imports it.
- */
+/** Test-only seam: swaps the `createRoot` factory so the lifecycle runs without a DOM. */
 export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): void {
   createRootImpl = impl ?? defaultCreateRoot;
 }
@@ -89,17 +80,13 @@ export function remarginPostProcessor(plugin: RemarginPlugin): MarkdownPostProce
       if (!pre) continue;
 
       const parsed = parseFromInnerContent(code.textContent ?? "");
-      // Skip when the fence wasn't a single, well-formed comment block.
-      // We need exactly one valid parsed block with an id — anything else
-      // (zero, multiple, or invalid) falls through to the raw `<pre>`.
+      // Exactly one valid parsed block with an id; anything else falls through to the raw `<pre>`.
       if (parsed.length !== 1) continue;
       const block = parsed[0];
       if (!block.valid || !block.comment.id) continue;
 
       const host = document.createElement("div");
-      // `remargin-container` makes Tailwind utilities scoped via
-      // tailwind.config.ts's `important: ".remargin-container"` apply
-      // to this widget's subtree (tooltips and all).
+      // `remargin-container` is what scopes the Tailwind utilities to this widget's subtree.
       host.className = "remargin-reading-host remargin-container";
       host.dataset.remarginId = block.comment.id;
       // visibility, not display:none — a zero-height section stalls
@@ -131,12 +118,8 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
   private root: Root | null = null;
   private unsubscribeCollapse: (() => void) | null = null;
   private unsubscribeVault: (() => void) | null = null;
-  /** Resolved subtree once `cachedRead` returns. Null until then. */
   private subtree: ThreadNode | null = null;
-  /**
-   * True when our id is a non-orphan reply: parent exists in the doc,
-   * so this host yields rendering to the parent.
-   */
+  /** True for a reply whose parent is in the doc: the parent's host renders it. */
   private suppressed = false;
   /** Ids covered by the current subtree — used to filter collapse notifications. */
   private subtreeIds = new Set<string>();
@@ -161,9 +144,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
       if (this.subtreeIds.has(id)) this.render();
     });
     void this.loadTree();
-    // Refresh the tree if the source file mutates while we're mounted
-    // (e.g. another pane edits it). Reading-mode re-render handles most
-    // updates already, but the listener catches background edits.
+    // Catches background edits of the source file, e.g. from another pane.
     const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
     if (file instanceof TFile) {
       const handler = (modified: TAbstractFile) => {
@@ -188,10 +169,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     if (!id) return;
     const file = this.plugin.app.vault.getAbstractFileByPath(this.sourcePath);
     if (!(file instanceof TFile)) {
-      // Sourcepath didn't resolve to a vault file (off-vault preview,
-      // path mismatch, etc.). Without the doc-scope tree we can't
-      // suppress, so render the leaf as a graceful fallback so the
-      // user at least sees something.
+      // The path resolved to no vault file: with no document tree to suppress by, render the leaf.
       console.warn("[remargin] loadTree: no TFile for", this.sourcePath, "— rendering leaf only");
       this.reveal();
       return;
@@ -201,9 +179,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     try {
       text = await this.plugin.app.vault.cachedRead(file);
     } catch (err) {
-      // Read failed — render the leaf as a fallback so the host doesn't
-      // stay hidden forever. Without doc-scope context we can't make a
-      // suppression decision; surface the comment rather than nothing.
+      // The read failed: render the leaf so the host does not stay hidden.
       console.warn("[remargin] loadTree: cachedRead failed for", this.sourcePath, err);
       this.reveal();
       return;
@@ -222,13 +198,11 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     const rootIds = new Set(trees.map((n) => n.comment.id));
 
     if (!rootIds.has(id)) {
-      // Reply whose parent IS in the doc: yield to the parent's host.
       this.suppressed = true;
       this.subtree = null;
       this.subtreeIds = new Set();
-      // Collapse AFTER the render pass — display:none mid-render leaves a
-      // zero-height section that stalls Obsidian's incremental renderer
-      // (trailing content stops painting). Stays visibility:hidden until.
+      // Collapse after the render pass: display:none mid-render leaves a zero-height section that
+      // stalls Obsidian's incremental renderer.
       this.collapse();
       return;
     }
@@ -248,10 +222,7 @@ export class ReadingModeCommentChild extends MarkdownRenderChild {
     const id = this.parsed.comment.id;
     if (!id) return;
     const node: ThreadNode = this.subtree ?? {
-      // The widget expects a full `Comment`. The parser returns
-      // `Partial<Comment>` because malformed blocks may miss fields —
-      // but the post-processor filters to `valid && id`, so the cast
-      // is sound. Header/body components handle missing optionals.
+      // The post-processor filters to `valid && id`, so the cast from `Partial<Comment>` is sound.
       comment: this.parsed.comment as Comment,
       replies: [],
     };

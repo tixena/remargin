@@ -1,10 +1,5 @@
-//! Tests for the comment-body style gate.
-//!
-//! Two halves, and the second matters more: the gate must refuse an agent's
-//! slab of prose, and it must stay out of the way of everything else — a
-//! human author, a quoted bad example, a warn-tier heuristic. A gate that
-//! fires wrongly is worse than no gate, because the author pays for it by
-//! deleting content until the tool relents.
+//! Tests for the comment-body style gate: it must refuse an agent's slab of prose and stay out of
+//! the way of a human author, a quoted bad example and a warn-tier heuristic.
 
 use super::{Severity, TRAILING_METADATA_OPENERS, gate, gate_edit, notes, review};
 use crate::parser::AuthorType;
@@ -85,7 +80,6 @@ fn trailing_metadata_inside_a_fenced_block_is_accepted() {
 
 #[test]
 fn trailing_metadata_inside_a_blockquote_is_accepted() {
-    // The worked example that teaches the rule quotes the thing it forbids.
     let body = "**Before**: the answer, then an aside the reader cannot act on:\n\n> Posted as a self-reply, so nothing was acked.\n>\n> One observation I cannot act on: the sidebar shows a badge even though no recipient was passed.\n";
 
     gate(body, &AuthorType::Agent).unwrap();

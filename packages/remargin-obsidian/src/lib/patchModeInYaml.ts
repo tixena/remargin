@@ -1,3 +1,5 @@
+/** In-place patch of the `mode:` field in `.remargin.yaml`. */
+
 /**
  * Patch the top-level `mode:` field of a minimal YAML document used by
  * `.remargin.yaml`. Preserves every other line, comment, and blank line.
@@ -21,8 +23,6 @@ export function patchModeInYaml(source: string, mode: string): string {
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? "";
-    // Only top-level keys — any leading whitespace means this is nested
-    // under something else and should not be touched.
     if (/^\s/.test(line)) continue;
     const match = keyRe.exec(line);
     if (!match) continue;
@@ -33,7 +33,6 @@ export function patchModeInYaml(source: string, mode: string): string {
     return lines.join("\n");
   }
 
-  // No existing top-level `mode:` — append.
   if (source.length === 0) {
     return `mode: ${mode}\n`;
   }

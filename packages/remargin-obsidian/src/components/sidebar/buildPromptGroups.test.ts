@@ -1,3 +1,5 @@
+/** Tests for grouping sandboxed files by resolved system prompt. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { ResolvedSystemPrompt } from "../../backend/types.ts";
@@ -45,7 +47,6 @@ describe("buildPromptGroups", () => {
     ]);
     const out = buildPromptGroups(files, prompts, new Map(), new Set(files));
     assert.equal(out.length, 2);
-    // /vault/code comes before /vault/docs lex-wise.
     assert.equal(out[0]?.name, "SWE reviewer");
     assert.deepEqual(out[0]?.files, ["code/a.md", "code/c.md"]);
     assert.equal(out[1]?.name, "Docs");

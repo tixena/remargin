@@ -1,3 +1,5 @@
+/** Decides when the inbox re-probes the caller's identity. */
+
 /**
  * Gate value for the inbox's identity probe, fed to the probe effect's
  * dependency array. `null` means "already resolved — never probe again",

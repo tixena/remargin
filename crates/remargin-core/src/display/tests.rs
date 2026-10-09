@@ -119,7 +119,6 @@ fn tree_root_with_replies() {
     assert_eq!(forest.len(), 1);
     assert_eq!(forest[0].comment.id, "abc");
     assert_eq!(forest[0].children.len(), 2);
-    // Children sorted by ts: ccc (14:03) before bbb (14:05).
     assert_eq!(forest[0].children[0].comment.id, "ccc");
     assert_eq!(forest[0].children[1].comment.id, "bbb");
 }
@@ -151,7 +150,6 @@ fn tree_multiple_roots() {
     let comments: Vec<&Comment> = vec![&root_a, &root_b, &reply_c];
     let forest = build_comment_tree(&comments);
 
-    // Two roots sorted by line: bbb (line 10) before aaa (line 50).
     assert_eq!(forest.len(), 2);
     assert_eq!(forest[0].comment.id, "bbb");
     assert_eq!(forest[1].comment.id, "aaa");
@@ -165,7 +163,6 @@ fn tree_orphan_reply() {
     let comments: Vec<&Comment> = vec![&orphan];
     let forest = build_comment_tree(&comments);
 
-    // Orphan treated as root.
     assert_eq!(forest.len(), 1);
     assert_eq!(forest[0].comment.id, "bbb");
 }
@@ -241,7 +238,6 @@ fn render_reply_indentation() {
     let comments: Vec<&Comment> = vec![&root, &reply];
     let output = format_comments_pretty("file.md", &comments);
 
-    // Root header indented 2 spaces, reply header indented 4 spaces.
     assert!(output.contains("  abc \u{00b7} eduardo (human)"));
     assert!(output.contains("    xyz \u{00b7} claude (agent)"));
 }
@@ -254,7 +250,6 @@ fn render_deep_indent() {
     let comments: Vec<&Comment> = vec![&a, &b, &c];
     let output = format_comments_pretty("file.md", &comments);
 
-    // Depth 0 = 2 spaces, depth 1 = 4, depth 2 = 6.
     assert!(output.contains("      ccc \u{00b7}"));
 }
 
@@ -397,8 +392,6 @@ fn render_footer() {
         ack: vec![ack],
         ..TestComment::default()
     });
-    // broadcasts count as pending unless acked. Close
-    // these two so the footer still asserts "2 pending" (from cm1/cm2).
     let ack4 = make_ack("dave", "2026-04-06T15:10:00-04:00");
     let cm4 = build_comment(TestComment {
         id: "ddd",
@@ -449,9 +442,6 @@ fn render_no_pending() {
         ack: vec![ack1],
         ..TestComment::default()
     });
-    // a broadcast (no `to`) counts as pending unless
-    // somebody has acked it. Close both broadcasts with an ack so the
-    // footer reads "0 pending".
     let ack2 = make_ack("bob", "2026-04-06T14:10:00-04:00");
     let cm2 = build_comment(TestComment {
         id: "bbb",
@@ -485,7 +475,6 @@ fn render_content_with_special_chars() {
     let comments: Vec<&Comment> = vec![&cm];
     let output = format_comments_pretty("file.md", &comments);
 
-    // The special characters should appear literally.
     assert!(output.contains("Line with \u{2502} bar and `backticks` here"));
 }
 
@@ -497,7 +486,6 @@ fn render_orphan_mixed_with_roots() {
     let comments: Vec<&Comment> = vec![&root1, &root2, &orphan];
     let output = format_comments_pretty("file.md", &comments);
 
-    // All 3 appear as roots in document order: aaa (10), ccc (20), bbb (30).
     let aaa_pos = output.find("aaa \u{00b7}").unwrap();
     let ccc_pos = output.find("ccc \u{00b7}").unwrap();
     let bbb_pos = output.find("bbb \u{00b7}").unwrap();
@@ -507,8 +495,6 @@ fn render_orphan_mixed_with_roots() {
 
 #[test]
 fn broadcast_no_ack_is_pending() {
-    // Broadcast (empty `to`) with no acks is pending: a fresh
-    // broadcast keeps the conversation open until somebody acks.
     let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
     assert!(is_pending(&cm));
     assert_eq!(count_pending(&[&cm]), 1);
@@ -516,8 +502,6 @@ fn broadcast_no_ack_is_pending() {
 
 #[test]
 fn broadcast_with_ack_not_pending() {
-    // Any ack closes a broadcast from the "is this conversation
-    // still open?" perspective used by count_pending.
     let ack = make_ack("alice", "2026-04-06T15:00:00-04:00");
     let cm = build_comment(TestComment {
         id: "abc",
@@ -538,7 +522,6 @@ fn pending_with_partial_ack() {
         ack: vec![ack],
         ..TestComment::default()
     });
-    // alice acked but bob didn't -> still pending.
     assert!(is_pending(&cm));
 }
 
@@ -589,11 +572,6 @@ fn make_expanded(
 fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult {
     let comment_count = u32::try_from(comments.len()).unwrap_or(u32::MAX);
     let last_activity = comments.iter().map(|c| c.ts).max();
-    // Pending count is computed by the pretty-printer from the
-    // comments themselves (expanded mode); the stored
-    // QueryResult.pending_count is unused by format_query_pretty for
-    // the footer, but we keep it consistent for readers that inspect
-    // the struct.
     let pending_count = u32::try_from(
         comments
             .iter()
@@ -633,13 +611,10 @@ fn query_pretty_single_file() {
     let result = make_query_result("docs/design.md", vec![cm]);
     let output = format_query_pretty(&[result], None);
 
-    // a broadcast (empty `to`) with no acks counts as
-    // pending, so "1 pending" here (one broadcast, unacked).
     assert!(output.contains("docs/design.md (1 comment, 1 pending)"));
     assert!(output.contains("docs/design.md:10"));
     assert!(output.contains("abc \u{00b7} eduardo (human) \u{00b7} 2026-04-06 14:00"));
     assert!(output.contains("\u{2502} Fix this bug."));
-    // Grand footer.
     assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
     assert!(output.contains("1 pending across 1 file"));
 }
@@ -656,7 +631,6 @@ fn query_pretty_header_names_both_counts_under_a_filter() {
         "docs/design.md",
     );
     let mut result = make_query_result("docs/design.md", vec![cm]);
-    // A comment-level filter kept one of the file's 190 comments.
     result.comment_count = 190;
 
     let output = format_query_pretty(&[result], Some("for alice"));
@@ -690,13 +664,11 @@ fn query_pretty_multi_file() {
     let result_b = make_query_result("src/b.md", vec![cm1]);
     let result_a = make_query_result("src/a.md", vec![cm2]);
 
-    // Pass in non-alphabetical order; output should sort alphabetically.
     let output = format_query_pretty(&[result_b, result_a], None);
 
     let pos_a = output.find("src/a.md (1 comment,").unwrap();
     let pos_b = output.find("src/b.md (1 comment,").unwrap();
     assert!(pos_a < pos_b, "Files should be sorted alphabetically");
-    // broadcasts with no acks count as pending.
     assert!(output.contains("2 pending across 2 files"));
 }
 
@@ -718,15 +690,12 @@ fn query_pretty_pending_for() {
     let output = format_query_pretty(&[result], Some("for alice"));
 
     assert!(output.contains("1 pending for alice"));
-    // Per-file header also uses the filter name.
     assert!(output.contains("design.md (1 comment, 1 pending for alice)"));
-    // Grand footer.
     assert!(output.contains("1 pending for alice across 1 file"));
 }
 
 #[test]
 fn query_pretty_flat_not_threaded() {
-    // A reply should appear at depth=0 (flat), not nested.
     let root = make_expanded(
         "aaa",
         "eduardo",
@@ -750,12 +719,9 @@ fn query_pretty_flat_not_threaded() {
 
     let output = format_query_pretty(&[result], None);
 
-    // Both comments should be at the same indentation (2 spaces).
     assert!(output.contains("  aaa \u{00b7} eduardo (human)"));
     assert!(output.contains("  bbb \u{00b7} claude (agent)"));
-    // Reply should still show the reply-to marker.
     assert!(output.contains("\u{2502} \u{2934} reply-to: aaa"));
-    // Reply (line 10) should come BEFORE root (line 20) since sorted by line.
     let bbb_pos = output.find("bbb \u{00b7}").unwrap();
     let aaa_pos = output.find("aaa \u{00b7}").unwrap();
     assert!(
@@ -835,7 +801,6 @@ fn query_pretty_acked_status() {
     let output = format_query_pretty(&[result], None);
 
     assert!(output.contains("\u{2502} \u{2713} acked by alice @ 2026-04-06 15:00"));
-    // Should NOT contain "pending" line for this comment.
     assert!(!output.contains("\u{2502} pending\n"));
 }
 
@@ -843,7 +808,6 @@ fn query_pretty_acked_status() {
 fn query_pretty_empty_results() {
     let output = format_query_pretty(&[], None);
 
-    // Grand footer still present.
     assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
     assert!(output.contains("0 pending across 0 files"));
 }
@@ -862,8 +826,6 @@ fn query_pretty_no_filter() {
     let result = make_query_result("file.md", vec![cm]);
     let output = format_query_pretty(&[result], None);
 
-    // Without filter_name, footer should just say "N pending" not "pending for <name>".
-    // the unacked broadcast contributes one pending.
     assert!(output.contains("1 pending\n"));
     assert!(!output.contains("pending for"));
 }
@@ -927,14 +889,11 @@ fn query_no_pretty_unchanged() {
     let result = make_query_result("file.md", vec![cm]);
     let output = format_query_pretty(&[result], None);
 
-    // Pretty output has file:line links, vertical bars, and footer separators.
     assert!(output.contains("file.md:10"));
     assert!(output.contains("\u{2502}"));
     assert!(output.contains("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"));
     assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
 }
-
-// --- Tests for utility functions moved from main.rs ---
 
 fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
     chrono::DateTime::parse_from_rfc3339(s).unwrap()
@@ -1005,7 +964,6 @@ fn render_activity_cutoff_header_implicit_initial_touch() {
 
 #[test]
 fn render_activity_cutoff_header_explicit_missing_ts() {
-    // Defensive case: explicit=true but cutoff is None.
     let header = render_activity_cutoff_header(true, None);
     assert!(
         header.contains("explicit cutoff missing"),

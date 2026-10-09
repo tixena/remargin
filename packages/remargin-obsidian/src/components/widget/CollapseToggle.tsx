@@ -1,6 +1,9 @@
+/** The chevron that collapses or expands an editor-side comment widget. */
+
 import type { MouseEvent } from "react";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 
+/** Props for {@link CollapseToggle}. */
 interface CollapseToggleProps {
   collapsed: boolean;
   onToggle: () => void;
@@ -17,8 +20,6 @@ interface CollapseToggleProps {
  */
 export function CollapseToggle({ collapsed, onToggle }: CollapseToggleProps) {
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
-    // Stop the surrounding `WidgetCommentView` click from also firing.
-    // Without this, clicking the chevron toggles AND opens the sidebar.
     event.stopPropagation();
     onToggle();
   };

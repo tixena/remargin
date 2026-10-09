@@ -1,3 +1,5 @@
+/** Tests for the recipient picker's option list. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { Participant } from "../backend/index.ts";
@@ -81,7 +83,7 @@ describe("pickerOptions", () => {
     const input = [
       participant({ name: "alice" }),
       participant({ name: "bob", status: "revoked" }),
-      participant({ name: "alice" }), // duplicate
+      participant({ name: "alice" }),
       participant({ name: "carol" }),
     ];
     const result = pickerOptions(input, ["carol"]);

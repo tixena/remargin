@@ -1,3 +1,5 @@
+//! Tests for id generation: starting length, growth when a length fills up, and the character set.
+
 use std::collections::HashSet;
 
 use super::{CHARSET_SIZE, INITIAL_LENGTH, generate, pick_length};

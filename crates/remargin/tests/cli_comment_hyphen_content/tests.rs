@@ -1,3 +1,5 @@
+//! `remargin comment` with a body that starts with a hyphen.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};

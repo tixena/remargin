@@ -1,3 +1,5 @@
+/** React context and hook for the plugin instance. */
+
 import { createContext, useContext } from "react";
 import type RemarginPlugin from "@/main";
 

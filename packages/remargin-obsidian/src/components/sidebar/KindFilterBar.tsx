@@ -1,24 +1,14 @@
+/** The sidebar's kind filter: one togglable chip per kind in view. */
+
 import { X } from "lucide-react";
 import { useCallback } from "react";
 
+/** Props for {@link KindFilterBar}. */
 export interface KindFilterBarProps {
-  /**
-   * Sorted, de-duplicated set of `remargin_kind` values present in
-   * the currently-visible Inbox and Current-file data. Empty while the
-   * sections are loading their first page.
-   */
+  /** The kinds present in the visible data, sorted and de-duplicated; empty while loading. */
   availableKinds: string[];
-  /**
-   * Session-scoped filter selection. Empty array means "no filter" —
-   * every comment renders. Populated with OR semantics: a comment
-   * passes when at least one of its kinds is in this list.
-   */
+  /** Empty means no filter; otherwise a comment passes when any of its kinds is listed. */
   selected: string[];
-  /**
-   * Called with the next selection. The caller owns the state so the
-   * filter applies across every section (Inbox + Current file)
-   * without two chip rows getting out of sync.
-   */
   onChange: (next: string[]) => void;
 }
 

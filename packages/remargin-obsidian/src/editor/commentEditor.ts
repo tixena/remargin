@@ -1,3 +1,5 @@
+/** The CodeMirror editor used by the inline composers. */
+
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
@@ -10,12 +12,12 @@ import {
 } from "@codemirror/view";
 import { commentEditorTheme } from "./commentEditorTheme";
 
+/** What {@link createCommentEditor} needs: the mount point, placeholder and callbacks. */
 export interface CommentEditorConfig {
   parent: HTMLElement;
   placeholder: string;
   onSubmit: () => void;
   onCancel: () => void;
-  /** Called on every document change with the current document length. */
   onDocLength?: (length: number) => void;
 }
 
@@ -46,10 +48,7 @@ export function createCommentEditor(config: CommentEditorConfig): EditorView {
         commentEditorTheme,
         EditorView.lineWrapping,
         placeholderExt(config.placeholder),
-        // Kept as a fallback for environments where the window-capture
-        // interceptor below is bypassed (e.g. synthetic events dispatched
-        // directly on the contentDOM). The interceptor handles the common
-        // case of a real user keystroke.
+        // Fallback for events dispatched straight on the contentDOM, which bypass the window listener.
         keymap.of([
           {
             key: "Mod-Enter",
@@ -76,11 +75,8 @@ export function createCommentEditor(config: CommentEditorConfig): EditorView {
     parent: config.parent,
   });
 
-  // Window-capture keydown interceptor. Runs in the capture phase at the
-  // topmost propagation target, so it beats Obsidian's document-capture
-  // hotkey dispatcher (which otherwise swallows Mod-Enter for the
-  // global "Toggle ..." bindings). We gate on `view.dom.contains(target)`
-  // so keystrokes outside the composer stay untouched.
+  // Window capture runs before Obsidian's document-capture hotkey dispatcher, which would
+  // swallow Mod-Enter. Gated on `view.dom.contains(target)` so other keystrokes pass untouched.
   const onKeyDownCapture = (event: KeyboardEvent) => {
     const target = event.target;
     if (!(target instanceof Node) || !view.dom.contains(target)) return;
@@ -98,9 +94,7 @@ export function createCommentEditor(config: CommentEditorConfig): EditorView {
   };
   window.addEventListener("keydown", onKeyDownCapture, true);
 
-  // Tear down the window listener when CM6 destroys the view. `destroy` is
-  // called by consumers in their unmount path; piggybacking on it keeps the
-  // lifetime of the listener tied to the view without an extra API.
+  // Removed when CM6 destroys the view, which ties the listener's lifetime to it.
   const originalDestroy = view.destroy.bind(view);
   view.destroy = () => {
     window.removeEventListener("keydown", onKeyDownCapture, true);

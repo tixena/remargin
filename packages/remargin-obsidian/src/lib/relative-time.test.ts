@@ -1,3 +1,5 @@
+/** Tests for relative timestamp formatting. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { formatRelative } from "./relative-time.ts";

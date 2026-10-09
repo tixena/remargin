@@ -20,35 +20,24 @@ use serde_yaml::{Mapping, Value};
 use crate::parser::rfc3339_z;
 use crate::permissions::claude_sync::{RuleSet, apply_rules, residual_rules};
 
-/// Wildcard literal accepted in `trusted_roots[].path`. Mirrors the schema
-/// constant in [`crate::config::permissions`].
 const RESTRICT_WILDCARD: &str = "*";
 
 /// Caller-supplied parameters for [`restrict`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RestrictArgs {
-    /// Extra Bash commands to deny on the restricted path. The
-    /// resolver records these on the on-disk entry; the rule
-    /// generator emits one `Bash(<cmd> * //...)` deny per name.
+    /// Extra Bash commands to deny on the restricted path, recorded on the on-disk entry.
     pub also_deny_bash: Vec<String>,
-    /// When `true`, allow `Bash(remargin *)` on the path — useful
-    /// when the caller wants the MCP locked down but still needs CLI
-    /// access for ops like `permissions show`. Defaults to `false`.
+    /// Allow the `remargin` CLI on the path; defaults to `false`.
     pub cli_allowed: bool,
-    /// Subpath relative to the anchor, OR the literal `"*"` for
-    /// realm-wide. Subpaths are realpath-canonicalised before being
-    /// stored.
+    /// A subpath relative to the anchor, canonicalised before it is stored, or `"*"` for the whole
+    /// realm.
     pub path: String,
 }
 
 impl RestrictArgs {
-    /// Build a [`RestrictArgs`] across the crate boundary. The struct
-    /// is `#[non_exhaustive]` so external callers cannot use struct
-    /// literals; this constructor keeps the construction surface
-    /// stable while leaving room to add fields without breaking
-    /// callers (a new optional field would land as a separate
-    /// `with_<field>` setter or a builder).
+    /// Build a [`RestrictArgs`] from outside the crate: the struct is `#[non_exhaustive]`, so
+    /// struct literals are unavailable there.
     #[must_use]
     pub const fn new(path: String, also_deny_bash: Vec<String>, cli_allowed: bool) -> Self {
         Self {
@@ -68,18 +57,10 @@ impl RestrictArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RemarginYamlSim {
-    /// On-disk entry that would be replaced. `None` when there is no
-    /// existing entry for `path_on_disk` (i.e. the new entry is being
-    /// appended) or when the existing entry is already byte-identical
-    /// to the projected one.
+    /// The on-disk entry that would be replaced; `None` when there is none or it already matches.
     pub previous_entry: Option<RestrictEntryProjection>,
-    /// Projected serialized YAML body. The live caller writes this
-    /// verbatim; the projection caller discards it.
     pub projected_body: String,
-    /// `true` when `<anchor>/.remargin.yaml` does not exist.
     pub will_be_created: bool,
-    /// `true` when the projected body is byte-identical to the body
-    /// already on disk (i.e. the upsert would be a no-op).
     pub would_be_noop: bool,
 }
 
@@ -92,11 +73,10 @@ pub struct RemarginYamlSim {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct RestrictEntryProjection {
-    /// `also_deny_bash` from the on-disk entry. Empty when absent.
+    /// Empty when absent.
     pub also_deny_bash: Vec<String>,
-    /// `cli_allowed` from the on-disk entry. `false` when absent.
+    /// `false` when absent.
     pub cli_allowed: bool,
-    /// `path` field from the on-disk entry.
     pub path: String,
 }
 
@@ -106,19 +86,12 @@ pub struct RestrictEntryProjection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RestrictOutcome {
-    /// Canonical absolute restricted path. For the wildcard form,
-    /// this is the anchor root.
+    /// Canonical; for the wildcard form this is the anchor root.
     pub absolute_path: PathBuf,
-    /// The directory holding `.claude/`, where `.remargin.yaml`
-    /// lives.
+    /// The directory holding `.claude/`, where `.remargin.yaml` lives.
     pub anchor: PathBuf,
-    /// Settings files the rules were applied to.
     pub claude_files_touched: Vec<PathBuf>,
-    /// Every rule string the synchronizer wrote to the settings
-    /// files. Useful for verbose CLI output.
     pub rules_applied: Vec<String>,
-    /// `true` when this call created `.remargin.yaml`. `false` when
-    /// the file already existed and we appended / merged.
     pub yaml_was_created: bool,
 }
 
@@ -179,13 +152,8 @@ pub fn restrict(
 
     let yaml_was_created = upsert_remargin_yaml(system, &anchor, &on_disk_path, args)?;
 
-    // The hook is the single source of truth; `restrict` writes only the
-    // residue the hook cannot cover (currently none). When there is
-    // nothing to project, skip the settings merge and the sidecar write
-    // entirely — this avoids polluting settings files with empty rule
-    // arrays and, crucially, never clobbers a pre-existing sidecar entry
-    // an older restrict left behind (which `unrestrict` still needs to
-    // scrub the legacy rules cleanly).
+    // With nothing to project, skip the settings merge and the sidecar write: an existing sidecar
+    // entry must survive for `unrestrict` to scrub its rules.
     let rules = residual_rules();
     let claude_files_touched = if rules.is_empty() {
         Vec::new()
@@ -245,12 +213,9 @@ pub fn find_claude_anchor(system: &dyn System, cwd: &Path) -> Result<PathBuf> {
 
 /// Sanctioned in-place editor for `<anchor>/.remargin.yaml`.
 ///
-/// Bypasses the guard (which blocks the public `write` /
-/// `edit` ops on `.remargin.yaml`). Restricted to this module so the
-/// audit boundary stays explicit: only `restrict` and (later)
-/// `unprotect` may use it.
-///
-/// Returns `true` when the file did not exist before this call.
+/// Bypasses the guard that blocks the public `write` / `edit` ops on `.remargin.yaml`, and is
+/// kept to this module so the audit boundary stays explicit. Returns `true` when the file did
+/// not exist before this call.
 ///
 /// # Errors
 ///

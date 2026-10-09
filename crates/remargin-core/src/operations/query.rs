@@ -26,12 +26,8 @@ use crate::parser::{self, Acknowledgment, AuthorType};
 use crate::parser::{acknowledgment_schema, author_type_schema};
 use crate::reactions::{ReactionEntry, reaction_entry_schema};
 
-/// Compact comment-row column names, `content` last.
-///
-/// Emitted once per response in the envelope's `comment_cols` header;
-/// [`to_compact_row`] fills the positions in this order. The verbose
-/// per-comment `checksum` / `signature` and the redundant `file` are
-/// dropped.
+/// Column names of a compact comment row, `content` last; `checksum`, `signature` and `file`
+/// are left out.
 pub const COMMENT_COLS: [&str; 14] = [
     "id",
     "line",
@@ -80,47 +76,25 @@ pub const COMMENT_COLS_INTEGRITY: [&str; 16] = [
 ///
 /// `pending` (the broad form) includes BOTH directed comments with
 /// unacked recipients AND broadcast comments (empty `to`) that have
-/// not been acked by anyone. the broad form silently
-/// excluded broadcasts; the bug-fix semantics match the help text
-/// ("Only documents with pending (unacked) comments") without the
-/// implicit directed-only carve-out.
+/// not been acked by anyone.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct QueryFilter {
-    /// Only include documents with comments by this author.
     pub author: Option<String>,
-    /// Only include documents containing a comment with this structural ID.
     pub comment_id: Option<String>,
-    /// Regex applied to comment content. Applied after all metadata filters;
-    /// see [`QueryFilter::with_content_regex`] for a pre-compiled constructor
-    /// helper.
+    /// Applied to comment content, after all metadata filters.
     pub content_regex: Option<Regex>,
-    /// Include individual matching comments in each result.
     pub expanded: bool,
-    /// Only include documents with pending (unacked) comments. Matches
-    /// both directed and broadcast comments.
+    /// Matches both directed and broadcast comments.
     pub pending: bool,
-    /// Surface broadcast (empty-`to`) comments that the given identity
-    /// has not acknowledged yet. Set by the CLI's `--pending-broadcast`
-    /// and the MCP `pending_broadcast: true` flag, which carry the
-    /// caller's identity through.
+    /// Surface broadcast comments this identity has not acknowledged.
     pub pending_broadcast: Option<String>,
-    /// Only include documents with pending comments for this recipient.
     pub pending_for: Option<String>,
-    /// Sugar for `pending_for = Some(<caller identity>)`. Kept as a
-    /// distinct field so CLI/MCP surfaces can expose a "pending for me"
-    /// flag without needing the caller to repeat their identity.
+    /// Sugar for `pending_for` with the caller's identity.
     pub pending_for_me: Option<String>,
-    /// OR-semantics filter: include a comment when its `remargin_kind`
-    /// list contains at least one of these values. Empty = no filter.
-    /// Shares a matcher with the `comments` CLI command via
-    /// [`crate::kind::matches_kind_filter`], so both surfaces stay on
-    /// par — divergence between them was explicitly called out in the
-    /// design.
+    /// A comment passes when its kinds hold at least one of these values; empty means no filter.
     pub remargin_kind: Vec<String>,
-    /// Only include documents with activity after this timestamp.
     pub since: Option<DateTime<FixedOffset>>,
-    /// Return only counts/summary, suppress comment data.
     pub summary: bool,
 }
 
@@ -482,9 +456,7 @@ pub fn compact_rows_for(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The directory cannot be walked
-/// - A file cannot be parsed
+/// Returns an error if the read gate refuses the caller or the directory cannot be walked.
 pub fn query(
     system: &dyn System,
     base_dir: &Path,
@@ -493,10 +465,8 @@ pub fn query(
 ) -> Result<Vec<QueryResult>> {
     config.ensure_can_read(system, base_dir)?;
 
-    // File-path branch: the user named one file explicitly, so honor it
-    // and skip the `.md`-extension and visibility gates the walk applies.
-    // The relative path is the file name, matching how a directory query
-    // of the parent would render this file.
+    // A file named explicitly skips the `.md` and visibility gates the walk applies; its relative
+    // path is the file name, as a directory query of the parent would render it.
     if system.is_file(base_dir).unwrap_or(false) {
         let relative = base_dir
             .file_name()
@@ -518,7 +488,6 @@ pub fn query(
             continue;
         }
 
-        // Only process visible markdown files.
         let has_md_ext = entry
             .path
             .extension()
@@ -567,7 +536,6 @@ fn process_document(
         return None;
     }
 
-    // Filter by comment ID if specified.
     if let Some(target_id) = &filter.comment_id
         && !comments.iter().any(|cm| cm.id == *target_id)
     {
@@ -581,10 +549,6 @@ fn process_document(
 
     let last_activity = comments.iter().map(|cm| cm.ts).max();
 
-    // Apply the pending-flavor union filter at the file level: when
-    // any of `pending`, `pending_for`, `pending_for_me`, or
-    // `pending_broadcast` is set, the document must have at least
-    // one comment that matches the union.
     if filter.any_pending_active() && !comments.iter().any(|cm| filter.matches_pending_union(cm)) {
         return None;
     }
@@ -611,8 +575,6 @@ fn process_document(
         .collect();
     let matched_count = u32::try_from(matched.len()).unwrap_or(u32::MAX);
 
-    // Collect expanded comments unless summary-only mode is requested.
-    // When `expanded` is true OR `summary` is false, include comment data.
     let include_comments = !filter.summary || filter.expanded;
     let expanded_comments = include_comments.then(|| {
         matched
@@ -620,9 +582,7 @@ fn process_document(
             .map(|cm| expanded_from_comment(cm, relative))
             .collect::<Vec<ExpandedComment>>()
     });
-    // Empty match list means no matches — skip the file entirely. Summary
-    // mode keeps listing the file (it passed the file-level gates) and
-    // reports `matched_count: 0`.
+    // No match skips the file. Summary mode still lists it, with `matched_count: 0`.
     if include_comments && matched.is_empty() {
         return None;
     }
@@ -696,9 +656,7 @@ fn collect_pending_recipients(pending: &[&&parser::Comment]) -> Vec<String> {
 /// Directed comments (`to` non-empty) are pending when at least one
 /// named recipient has not acknowledged. Broadcast comments (`to`
 /// empty) are pending when nobody has acknowledged yet — any ack is
-/// enough to close a broadcast conversation. the
-/// broad form silently excluded broadcasts; the current semantics
-/// match the documented "pending (unacked) comments" language.
+/// enough to close a broadcast conversation.
 fn is_pending(cm: &parser::Comment) -> bool {
     cm.is_pending()
 }
@@ -719,7 +677,6 @@ fn is_pending_broadcast(cm: &parser::Comment, me: &str) -> bool {
     cm.is_pending_broadcast_for(me)
 }
 
-/// Convert a parsed comment reference into an owned `ExpandedComment`.
 fn expanded_from_comment(cm: &parser::Comment, file: &Path) -> ExpandedComment {
     ExpandedComment {
         ack: cm.ack.clone(),

@@ -1,3 +1,6 @@
+//! Tests for image sampling: option parsing, crop and downscale, the byte budget and the
+//! inputs it rejects.
+
 use super::{
     CropRegion, DEFAULT_MAX_BYTES, GetImageOptions, MIN_MAX_BYTES, OutputFormat, get_image,
 };

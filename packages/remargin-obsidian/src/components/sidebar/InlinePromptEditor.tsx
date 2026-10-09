@@ -1,3 +1,5 @@
+/** The inline editor for a folder's `system_prompt:` block. */
+
 import type { EditorView } from "@codemirror/view";
 import { Check, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,59 +11,40 @@ function noop(): void {
   /* intentionally empty */
 }
 
+/** What the editor hands to its save handler. */
 export interface InlinePromptEditorSaveArgs {
-  /** Target `.remargin.yaml` for the write. */
   source: string;
-  /** Final name (may be empty). */
   name: string;
-  /** Final prompt body (may be empty). */
   prompt: string;
   /** Final runner command. Empty = use the default runner. */
   runner: string;
 }
 
+/** Props for {@link InlinePromptEditor}. */
 export interface InlinePromptEditorProps {
   /** Existing `.remargin.yaml` when editing; `null` when creating. */
   source: string | null;
-  /**
-   * Target folder. When creating, the parent writes to
-   * `${folder}/.remargin.yaml`. When editing, the parent derives the
-   * source's directory; this prop is passed for symmetry so the editor
-   * doesn't have to compute it.
-   */
+  /** Target folder; when creating, the parent writes to `${folder}/.remargin.yaml`. */
   folder: string;
   initialName: string;
   initialBody: string;
-  /**
-   * Stored runner command, prefilled so a plain Save round-trips it
-   * instead of silently clearing it. Empty = default runner.
-   */
+  /** Prefilled so a plain Save round-trips the stored runner; empty means the default runner. */
   initialRunner?: string;
   onSave: (args: InlinePromptEditorSaveArgs) => Promise<void>;
   onDelete?: (source: string) => Promise<void>;
   onCancel: () => void;
-  /**
-   * When set, the Save button is disabled and the tooltip explains
-   * why (e.g. strict mode without a key). The editor stays open and
-   * editable so the user can still copy the buffer.
-   */
+  /** When set, Save is disabled and the tooltip says why; the editor stays open and editable. */
   saveDisabledReason?: string;
-  /**
-   * Vault folders the create-mode picker can offer. Ignored in edit
-   * mode (the folder is locked to the existing `source`'s dirname).
-   * Vault root is represented as an empty string in this list.
-   */
+  /** Folders the create-mode picker offers; the vault root is the empty string. */
   availableFolders?: string[];
 }
 
 /**
  * Inline editor for the folder-scoped `system_prompt:` block. Renders
  * inside a prompt group header in place of the group's body when the
- * user clicks the gear (edit) or "+ Configure" (create) affordance.
- *
- * Layout matches `ui_components.pen` frame `cTujj`: a NAME input, a
- * CM6 PROMPT editor with markdown highlighting, the target file scope
- * line, and Delete / Cancel / Save buttons.
+ * user clicks the gear (edit) or "+ Configure" (create) affordance: a
+ * NAME input, a CM6 PROMPT editor with markdown highlighting, the target
+ * file scope line, and Delete / Cancel / Save buttons.
  */
 export function InlinePromptEditor({
   source,
@@ -89,9 +72,7 @@ export function InlinePromptEditor({
   const viewRef = useRef<EditorView | null>(null);
   const submitRef = useRef<() => void>(noop);
   const cancelRef = useRef<() => void>(noop);
-  // Captured once so the mount effect can seed CM6 without depending on
-  // the prop directly; subsequent prop changes are intentionally
-  // ignored (the user is editing the buffer at that point).
+  // Captured once to seed CM6; later prop changes are ignored because the user is editing.
   const initialBodyRef = useRef(initialBody);
 
   const getBody = useCallback((): string => {
@@ -137,9 +118,6 @@ export function InlinePromptEditor({
   submitRef.current = () => void handleSubmit();
   cancelRef.current = onCancel;
 
-  // Mount the CM6 body editor on first render. The seed body is read
-  // once from a ref so the effect's dep list stays empty without
-  // tripping the exhaustive-deps lint.
   useEffect(() => {
     if (!editorRef.current) return undefined;
     const view = createCommentEditor({
@@ -168,9 +146,7 @@ export function InlinePromptEditor({
     return list.filter((f) => f.toLowerCase().includes(q));
   }, [availableFolders, folderQuery]);
 
-  // Close the folder dropdown when the user clicks outside the picker.
-  // mousedown (not click) so the close happens before any inner button's
-  // onClick — otherwise picking from the list races with the outside-close.
+  // mousedown, not click: the close must happen before an inner button's onClick.
   useEffect(() => {
     if (!showFolderDropdown) return undefined;
     const onDocumentMouseDown = (e: MouseEvent) => {

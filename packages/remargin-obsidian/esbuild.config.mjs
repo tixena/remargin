@@ -1,3 +1,5 @@
+/** esbuild build of the plugin bundle, with the stylesheet compiled through PostCSS and inlined. */
+
 import tailwindcss from "@tailwindcss/postcss";
 import autoprefixer from "autoprefixer";
 import esbuild from "esbuild";

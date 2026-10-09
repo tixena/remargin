@@ -1,3 +1,5 @@
+//! `remargin lint` against realms whose `permissions.deny_ops.ops` is valid or carries a typo.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -22,11 +24,7 @@ fn write_realm_yaml(realm: &Path, body: &str) {
     fs::write(realm.join(".remargin.yaml"), body).unwrap();
 }
 
-/// Acceptance criterion 1 + 2: a typo in `deny_ops.ops` causes
-/// `remargin lint` to exit non-zero with an error that names the
-/// typo AND lists the valid ops. The doc sits in a sub-realm so
-/// the lint command's own parent walk surfaces the finding rather
-/// than the cwd-level config preflight.
+/// The doc sits in a sub-realm so lint's parent walk, not the cwd preflight, surfaces the typo.
 #[test]
 fn lint_flags_unknown_op_in_deny_ops() {
     let workspace = TempDir::new().unwrap();
@@ -51,23 +49,17 @@ fn lint_flags_unknown_op_in_deny_ops() {
         stderr.contains("purg"),
         "stderr did not name typo: {stderr}"
     );
-    // Valid-ops list is rendered by serde_yaml's "expected one of …".
     assert!(
         stderr.contains("purge") && stderr.contains("delete"),
         "stderr did not list valid ops: {stderr}"
     );
-    // Source file is named so the user knows where to fix.
     assert!(
         stderr.contains(".remargin.yaml"),
         "stderr did not name source file: {stderr}"
     );
 }
 
-/// `--json` surfaces the same finding in the canonical
-/// `{ errors, ok, permissions }` payload. The doc lives in a
-/// nested directory so the `lint`-time parent walk picks up the
-/// realm config without the cwd-level config preflight short-
-/// circuiting first.
+/// `--json` surfaces the same finding in the `{ errors, ok, permissions }` payload.
 #[test]
 fn lint_json_includes_permissions_finding() {
     let workspace = TempDir::new().unwrap();
@@ -80,8 +72,7 @@ fn lint_json_includes_permissions_finding() {
     );
     fs::write(docdir.join("doc.md"), CLEAN_DOC).unwrap();
 
-    // Run from the workspace root (no `.remargin.yaml` here) so
-    // the lint command itself drives the parent walk.
+    // The workspace root has no `.remargin.yaml`, so lint itself drives the parent walk.
     let out = run_in(workspace.path(), &["lint", "--json", "realm/docs/doc.md"]);
     assert!(
         !out.status.success(),
@@ -103,8 +94,7 @@ fn lint_json_includes_permissions_finding() {
     );
 }
 
-/// Existing valid configs (`[purge, delete]`) keep working — no
-/// permissions findings, exit zero.
+/// A valid `[purge, delete]` list yields no permissions findings and exits zero.
 #[test]
 fn lint_clean_config_passes() {
     let workspace = TempDir::new().unwrap();

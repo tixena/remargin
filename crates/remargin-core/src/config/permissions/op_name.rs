@@ -20,60 +20,34 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum OpName {
-    /// Write: acknowledge a comment.
     Ack,
-    /// Write: batch op container.
     Batch,
-    /// Write: append a new comment.
     Comment,
-    /// Read: list comments on a doc.
     Comments,
-    /// Write: copy a file (body-only for markdown; preserves source).
     Cp,
-    /// Write: delete a comment / block.
     Delete,
-    /// Write: fallback grant for deleting a comment the caller authored.
-    /// Consulted only when `delete` was denied and every target is the
-    /// caller's own comment. Absent from `deny_ops` (the default) = own
-    /// deletion is permitted as a rescue.
+    /// Consulted only when `delete` was denied and every target is the caller's own comment.
     DeleteOwn,
-    /// Write: edit a comment / block.
     Edit,
-    /// Read: get the rendered body of a doc.
     Get,
-    /// Read: structural lint over a doc.
     Lint,
-    /// Read: list files under a path.
     Ls,
-    /// Read: doc / block metadata.
     Metadata,
-    /// Write: rename / move a file or directory.
     Mv,
-    /// Write: purge tombstoned content.
     Purge,
-    /// Read: structured query over comments / blocks.
     Query,
-    /// Write: react to a comment.
     React,
-    /// Write: find/replace across document body text.
     Replace,
-    /// Write: stage a doc into a sandbox.
     SandboxAdd,
-    /// Write: remove a doc from a sandbox.
     SandboxRemove,
-    /// Read: text search over a doc.
     Search,
-    /// Write: sign a comment / block.
     Sign,
-    /// Read: integrity verification.
     Verify,
-    /// Write: full-doc rewrite.
     Write,
 }
 
 impl OpName {
-    /// Every variant, sorted by kebab-case wire form. Drives the
-    /// user-visible "valid ops: …" diagnostic and the lint surface.
+    /// Sorted by kebab-case wire form.
     pub const ALL: &'static [Self] = &[
         Self::Ack,
         Self::Batch,
@@ -100,8 +74,7 @@ impl OpName {
         Self::Write,
     ];
 
-    /// Read-side ops. Bypass `trusted_roots` and the dot-folder
-    /// default-deny; still subject to explicit `deny_ops` entries.
+    /// Bypass `trusted_roots` and the dot-folder default-deny; still subject to `deny_ops`.
     pub const READ: &'static [Self] = &[
         Self::Comments,
         Self::Get,
@@ -113,8 +86,7 @@ impl OpName {
         Self::Verify,
     ];
 
-    /// Write-side ops. Gated by `trusted_roots`, the dot-folder
-    /// default-deny, and `deny_ops`.
+    /// Gated by `trusted_roots`, the dot-folder default-deny and `deny_ops`.
     pub const WRITE: &'static [Self] = &[
         Self::Ack,
         Self::Batch,

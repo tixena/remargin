@@ -42,10 +42,6 @@ fn read_file(system: &MemorySystem, path: &str) -> String {
     system.read_to_string(Path::new(path)).unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// splice_system_prompt — pure string transform.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn splice_appends_to_file_without_block() {
     let existing = "identity: eduardo\ntype: human\n";
@@ -194,10 +190,6 @@ fn splice_replacing_block_drops_stale_runner() {
     assert!(out.content.contains("  prompt: body"));
 }
 
-// ---------------------------------------------------------------------------
-// remove_system_prompt
-// ---------------------------------------------------------------------------
-
 #[test]
 fn remove_strips_block_keeps_other_fields() {
     let existing = "\
@@ -227,10 +219,6 @@ fn remove_trims_trailing_blank_lines() {
     assert!(!out.content.ends_with("\n\n"));
 }
 
-// ---------------------------------------------------------------------------
-// starts_with_system_prompt_key — guards against partial matches.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn key_matcher_accepts_canonical() {
     assert!(starts_with_system_prompt_key("system_prompt:"));
@@ -247,10 +235,6 @@ fn key_matcher_rejects_substring() {
     assert!(!starts_with_system_prompt_key("system_prompt_foo:"));
 }
 
-// ---------------------------------------------------------------------------
-// find_block_range — boundary handling.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn find_block_range_stops_at_next_top_level_key() {
     let s = "system_prompt:\n  prompt: x\nidentity: eduardo\n";
@@ -266,10 +250,6 @@ fn find_block_range_extends_to_eof() {
     let block = &s[range.start..range.end];
     assert_eq!(block, "system_prompt:\n  prompt: x");
 }
-
-// ---------------------------------------------------------------------------
-// set — end-to-end with MemorySystem.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn set_creates_yaml_when_absent() {
@@ -428,10 +408,6 @@ fn set_refuses_missing_folder() {
     assert!(msg.contains("does not exist"), "unexpected error: {msg}");
 }
 
-// ---------------------------------------------------------------------------
-// delete — end-to-end.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn delete_strips_block_preserves_identity() {
     let system = MemorySystem::new();
@@ -480,10 +456,6 @@ fn delete_leaves_empty_file_in_place() {
             .unwrap()
     );
 }
-
-// ---------------------------------------------------------------------------
-// list — recursive walk.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn list_finds_declared_prompts() {
@@ -567,10 +539,6 @@ fn list_empty_when_no_declarations() {
     let out = list(&system, Path::new("/vault")).unwrap();
     assert!(out.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// post-write diff — the defence-in-depth check.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn diff_accepts_only_prompt_change() {

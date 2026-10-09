@@ -1,3 +1,5 @@
+/** Identity flags the plugin forwards to the CLI. */
+
 import { expandPath } from "@/lib/expandPath";
 import type { RemarginSettings } from "@/types";
 
@@ -16,11 +18,6 @@ import type { RemarginSettings } from "@/types";
  * emit `--identity` and `--type`, but never `--key`. If a user truly
  * runs without a config file, they should create one — the CLI
  * resolves signing keys from there, not from plugin settings.
- *
- * Exported as a pure module-level function so unit tests can exercise
- * it directly without spinning up a `RemarginBackend` (which takes a
- * vault path and settings-change callbacks the tests do not care
- * about).
  */
 export function buildIdentityArgs(settings: RemarginSettings): string[] {
   if (settings.identityMode === "config" && settings.configFilePath) {

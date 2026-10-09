@@ -1,7 +1,4 @@
 //! IO plumbing: sink writers, JSON output helpers, stdin reading, path helpers.
-//!
-//! Extracted from `main.rs` so these leaf utilities can live (and eventually be
-//! unit-tested) in isolation without bringing in the full CLI grammar.
 
 use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};

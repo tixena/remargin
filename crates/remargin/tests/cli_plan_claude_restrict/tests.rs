@@ -1,3 +1,5 @@
+//! `plan claude restrict` runs, read back from `--json` and from the files left on disk.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,8 +45,7 @@ fn parse_json(out: &Output) -> Value {
     serde_json::from_str(stdout).unwrap()
 }
 
-/// Scenario 17: `plan restrict` does not write any of the four
-/// target files.
+/// `plan restrict` writes none of the four target files.
 #[test]
 fn plan_restrict_does_not_write() {
     let realm = realm_with_claude();
@@ -80,16 +81,13 @@ fn plan_restrict_does_not_write() {
     assert!(!sidecar.exists(), "plan must not create sidecar");
 }
 
-/// Scenario 16 + 18: plan + apply parity AND noop covenant. After
-/// `restrict`, a second `plan restrict` reports noop = true and
-/// every entry as Noop / nothing-to-add.
+/// After `restrict`, a second `plan restrict` reports `noop = true` and nothing to add.
 #[test]
 fn plan_then_apply_then_replan_reports_noop() {
     let realm = realm_with_claude();
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
     let user_settings = user_settings_arg(&realm);
 
-    // Apply, then replan.
     let apply = run_in(
         realm.path(),
         &[
@@ -126,9 +124,7 @@ fn plan_then_apply_then_replan_reports_noop() {
     }
 }
 
-/// With the projection retired, an existing user-scope allow that would
-/// once have overlapped a projected deny surfaces no `allow_deny_overlap`
-/// conflict — nothing is projected to overlap.
+/// Nothing is projected, so an existing user-scope allow raises no `allow_deny_overlap` conflict.
 #[test]
 fn plan_surfaces_no_allow_deny_overlap_now_projection_retired() {
     let realm = realm_with_claude();
@@ -166,8 +162,7 @@ fn plan_surfaces_no_allow_deny_overlap_now_projection_retired() {
     );
 }
 
-/// `plan restrict` projects no settings changes — the hook is the single
-/// source of truth, so `settings_files` is empty (no deny rules to add).
+/// The hook is the single source of truth, so `settings_files` is empty.
 #[test]
 fn plan_wildcard_projects_no_settings_rules() {
     let realm = realm_with_claude();
@@ -194,8 +189,6 @@ fn plan_wildcard_projects_no_settings_rules() {
     );
 }
 
-/// Scenario 20: anchor surprise surfaces when running from a
-/// subdirectory deeper than the realm anchor.
 #[test]
 fn plan_surfaces_anchor_is_ancestor_when_run_from_subdir() {
     let realm = realm_with_claude();
@@ -225,8 +218,7 @@ fn plan_surfaces_anchor_is_ancestor_when_run_from_subdir() {
     );
 }
 
-/// Scenario 22: wildcard form projects realm-wide rules with the
-/// anchor as `absolute_path`.
+/// The wildcard entry carries the anchor as its `absolute_path`.
 #[test]
 fn plan_wildcard_resolves_to_anchor() {
     let realm = realm_with_claude();

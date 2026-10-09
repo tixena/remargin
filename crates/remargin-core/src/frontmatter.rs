@@ -24,15 +24,10 @@ use serde_yaml::{Mapping, Value};
 use crate::config::{Mode, ResolvedConfig};
 use crate::parser::{self, Comment, ParsedDocument, SandboxEntry, Segment, rfc3339_z};
 
-/// The frontmatter key under which sandbox entries are stored.
-///
-/// Note: intentionally *not* prefixed with `remargin_`. The `remargin_`
-/// prefix is reserved for derived/tool-managed fields (`remargin_pending`,
-/// `remargin_pending_for`, `remargin_last_activity`). `sandbox` is
-/// user-written state and follows the bare `ack` naming convention.
+/// Not prefixed with `remargin_`: that prefix is reserved for tool-managed fields, and `sandbox`
+/// is user-written state.
 pub const SANDBOX_KEY: &str = "sandbox";
 
-/// Frontmatter delimiter.
 const FRONTMATTER_DELIMITER: &str = "---";
 
 /// Ensure a document has frontmatter. If missing, add it.
@@ -88,9 +83,8 @@ pub fn ensure_frontmatter_authored(
 
     let mut mapping = parse_existing_frontmatter(doc)?;
 
-    // Authenticate `author` against the on-disk value BEFORE the generic
-    // fill so a supplied value (or its deliberate absence) is judged as
-    // written rather than silently back-filled from the caller identity.
+    // Judge `author` as written, before the generic fill can back-fill it from the caller
+    // identity.
     authenticate_author(&mut mapping, config, create, old_author)?;
     populate_non_author_fields(&mut mapping, &body);
     update_remargin_fields(&mut mapping, &comments);
@@ -116,10 +110,8 @@ pub(crate) fn read_author(doc: &ParsedDocument) -> Result<Option<String>> {
         .map(str::to_owned))
 }
 
-/// Authenticate the `author` frontmatter key in place.
-///
-/// See [`ensure_frontmatter_authored`] for the full contract. `config`
-/// MUST already be escalated to the doc's realm.
+/// Authenticate the `author` frontmatter key in place. `config` must already be escalated to the
+/// doc's realm.
 fn authenticate_author(
     mapping: &mut Mapping,
     config: &ResolvedConfig,
@@ -159,7 +151,6 @@ fn authenticate_author(
             }
             Ok(())
         }
-        // Unchanged author passes in every mode.
         Some(new) if old_author == Some(new.as_str()) => Ok(()),
         Some(new) => match config.mode {
             Mode::Open => Ok(()),
@@ -337,7 +328,6 @@ pub fn remove_sandbox_entry_for(entries: &mut Vec<SandboxEntry>, identity: &str)
 pub fn populate_user_fields(mapping: &mut Mapping, doc_body: &str, config: &ResolvedConfig) {
     populate_non_author_fields(mapping, doc_body);
 
-    // author: from config identity if available and not already set.
     let author_key = Value::String(String::from("author"));
     if !mapping.contains_key(&author_key)
         && let Some(identity) = &config.identity
@@ -352,20 +342,17 @@ pub fn populate_user_fields(mapping: &mut Mapping, doc_body: &str, config: &Reso
 /// `author` separately, so it must not be back-filled from the caller
 /// identity here.
 fn populate_non_author_fields(mapping: &mut Mapping, doc_body: &str) {
-    // title: from first # heading, only if not already set.
     let title_key = Value::String(String::from("title"));
     if !mapping.contains_key(&title_key) {
         let title = extract_title_from_heading(doc_body).unwrap_or_default();
         mapping.insert(title_key, Value::String(title));
     }
 
-    // description: empty string if not set.
     let desc_key = Value::String(String::from("description"));
     if !mapping.contains_key(&desc_key) {
         mapping.insert(desc_key, Value::String(String::new()));
     }
 
-    // created: current timestamp if not set.
     let created_key = Value::String(String::from("created"));
     if !mapping.contains_key(&created_key) {
         let now = rfc3339_z(&Utc::now());
@@ -379,13 +366,8 @@ fn populate_non_author_fields(mapping: &mut Mapping, doc_body: &str) {
 pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
     let pending_count = comments.iter().filter(|cm| cm.is_pending()).count();
 
-    // Collect unique unacked recipients across pending comments.
-    // Broadcasts (`to: []`) surface under the `<unassigned>` sentinel.
-    // Directed comments contribute only the named recipients who
-    // have not personally acked yet; recipients who already acked
-    // are excluded so partial acks shrink `remargin_pending_for`
-    // monotonically. The angle-bracket sentinel cannot collide with
-    // any registered identity (the registry rejects `<`).
+    // A broadcast surfaces under `<unassigned>`, which no registered identity can collide with; a
+    // directed comment contributes only the recipients who have not acked.
     let mut pending_for: Vec<String> = Vec::new();
     let unassigned_sentinel = String::from("<unassigned>");
     for cm in comments {
@@ -406,13 +388,10 @@ pub fn update_remargin_fields(mapping: &mut Mapping, comments: &[&Comment]) {
     }
     pending_for.sort();
 
-    // Most recent timestamp across all comments, acks, and reactions.
     let last_activity = find_last_activity(comments);
 
-    // Write the fields. With nothing pending both are removed rather than
-    // stamped as `0` / `[]`, so the steady state stays out of the reader's
-    // Properties panel; removal (not skip) also sheds a stale non-zero value
-    // left by an earlier write.
+    // With nothing pending both fields are removed, not stamped `0` / `[]`; removal also sheds a
+    // stale value.
     let pending_key = Value::String(String::from("remargin_pending"));
     let pending_for_key = Value::String(String::from("remargin_pending_for"));
     if pending_count == 0 {
@@ -470,10 +449,8 @@ fn find_last_activity(comments: &[&Comment]) -> Option<DateTime<FixedOffset>> {
     let mut latest: Option<DateTime<FixedOffset>> = None;
 
     for cm in comments {
-        // Comment creation timestamp.
         latest = Some(max_ts(latest, cm.ts));
 
-        // Ack timestamps.
         for ack in &cm.ack {
             latest = Some(max_ts(latest, ack.ts));
         }
@@ -482,7 +459,6 @@ fn find_last_activity(comments: &[&Comment]) -> Option<DateTime<FixedOffset>> {
     latest
 }
 
-/// Return the later of an optional timestamp and a new timestamp.
 fn max_ts(
     current: Option<DateTime<FixedOffset>>,
     candidate: DateTime<FixedOffset>,
@@ -506,7 +482,6 @@ pub(crate) fn parse_existing_frontmatter(doc: &ParsedDocument) -> Result<Mapping
         return Ok(Mapping::new());
     }
 
-    // Find the opening and closing --- delimiters.
     let lines: Vec<&str> = first_body.split('\n').collect();
     let opener = lines
         .iter()
@@ -541,7 +516,6 @@ pub(crate) fn parse_existing_frontmatter(doc: &ParsedDocument) -> Result<Mapping
     }
 }
 
-/// Remove the frontmatter block from a body string, returning the rest.
 fn strip_frontmatter(text: &str) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
     let opener = lines
@@ -562,7 +536,6 @@ fn strip_frontmatter(text: &str) -> String {
         return String::from(text);
     };
 
-    // Everything after the closing --- (including the newline after it).
     let remaining_lines = &lines[closer_idx + 1..];
     remaining_lines.join("\n")
 }
@@ -572,11 +545,9 @@ fn write_frontmatter_to_doc(doc: &mut ParsedDocument, yaml: &Value) {
     let yaml_str = serde_yaml::to_string(yaml).unwrap_or_default();
     let frontmatter_block = format!("{FRONTMATTER_DELIMITER}\n{yaml_str}{FRONTMATTER_DELIMITER}\n");
 
-    // Check if the first segment is a body with existing frontmatter.
     if let Some(Segment::Body(text)) = doc.segments.first() {
         let trimmed = text.trim_start();
         if trimmed.starts_with(FRONTMATTER_DELIMITER) {
-            // Replace existing frontmatter while preserving content after it.
             let remaining = strip_frontmatter(text);
             let new_body = format!("{frontmatter_block}{remaining}");
             doc.segments[0] = Segment::Body(new_body);
@@ -584,7 +555,6 @@ fn write_frontmatter_to_doc(doc: &mut ParsedDocument, yaml: &Value) {
         }
     }
 
-    // No existing frontmatter -- prepend it.
     match doc.segments.first() {
         Some(Segment::Body(text)) => {
             let new_body = format!("{frontmatter_block}\n{text}");

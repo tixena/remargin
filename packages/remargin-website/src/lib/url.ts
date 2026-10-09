@@ -1,8 +1,8 @@
+/** URL helpers for the website. */
+
 /**
- * Build a path with the configured base URL prefix.
- * `import.meta.env.BASE_URL` is `'/remargin/'` in production and `'/'` in dev
- * with no base; this helper normalizes leading/trailing slashes so we never
- * emit `//foo`.
+ * Build a path with the configured base URL prefix. Leading and trailing slashes are
+ * normalized so the result never contains `//foo`.
  */
 export const asset = (p: string): string => {
   const base = import.meta.env.BASE_URL.replace(/\/+$/, '');

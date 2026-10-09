@@ -1,3 +1,5 @@
+//! Each identity-aware subcommand run from `walker` with `--config` pointing at `flag`'s yaml.
+
 use core::str;
 use std::fs;
 use std::io::Write as _;
@@ -24,9 +26,7 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 
 const TEST_PUBLIC_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+wwXvHwYjjSVOO1PyMrur+yoibLd5o/hmV test@remargin";
 
-/// Build the two-realm layout described in the module docs. Returns
-/// the tempdir (keep alive for the test's lifetime), the walker cwd,
-/// and the flag config path.
+/// Builds the two realms and returns the tempdir, the walker cwd and the flag config path.
 fn two_realms() -> (TempDir, PathBuf, PathBuf) {
     let tmp = TempDir::new().unwrap();
     let walker = tmp.path().join("walker");
@@ -108,8 +108,6 @@ fn seed_comment_as_manual(
     String::from(parsed["id"].as_str().unwrap())
 }
 
-// ---------- comment ----------
-
 #[test]
 fn comment_attributes_new_comment_to_config_identity() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -137,8 +135,6 @@ fn comment_attributes_new_comment_to_config_identity() {
         "walker-agent must not leak in, doc was:\n{body}"
     );
 }
-
-// ---------- ack ----------
 
 #[test]
 fn ack_attributes_ack_to_config_identity() {
@@ -172,8 +168,6 @@ fn ack_attributes_ack_to_config_identity() {
     );
 }
 
-// ---------- react ----------
-
 #[test]
 fn react_attributes_reaction_to_config_identity() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -195,8 +189,6 @@ fn react_attributes_reaction_to_config_identity() {
     );
 }
 
-// ---------- batch ----------
-
 #[test]
 fn batch_attributes_created_comments_to_config_identity() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -215,9 +207,7 @@ fn batch_attributes_created_comments_to_config_identity() {
         &["batch", &doc_str, "--ops", &ops, "--config", &flag_path],
     );
 
-    // The doc's frontmatter carries `author: flag-agent` for the
-    // whole doc; inside each comment fence `type: agent` appears
-    // exactly once. Count those to check the two new comments.
+    // `type: agent` appears exactly once per comment fence, so counting it counts the new comments.
     let body = doc_contents(&doc);
     let fences = body.matches("type: agent").count();
     assert_eq!(
@@ -232,8 +222,6 @@ fn batch_attributes_created_comments_to_config_identity() {
     assert!(!body.contains("author: walker-agent"));
 }
 
-// ---------- edit ----------
-
 #[test]
 fn edit_uses_config_identity_for_edit_own_guard() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -241,9 +229,7 @@ fn edit_uses_config_identity_for_edit_own_guard() {
     let flag_path = String::from(flag_config.to_string_lossy());
     let doc_str = String::from(doc.to_string_lossy());
 
-    // Seed a comment AS flag-agent so the edit-own guard admits
-    // the later edit only if --config actually steers identity to
-    // flag-agent.
+    // Seeded as flag-agent, so the edit-own guard admits the edit only when `--config` is honored.
     let id = seed_comment_as(&walker, &doc_str, "seed", &flag_path);
 
     run_ok(
@@ -264,8 +250,6 @@ fn edit_uses_config_identity_for_edit_own_guard() {
         "edited content should appear, doc was:\n{body}"
     );
 }
-
-// ---------- plan ----------
 
 #[test]
 fn plan_reports_config_identity() {
@@ -300,20 +284,11 @@ fn plan_reports_config_identity() {
     );
 }
 
-// ---------- identity (read-only diagnostic) ----------
-
 #[test]
 fn identity_reports_config_declaration() {
-    // `identity --config <path>` must return the identity
-    // declared in that file, not whatever the walk-up finds. This
-    // is the regression the Obsidian plugin hits: its `me` is
-    // driven by `backend.identity()` and must agree with the
-    // identity mutating ops are writing under.
     let (_tmp, walker, flag_config) = two_realms();
     let flag_path = String::from(flag_config.to_string_lossy());
 
-    // Walk-up sanity: from inside walker the bare `identity` call
-    // must report walker-agent (the nearer config).
     let baseline = run_ok(&walker, &["identity", "--json"]);
     let baseline_json: Value = serde_json::from_str(&baseline).unwrap();
     assert_eq!(
@@ -322,8 +297,6 @@ fn identity_reports_config_declaration() {
         "walk-up from walker must pick up walker-agent; got: {baseline_json}"
     );
 
-    // With --config pointing at the flag realm, the same invocation
-    // must now return flag-agent.
     let via_flag = run_ok(&walker, &["identity", "--config", &flag_path, "--json"]);
     let via_flag_json: Value = serde_json::from_str(&via_flag).unwrap();
     assert_eq!(
@@ -343,8 +316,6 @@ fn identity_reports_config_declaration() {
     );
 }
 
-// ---------- verify ----------
-
 #[test]
 fn verify_runs_under_config_identity() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -352,20 +323,14 @@ fn verify_runs_under_config_identity() {
     let flag_path = String::from(flag_config.to_string_lossy());
     let doc_str = String::from(doc.to_string_lossy());
 
-    // Seed one comment so verify has something to report on.
     let _id = seed_comment_as(&walker, &doc_str, "seed", &flag_path);
 
-    // `verify` is read-only: we can't inspect its per-run identity
-    // via the doc. The regression shape is "passing --config errors
-    // because the resolver picks up the wrong identity or drops the
-    // flag." Exit code + clean output is the signal.
+    // `verify` is read-only, so the signal is the exit code and clean output.
     let _verified = run_ok(
         &walker,
         &["verify", &doc_str, "--config", &flag_path, "--json"],
     );
 }
-
-// ---------- sandbox ----------
 
 #[test]
 fn sandbox_scoping_follows_config_identity() {
@@ -374,12 +339,8 @@ fn sandbox_scoping_follows_config_identity() {
     let flag_path = String::from(flag_config.to_string_lossy());
     let doc_str = String::from(doc.to_string_lossy());
 
-    // Add the doc to flag-agent's sandbox via --config. Each
-    // sandbox is keyed by the caller's identity, so walker-agent's
-    // list must stay empty while flag-agent's list contains the doc.
-    //
-    // Both `IdentityArgs` and `OutputArgs` are flattened on the
-    // `sandbox` parent, so the flags go BEFORE the sub-action.
+    // Both flag groups are flattened on the `sandbox` parent, so the flags go before the
+    // sub-action.
     run_ok(
         &walker,
         &["sandbox", "--config", &flag_path, "--json", "add", &doc_str],
@@ -414,8 +375,6 @@ fn sandbox_scoping_follows_config_identity() {
     );
 }
 
-// ---------- write ----------
-
 #[test]
 fn write_accepts_config_declaration() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -438,8 +397,6 @@ fn write_accepts_config_declaration() {
     assert!(body.contains("# New Doc"));
 }
 
-// ---------- delete ----------
-
 #[test]
 fn delete_runs_under_config_identity() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -457,8 +414,6 @@ fn delete_runs_under_config_identity() {
         "deleted comment body should be gone, doc was:\n{body}"
     );
 }
-
-// ---------- purge ----------
 
 #[test]
 fn purge_accepts_config_declaration() {
@@ -478,8 +433,6 @@ fn purge_accepts_config_declaration() {
     );
 }
 
-// ---------- rm ----------
-
 #[test]
 fn rm_accepts_config_declaration() {
     let (_tmp, walker, flag_config) = two_realms();
@@ -493,8 +446,6 @@ fn rm_accepts_config_declaration() {
     assert!(!doc.exists(), "rm should remove the file");
 }
 
-// ---------- sign (strict mode with real key) ----------
-
 #[test]
 fn sign_under_config_identity_passes_strict_verify() {
     let tmp = TempDir::new().unwrap();
@@ -503,8 +454,6 @@ fn sign_under_config_identity_passes_strict_verify() {
     fs::create_dir_all(&walker).unwrap();
     fs::create_dir_all(&flag).unwrap();
 
-    // Shared registry lives at the tempdir root so both realms
-    // discover the same active participant set.
     let registry = format!(
         "participants:\n  walker-agent:\n    type: agent\n    status: active\n    pubkeys:\n      - {TEST_PUBLIC_KEY}\n  flag-agent:\n    type: agent\n    status: active\n    pubkeys:\n      - {TEST_PUBLIC_KEY}\n"
     );
@@ -515,10 +464,7 @@ fn sign_under_config_identity_passes_strict_verify() {
     let flag_key = flag.join("agent_key");
     fs::write(&flag_key, TEST_PRIVATE_KEY).unwrap();
 
-    // Use `./agent_key` so `resolve_key_path` treats it as a path
-    // (the bare-name shorthand would resolve to `~/.ssh/agent_key`).
-    // The post-expansion anchor prepends the config file's dir,
-    // pointing at the key we just wrote.
+    // `./agent_key` is treated as a path; a bare name would resolve to `~/.ssh/agent_key`.
     fs::write(
         walker.join(".remargin.yaml"),
         "identity: walker-agent\ntype: agent\nmode: strict\nkey: ./agent_key\n",
@@ -554,10 +500,7 @@ fn sign_under_config_identity_passes_strict_verify() {
         "strict comment --config must succeed; stderr={stderr}"
     );
 
-    // sign --all-mine: with --config, the forgery guard accepts
-    // flag-agent's comment as our own. If --config were dropped,
-    // the resolved identity would be walker-agent and the
-    // flag-agent comment would be classified as foreign.
+    // Without `--config` the identity is walker-agent and the flag-agent comment reads as foreign.
     let _sign_result = run_ok(
         &walker,
         &[
@@ -570,7 +513,6 @@ fn sign_under_config_identity_passes_strict_verify() {
         ],
     );
 
-    // Strict-mode verify must pass with --config.
     let verify = run(
         &walker,
         &["verify", &doc_str, "--config", &flag_path, "--json"],
@@ -581,8 +523,6 @@ fn sign_under_config_identity_passes_strict_verify() {
         "verify under --config should pass; stderr={verify_stderr}"
     );
 }
-
-// ---------- mcp (startup-level --config) ----------
 
 #[test]
 fn mcp_startup_config_sets_default_identity_for_tool_calls() {

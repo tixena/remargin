@@ -1,3 +1,5 @@
+/** Tests for scrolling to and highlighting a comment card. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { focusCardInRoot, HIGHLIGHT_DURATION_MS } from "./focusCard.ts";
@@ -24,9 +26,6 @@ function makeRootWithCard(commentId: string) {
   };
   const root = {
     querySelector(selector: string) {
-      // Only return the card if the selector targets its id; mirrors
-      // the real-DOM behaviour and lets tests for "wrong id" pass a
-      // root that returns null.
       const expected = `[data-comment-id="${commentId}"]`;
       return selector === expected ? card : null;
     },
@@ -35,8 +34,6 @@ function makeRootWithCard(commentId: string) {
 }
 
 describe("focusCardInRoot", () => {
-  // Underpins T36 AC #9: with a card mounted, the helper scrolls,
-  // applies the highlight class, and schedules its removal.
   it("scrolls the matching card and applies remargin-highlight", () => {
     const { root, events } = makeRootWithCard("abc");
     const timeouts: Array<{ handler: () => void; ms: number }> = [];
@@ -54,8 +51,6 @@ describe("focusCardInRoot", () => {
     assert.equal(timeouts[0].ms, HIGHLIGHT_DURATION_MS);
   });
 
-  // Underpins T36 AC #9: after the timeout fires, the highlight class
-  // is removed.
   it("removes remargin-highlight after the timeout fires", () => {
     const { root, events } = makeRootWithCard("abc");
     const timeouts: Array<{ handler: () => void; ms: number }> = [];
@@ -72,9 +67,6 @@ describe("focusCardInRoot", () => {
     ]);
   });
 
-  // Underpins T36 AC #11 (silent no-op when no subscriber/match): when
-  // the root has no matching card, the call returns false and does
-  // not throw or emit side effects.
   it("returns false and emits no side effects when no card matches", () => {
     let timeoutCalls = 0;
     const root = { querySelector: () => null };

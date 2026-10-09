@@ -1,3 +1,5 @@
+/** The read-only widget for a single comment. */
+
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
 import { EditedLabel } from "@/components/sidebar/EditedLabel";
 import { KindChips } from "@/components/sidebar/KindChips";
@@ -7,36 +9,25 @@ import { activationKeyHandler } from "@/lib/keyboardActivation";
 import type { PendingSummary } from "@/lib/pendingState";
 import { CollapseToggle } from "./CollapseToggle";
 
+/** Props for {@link WidgetCommentView}. */
 export interface WidgetCommentViewProps {
   comment: Comment;
-  /** Source path forwarded to MarkdownRenderer for relative link resolution. */
   sourcePath: string;
   collapsed: boolean;
-  /** Flip the collapsed state — wired by the caller to a `CollapseState`. */
   onToggle: () => void;
-  /**
-   * Click on the widget body. Receives the comment id and the source path
-   * so the parent can route the click to the sidebar focus receiver
-   * (`plugin.focusComment`).
-   */
   onClick: (commentId: string, file: string) => void;
-  /**
-   * Optional pending-stats badge surface. Rendered only when present
-   * AND the comment is collapsed AND `summary.totalReplies > 0`. The
-   * widget tree builder feeds this from `summarizeThread(node, me)`
-   * so callers do not have to recompute it.
-   */
+  /** Rendered only when the comment is collapsed and `summary.totalReplies > 0`. */
   summary?: PendingSummary;
 }
 
 /**
  * Read-only widget rendering of a single remargin comment, shared by
- * the reading-mode post-processor (T37) and the Live Preview CM6 widget
- * (T38). Reuses the sidebar's `CommentHeader` and `MarkdownContent`
+ * the reading-mode post-processor and the Live Preview CM6 widget.
+ * Reuses the sidebar's `CommentHeader` and `MarkdownContent`
  * primitives so the visual language is identical across surfaces.
  *
  * Editing is intentionally not surfaced here — every edit affordance
- * still lives in the sidebar. Clicking the widget body is the bridge:
+ * lives in the sidebar. Clicking the widget body is the bridge:
  * `onClick(commentId, file)` lets the parent dispatch the focus-receiver
  * call so the sidebar scrolls and highlights the corresponding card.
  *
@@ -52,10 +43,7 @@ export function WidgetCommentView({
   onClick,
   summary,
 }: WidgetCommentViewProps) {
-  // Plain inline handler (no `useCallback`) keeps the component
-  // hook-free, which lets unit tests call the function directly without
-  // a React renderer to introspect prop wiring. Re-renders here are
-  // already cheap — no children memoize on the click identity.
+  // No `useCallback`: the component stays hook-free so unit tests can call it directly.
   const handleClick = () => {
     onClick(comment.id, sourcePath);
   };
@@ -64,9 +52,7 @@ export function WidgetCommentView({
   const hasTags = !!comment.edited_at || (comment.remargin_kind ?? []).length > 0;
 
   return (
-    // The whole card is the click/keyboard target for the sidebar-focus
-    // bridge; `ignoreEvent()` on the CM6 widget keeps the editor from
-    // eating these keys in Live Preview.
+    // The whole card is the click and keyboard target for the sidebar-focus bridge.
     <div
       className="remargin-widget-comment"
       role="button"

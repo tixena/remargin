@@ -30,10 +30,8 @@ pub struct AllowDotFoldersView {
 pub struct CheckOutput {
     /// Set when the caller asked `--why` AND the path is restricted.
     pub matching_rule: Option<MatchingRule>,
-    /// Canonical absolute path that was evaluated.
     pub path: PathBuf,
-    /// `true` when the path is outside the `trusted_roots` allow-list
-    /// or covered by a `deny_ops` rule.
+    /// Outside the `trusted_roots` allow-list, or covered by a `deny_ops` rule.
     pub restricted: bool,
 }
 
@@ -46,6 +44,7 @@ pub struct DenyOpsView {
     pub source_file: PathBuf,
 }
 
+/// Serialised view of one denied op and the identities exempt from it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DenyOpsItemView {
@@ -61,9 +60,7 @@ pub struct DenyOpsItemView {
 pub struct MatchingRule {
     /// Either `"restrict"` or `"deny_ops"`.
     pub kind: &'static str,
-    /// Human-readable form of the matching rule.
     pub rule_text: String,
-    /// `.remargin.yaml` that declared the rule.
     pub source_file: PathBuf,
 }
 
@@ -82,6 +79,7 @@ pub struct TrustedRootView {
     pub source_file: PathBuf,
 }
 
+/// Serialised view of the permissions resolved for a directory.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ShowOutput {
@@ -153,8 +151,6 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
         });
     }
 
-    // Routes through the same predicate as the per-op guard so the
-    // two layers can't drift on the covers-an-entry rule.
     if !resolved.trusted_roots_unconstrained() {
         let inside = !resolved.trusted_roots.is_empty()
             && target_is_sanctioned(canonical, &resolved.trusted_roots);
@@ -180,9 +176,7 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
 }
 
 fn group_allow_dot_folders(resolved: &ResolvedPermissions) -> Vec<AllowDotFoldersView> {
-    // the resolver now preserves one entry per declaring
-    // `.remargin.yaml` so each view's `source_file` mirrors the
-    // provenance already carried by `trusted_roots` and `deny_ops`.
+    // One view per declaring `.remargin.yaml`, so each `source_file` names where it came from.
     resolved
         .allow_dot_folders
         .iter()

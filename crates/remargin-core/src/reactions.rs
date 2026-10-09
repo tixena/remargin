@@ -5,9 +5,9 @@
 //! ```yaml
 //! reactions:
 //!   "+1":
-//!     - author: eduardo
+//!     - author: alice
 //!       ts: 2026-04-26T12:00:00-04:00
-//!     - author: claude
+//!     - author: bob
 //!       ts: 2026-04-26T12:01:00-04:00
 //! ```
 //!
@@ -15,7 +15,7 @@
 //!
 //! ```yaml
 //! reactions:
-//!   "+1": [eduardo, claude]
+//!   "+1": [alice, bob]
 //! ```
 //!
 //! Legacy entries get a synthesized `ts` after the rest of the comment is
@@ -53,7 +53,6 @@ pub struct ReactionEntry {
 }
 
 impl ReactionEntry {
-    /// Construct a new entry with explicit author and timestamp.
     #[must_use]
     pub const fn new(author: String, ts: DateTime<FixedOffset>) -> Self {
         Self { author, ts }

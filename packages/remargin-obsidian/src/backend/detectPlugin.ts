@@ -1,3 +1,5 @@
+/** Detects the remargin Claude Code plugin from `claude plugins list` output. */
+
 import type { PluginPresence } from "./types.ts";
 
 const PLUGIN_NAME = "remargin";

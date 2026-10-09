@@ -47,7 +47,7 @@ fn reply_to_reply_inherits_thread() {
     let comments: Vec<&Comment> = vec![&root, &child];
 
     let thread = resolve_thread_root(&comments, "child");
-    assert_eq!(thread, "root"); // Inherited from child's thread field
+    assert_eq!(thread, "root");
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn dangling_parent_no_crash() {
     let comments: Vec<&Comment> = Vec::new();
 
     let thread = resolve_thread_root(&comments, "nonexistent");
-    assert_eq!(thread, "nonexistent"); // Falls back to the reply_to value
+    assert_eq!(thread, "nonexistent");
 }
 
 #[test]

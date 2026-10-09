@@ -1,3 +1,5 @@
+//! Tests for extension-to-MIME mapping and the binary/text split.
+
 use super::{is_binary_mime, mime_for_extension};
 use std::path::Path;
 

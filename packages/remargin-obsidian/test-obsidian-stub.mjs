@@ -4,28 +4,18 @@
  * code importing from "obsidian" would fail at runtime without a stub.
  *
  * The exports here cover the surface area component code in this
- * package touches today. Each is a minimal no-op — tests that actually
+ * package touches. Each is a minimal no-op — tests that actually
  * exercise behaviour (e.g. setIcon side-effects) override the relevant
  * export with a spy before the component renders.
- *
- * Authoritative for: T36 (rem-fyj8.1) — see the ticket's "Mocks
- * authorized" table. Add new exports here as new components import
- * additional Obsidian APIs at test scope.
  */
 
 const noop = () => {
   /* obsidian-module no-op stub */
 };
 
-// Lightweight `setIcon`: components call this inside `useEffect`, which
-// react-dom/server skips, so the stub almost never fires in static
-// markup tests. Kept as a real function so client-render tests don't
-// throw if they exercise it.
+// Called inside `useEffect`, which react-dom/server skips; a real function for client renders.
 export const setIcon = noop;
 
-// `MarkdownRenderer.render` is awaited inside MarkdownContent's
-// useEffect — also unreachable in static markup tests, but exposed so
-// the namespace import resolves cleanly.
 export const MarkdownRenderer = {
   render: async () => {
     /* obsidian-module no-op stub */
@@ -88,10 +78,8 @@ export class ItemView {
 }
 export class MarkdownView {}
 export class MarkdownRenderChild {
-  // Real Obsidian's MarkdownRenderChild stashes its host element on
-  // `this.containerEl` so subclasses can mount React roots into it
-  // during `onload()`. T37's `ReadingModeCommentChild` relies on this
-  // — keep the behaviour parity in the test stub.
+  // Real Obsidian's MarkdownRenderChild stashes its host element on `this.containerEl` so
+  // subclasses can mount into it during `onload()`; the stub keeps that behaviour.
   constructor(containerEl) {
     this.containerEl = containerEl;
   }
@@ -112,19 +100,10 @@ export class Setting {
   }
 }
 
-// `editorInfoField` is Obsidian's CM6 StateField that exposes the
-// surrounding markdown view's file/editor/etc. The CM6 widget reads
-// it via `state.field(editorInfoField, false)` to resolve the source
-// path. Tests pass their own `state.field` implementation, so this
-// only needs to exist as a placeholder symbol.
+// A placeholder symbol: tests pass their own `state.field` keyed on it.
 export const editorInfoField = {};
 
-// `editorLivePreviewField` is Obsidian's CM6 StateField<boolean> —
-// `true` while the editor is in Live Preview, `false` in Source Mode.
-// The CM6 widget reads it via `state.field(editorLivePreviewField,
-// false)` to gate decoration emission. Tests pass their own
-// `state.field` implementation keyed on this sentinel object, so it
-// only needs to exist as an identity-stable placeholder symbol.
+// An identity-stable placeholder: tests key their own `state.field` on this sentinel.
 export const editorLivePreviewField = {};
 
 // `setting`/`workspace`-shaped helpers some components reference.

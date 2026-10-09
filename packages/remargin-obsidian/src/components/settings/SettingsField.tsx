@@ -1,3 +1,6 @@
+/** A labelled settings row: label, description and the control beside them. */
+
+/** Props for {@link SettingsField}. */
 interface SettingsFieldProps {
   label: string;
   description: string;

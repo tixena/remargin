@@ -22,14 +22,12 @@ export interface HasRemarginKind {
 
 /**
  * Collect the sorted, de-duplicated set of `remargin_kind` values
- * present in the supplied items. Used to drive the chip row in the
- * sidebar: only kinds that actually appear in the visible data get a
- * chip, matching the AC's "values present in the visible set".
+ * present in the supplied items: only kinds that appear in the visible
+ * data get a chip.
  *
  * Sort is case-insensitive so `Question` and `question` would appear
  * next to each other if both existed, but the stored casing wins for
- * display. Validation on the CLI side already canonicalizes input, so
- * in practice duplicates only differ by character-level equality.
+ * display.
  */
 export function collectKinds(items: Iterable<HasRemarginKind>): string[] {
   const seen = new Set<string>();

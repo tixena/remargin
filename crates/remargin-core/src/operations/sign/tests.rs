@@ -13,10 +13,6 @@
 //! - no-key: sign with a config that has no resolvable key is a hard
 //!   error regardless of mode (stricter than create/edit's fail-fast —
 //!   sign without a key has nothing to do)
-//!
-//! Dry-run coverage: the per-op `--dry-run` flag was removed in
-//! in favour of `remargin plan sign`. The projection test lives in
-//! `operations/tests.rs::project_sign_*`.
 
 extern crate alloc;
 
@@ -38,14 +34,6 @@ use crate::parser::{self, AuthorType, Comment, Segment};
 use crate::reactions::Reactions;
 use crate::writer::write_document;
 
-// ---- Test key pair -----------------------------------------------------
-//
-// Matched ed25519 key pair copied from `crate::crypto::tests`. Using the
-// exact same pair keeps sign's round-trip behaviour identical to what
-// verify_signature tests already pin down — a signature produced by
-// TEST_PRIVATE_KEY verifies against TEST_PUBLIC_KEY, which is what the
-// registry's `pubkeys` list holds.
-
 const TEST_PRIVATE_KEY: &str = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -57,8 +45,6 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 ";
 
 const TEST_PUBLIC_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+wwXvHwYjjSVOO1PyMrur+yoibLd5o/hmV test@remargin";
-
-// ---- Fixtures ---------------------------------------------------------
 
 fn registry_with_alice_pubkey() -> Registry {
     let yaml = format!(
@@ -216,8 +202,6 @@ participants:
         .unwrap()
 }
 
-// ---- Happy path --------------------------------------------------------
-
 #[test]
 fn sign_all_mine_writes_signature_for_owned_unsigned_comments() {
     let system = mock_with(&two_author_doc());
@@ -240,8 +224,6 @@ fn sign_all_mine_writes_signature_for_owned_unsigned_comments() {
         "all-mine never reports non-owned ids as skipped"
     );
 
-    // Post-state: the on-disk doc must now carry a signature on alc and
-    // still none on bob.
     let doc = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
     let alc = doc.find_comment("alc").unwrap();
     let bob = doc.find_comment("bob").unwrap();
@@ -276,16 +258,12 @@ fn sign_ids_signs_listed_comments() {
     assert!(doc.find_comment("alc").unwrap().signature.is_some());
 }
 
-// ---- Forgery guard ----------------------------------------------------
-
 #[test]
 fn sign_ids_foreign_author_is_hard_error() {
     let before = two_author_doc();
     let system = mock_with(&before);
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    // alice tries to sign bob's comment — cryptographic forgery. Must
-    // bail before any byte hits disk.
     let result = sign_comments(
         &system,
         Path::new("/d/a.md"),
@@ -334,14 +312,8 @@ fn sign_ids_missing_id_is_hard_error() {
     assert_eq!(after, before);
 }
 
-// ---- Already-signed behaviour ----------------------------------------
-
 #[test]
 fn sign_ids_already_signed_reported_as_skipped() {
-    // Pre-build a pre-signed doc (using the same key pair) so the
-    // caller lists an id that is already signed under `--ids`. The op
-    // must NOT re-sign; it must report it as skipped with the canonical
-    // reason string.
     let pre_system = MemorySystem::new()
         .with_file(Path::new("/keys/ed25519"), TEST_PRIVATE_KEY.as_bytes())
         .unwrap();
@@ -383,8 +355,6 @@ fn sign_all_mine_is_idempotent() {
     .unwrap();
     assert_eq!(r1.signed.len(), 1);
 
-    // Second run: alice has no unsigned comments left. --all-mine is
-    // a filter, so already-signed ids are silently excluded.
     let r2 = sign_comments(
         &system,
         Path::new("/d/a.md"),
@@ -401,14 +371,8 @@ fn sign_all_mine_is_idempotent() {
     );
 }
 
-// ---- No key -----------------------------------------------------------
-
 #[test]
 fn sign_without_resolvable_key_is_hard_error() {
-    // Unlike create / edit (which route through `resolve_signing_key`
-    // and get `Ok(None)` in non-strict modes), `sign` has a stricter
-    // pre-condition: without a key there is literally nothing to do.
-    // The op must bail with an actionable message regardless of mode.
     let before = two_author_doc();
     let system = mock_with(&before);
     let mut cfg = make_config(Mode::Registered, "alice", None);
@@ -433,14 +397,8 @@ fn sign_without_resolvable_key_is_hard_error() {
     assert_eq!(after, before, "no-key refusal must not touch disk");
 }
 
-// ---- Parser sanity: signed comment round-trips through verify ----------
-
 #[test]
 fn signed_comment_survives_reparse_with_signature() {
-    // Sanity guard: after sign + write + re-parse, the `signature:` field
-    // is still attached to the comment (not dropped on serialize). This
-    // is what makes the idempotency and skip-already-signed tests above
-    // meaningful.
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
@@ -462,11 +420,7 @@ fn signed_comment_survives_reparse_with_signature() {
     assert_eq!(signed_count, 1, "exactly one signed comment expected");
 }
 
-/// Signature stability across the on-disk timestamp format change. A doc
-/// authored and signed while zero offsets were spelled `+00:00` verifies
-/// as-is, and keeps verifying after a rewrite converts its disk timestamps
-/// to `Z` — the signing payload is rebuilt from the parsed instant, which
-/// both spellings share.
+/// A doc signed with `+00:00` timestamps still verifies after a rewrite turns them into `Z`.
 #[test]
 fn legacy_zero_offset_signature_survives_the_z_rewrite() {
     let content = "alice's note";
@@ -550,8 +504,6 @@ signature: {sig}
     );
 }
 
-// ---- repair_checksum --------------------------------------
-
 /// Substitute every occurrence of `needle` inside a `remargin` fence in
 /// `doc` with `replacement`. Simulates an out-of-band edit (e.g. a text
 /// editor, rsync merge, or hand-patched diff) that modifies a comment's
@@ -563,12 +515,6 @@ fn edit_fence_content_in_place(doc: &str, needle: &str, replacement: &str) -> St
 
 #[test]
 fn sign_on_tampered_content_without_repair_checksum_lands_signature() {
-    // Under the subset gate: P = {(alc, checksum_invalid)} (tampered
-    // bytes). Default sign (no --repair-checksum) leaves the checksum
-    // field alone but attaches a signature over the current content.
-    // Q = {(alc, checksum_invalid)} (still bad checksum). Q ⊆ P →
-    // allowed. The signature lands but the checksum stays stale until
-    // someone explicitly repairs it.
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
@@ -598,27 +544,15 @@ fn sign_on_tampered_content_without_repair_checksum_lands_signature() {
 
 #[test]
 fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
-    // Full scenario:
-    // 1. Place a comment (two_author_doc seeds alice's "alice's note"
-    // with a matching checksum).
-    // 2. Something alters the comment (simulated here by a direct
-    // byte substitution on the on-disk file, as an editor or
-    // merge tool would).
-    // 3. Sign the comment with --repair-checksum.
-    // 4. The stored checksum is recomputed from the new content,
-    // the signature is attached, and verify passes.
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    // Step 2: out-of-band edit to alice's comment body. Bob's comment
-    // is untouched and must remain untouched post-sign.
     let before = system.read_to_string(Path::new("/d/a.md")).unwrap();
     let tampered = edit_fence_content_in_place(&before, "alice's note", "alice's NOTE (edited)");
     system
         .write(Path::new("/d/a.md"), tampered.as_bytes())
         .unwrap();
 
-    // Capture the stale checksum for the assertion on the repair entry.
     let pre_sign = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
     let stale_cksum = pre_sign.find_comment("alc").unwrap().checksum.clone();
     let fresh_cksum = crypto::compute_checksum("alice's NOTE (edited)", &[]);
@@ -627,7 +561,6 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
         "sanity: tampered content must diverge from the stored checksum"
     );
 
-    // Step 3: sign with repair_checksum = true.
     let result = sign_comments(
         &system,
         Path::new("/d/a.md"),
@@ -639,7 +572,6 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
     )
     .unwrap();
 
-    // Result assertions.
     assert_eq!(result.signed.len(), 1, "alice's comment should be signed");
     assert_eq!(result.signed[0].id, "alc");
     assert_eq!(
@@ -651,7 +583,6 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
     assert_eq!(result.repaired[0].old_checksum, stale_cksum);
     assert_eq!(result.repaired[0].new_checksum, fresh_cksum);
 
-    // Step 4: on-disk post-state.
     let after = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
     let alc = after.find_comment("alc").unwrap();
     assert_eq!(
@@ -664,7 +595,6 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
         "repaired comment must carry a fresh signature"
     );
 
-    // Bob's comment is untouched by the repair.
     let bob = after.find_comment("bob").unwrap();
     assert!(
         bob.signature.is_none(),
@@ -674,10 +604,6 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
 
 #[test]
 fn sign_with_repair_checksum_on_already_valid_checksum_reports_no_repair() {
-    // When the stored checksum already matches the current content the
-    // repair path is a no-op — the signature is still written, but the
-    // `repaired` list stays empty. Regression guard: we should not
-    // spuriously mark every signed comment as "repaired".
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
@@ -702,13 +628,6 @@ fn sign_with_repair_checksum_on_already_valid_checksum_reports_no_repair() {
 
 #[test]
 fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
-    // The real-world shape (the scenario that drove): a
-    // comment was signed at creation, then edited out-of-band. The
-    // stored signature is now invalid (covers pre-edit content) and
-    // the stored checksum is stale. Default sign skips the comment
-    // with reason="already_signed" because `signature.is_some()`;
-    // under --repair-checksum the op is supposed to re-vouch, which
-    // means overwriting both fields.
     let pre_system = MemorySystem::new()
         .with_file(Path::new("/keys/ed25519"), TEST_PRIVATE_KEY.as_bytes())
         .unwrap();
@@ -716,18 +635,12 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
     let system = mock_with(&pre_signed);
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    // Tamper with the content after signing. Now checksum is stale
-    // and signature no longer matches the current content.
     let tampered =
         edit_fence_content_in_place(&pre_signed, "alice's note", "alice's NOTE (edited)");
     system
         .write(Path::new("/d/a.md"), tampered.as_bytes())
         .unwrap();
 
-    // Under the subset gate: stale checksum is in P, so the op no
-    // longer trips the gate on its presence. But the comment is
-    // already signed → default sign classifies it as already_signed
-    // and skips, leaving content/checksum untouched.
     let baseline = sign_comments(
         &system,
         Path::new("/d/a.md"),
@@ -742,8 +655,6 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
     );
     assert_eq!(baseline.skipped.len(), 1);
 
-    // With --repair-checksum: overwrite both fields, write, verify
-    // passes.
     let result = sign_comments(
         &system,
         Path::new("/d/a.md"),
@@ -776,9 +687,6 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
         crypto::compute_checksum("alice's NOTE (edited)", &[])
     );
     assert!(alc.signature.is_some());
-    // The new signature must verify against the registry pubkey
-    // (round-trip guard — re-signing with the matched key produces a
-    // valid signature over the current content).
     let sig_ok = crypto::verify_signature(alc, TEST_PUBLIC_KEY).unwrap();
     assert!(
         sig_ok,
@@ -788,14 +696,10 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
 
 #[test]
 fn sign_forgery_guard_blocks_repair_on_foreign_comment() {
-    // repair_checksum does not bypass the forgery guard. alice cannot
-    // repair (or sign) bob's comment — the op bails before any byte
-    // hits disk, even with the repair flag on.
     let before = two_author_doc();
     let system = mock_with(&before);
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    // Out-of-band edit to bob's comment; alice tries to repair+sign it.
     let tampered = edit_fence_content_in_place(&before, "bob's note", "bob's NOTE (edited)");
     system
         .write(Path::new("/d/a.md"), tampered.as_bytes())
@@ -823,8 +727,6 @@ fn sign_forgery_guard_blocks_repair_on_foreign_comment() {
         "forgery-guard refusal must not touch disk even when repair was requested"
     );
 }
-
-// --- render_sign_result_text unit tests ---
 
 #[test]
 fn render_sign_result_empty() {

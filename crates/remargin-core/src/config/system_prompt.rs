@@ -13,45 +13,30 @@ use serde::Serialize;
 
 use crate::config::{CONFIG_FILENAME, Config};
 
-/// Locked Default prompt body per the `y76` decision.
-///
-/// Public so adapters (CLI / MCP / tests) can compare against it
-/// without re-typing the string. The `<files>` token is substituted by
-/// the caller (the Submit pipeline); this resolver returns the body
-/// verbatim.
+/// The `<files>` token is substituted by the caller; the resolver returns the body verbatim.
 pub const DEFAULT_PROMPT_BODY: &str =
     "Please process the comments in <files> using the remargin skill";
 
 /// Resolved `system_prompt:` answer for one walk.
 ///
-/// `source.is_none()` and `is_default = true` both fire when the walk
-/// exhausted without finding a `system_prompt:` block. The two are kept
-/// distinct so a future "explicit vault default" can declare a body in
-/// `vault/.remargin.yaml` and keep `is_default = false` — the y76
-/// fallback only fires when the walk produced nothing at all.
+/// `source` is `None` and `is_default` is `true` only when the walk found no `system_prompt:`
+/// block at all.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct ResolvedSystemPrompt {
-    /// True when the walk exhausted with no match and the resolver
-    /// returned [`DEFAULT_PROMPT_BODY`].
     pub is_default: bool,
-    /// Human-readable name. Derived from the YAML `name:` field when
-    /// present; otherwise from the owning folder basename. `"default"`
-    /// for the fallback.
+    /// The YAML `name:`, else the owning folder's basename; `"default"` for the fallback.
     pub name: String,
-    /// Body to send to the AI.
     pub prompt: String,
-    /// Single-line command the composed prompt is piped into. `None`
-    /// means the caller's default runner.
+    /// `None` means the caller's default runner.
     pub runner: Option<String>,
-    /// `.remargin.yaml` that declared the prompt. `None` for the
-    /// fallback.
+    /// `None` for the fallback.
     pub source: Option<PathBuf>,
 }
 
 /// Walk upward from `file_path`'s parent directory looking for the
 /// nearest `.remargin.yaml` that declares a `system_prompt:` block.
-/// Falls through to the y76 Default when the walk exhausts.
+/// Falls through to [`DEFAULT_PROMPT_BODY`] when the walk exhausts.
 ///
 /// `file_path` itself need not exist on disk; only its parent chain is
 /// walked. Callers wanting to resolve for a directory can pass the

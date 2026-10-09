@@ -1,13 +1,11 @@
+/** Tests for the argv and stdin of a `remargin write`. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { buildWriteInvocation } from "./buildWriteInvocation.ts";
 
 describe("buildWriteInvocation", () => {
-  // Regression: the Obsidian "Initialize" button feeds a bare .md file's
-  // full text — which starts with a `---` frontmatter fence — to
-  // `remargin write`. Passing that body as an argv positional made clap
-  // read the leading `---` as a flag and abort with "unexpected
-  // argument". The body must ride stdin instead.
+  // A body starting with a `---` fence would be read by clap as a flag, so it must ride stdin.
   it("routes a frontmatter-leading body to stdin, never argv", () => {
     const body = '---\ntop_of_mind: "true"\narea: personal\n---\n# STACK\n';
     const { args, stdin } = buildWriteInvocation("STACK.md", body);

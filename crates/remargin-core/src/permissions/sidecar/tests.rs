@@ -21,10 +21,7 @@ fn empty_anchor() -> (MemorySystem, PathBuf) {
 }
 
 fn sample_entry() -> SidecarEntry {
-    // the projected allow set is empty by default now that
-    // `restrict` no longer auto-emits `mcp__remargin__*`. Pinning a
-    // single editor-tool re-allow here keeps the round-trip exercised
-    // with a non-empty allow vector.
+    // One editor-tool re-allow keeps the round trip exercised with a non-empty allow vector.
     SidecarEntry {
         added_at: String::from("2026-04-26T10:00:00Z"),
         added_to_files: vec![
@@ -39,8 +36,6 @@ fn sample_entry() -> SidecarEntry {
     }
 }
 
-/// `Sidecar::new` returns an empty payload pinned to the current
-/// version constant.
 #[test]
 fn sidecar_new_starts_empty_at_current_version() {
     let sidecar = Sidecar::new();
@@ -48,9 +43,7 @@ fn sidecar_new_starts_empty_at_current_version() {
     assert_eq!(sidecar.version, SIDECAR_VERSION);
 }
 
-/// Loading from a missing file yields an empty sidecar at the current
-/// version — no error. This is the bootstrap case for the very first
-/// `restrict` invocation.
+/// The bootstrap case for the very first `restrict`.
 #[test]
 fn load_missing_returns_empty_sidecar() {
     let (system, anchor) = empty_anchor();
@@ -59,7 +52,6 @@ fn load_missing_returns_empty_sidecar() {
     assert_eq!(sidecar.version, SIDECAR_VERSION);
 }
 
-/// Round-trip: save an entry, reload, get the same entry back.
 #[test]
 fn save_and_load_round_trip() {
     let (system, anchor) = empty_anchor();
@@ -71,8 +63,6 @@ fn save_and_load_round_trip() {
     assert_eq!(reloaded.entries["/r/secret"], entry);
 }
 
-/// `add_entry` for the same key twice replaces the prior record so a
-/// re-apply tracks the latest deltas.
 #[test]
 fn add_entry_replaces_existing_record() {
     let (system, anchor) = empty_anchor();
@@ -89,8 +79,6 @@ fn add_entry_replaces_existing_record() {
     assert_eq!(reloaded.entries["/r/secret"], second);
 }
 
-/// `remove_entry` returns the prior record and persists the updated
-/// sidecar minus that entry.
 #[test]
 fn remove_entry_returns_and_persists() {
     let (system, anchor) = empty_anchor();
@@ -104,8 +92,6 @@ fn remove_entry_returns_and_persists() {
     assert!(after.entries.is_empty());
 }
 
-/// `remove_entry` on a key that was never tracked returns `None` and
-/// leaves the sidecar unchanged.
 #[test]
 fn remove_entry_missing_returns_none() {
     let (system, anchor) = empty_anchor();
@@ -113,8 +99,7 @@ fn remove_entry_missing_returns_none() {
     assert!(removed.is_none());
 }
 
-/// Scenario 16: a sidecar with an unknown version is rejected with a
-/// message that names both versions.
+/// The message names both versions.
 #[test]
 fn load_rejects_unknown_version() {
     let (system, anchor) = empty_anchor();
@@ -131,7 +116,6 @@ fn load_rejects_unknown_version() {
     );
 }
 
-/// Scenario 17: corrupt JSON surfaces an error that names the file.
 #[test]
 fn load_rejects_malformed_json() {
     let (system, anchor) = empty_anchor();
@@ -147,8 +131,6 @@ fn load_rejects_malformed_json() {
     );
 }
 
-/// Scenario 15: missing `.gitignore` is created with the entry on
-/// first save.
 #[test]
 fn save_creates_gitignore_when_absent() {
     let (system, anchor) = empty_anchor();
@@ -161,8 +143,6 @@ fn save_creates_gitignore_when_absent() {
     );
 }
 
-/// Scenario 14: re-running `save` with the entry already in
-/// `.gitignore` does NOT duplicate it.
 #[test]
 fn save_does_not_duplicate_gitignore_entry() {
     let (system, anchor) = empty_anchor();
@@ -177,8 +157,6 @@ fn save_does_not_duplicate_gitignore_entry() {
     assert_eq!(count, 1, "gitignore: {gitignore}");
 }
 
-/// `.gitignore` already containing the entry (e.g. user pre-added it)
-/// is left byte-identical.
 #[test]
 fn save_preserves_existing_gitignore_entry() {
     let (system, anchor) = empty_anchor();
@@ -191,8 +169,6 @@ fn save_preserves_existing_gitignore_entry() {
     assert_eq!(updated, original);
 }
 
-/// Save preserves unrelated `.gitignore` content and appends the new
-/// entry on its own line.
 #[test]
 fn save_appends_to_existing_gitignore_without_clobbering() {
     let (system, anchor) = empty_anchor();
@@ -206,8 +182,6 @@ fn save_appends_to_existing_gitignore_without_clobbering() {
     assert!(updated.contains(SIDECAR_GITIGNORE_ENTRY));
 }
 
-/// Sidecar JSON is human-readable (pretty-printed) so diffs are
-/// reviewable.
 #[test]
 fn saved_json_is_pretty_printed() {
     let (system, anchor) = empty_anchor();
@@ -219,8 +193,6 @@ fn saved_json_is_pretty_printed() {
     );
 }
 
-/// `sidecar_path` is the documented absolute resolution. Pin it so a
-/// future relocation must update this test deliberately.
 #[test]
 fn sidecar_path_is_under_dot_claude() {
     assert_eq!(

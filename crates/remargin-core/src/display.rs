@@ -14,7 +14,7 @@ use crate::reactions::ReactionsExt as _;
 
 /// A node in the comment tree: a comment plus its direct replies.
 pub(crate) struct CommentNode<'cm> {
-    /// Direct replies, sorted by timestamp ascending.
+    /// Sorted by timestamp ascending.
     pub children: Vec<Self>,
     pub comment: &'cm Comment,
 }

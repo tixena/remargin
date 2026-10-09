@@ -1,3 +1,5 @@
+/** Runs captured CLI report payloads through the generated schemas. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
@@ -14,11 +16,8 @@ import {
   VerifyErrorKind$Schema,
 } from "@/generated";
 
-// Every payload below is REAL `remargin <cmd> --json` stdout captured from the
-// CLI (not hand-authored). The io layer decorates every top-level response with
-// an injected `elapsed_ms`, so a schema that models a whole payload has to admit
-// that one key while staying strict about every other unknown key; a schema that
-// models a fragment nested inside a payload never sees it.
+// Every payload is real `remargin <cmd> --json` stdout. The io layer adds `elapsed_ms` to each
+// top-level response, so whole-payload schemas admit that one key; nested fragments never see it.
 
 const DOCTOR = `{
   "elapsed_ms": 24,
@@ -42,8 +41,6 @@ const SANDBOX_REMOVE = `{
   "elapsed_ms": 2, "failed": [], "removed": ["doc.md"], "skipped": []
 }`;
 
-// One `sandbox list` row, captured from the same run — a nested element, so the
-// envelope's elapsed_ms never reaches it.
 const SANDBOX_LIST_ENTRY = `{ "path": "doc.md", "since": "2026-08-02T14:10:26.961832093+00:00" }`;
 
 describe("report schemas — live --json payloads parse whole", () => {
@@ -111,10 +108,7 @@ describe("nested schemas — no elapsed_ms member", () => {
   });
 });
 
-// serde emits enum variants in the casing `rename_all` names — snake_case for
-// CpKind, Severity, and FindingKind — and the generated schemas must carry those
-// exact strings. Captured from a scratch realm, so the absolute paths below are
-// the temp directory the CLI really ran in.
+// serde emits enum variants in `rename_all` casing; the schemas must carry those exact strings.
 
 const CP_VERBATIM = `{
   "bytes_copied": 69,

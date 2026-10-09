@@ -1,18 +1,15 @@
+//! Source-level checks that the comment-body gate has no bypass seam.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The gate's exact signature. Its two parameters are the whole of its
-/// input surface; a third one would be the seam a bypass hangs off.
+/// Its two parameters are the whole of its input surface; a third would be a bypass seam.
 const GATE_SIGNATURE: &str = "pub fn gate(content: &str, author_type: &AuthorType) -> Result<()> {";
 
-/// The edit gate's exact signature. The old body, the new body and the
-/// author type are the whole of its input surface; a fourth parameter would
-/// be the same seam under another name.
+/// The old body, the new body and the author type are the whole of its input surface.
 const EDIT_GATE_SIGNATURE: &str = "pub fn gate_edit(old_content: &str, new_content: &str, author_type: &AuthorType) -> Result<()> {";
 
-/// The edit path's entry point, and the call it has to carry. An edit that
-/// reaches a write without it is how a gated body gets rewritten into an
-/// ungated one.
+/// The edit path's entry point; its body must carry the edit-gate call.
 const EDIT_ENTRY_POINT: &str = "pub fn edit_comment(";
 const EDIT_GATE_CALL: &str = "comment_style::gate_edit(";
 
@@ -20,12 +17,8 @@ const EDIT_GATE_CALL: &str = "comment_style::gate_edit(";
 const CREATE_ENTRY_POINT: &str = "pub fn create_comment(";
 const GATE_CALL: &str = "comment_style::gate(";
 
-/// Every hop from a projection that authors a body down to the gate, as
-/// (function, call its body must carry). A projection is what an agent is
-/// told to trust before it commits, so one that reaches a write surface
-/// without the gate reports the opposite of what the write will do. Batch
-/// gates through a preflight helper, so both hops are pinned — cutting
-/// either one severs the chain.
+/// Every hop from a body-authoring projection down to the gate, as (function, call its body
+/// must carry). Batch gates through a preflight helper, so both hops are pinned.
 const PROJECTION_GATE_CHAIN: &[(&str, &str)] = &[
     ("pub fn project_batch(", "preflight_batch_ops("),
     ("fn preflight_batch_ops(", GATE_CALL),
@@ -33,9 +26,7 @@ const PROJECTION_GATE_CHAIN: &[(&str, &str)] = &[
     ("pub fn project_edit(", EDIT_GATE_CALL),
 ];
 
-/// Tokens that must not appear in the gate's module. Each one is a way for
-/// caller-supplied state to reach a decision that may only be made from the
-/// body and the author type.
+/// Each token is a way for caller-supplied state to reach the gate's decision.
 const BANNED_IN_GATE_MODULE: &[&str] = &[
     "ResolvedConfig",
     "env!",

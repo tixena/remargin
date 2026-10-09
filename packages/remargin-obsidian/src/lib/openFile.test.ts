@@ -1,11 +1,9 @@
+/** Tests for opening a file at a line: unresolvable paths, the normal path and normalization. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { TFile } from "obsidian";
 import { openFileAtLine } from "./openFile.ts";
-
-// ---------------------------------------------------------------------------
-// Minimal plugin-shaped mock
-// ---------------------------------------------------------------------------
 
 /**
  * Build a minimal plugin stub.
@@ -63,13 +61,7 @@ function makePlugin(resolvesExact: string | undefined): {
   return { plugin, openFileCalls, revealLeafCalls, lastLookupPath: () => lastLookup };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("openFileAtLine", () => {
-  // ── Unresolvable path: early-return / Notice branch ──────────────────────
-
   it("returns without throwing when the path is unresolvable", async () => {
     const { plugin } = makePlugin(undefined);
 
@@ -89,8 +81,6 @@ describe("openFileAtLine", () => {
       "early return must prevent openFile from being called"
     );
   });
-
-  // ── Resolvable path: normal open path ────────────────────────────────────
 
   it("calls leaf.openFile exactly once for a resolvable vault-relative path", async () => {
     const { plugin, openFileCalls } = makePlugin("notes/doc.md");
@@ -115,8 +105,6 @@ describe("openFileAtLine", () => {
 
     assert.strictEqual(revealLeafCalls.length, 0, "revealLeaf must not be called when file resolution fails");
   });
-
-  // ── normalizePath: paths are normalised before vault lookup ──────────────
 
   it("strips a leading ./ so the vault lookup matches the canonical path", async () => {
     const { plugin, openFileCalls, lastLookupPath } = makePlugin("notes/doc.md");
@@ -143,8 +131,6 @@ describe("openFileAtLine", () => {
     );
     assert.strictEqual(openFileCalls.length, 1, "file should have been opened after normalisation");
   });
-
-  // ── Isolation: each plugin instance has an independent call tracker ──────
 
   it("call counters are independent across plugin instances", async () => {
     const { plugin: gone, openFileCalls: callsGone } = makePlugin(undefined);

@@ -1,3 +1,5 @@
+/** The sidebar's frame: header toolbar, collapsible sections and the scroll viewport. */
+
 import { Inbox, Mail } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ReMarginLogo } from "@/components/icons/ReMarginLogo";
@@ -11,46 +13,24 @@ import { FontScaleControl } from "./FontScaleControl";
 import { focusCardInRoot } from "./focusCard";
 import { SectionHeader } from "./SectionHeader";
 
+/** Props for {@link SidebarShell}. */
 interface SidebarShellProps {
   plugin: RemarginPlugin;
   activeFile?: string;
-  /**
-   * Called when a focus request from the plugin (`focusComment`) targets
-   * a file other than `activeFile`. The parent should switch the active
-   * filter to `file` so the targeted card mounts before the shell
-   * scrolls + highlights it. When omitted, cross-file focus events are
-   * silently ignored — the scroll path still runs but matches nothing.
-   */
+  /** Called when a focus request targets another file, so the parent can switch to it first. */
   onFocusFile?: (file: string) => void;
   sandboxCount?: number;
   inboxCount?: number;
   threadPending?: number;
-  /**
-   * Monotonic refresh signal — bumped by the sidebar on any mutation.
-   * Forwarded to children that cache per-file state (currently the
-   * `Initialize` detection in `FilePathHeader`).
-   */
   refreshKey?: number;
-  /** Called by the `Initialize` flow after `remargin write` succeeds. */
   onInitialized?: () => void;
-  /** Handler for the header `+` button. */
   onPlusClick?: () => void;
-  /**
-   * Handler for the header refresh button. Firing it should cause every
-   * sidebar section to refetch its data.
-   */
   onRefreshClick?: () => void;
   sandboxContent?: React.ReactNode;
   sandboxActions?: React.ReactNode;
   inboxContent?: React.ReactNode;
-  /** Right-aligned actions slot for the Inbox section header. */
   inboxActions?: React.ReactNode;
   threadContent?: React.ReactNode;
-  /**
-   * Optional content rendered inside the file-named section, above the
-   * thread list. Used by the `+` flow to show an inline comment editor
-   * next to the file it targets (no modal).
-   */
   threadInlineEditor?: React.ReactNode;
   footerContent?: React.ReactNode;
 }
@@ -79,15 +59,8 @@ export function SidebarShell({
   const [threadOpen, setThreadOpen] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Bridge: subscribe to the plugin's `remargin:focus` event bus so a
-  // widget click in the editor (T37 reading-mode / T38 Live Preview)
-  // can scroll the matching sidebar card into view + briefly highlight
-  // it. When the event names a different file, ask the parent to
-  // switch the filter first — the card will mount on the next render
-  // and the scroll runs in the next animation frame.
-  // The `latestFile` ref keeps the listener stable across `activeFile`
-  // changes; without it, every active-file flip would tear down and
-  // re-attach the listener mid-render.
+  // Subscribes to the plugin's `remargin:focus` bus so a widget click in the editor scrolls to
+  // the matching card. The `latestFile` ref keeps the listener stable across `activeFile` changes.
   const latestFile = useRef(activeFile);
   latestFile.current = activeFile;
   useEffect(() => {
@@ -106,10 +79,7 @@ export function SidebarShell({
         focus();
         return;
       }
-      // Switch the filter first; defer the scroll so the new card has
-      // a chance to mount under the updated filter. A microtask is the
-      // smallest delay that reliably runs after React re-renders the
-      // section list.
+      // The filter switches first; the scroll is deferred so the new card can mount under it.
       onFocusFile?.(file);
       Promise.resolve().then(focus);
     };
@@ -119,13 +89,8 @@ export function SidebarShell({
     };
   }, [plugin, onFocusFile]);
 
-  // Restore native select + copy on text inside the sidebar. Obsidian's
-  // hotkey scope intercepts Ctrl+C/Cmd+C before the browser's clipboard
-  // pipeline sees it, so a capture-phase listener writes the current
-  // selection to the system clipboard ourselves and stops propagation.
-  // Bound on the document at capture phase so we beat Obsidian's hotkey
-  // dispatcher; scoped by checking the live selection lives inside the
-  // sidebar root, so this never interferes with selections elsewhere.
+  // Obsidian's hotkey scope intercepts Ctrl+C / Cmd+C, so a capture-phase listener copies the
+  // selection itself, and only when the selection lives inside the sidebar root.
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -221,12 +186,8 @@ export function SidebarShell({
         </div>
       </div>
 
-      {/* `min-h-0` is load-bearing: a flex item defaults to
-          `min-height: auto`, which forbids it from shrinking below its
-          content. Without it `flex-1` never caps this height, the Radix
-          root grows to the full comment list, scrollHeight equals
-          clientHeight, and the panel scrolls the whole Obsidian pane
-          instead of itself. `min-w-0` is the same fix on the other axis. */}
+      {/* `min-h-0` is load-bearing: without it `flex-1` never caps this height and the whole
+          Obsidian pane scrolls instead of the panel. `min-w-0` is the same fix on the other axis. */}
       <ScrollArea className="flex-1 min-h-0 min-w-0">
         <div className="flex flex-col min-w-0">
           <Collapsible open={sandboxOpen} onOpenChange={setSandboxOpen}>

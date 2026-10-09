@@ -1,8 +1,6 @@
 //! Extension-based MIME type detection.
 //!
-//! Source of truth is the file extension — no content-sniffing. Used by
-//! `metadata` and, once it lands, `get --binary` so
-//! agents can decide whether a file is worth fetching before pulling bytes.
+//! Source of truth is the file extension — no content-sniffing.
 
 use std::path::Path;
 
@@ -17,7 +15,6 @@ pub fn mime_for_extension(path: &Path) -> &'static str {
     };
     let lowered = ext.to_lowercase();
     match lowered.as_str() {
-        // Prose / data
         "md" => "text/markdown",
         "csv" => "text/csv",
         "html" | "htm" => "text/html",
@@ -26,27 +23,22 @@ pub fn mime_for_extension(path: &Path) -> &'static str {
         "json" => "application/json",
         "yaml" | "yml" => "application/yaml",
         "toml" => "application/toml",
-        // Images
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
         "webp" => "image/webp",
         "svg" => "image/svg+xml",
-        // Documents
         "pdf" => "application/pdf",
-        // Audio
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "ogg" => "audio/ogg",
         "flac" => "audio/flac",
         "m4a" => "audio/mp4",
-        // Video
         "mp4" => "video/mp4",
         "webm" => "video/webm",
         "mov" => "video/quicktime",
         "avi" => "video/x-msvideo",
-        // Plaintext + source code default to text/plain. Callers that need
-        // finer granularity (e.g. application/javascript) can special-case.
+        // Source code defaults to text/plain.
         "txt" | "ini" | "env" | "conf" | "sh" | "bash" | "zsh" | "fish" | "ps1" | "psm1"
         | "psd1" | "sql" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" | "mts" | "cts" | "py"
         | "pyi" | "pyw" | "rs" | "go" | "cs" | "csx" | "fs" | "fsx" | "vb" | "java" | "kt"
@@ -56,7 +48,6 @@ pub fn mime_for_extension(path: &Path) -> &'static str {
         | "erl" | "hrl" | "zig" | "nim" | "scss" | "sass" | "less" | "vue" | "svelte" | "pen" => {
             "text/plain"
         }
-        // Office documents
         "doc" => "application/msword",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xls" => "application/vnd.ms-excel",

@@ -1,3 +1,6 @@
+//! Unit tests for the CLI helpers: the activity cutoff header, line ranges, comment content and
+//! registry rendering.
+
 use std::path::{Path, PathBuf};
 
 use os_shim::mock::MemorySystem;
@@ -15,8 +18,7 @@ fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
     chrono::DateTime::parse_from_rfc3339(s).unwrap()
 }
 
-/// implicit cutoff with a caller-last-action ts
-/// renders as "(since you last touched this file: …)".
+/// Renders as "(since you last touched this file: …)".
 #[test]
 fn cutoff_header_implicit_with_last_action() {
     let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
@@ -26,8 +28,6 @@ fn cutoff_header_implicit_with_last_action() {
     );
 }
 
-/// implicit cutoff with no prior activity renders
-/// the initial-touch fallback message.
 #[test]
 fn cutoff_header_implicit_initial_touch() {
     let header = render_activity_cutoff_header(false, None);
@@ -41,16 +41,13 @@ fn cutoff_header_implicit_initial_touch() {
     );
 }
 
-/// explicit `--since` echoes the cutoff with the
-/// "(since …)" wording, matching the user's input.
 #[test]
 fn cutoff_header_explicit_since() {
     let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
     assert_eq!(header, "(since 2026-04-27 02:09)");
 }
 
-/// the placeholder string `YOUR-LAST-ACTION` from
-/// the design discussion must never reach user-visible output.
+/// The placeholder `YOUR-LAST-ACTION` must never reach user-visible output.
 #[test]
 fn cutoff_header_never_emits_placeholder() {
     for explicit in [true, false] {

@@ -1,3 +1,5 @@
+/** The inline composer for a reply. */
+
 import type { EditorView } from "@codemirror/view";
 import { Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,6 +12,7 @@ function noop(): void {
   /* intentionally empty */
 }
 
+/** Props for {@link InlineReplyEditor}. */
 interface InlineReplyEditorProps {
   file: string;
   replyTo: string;
@@ -22,9 +25,7 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
   const [submitting, setSubmitting] = useState(false);
   const [hasContent, setHasContent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Parent author, resolved lazily so we can pre-select and lock the
-  // chip when the reply composer opens. The CLI enforces the
-  // parent-in-to invariant server-side; the lock is purely decorative.
+  // The lock on the parent author's chip is decorative: the CLI enforces parent-in-`to`.
   const [parentAuthor, setParentAuthor] = useState<string | null>(null);
   const [to, setTo] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -60,10 +61,7 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
   submitRef.current = () => void handleSubmit();
   closeRef.current = onClose;
 
-  // Fetch the parent author once per (file, replyTo) pair so we can
-  // pre-populate the chip. If the fetch fails (unlikely — the comment
-  // was just displayed), we silently fall back to no pre-selection;
-  // the CLI will still insert `to: [<parent_author>]` on submit.
+  // If the fetch fails there is no pre-selection; the CLI still inserts the parent author on submit.
   useEffect(() => {
     let cancelled = false;
     backend
@@ -92,10 +90,7 @@ export function InlineReplyEditor({ file, replyTo, onClose, onSubmitted }: Inlin
         onCancel: () => closeRef.current(),
         onDocLength: (len) => setHasContent(len > 0),
       });
-      // Bring the composer into view and focus the editor so the user can
-      // start typing immediately. Without this the user often doesn't
-      // notice anything happened, because the composer renders at the
-      // bottom of a long sidebar below the fold.
+      // The composer can render below the fold of a long sidebar, so it is scrolled to and focused.
       containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       viewRef.current.focus();
     }

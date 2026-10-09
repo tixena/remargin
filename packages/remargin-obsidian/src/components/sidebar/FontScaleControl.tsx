@@ -1,3 +1,5 @@
+/** The sidebar toolbar's font-scale control. */
+
 import { useState } from "react";
 import { ObsidianIcon } from "@/components/ui/ObsidianIcon";
 import { usePlugin } from "@/hooks/usePlugin";

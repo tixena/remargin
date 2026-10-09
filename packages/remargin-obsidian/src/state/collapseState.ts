@@ -1,3 +1,5 @@
+/** The per-session collapse store shared by the editor-side comment widgets. */
+
 /**
  * Listener invoked whenever a comment's collapse state changes. Receives
  * the comment id that flipped and its new collapsed value.
@@ -9,11 +11,9 @@ export type CollapseListener = (commentId: string, collapsed: boolean) => void;
  * the reading-mode post-processor and the Live Preview CM6 widget so
  * collapsing in one surface mirrors in the other.
  *
- * State is held in a private map keyed by comment id; default for any
- * unknown id is "collapsed" (matches the design's "land minimal, expand
- * on demand" stance). State is not persisted to plugin data — the user
- * confirmed per-session scope, and resetting on plugin reload keeps the
- * UI behaviour predictable.
+ * State is held in a private map keyed by comment id; any unknown id
+ * reads as collapsed. State is not persisted to plugin data, so it
+ * resets on plugin reload.
  *
  * Subscribers are notified synchronously on every `toggle`; `subscribe`
  * returns an unsubscribe thunk so callers (typically React `useEffect`

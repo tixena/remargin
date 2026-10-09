@@ -13,7 +13,6 @@ use crate::parser::Comment;
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ThreadTree {
-    /// Top-level comments (roots), each with their nested reply chains.
     pub roots: Vec<ThreadNode>,
 }
 
@@ -21,9 +20,7 @@ pub struct ThreadTree {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ThreadNode {
-    /// Nested replies to this comment.
     pub children: Vec<Self>,
-    /// The comment at this node.
     pub comment_id: String,
 }
 
@@ -45,7 +42,6 @@ pub fn build_thread_tree(comments: &[&Comment]) -> ThreadTree {
     ThreadTree { roots }
 }
 
-/// Recursively build a tree node for a comment.
 fn build_node(comment: &Comment, all_comments: &[&Comment]) -> ThreadNode {
     let children: Vec<ThreadNode> = all_comments
         .iter()

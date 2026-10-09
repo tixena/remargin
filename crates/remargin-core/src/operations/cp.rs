@@ -78,11 +78,10 @@ pub struct CpOutcome {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CpArgs {
-    /// Destination path (relative to `base_dir` or absolute).
+    /// Relative to `base_dir`, or absolute.
     pub dst: PathBuf,
-    /// Allow overwriting `dst` when it exists.
     pub force: bool,
-    /// Source path (relative to `base_dir` or absolute).
+    /// Relative to `base_dir`, or absolute.
     pub src: PathBuf,
 }
 
@@ -98,8 +97,6 @@ impl CpArgs {
         }
     }
 
-    /// Builder-style mutator: opt the args into `--force` overwrite
-    /// semantics.
     #[must_use]
     pub const fn with_force(mut self, force: bool) -> Self {
         self.force = force;
@@ -127,18 +124,9 @@ impl CpArgs {
 ///
 /// # Errors
 ///
-/// Returns an error when:
-///
-/// - Either endpoint is a forbidden target.
-/// - Either endpoint escapes the sandbox.
-/// - The destination is outside `trusted_roots` for the caller.
-/// - `deny_ops: cp` is set on the source.
-/// - The source lives in a strict realm that does not admit the caller.
-/// - `args.src` is missing.
-/// - `args.src` is a directory (recursive copy is out of scope for v1).
-/// - `args.src` is a file and `args.dst` is an existing directory.
-/// - `args.dst` already exists and `args.force` is `false`.
-/// - The underlying copy or write operation fails.
+/// Returns an error when an endpoint is a forbidden target or escapes the sandbox, the caller
+/// may not write the destination or copy the source, the source is missing or a directory, the
+/// destination exists without `force` or is a directory, or the copy fails.
 pub fn cp(
     system: &dyn System,
     base_dir: &Path,
@@ -310,9 +298,7 @@ fn perform_copy(
 /// Runs `ensure_frontmatter` (which recomputes `remargin_pending`,
 /// `remargin_pending_for`, and `remargin_last_activity` from the comments in
 /// `content`) then clears the `sandbox` key so the copy starts with no
-/// pending/sandbox state. Returns `(CpKind::Verbatim, 0)` — the
-/// comment-bearing branch is handled by the caller which substitutes
-/// `CpKind::BodyOnly`.
+/// pending/sandbox state.
 fn write_markdown_copy(
     system: &dyn System,
     dst: &Path,
@@ -321,11 +307,7 @@ fn write_markdown_copy(
 ) -> Result<()> {
     let mut doc = parser::parse(content)
         .with_context(|| format!("parsing markdown content for {}", dst.display()))?;
-    // Recompute remargin_pending / _pending_for / _last_activity from the
-    // (possibly empty) comment list in `doc`.
     frontmatter::ensure_frontmatter(&mut doc, config)?;
-    // Clear the sandbox key: the copy is a fresh document with no staged
-    // participants.
     frontmatter::write_sandbox_entries(&mut doc, &[])?;
 
     let serialized = doc

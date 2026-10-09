@@ -1,3 +1,5 @@
+//! Tests for the comment wire schema: field rendering, timestamps and the round trip.
+
 use super::{OnDiskComment, comment_from_on_disk};
 use crate::parser::{Acknowledgment, AuthorType, Comment};
 use crate::reactions::{Reactions, ReactionsExt as _};
@@ -47,9 +49,7 @@ fn from_comment_formats_ack_as_author_at_ts_string() {
     assert_eq!(on_disk.ack, vec!["jorge@2026-04-06T15:00:00-04:00"]);
 }
 
-/// Every timestamp the wire schema carries renders through the same
-/// canonical helper, so a zero offset lands on disk as `Z` — matching what
-/// serde emits for the identical instant in a JSON payload.
+/// A zero offset lands on disk as `Z`, matching what serde emits in a JSON payload.
 #[test]
 fn from_comment_renders_every_zero_offset_timestamp_with_z() {
     let mut comment = sample_comment();

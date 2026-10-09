@@ -1,7 +1,10 @@
+/** The sidebar footer: comment and pending counts, and the CLI version. */
+
 import { useEffect, useState } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBackend } from "@/hooks/useBackend";
 
+/** Props for {@link SidebarFooter}. */
 interface SidebarFooterProps {
   commentCount: number;
   pendingCount: number;

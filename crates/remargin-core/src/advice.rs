@@ -22,9 +22,8 @@ use serde_json::{Value, json};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct Advice {
-    /// 1-indexed line the note points at.
+    /// 1-indexed.
     pub line: usize,
-    /// Human-readable note. Phrased as advice; never as an error.
     pub message: String,
 }
 
@@ -37,9 +36,7 @@ pub struct Advice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct OpAdvice {
-    /// The note itself.
     pub note: Advice,
-    /// Zero-based index of the operation the note belongs to.
     pub op: usize,
 }
 
@@ -59,7 +56,6 @@ impl OpAdvice {
 pub(crate) struct ProseBlock<'text> {
     /// 1-indexed line of the block's first line.
     pub line: usize,
-    /// The block's lines, in order.
     pub lines: Vec<&'text str>,
 }
 
