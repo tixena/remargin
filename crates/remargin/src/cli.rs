@@ -76,11 +76,8 @@ impl IdentityArgs {
 /// Per-subcommand output group.
 ///
 /// Controls how the subcommand renders its result. Flattened into
-/// every subcommand that emits a payload. Unlike the old
-/// `GlobalFlags`, these flags are scoped to the subcommand — this
-/// matches the "per-concern, per-subcommand" structure the rest of
-/// the refactor establishes. Invocations that previously placed
-/// `--json` before the subcommand must now place it after.
+/// every subcommand that emits a payload, so `--json` goes after the
+/// subcommand, not before it.
 #[derive(clap::Args, Default)]
 pub struct OutputArgs {
     /// Output as JSON.
@@ -169,7 +166,6 @@ pub enum Commands {
     /// Claude Code integration: manage which paths Claude is allowed to
     /// edit + project the deny rules into both Claude settings files.
     Claude {
-        /// Subcommand: `restrict`, `unrestrict`.
         #[command(subcommand)]
         action: ClaudeAction,
     },
@@ -213,7 +209,6 @@ pub enum Commands {
     /// goose integration: manage the hook plugin that keeps goose
     /// sessions off remargin-managed paths.
     Goose {
-        /// Subcommand: `pretool`.
         #[command(subcommand)]
         action: GooseAction,
     },
@@ -221,8 +216,8 @@ pub enum Commands {
     ///
     /// With no subcommand (or `show`), resolves and prints the
     /// effective identity under the supplied [`IdentityArgs`] — the
-    /// pre-existing diagnostic surface that tooling (Obsidian plugin,
-    /// scripts) polls on startup.
+    /// diagnostic surface that tooling (Obsidian plugin, scripts) polls
+    /// on startup.
     ///
     /// With `create`, prints a ready-to-use identity YAML block to
     /// stdout so users can redirect into `.remargin.yaml`:
@@ -278,8 +273,7 @@ pub enum Commands {
     /// Structured pre-commit prediction for a mutating op.
     ///
     /// Per-op subcommand routing wires this to the in-memory projection
-    /// of each mutating op. This crate ships the shared shape +
-    /// subcommand tree; individual op wiring lands in follow-ups.
+    /// of each mutating op.
     ///
     /// Identity is flattened on the parent so every projection inherits
     /// the same `--identity` / `--type` / `--config` / `--key`. Output
@@ -342,7 +336,6 @@ pub enum Commands {
     /// Launch one agent session per discovered identity under cwd.
     #[cfg(feature = "session")]
     Session {
-        /// Subcommand: `launch`.
         #[command(subcommand)]
         action: SessionAction,
     },
@@ -382,7 +375,6 @@ pub enum Commands {
 pub enum ClaudeAction {
     /// Manage the remargin Claude Code plugin.
     Plugin {
-        /// Subcommand: install, uninstall, test.
         #[command(subcommand)]
         action: PluginAction,
         #[command(flatten)]
@@ -482,12 +474,12 @@ pub enum ClaudeAction {
 }
 
 /// `remargin session` subcommands. Nested-subcommand bucket mirroring
-/// [`ClaudeAction`]; `launch` discovers identities under cwd and (later)
+/// [`ClaudeAction`]; `launch` discovers identities under cwd and
 /// launches one session each.
 #[cfg(feature = "session")]
 #[derive(clap::Subcommand)]
 pub enum SessionAction {
-    /// Discover identities under cwd and (later) launch one session each.
+    /// Discover identities under cwd and launch one session each.
     Launch {
         /// List what would launch; spawn nothing.
         #[arg(long)]
@@ -496,7 +488,7 @@ pub enum SessionAction {
         #[arg(long, value_delimiter = ',')]
         identity: Vec<String>,
         /// Terminal multiplexer to launch into. Unset means auto: herdr when
-        /// its server is reachable, else tmux. (Tasks 86, 89.)
+        /// its server is reachable, else tmux.
         #[arg(long, value_name = "herdr|tmux")]
         multiplexer: Option<String>,
         /// Named session from the `sessions:` manifest. Omitted: the
@@ -505,15 +497,13 @@ pub enum SessionAction {
         name: Option<String>,
         #[command(flatten)]
         output_args: OutputArgs,
-        /// Emit the per-identity commands; spawn nothing. (Task 85.)
+        /// Emit the per-identity commands; spawn nothing.
         #[arg(long)]
         print: bool,
     },
 }
 
-/// Registry subcommands.
-/// Plan subcommands. One variant per mutating op; per-op
-/// wiring is tracked /.
+/// Plan subcommands: one variant per mutating op.
 #[derive(clap::Subcommand)]
 pub enum PlanAction {
     /// Project an `ack` op.
@@ -532,7 +522,6 @@ pub enum PlanAction {
     /// (`.remargin.yaml`, project + user settings, sidecar) and any
     /// detectable conflicts. No flags are consumed or written.
     Claude {
-        /// Subcommand: `restrict` or `unrestrict`.
         #[command(subcommand)]
         action: PlanClaudeAction,
     },
@@ -647,12 +636,12 @@ pub enum PermissionsAction {
 }
 
 /// `remargin identity` subcommands. Default action
-/// (no subcommand) is `show` — the pre-existing diagnostic surface.
+/// (no subcommand) is `show`.
 #[derive(clap::Subcommand)]
 pub enum IdentityAction {
     /// Print a ready-to-use identity YAML block to stdout. Users
-    /// redirect to `.remargin.yaml` themselves (no `--write` flag —
-    /// bans writes to `.remargin.yaml`).
+    /// redirect to `.remargin.yaml` themselves (no `--write` flag:
+    /// the command never writes `.remargin.yaml`).
     ///
     /// `--identity` and `--type` are required; `--key` is optional
     /// (valid in non-strict modes — pairs with `remargin keygen`).
@@ -674,9 +663,8 @@ pub enum IdentityAction {
         #[command(flatten)]
         output_args: OutputArgs,
     },
-    /// Resolve and print the effective identity (pre-existing
-    /// behavior). Kept as an explicit alternative to the bare
-    /// `remargin identity` form.
+    /// Resolve and print the effective identity. An explicit
+    /// alternative to the bare `remargin identity` form.
     Show {
         #[command(flatten)]
         identity_args: IdentityArgs,
@@ -685,9 +673,7 @@ pub enum IdentityAction {
     },
 }
 
-/// `remargin prompt` subcommands. Room for `set` / `unset` / `list`
-/// later — only `resolve` ships in v1 (the inline editor lives in the
-/// Obsidian plugin).
+/// `remargin prompt` subcommands.
 #[derive(clap::Subcommand)]
 pub enum PromptAction {
     /// Strip the `system_prompt:` block from `<folder>/.remargin.yaml`.
@@ -1213,11 +1199,9 @@ pub struct EditArgs {
     pub output_args: OutputArgs,
     /// Replacement classification tag list. Repeat to set multiple
     /// (e.g. `--kind question --kind action-item`). Omit every
-    /// `--kind` to leave the stored tag list untouched. Pass
-    /// `--kind ""` to clear — validation rejects empty strings so
-    /// a single `--kind ''` errors; the right way to clear today
-    /// is to run `remargin edit` without any `--kind` flags, then
-    /// use the forthcoming tag editor to drop entries.
+    /// `--kind` to leave the stored tag list untouched. An empty
+    /// value (`--kind ""`) is rejected, so this flag cannot clear
+    /// the list.
     #[arg(long = "kind")]
     pub remargin_kind: Vec<String>,
 }
@@ -1293,8 +1277,7 @@ pub struct GetImageArgs {
 /// Arguments for the corresponding subcommand variant.
 #[derive(clap::Args)]
 pub struct IdentityCmdArgs {
-    /// Subcommand. Omit to invoke `show` (backward-compatible
-    /// with the pre-existing surface).
+    /// Omit to invoke `show`.
     #[command(subcommand)]
     pub action: Option<IdentityAction>,
     #[command(flatten)]
@@ -1342,7 +1325,6 @@ pub struct LsArgs {
 /// Arguments for the corresponding subcommand variant.
 #[derive(clap::Args)]
 pub struct McpArgs {
-    /// Subcommand: run, install, uninstall, test.
     #[command(subcommand)]
     pub action: Option<McpAction>,
     #[command(flatten)]
@@ -1398,7 +1380,6 @@ pub struct ObsidianArgs {
 /// Arguments for the corresponding subcommand variant.
 #[derive(clap::Args)]
 pub struct PlanArgs {
-    /// Which mutating op to plan.
     #[command(subcommand)]
     pub action: PlanAction,
     #[command(flatten)]
@@ -1408,7 +1389,6 @@ pub struct PlanArgs {
 /// Arguments for the corresponding subcommand variant.
 #[derive(clap::Args)]
 pub struct PromptArgs {
-    /// Subcommand: resolve.
     #[command(subcommand)]
     pub action: PromptAction,
     #[command(flatten)]
@@ -1529,7 +1509,6 @@ pub struct ReactArgs {
 /// Arguments for the corresponding subcommand variant.
 #[derive(clap::Args)]
 pub struct RegistryArgs {
-    /// Subcommand: show.
     #[command(subcommand)]
     pub action: RegistryAction,
     #[command(flatten)]
@@ -1595,7 +1574,6 @@ pub struct RmArgs {
 /// Arguments for the corresponding subcommand variant.
 #[derive(clap::Args)]
 pub struct SandboxArgs {
-    /// Subcommand: add, list, or remove.
     #[command(subcommand)]
     pub action: SandboxAction,
     #[command(flatten)]

@@ -37,7 +37,7 @@ pub struct ReactionEntryOnDisk {
 /// fixed by the manual [`Serialize`] impl below — NOT by struct field
 /// declaration order. Source fields stay alphabetical (clippy's
 /// `arbitrary_source_item_ordering` requirement); the canonical YAML
-/// byte sequence stays as it has always been (`id`, `author`, `type`,
+/// byte sequence is (`id`, `author`, `type`,
 /// `ts`, `edited_at`, `to`, `reply-to`, `thread`, `attachments`,
 /// `remargin_kind`, `reactions`, `ack`, `checksum`, `signature`).
 #[derive(Debug, Clone, Deserialize)]
