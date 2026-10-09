@@ -35,7 +35,7 @@ function render(settings: RemarginSettings, onSave: (s: RemarginSettings) => voi
   );
 }
 
-describe("SettingsTab — editor widgets toggle (T36 AC #13)", () => {
+describe("SettingsTab — editor widgets toggle", () => {
   it("renders the editor widgets label and description copy verbatim", () => {
     const html = render({ ...DEFAULT_SETTINGS }, noopSave);
     assert.ok(html.includes("Editor widgets"), `expected 'Editor widgets' label, got: ${html}`);

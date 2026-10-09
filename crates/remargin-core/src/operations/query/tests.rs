@@ -729,7 +729,7 @@ fn setup_pending_system() -> MemorySystem {
 }
 
 #[test]
-fn broadcast_counts_as_pending_after_rem_4j91() {
+fn broadcast_counts_as_pending() {
     let system = setup_pending_system();
     let filter = QueryFilter {
         pending: true,

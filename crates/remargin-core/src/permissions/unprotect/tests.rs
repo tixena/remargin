@@ -475,7 +475,7 @@ fn default_unprotect_against_unrestricted_path_is_still_warn_noop() {
 
 /// The public surface works through the dedicated helper, which stays callable only from here.
 #[test]
-fn rem_is4z_bypass_uses_dedicated_helper() {
+fn bypass_uses_dedicated_helper() {
     let (system, anchor) = realm_with_claude();
     let files = settings_files(&anchor);
     restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();

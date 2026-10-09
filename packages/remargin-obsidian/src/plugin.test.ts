@@ -31,7 +31,7 @@ function makeManifest(): unknown {
   return { version: "0.0.0-test", id: "remargin", name: "Remargin" };
 }
 
-describe("RemarginPlugin onload (T36 foundation)", () => {
+describe("RemarginPlugin onload", () => {
   it("creates plugin.collapseState and plugin.focusEvents", async () => {
     const plugin = new RemarginPlugin(makeApp() as never, makeManifest() as never);
     // The update probe is disabled so `onload` does not spawn the CLI.

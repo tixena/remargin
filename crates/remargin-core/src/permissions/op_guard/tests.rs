@@ -939,14 +939,14 @@ fn open_mode_agent_can_read_ssh_no_synthesized_default() {
 
 /// With no `trusted_roots:` key the guard is silent; the call site supplies the implicit root.
 #[test]
-fn rem_djfx_trusted_roots_key_absent_falls_back_to_open() {
+fn trusted_roots_key_absent_falls_back_to_open() {
     let system = realm_with("permissions:\n  allow_dot_folders: ['.git']\n");
     pre_mutate_check(&system, "write", Path::new("/r/anywhere/foo.md")).unwrap();
     pre_mutate_check(&system, "get", Path::new("/elsewhere/x.md")).unwrap();
 }
 
 #[test]
-fn rem_djfx_explicit_empty_trusted_roots_locks_reads_and_writes() {
+fn explicit_empty_trusted_roots_locks_reads_and_writes() {
     let system = realm_with("permissions:\n  trusted_roots: []\n");
     let err_w = pre_mutate_check(&system, "write", Path::new("/r/foo.md")).unwrap_err();
     assert!(outside_allowed_match(&err_w, "write", "/r/.remargin.yaml"));
@@ -956,7 +956,7 @@ fn rem_djfx_explicit_empty_trusted_roots_locks_reads_and_writes() {
 
 /// A deeper `trusted_roots: []` locks, but entries inherited from shallower files stay reachable.
 #[test]
-fn rem_djfx_lock_does_not_drop_inherited_parent_roots() {
+fn lock_does_not_drop_inherited_parent_roots() {
     let parent = "permissions:\n  trusted_roots:\n    - path: top\n";
     let child = "permissions:\n  trusted_roots: []\n";
     let system = MemorySystem::new()
@@ -979,7 +979,7 @@ fn rem_djfx_lock_does_not_drop_inherited_parent_roots() {
 }
 
 #[test]
-fn rem_djfx_deny_ops_wins_for_reads() {
+fn deny_ops_wins_for_reads() {
     let system = realm_with(
         "permissions:\n  trusted_roots:\n    - path: '*'\n  deny_ops:\n    - path: secret\n      ops: [get]\n",
     );
@@ -988,7 +988,7 @@ fn rem_djfx_deny_ops_wins_for_reads() {
 }
 
 #[test]
-fn rem_djfx_remargin_dot_folder_read_parity() {
+fn remargin_dot_folder_read_parity() {
     let resolved = ResolvedPermissions {
         allow_dot_folders: Vec::new(),
         cli_allowed: None,
