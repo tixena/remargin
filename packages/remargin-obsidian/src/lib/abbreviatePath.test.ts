@@ -14,9 +14,7 @@ describe("abbreviatePath", () => {
   });
 
   it("abbreviates leftmost segments first", () => {
-    // "src/01_personal/remargin/ui" is 27 chars
-    // After abbreviating "src" -> "s": "s/01_personal/remargin/ui" = 25
-    // After abbreviating "01_personal" -> "0": "s/0/remargin/ui" = 15
+    // 27 chars; "src" -> "s" leaves 25, then "01_personal" -> "0" leaves "s/0/remargin/ui" at 15.
     const result = abbreviatePath("src/01_personal/remargin/ui", 20);
     assert.strictEqual(result, "s/0/remargin/ui");
   });
@@ -37,9 +35,7 @@ describe("abbreviatePath", () => {
   });
 
   it("stops abbreviating once the path fits", () => {
-    // "docs/guide/reference" = 20 chars
-    // Abbreviating "docs" -> "d": "d/guide/reference" = 17 chars
-    // 17 <= 18, so it stops
+    // 20 chars; "docs" -> "d" leaves "d/guide/reference" at 17, which fits in 18, so it stops.
     const result = abbreviatePath("docs/guide/reference", 18);
     assert.strictEqual(result, "d/guide/reference");
   });

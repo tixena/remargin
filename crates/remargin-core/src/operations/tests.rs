@@ -666,8 +666,7 @@ Original.
     assert!(content.contains("edited_at:"));
 }
 
-/// A comment with no `edited_at:` line round-trips with none: no fabricated value, no extra
-/// line.
+/// A comment with no `edited_at:` line round-trips with none: no fabricated value or extra line.
 #[test]
 fn pre_existing_comment_without_edited_at_round_trips() {
     let doc_content = "\

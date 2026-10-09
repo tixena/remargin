@@ -33,9 +33,8 @@ import { collectKinds, matchesKindFilter, pruneKindFilter } from "@/lib/kindFilt
 import type { InboxFilter, ViewMode } from "@/types";
 
 /**
- * Builds the diacritic-insensitive pattern sent to `remargin query --content-regex`. The
- * generator leaves consonants without diacritics as lowercase literals, so the query also
- * passes `--ignore-case`.
+ * Builds the diacritic-insensitive pattern for `remargin query --content-regex`. Consonants
+ * without diacritics come out as lowercase literals, so the query also passes `--ignore-case`.
  */
 const buildSearchPattern = toRegex({ flags: "i" });
 

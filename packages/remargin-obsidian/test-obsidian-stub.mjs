@@ -27,12 +27,10 @@ export const MarkdownRenderer = {
 // imports resolve.
 export const requestUrl = async () => ({ status: 0, text: "", json: {} });
 
-// Plugin-side base classes. Most are reference-only at runtime
-// (declared inside `class Foo extends X`), but `Plugin` IS constructed
-// by `plugin.test.ts` so the stub mirrors the real signature: stash
-// `app` + `manifest`, expose enough register-style methods to swallow
-// onload's calls without crashing. Tests pass a minimal mock `app`
-// shaped just enough to satisfy the paths they exercise.
+/**
+ * Stub of the plugin base class, the one `plugin.test.ts` constructs: it stashes `app` and
+ * `manifest` and exposes enough register-style methods to swallow onload's calls.
+ */
 export class Plugin {
   constructor(app, manifest) {
     this.app = app;
@@ -71,29 +69,36 @@ export class Plugin {
     /* obsidian-module no-op stub */
   }
 }
+/** Stub base class for the sidebar view; extended, never rendered. */
 export class ItemView {
   constructor() {
     /* obsidian-module no-op stub */
   }
 }
+/** Placeholder for the markdown editor view, passed around as a type token. */
 export class MarkdownView {}
+/**
+ * Stub of the render child the reading-mode widget extends. Like the real one it stashes its
+ * host element on `containerEl`, so subclasses can mount into it during `onload()`.
+ */
 export class MarkdownRenderChild {
-  // Real Obsidian's MarkdownRenderChild stashes its host element on `this.containerEl` so
-  // subclasses can mount into it during `onload()`; the stub keeps that behaviour.
   constructor(containerEl) {
     this.containerEl = containerEl;
   }
 }
+/** Stub base class for the settings tab; extended, never displayed. */
 export class PluginSettingTab {
   constructor() {
     /* obsidian-module no-op stub */
   }
 }
+/** Stub of the toast notice; constructing one does nothing. */
 export class Notice {
   constructor() {
     /* obsidian-module no-op stub */
   }
 }
+/** Stub of the settings-row builder; constructing one does nothing. */
 export class Setting {
   constructor() {
     /* obsidian-module no-op stub */
@@ -117,12 +122,15 @@ export function normalizePath(path) {
   return path.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }
 
-// Vault types referenced via `type` imports in component code. Tests
-// never construct these, but type-only imports are erased before
-// runtime so the named exports just need to exist.
+/** Placeholder for a vault file; component code names it in `type` imports and type checks. */
 export class TFile {}
+/** Placeholder for a vault folder. */
 export class TFolder {}
+/** Placeholder for the common base of vault files and folders. */
 export class TAbstractFile {}
+/** Placeholder for a workspace leaf, one pane of the app. */
 export class WorkspaceLeaf {}
+/** Placeholder for the Obsidian app object; tests pass their own mock in its place. */
 export class App {}
+/** Placeholder for the workspace object. */
 export class Workspace {}

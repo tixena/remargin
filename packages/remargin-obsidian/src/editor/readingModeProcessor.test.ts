@@ -822,8 +822,7 @@ describe("ReadingModeCommentChild", () => {
     }
   });
 
-  // A same-doc reply must not collapse to display:none during the render pass: a zero-height
-  // section stalls Obsidian's incremental renderer and trailing content stops painting.
+  // Collapsing to display:none mid-render stalls Obsidian's incremental renderer.
   it("test #13: suppressed reply defers its collapse past the render pass", async () => {
     const plugin = makePlugin(true);
     plugin.__vaultFiles.set(

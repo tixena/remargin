@@ -33,9 +33,8 @@ use crate::permissions::sidecar::{self, SidecarEntry};
 /// The editor-side tools the path denies cover: the same tools the `PreToolUse` hook gates.
 const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"];
 
-/// Each token expands to `Bash(<token> {glob_root}/**)`; a trailing `*`, or its absence, is part
-/// of the token. Several commands appear bare and with `*` so both `cmd <path>` and
-/// `cmd -f <path>` match.
+/// Each token expands to `Bash(<token> {glob_root}/**)`, its trailing `*` or lack of one included.
+/// Several commands appear both bare and with `*` so `cmd <path>` and `cmd -f <path>` both match.
 pub const BASH_MUTATORS: &[&str] = &[
     "cp *",
     "mv *",

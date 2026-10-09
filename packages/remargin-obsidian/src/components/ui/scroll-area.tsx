@@ -39,9 +39,8 @@ const ScrollBar = React.forwardRef<
     )}
     {...props}
   >
-    {/* `bg-bg-border`, not shadcn's `bg-border`: this palette names the
-        token `bg-border` (tailwind.config.ts), so `bg-border` resolves to
-        no colour at all and paints an invisible thumb. */}
+    {/* `bg-bg-border`, not shadcn's `bg-border`: this palette names the token `bg-border`, so
+        the class `bg-border` resolves to no colour and paints an invisible thumb. */}
     <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-bg-border" />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ));

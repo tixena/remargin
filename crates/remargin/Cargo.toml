@@ -1,3 +1,5 @@
+# The CLI crate. `obsidian` is on by default; `session` and `unrestricted` are opt-in features.
+
 [package]
 name = "remargin"
 description = "CLI binary for the remargin document access layer"
@@ -16,36 +18,27 @@ name = "remargin"
 path = "src/main.rs"
 
 [features]
-# `obsidian` is on by default so the Obsidian plugin's Update button
-# can shell out to `remargin obsidian install --vault-path <vault>` on
-# any cargo-installed binary without users having to pass an extra
-# `--features` flag. Consumers who want a smaller binary without the
-# self-update path can opt out via `--no-default-features --features "zod
-# jsonschema"`.
+# `obsidian` is on by default so the plugin's Update button can run `remargin obsidian install`
+# on any cargo-installed binary; opt out with `--no-default-features --features "zod jsonschema"`.
 default = ["zod", "jsonschema", "obsidian"]
 unrestricted = ["remargin-core/unrestricted"]
 zod = ["remargin-core/zod"]
 jsonschema = ["remargin-core/jsonschema"]
-# Expose the `remargin obsidian install|uninstall` subcommand. The install
-# path fetches `main.js` and `manifest.json` from the matching GitHub
-# release (`obsidian-v{CARGO_PKG_VERSION}`) at runtime, so no TypeScript
-# build is required to compile the CLI.
+# The `remargin obsidian install|uninstall` subcommand. Install fetches `main.js` and
+# `manifest.json` from the matching GitHub release at runtime, so the CLI needs no TypeScript build.
 obsidian = ["dep:ureq"]
-# `remargin session launch` grammar + dry-run discovery table. Off by
-# default so a shipped binary stays lean; enabling it turns on the
-# downward session discovery in remargin-core (`remargin-core/session`).
+# `remargin session launch` and its dry-run discovery table. Off by default so a shipped binary
+# stays lean; it turns on session discovery in remargin-core.
 session = ["remargin-core/session"]
 
 [dependencies]
 remargin-core.workspace = true
 
-# CLI framework
 clap.workspace = true
 
 # Base64 (binary payloads for `get --binary --json`)
 base64.workspace = true
 
-# YAML / JSON processing
 serde.workspace = true
 serde_yaml.workspace = true
 serde_json.workspace = true
@@ -53,13 +46,10 @@ serde_json.workspace = true
 # System abstraction (filesystem, env, temp dirs)
 os-shim.workspace = true
 
-# Error handling
 anyhow.workspace = true
 
-# Date/time
 chrono.workspace = true
 
-# Logging
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
@@ -69,9 +59,8 @@ ureq = { workspace = true, optional = true }
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
-# Used by tests/adapter_loc_cap.rs to walk main.rs and mcp.rs AST.
-# `span-locations` exposes `Span::start()` / `Span::end()` so we can
-# measure each function's physical line span.
+# tests/adapter_loc_cap.rs parses main.rs and mcp.rs; `span-locations` exposes `Span::start()` /
+# `Span::end()`, which measure each function's physical line span.
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "3", features = ["full", "parsing"] }
 tempfile.workspace = true

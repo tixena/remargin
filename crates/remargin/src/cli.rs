@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
+/// The root command: global metadata and the subcommand to run.
 #[derive(Parser)]
 #[command(
     name = "remargin",
@@ -123,6 +124,7 @@ pub struct UnrestrictedArgs {
     unrestricted: bool,
 }
 
+/// The flagless stand-in used when the `unrestricted` feature is off.
 #[cfg(not(feature = "unrestricted"))]
 #[derive(clap::Args, Default)]
 pub struct UnrestrictedArgs;
@@ -615,6 +617,7 @@ pub enum PlanClaudeAction {
     },
 }
 
+/// Actions under `remargin registry`.
 #[derive(clap::Subcommand)]
 pub enum RegistryAction {
     /// Show the current registry.

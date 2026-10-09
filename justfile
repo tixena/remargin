@@ -1,9 +1,7 @@
-# Cargo features the quality gate turns on beyond crate defaults. The
-# `session` feature is off by default so a shipped/installed binary stays
-# lean and dep-free; the gate enables it here so the session code and its
-# tests are actually compiled, linted, and run. Enabling the `remargin`
-# crate's `session` feature transitively turns on `remargin-core/session`,
-# so both crates' session code is exercised under `just all`.
+# Task runner for the workspace: the quality gate, builds, tests and the Obsidian plugin release.
+
+# Cargo features the quality gate turns on beyond crate defaults: `session` is off by default,
+# so the gate enables it to compile, lint and test the session code of both crates.
 gate_features := "remargin/session"
 
 # Default: list recipes.
@@ -39,9 +37,8 @@ build-rust:
 build-ts: generate-types
     pnpm -C packages/remargin-obsidian build
 
-# Build the CLI with the Obsidian plugin feature. The CLI no longer embeds
-# the plugin at compile time -- it fetches main.js / manifest.json from the
-# matching GitHub release at install time -- so this recipe no longer
+# Build the CLI with the Obsidian plugin feature. The CLI fetches main.js /
+# manifest.json from the matching GitHub release at install time, so nothing here
 # depends on the TypeScript build.
 build-cli-obsidian:
     cargo build -p remargin --features obsidian

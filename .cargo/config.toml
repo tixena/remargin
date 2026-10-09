@@ -1,3 +1,5 @@
+# Cargo aliases for this workspace.
+
 [alias]
 # Dev-time tooling dispatcher — see crates/xtask. Never installed on end
 # users: `cargo install remargin` only ships the `remargin` CLI.

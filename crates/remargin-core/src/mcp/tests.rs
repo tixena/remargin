@@ -1696,16 +1696,8 @@ fn verify_checks_checksum_integrity() {
 
 #[test]
 fn verify_escalates_to_realm_strict_mode_when_caller_is_open() {
-    // BUG: handle_verify passes the caller's ResolvedConfig straight into
-    // verify_document without calling escalate_for_doc. So a file living
-    // inside a strict-mode realm gets verified under the caller's
-    // open-mode rules — and an unsigned comment by a registered-active
-    // participant (which strict mode would mark fatal) passes verify
-    // with ok=true. Breaks the realm-mode-floor contract documented on
-    // ResolvedConfig::escalate_for_doc.
-    //
-    // After the fix, handle_verify must escalate to the realm's strict
-    // mode before calling verify_document.
+    // BUG: verifying a strict-realm file under the caller's open mode lets an unsigned comment by
+    // a registered participant pass; verify must escalate to the realm's mode first.
 
     let unsigned_doc = "\
 # Realm doc
@@ -2713,8 +2705,7 @@ fn mcp_query_expanded_returns_comments() {
     assert!(acks[0].as_str().unwrap().contains('@'));
 }
 
-/// A comment-level filter narrows `comments` and `matched_count`; the summary counts stay
-/// file-wide.
+/// A comment-level filter narrows `comments` and `matched_count`; summary counts stay file-wide.
 #[test]
 fn mcp_query_reports_matched_count_beside_file_wide_counts() {
     let base = Path::new("/docs");

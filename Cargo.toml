@@ -1,3 +1,5 @@
+# Workspace manifest: members, shared package metadata, pinned dependencies and the lint policy.
+
 [workspace]
 members = ["crates/remargin", "crates/remargin-core", "crates/xtask"]
 default-members = ["crates/remargin", "crates/remargin-core"]
@@ -14,10 +16,8 @@ repository = "https://github.com/tixena/remargin"
 [workspace.dependencies]
 remargin-core = { path = "crates/remargin-core" }
 
-# CLI framework
 clap = { version = "4", features = ["derive", "env"] }
 
-# YAML processing
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
@@ -35,30 +35,25 @@ rand_core = { version = "0.10.1" }
 getrandom = "0.4"
 base64 = ">=0.23"
 
-# Error handling
 anyhow = ">=1.0.103"
 thiserror = "2"
 
-# File system
 tempfile = "3"
 ignore = "0.4"
 
 # Image sampling / cropping for binary attachments
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
-# Date/time
 chrono = { version = ">=0.4.45", features = ["serde"] }
 
 # Random ID generation
 rand = ">=0.10.2"
 
-# Regex (text search)
 regex = ">=1.13.1"
 
 # Human-friendly duration parsing (session: loop interval; `session` feature)
 humantime = "2"
 
-# Logging
 tracing = "0.1"
 tracing-subscriber = { version = ">=0.3.23", features = ["env-filter", "fmt"] }
 

@@ -185,8 +185,7 @@ fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
     .unwrap();
 }
 
-/// `trusted_roots` accumulates as an allow-list, so the entry declared at `/r/sub` covers its
-/// file.
+/// `trusted_roots` accumulates as an allow-list, so the entry at `/r/sub` covers its file.
 #[test]
 fn scenario_12_multi_realm_walks_combine() {
     let parent = "permissions:\n  trusted_roots:\n    - path: '*'\n";
