@@ -18,23 +18,16 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use serde_json::json;
 
-/// Name of the Obsidian plugin settings file that we preserve across reinstalls.
+/// The plugin settings file, preserved across reinstalls.
 const DATA_JSON: &str = "data.json";
-/// Relative path of the `.obsidian/` directory used as the "is this a vault?"
-/// sentinel.
+/// The directory that marks a folder as a vault.
 const DOT_OBSIDIAN: &str = ".obsidian";
-/// Relative path of the plugin directory inside a vault.
 const PLUGIN_REL_PATH: &str = ".obsidian/plugins/remargin";
 
-/// Base URL of the GitHub release assets served by the `tixena/remargin`
-/// repository.
 const RELEASE_BASE: &str = "https://github.com/tixena/remargin/releases/download";
-/// Per-request network timeout. Assets are roughly 100 KB; anything slower
-/// than this is a real network problem, not transient flake.
+/// Assets are roughly 100 KB; anything slower than this is a real network problem.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
-/// Hard cap on the number of bytes we are willing to read from a single
-/// asset. Acts as a defense against a misconfigured release that points at
-/// something huge.
+/// Guards against a release asset that points at something huge.
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Successful install report, used for both JSON and text output formatting.
@@ -168,8 +161,7 @@ pub fn install_from_bytes(
     let plugin_dir = vault.join(PLUGIN_REL_PATH);
     let data_json_path = plugin_dir.join(DATA_JSON);
 
-    // Preserve user settings if they exist. os-shim exposes read_to_string
-    // which is fine here because data.json is JSON text.
+    // `read_to_string` is enough: `data.json` is JSON text.
     let preserved_data = if system.exists(&data_json_path).unwrap_or(false) {
         match system.read_to_string(&data_json_path) {
             Ok(contents) => Some(contents),

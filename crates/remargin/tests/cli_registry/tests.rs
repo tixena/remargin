@@ -1,3 +1,5 @@
+//! `remargin registry show` in text and `--json` modes, and without a registry.
+
 use core::str;
 use std::fs;
 

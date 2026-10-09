@@ -1,19 +1,14 @@
+/** The row of reaction pills on a comment card. */
+
 import type { ReactionEntry } from "@/generated";
 import { useParticipants } from "@/hooks/useParticipants";
 import { cn } from "@/lib/utils";
 
+/** Props for {@link ReactionPills}. */
 export interface ReactionPillsProps {
-  /**
-   * Reaction map keyed by emoji. Each value is the per-author entry
-   * list for that emoji.
-   */
   reactions: Partial<Record<string, ReactionEntry[]>>;
-  /** Current identity name; used to tell "mine" apart from others'. */
   me?: string | null;
-  /**
-   * Invoked when the user clicks a pill. `mine` reflects the state BEFORE
-   * the click — if true, the handler should call `react --remove`.
-   */
+  /** `mine` is the state before the click: when true the handler should remove the reaction. */
   onToggle: (emoji: string, mine: boolean) => void;
 }
 

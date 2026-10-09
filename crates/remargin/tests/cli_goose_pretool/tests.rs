@@ -1,3 +1,5 @@
+//! `remargin goose pretool` dispatch verdicts, install lifecycle, `test` and `doctor`.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -94,11 +96,7 @@ fn status_of(out: &Output) -> String {
     report_of(out)["status"].as_str().unwrap().to_owned()
 }
 
-// ---- 6. both verdict channels ------------------------------------------
-
-/// A block fires on stdout (the decision object), on stderr (the bare
-/// reason), and through exit code 2. Either channel alone is one platform
-/// quirk away from being ignored, and an ignored block is a silent pass.
+/// A block fires on stdout, on stderr and through exit code 2: one channel alone can be ignored.
 #[test]
 fn block_fires_on_stdout_stderr_and_exit_two() {
     let realm = managed_realm();
@@ -120,8 +118,7 @@ fn block_fires_on_stdout_stderr_and_exit_two() {
         reason.contains("remargin__write"),
         "reason should name the remargin op: {reason}",
     );
-    // goose exposes the op as `remargin__write`; Claude Code's
-    // `mcp__remargin__*` names nothing this session can call.
+    // goose names the op `remargin__write`; `mcp__remargin__*` is nothing this session can call.
     assert!(
         !reason.contains("mcp__remargin__"),
         "reason should carry goose's tool namespacing: {reason}",
@@ -133,8 +130,7 @@ fn block_fires_on_stdout_stderr_and_exit_two() {
     );
 }
 
-/// An allow is silent on both channels and exits 0 — goose reads any
-/// output as a decision, so a chatty allow is a broken allow.
+/// goose reads any output as a decision, so an allow is silent on both channels and exits 0.
 #[test]
 fn allow_is_silent_and_exits_zero() {
     let realm = managed_realm();
@@ -174,8 +170,7 @@ fn shell_reaching_a_managed_path_blocks() {
     );
 }
 
-/// A payload the guard cannot read is a block, not a pass — goose treats a
-/// silent hook as permission to proceed.
+/// goose treats a silent hook as permission to proceed, so an unreadable payload is a block.
 #[test]
 fn malformed_payload_blocks_on_both_channels() {
     let out = run_dispatch(b"{\"tool_name\": ");
@@ -188,10 +183,7 @@ fn malformed_payload_blocks_on_both_channels() {
     assert!(!stderr_of(&out).is_empty(), "stderr must carry the reason");
 }
 
-// ---- 7. install / uninstall lifecycle ----------------------------------
-
-/// `install` writes the plugin directory, `uninstall` removes exactly it,
-/// and a sibling plugin survives both.
+/// `uninstall` removes exactly the plugin `install` wrote; a sibling plugin survives both.
 #[test]
 fn install_then_uninstall_round_trips_and_preserves_siblings() {
     let home = TempDir::new().unwrap();
@@ -230,9 +222,7 @@ fn install_then_uninstall_round_trips_and_preserves_siblings() {
     assert!(sibling.is_dir(), "sibling plugin must survive");
 }
 
-/// The generated hook entry carries no `matcher` key (goose reads it as a
-/// regex and silently drops an invalid one) and names the binary by
-/// absolute path (a `PATH` miss at spawn time fails open).
+/// goose silently drops an invalid `matcher` regex, and a `PATH` miss at spawn time fails open.
 #[test]
 fn generated_hook_manifest_omits_matcher_and_uses_an_absolute_binary() {
     let home = TempDir::new().unwrap();
@@ -269,10 +259,7 @@ fn local_install_targets_the_project_scope() {
     assert!(!guard_dir(home.path()).exists());
 }
 
-// ---- 8. test subcommand ------------------------------------------------
-
-/// The three verdicts `test` distinguishes: wired, absent, and present but
-/// corrupt.
+/// The three verdicts `test` distinguishes: wired, absent, and present but corrupt.
 #[test]
 fn test_subcommand_reports_wired_absent_and_corrupt() {
     let home = TempDir::new().unwrap();
@@ -314,10 +301,7 @@ fn test_subcommand_reports_wired_absent_and_corrupt() {
     );
 }
 
-// ---- 9. doctor ---------------------------------------------------------
-
-/// With goose installed but no guard plugin, `doctor` raises the finding
-/// and `--check=goose-guard` selects it on its own.
+/// goose without the guard plugin is a `doctor` finding that `--check=goose-guard` selects alone.
 #[test]
 fn doctor_flags_a_goose_install_without_the_guard() {
     let home = TempDir::new().unwrap();
@@ -352,7 +336,6 @@ fn doctor_flags_a_goose_install_without_the_guard() {
         .collect();
     assert_eq!(kinds, vec!["goose_guard_missing"]);
 
-    // Installing the guard clears the same scoped run.
     run_lifecycle(home.path(), realm.path(), &["goose", "pretool", "install"]);
     let clean = run_lifecycle(
         home.path(),

@@ -1,3 +1,5 @@
+//! Runs each deterministic `plan` op through the CLI and the MCP handler and compares the reports.
+
 use std::fs;
 use std::path::Path;
 
@@ -10,10 +12,7 @@ use remargin_core::mcp;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-/// A fixture document containing one real comment, seeded via the
-/// low-level writer so both CLI and MCP see byte-identical bytes. The
-/// comment's `ts` is pinned so subsequent plan reports do not capture
-/// wall-clock skew.
+/// The comment's `ts` is pinned so plan reports capture no wall-clock skew.
 const FIXTURE_DOC: &str = "---
 title: Parity fixture
 description: ''
@@ -44,8 +43,7 @@ Body paragraph two.
 /// projected report is pure adapter drift.
 fn seed(tmp: &TempDir, filename: &str) {
     fs::write(tmp.path().join(filename), FIXTURE_DOC).unwrap();
-    // Also drop a `.remargin.yaml` with open mode so the CLI's config
-    // walk does not find anything unexpected on the host.
+    // An open-mode `.remargin.yaml` here stops the CLI's config walk before it reaches the host's.
     fs::write(
         tmp.path().join(".remargin.yaml"),
         "mode: open\nidentity: parity-bot\ntype: agent\n",
@@ -69,11 +67,6 @@ fn parity_config(system: RealSystem, cwd: &Path) -> ResolvedConfig {
 /// `--json` is per-subcommand, not a top-level flag, so
 /// append it at the end where every subcommand accepts trailing
 /// options.
-///
-/// Failure surfaces via `.unwrap()` on a context-attached `Result`
-/// — same end behaviour as the previous `panic!` call but uses the
-/// project-allowed unwrap idiom rather than the lint-flagged
-/// `panic!` macro.
 fn run_cli(cwd: &Path, args: &[&str], stdin: &str) -> Value {
     let mut cmd = Command::cargo_bin("remargin").unwrap();
     cmd.current_dir(cwd).args(args).arg("--json");
@@ -151,8 +144,6 @@ fn strip_volatile(v: &mut Value) {
         Value::Object(map) => {
             let _: Option<Value> = map.remove("elapsed_ms");
             let _: Option<Value> = map.remove("ts");
-            // `identity.would_sign` can flip based on adapter-resolved
-            // key_path, which is identical here but belt-and-braces.
             for (_, child) in map.iter_mut() {
                 strip_volatile(child);
             }
@@ -250,12 +241,8 @@ fn plan_purge_parity() {
 fn plan_write_markdown_create_parity() {
     let tmp = TempDir::new().unwrap();
     seed(&tmp, "doc.md");
-    // `plan write --create` on a fresh markdown path so the
-    // preservation check does not trip. Pre-populate `created:` in the
-    // frontmatter so `ensure_frontmatter` does not stamp a wall-clock
-    // timestamp (which would diverge between CLI and MCP invocations).
-    // Content starts with `---` so pipe it via stdin to avoid clap's
-    // flag parser.
+    // `created:` is pre-populated so `ensure_frontmatter` stamps no wall-clock timestamp, and the
+    // body goes through stdin because it starts with `---`.
     let new_body = "---\ntitle: Fresh doc\ndescription: ''\nauthor: parity-bot\ncreated: 2026-04-06T12:00:00+00:00\n---\n\n# Fresh doc\n\nBody paragraph.\n";
     let report = assert_parity_with_stdin(
         &["plan", "write", "fresh.md", "--create"],
@@ -271,9 +258,7 @@ fn plan_write_markdown_create_parity() {
 fn plan_write_raw_returns_reject_reason_parity() {
     let tmp = TempDir::new().unwrap();
     seed(&tmp, "doc.md");
-    // Pre-create the raw-target file so both adapters hit the
-    // `raw -> Unsupported` branch together (rather than one erroring
-    // on missing file before reaching raw handling).
+    // The raw target exists up front so both adapters reach the raw-unsupported branch together.
     fs::write(tmp.path().join("out.txt"), "preexisting\n").unwrap();
     let report = assert_parity(
         &["plan", "write", "out.txt", "hello", "--raw"],
@@ -282,8 +267,6 @@ fn plan_write_raw_returns_reject_reason_parity() {
         &tmp,
     );
     assert_eq!(report["op"], "write");
-    // Both adapters should report the same `reject_reason` for raw
-    // writes (no structured plan representation).
     assert!(report["reject_reason"].is_string());
     assert_eq!(report["would_commit"], false);
 }

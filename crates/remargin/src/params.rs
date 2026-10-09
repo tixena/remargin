@@ -1,11 +1,8 @@
 //! CLI parameter bundles: one `*Params` struct per command handler.
 //!
 //! These lightweight structs carry the parsed / resolved inputs from the
-//! `Commands` enum into the `cmd_*` handler functions. Keeping them in a
-//! dedicated module separates the "parse shape" (clap grammar in `main.rs`)
-//! from the "handler shape" (business logic in the `cmd_*` fns), and makes
-//! future handler unit-tests easier to write without constructing the full
-//! `Commands` tree.
+//! `Commands` enum into the `cmd_*` handler functions, keeping the parse shape (the clap
+//! grammar) apart from the handler shape.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +12,7 @@ use remargin_core::operations::replace;
 
 use crate::IdentityArgs;
 
+/// Bundled CLI inputs for the `comment` handler.
 pub struct CommentParams<'cmd> {
     pub after_comment: Option<&'cmd str>,
     pub after_heading: Option<&'cmd str>,
@@ -30,6 +28,7 @@ pub struct CommentParams<'cmd> {
     pub to: &'cmd [String],
 }
 
+/// Bundled CLI inputs for the `comments` handler.
 pub struct CommentsParams<'cmd> {
     pub file: &'cmd str,
     pub json_mode: bool,
@@ -51,6 +50,7 @@ impl GetOutputMode {
     }
 }
 
+/// Bundled CLI inputs for the `get` handler.
 pub struct GetParams<'cmd> {
     pub binary: bool,
     pub end: Option<usize>,
@@ -61,6 +61,7 @@ pub struct GetParams<'cmd> {
     pub start: Option<usize>,
 }
 
+/// Bundled CLI inputs for the `edit` handler.
 pub struct EditParams<'cmd> {
     pub content: &'cmd str,
     pub file: &'cmd str,
@@ -76,6 +77,7 @@ pub enum ActivityOutputMode {
     Pretty,
 }
 
+/// Bundled CLI inputs for the `activity` handler.
 pub struct ActivityParams<'cmd> {
     pub explicit_path: Option<&'cmd Path>,
     pub identity_args: &'cmd IdentityArgs,
@@ -83,6 +85,7 @@ pub struct ActivityParams<'cmd> {
     pub since: Option<&'cmd str>,
 }
 
+/// Bundled CLI inputs for the `claude restrict` handler.
 pub struct RestrictParams<'cmd> {
     pub also_deny_bash: &'cmd [String],
     pub cli_allowed: bool,
@@ -91,8 +94,7 @@ pub struct RestrictParams<'cmd> {
     pub user_settings_explicit: Option<&'cmd Path>,
 }
 
-/// How `query` results are rendered. Mutually-exclusive successor to the
-/// previous `json_mode` / `pretty` / `summary` bool triple.
+/// How `query` results are rendered.
 pub enum QueryOutputMode {
     Json,
     Plain,
@@ -100,27 +102,20 @@ pub enum QueryOutputMode {
     Summary,
 }
 
-/// Pending-filter knobs for `query`. These compose as a UNION at the
-/// filter layer (e.g. `--pending-for-me` AND `--pending-broadcast` both
-/// apply, returning the union of matching comments). Grouped into one
-/// substruct so the parent [`QueryParams`] stays under clippy's
-/// bool-density threshold without changing CLI semantics.
+/// Pending-filter knobs for `query`. They compose as a union at the filter layer:
+/// `--pending-for-me` with `--pending-broadcast` returns the comments matching either.
 pub struct QueryPendingFilters<'cmd> {
-    /// `true` when `--pending` was passed: filter to comments without
-    /// any ack.
+    /// `--pending`.
     pub any: bool,
-    /// `true` when `--pending-broadcast` was passed: include
-    /// broadcast-pending comments.
+    /// `--pending-broadcast`.
     pub broadcast: bool,
-    /// `true` when `--pending-for-me` was passed: include comments
-    /// addressed to the resolved caller identity.
+    /// `--pending-for-me`.
     pub for_me: bool,
-    /// `Some(user)` when `--pending-for <user>` was passed: include
-    /// comments whose `to:` list contains `user` and which are still
-    /// pending.
+    /// `--pending-for <user>`.
     pub for_user: Option<&'cmd str>,
 }
 
+/// Bundled CLI inputs for the `prompt set` handler.
 pub struct PromptSetParams<'params> {
     pub config: &'params ResolvedConfig,
     pub cwd: &'params Path,
@@ -131,6 +126,7 @@ pub struct PromptSetParams<'params> {
     pub runner: Option<&'params str>,
 }
 
+/// Bundled CLI inputs for the `query` handler.
 pub struct QueryParams<'cmd> {
     pub author: Option<&'cmd str>,
     pub comment_id: Option<&'cmd str>,
@@ -151,6 +147,7 @@ pub enum SearchOutputMode {
     Text,
 }
 
+/// Bundled CLI inputs for the `search` handler.
 pub struct SearchParams<'cmd> {
     pub context: usize,
     pub ignore_case: bool,
@@ -163,6 +160,7 @@ pub struct SearchParams<'cmd> {
     pub scope: &'cmd str,
 }
 
+/// Bundled CLI inputs for the `sign` handler.
 pub struct SignParams<'cmd> {
     pub all_mine: bool,
     pub file: &'cmd str,
@@ -171,6 +169,7 @@ pub struct SignParams<'cmd> {
     pub repair_checksum: bool,
 }
 
+/// Bundled CLI inputs for the `ack` handler.
 pub struct AckParams<'cmd> {
     pub file: Option<&'cmd str>,
     pub ids: &'cmd [String],
@@ -179,6 +178,7 @@ pub struct AckParams<'cmd> {
     pub search_path: &'cmd str,
 }
 
+/// Bundled CLI inputs for the `react` handler.
 pub struct ReactParams<'cmd> {
     pub emoji: &'cmd str,
     pub file: &'cmd str,
@@ -187,12 +187,14 @@ pub struct ReactParams<'cmd> {
     pub remove: bool,
 }
 
+/// Bundled CLI inputs for the `replace` handler.
 pub struct ReplaceParams<'cmd> {
     pub json_mode: bool,
     pub options: replace::ReplaceOptions,
     pub path: &'cmd str,
 }
 
+/// Bundled CLI inputs for the `write` handler.
 pub struct WriteParams<'cmd> {
     pub content: Option<&'cmd str>,
     pub json_mode: bool,
@@ -216,6 +218,7 @@ pub struct MvParams<'cmd> {
     pub src: &'cmd str,
 }
 
+/// Bundled CLI inputs for the `get-image` handler.
 pub struct GetImageParams<'cli> {
     pub crop: Option<&'cli str>,
     pub format: Option<&'cli str>,

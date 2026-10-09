@@ -1,3 +1,5 @@
+/** The visual state of an inbox leaf, derived from who a comment addresses and who acked it. */
+
 import type { ExpandedComment } from "@/generated";
 
 /**
@@ -13,6 +15,7 @@ import type { ExpandedComment } from "@/generated";
  */
 export type LeafVisual = "me-directed-unacked" | "acked-by-me" | "neutral";
 
+/** What {@link deriveLeafState} found for one comment. */
 export interface LeafState {
   directedAtMe: boolean;
   ackedByMe: boolean;

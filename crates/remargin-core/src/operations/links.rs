@@ -26,14 +26,9 @@ use tixschema::model_schema;
 
 use crate::frontmatter;
 
-/// Frontmatter properties recognized as relations in v1.
-///
-/// Hardcoded for now; until the recognized-property set becomes a config
-/// knob, `up` and `related` are the only frontmatter keys whose values
-/// count as links.
+/// The only frontmatter keys whose values count as links.
 const RELATION_PROPERTIES: &[&str] = &["up", "related"];
 
-/// Column names for [`CompactLinkRow`], emitted once per response.
 pub const LINK_COLS: [&str; 4] = ["alias", "lines", "target", "title"];
 
 /// A single outbound link from a document, deduped by target.
@@ -92,8 +87,7 @@ pub struct CompactLinks {
 /// A link occurrence before dedup + resolution.
 struct RawLink {
     alias: Option<String>,
-    /// `true` when the target is an external URL (dropped: only
-    /// locally-resolving links are returned).
+    /// An external URL; dropped, since only locally-resolving links are returned.
     external: bool,
     line: usize,
     target: String,
@@ -143,9 +137,8 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
     let mut out: Vec<Link> = Vec::new();
 
     for occurrence in raw {
-        // Local-only: drop external URLs before the dedup-append branch so
-        // an external target never creates an entry a later occurrence
-        // could append to.
+        // Drop external URLs before the dedup-append branch, so an external target never creates an
+        // entry a later occurrence could append to.
         if occurrence.external {
             continue;
         }
@@ -160,7 +153,6 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
         }
 
         let (path, title) = match resolve_internal(&occurrence.target, base_dir, system) {
-            // Broken internal link: drop the occurrence entirely.
             None => continue,
             Some(resolved) => (Some(resolved.path), resolved.title),
         };
@@ -256,7 +248,6 @@ fn strip_frontmatter(content: &str) -> &str {
     if !trimmed.starts_with("---") {
         return content;
     }
-    // Find the closing `---` line and return everything after it.
     let mut seen_open = false;
     let mut offset = 0;
     for line in content.split_inclusive('\n') {
@@ -314,7 +305,6 @@ fn collect_frontmatter_links(body: &str, raw: &mut Vec<RawLink>) {
         let value = rest.trim();
 
         if value.is_empty() {
-            // Block sequence: subsequent `- item` lines until dedent.
             idx += 1;
             while idx < closer {
                 let item_line = lines[idx];
@@ -329,7 +319,6 @@ fn collect_frontmatter_links(body: &str, raw: &mut Vec<RawLink>) {
         }
 
         if let Some(inner) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
-            // Inline flow sequence: `[A, B, C]`.
             for entry in inner.split(',') {
                 push_relation(entry.trim(), key_line, raw);
             }
@@ -377,7 +366,6 @@ fn collect_body_links(body: &str, raw: &mut Vec<RawLink>) {
         let line_no = idx + 1;
         let trimmed = line.trim_start();
 
-        // Fenced code spans: a line opening/closing a ``` (or longer) fence.
         if let Some(ticks) = fence_marker(trimmed) {
             if in_fence {
                 if ticks == fence_ticks {
@@ -394,7 +382,6 @@ fn collect_body_links(body: &str, raw: &mut Vec<RawLink>) {
             continue;
         }
 
-        // Reference definition: `[ref]: url`.
         if let Some((label, url)) = parse_ref_definition(line) {
             ref_definitions.push((label.to_ascii_lowercase(), url));
             continue;
@@ -403,8 +390,7 @@ fn collect_body_links(body: &str, raw: &mut Vec<RawLink>) {
         scan_line(line, line_no, raw, &mut pending_refs);
     }
 
-    // Resolve `[text][ref]` against collected definitions; a ref with no
-    // definition is dropped.
+    // A `[text][ref]` with no definition is dropped.
     for (label, line, alias) in pending_refs {
         if let Some((_, url)) = ref_definitions
             .iter()
@@ -500,8 +486,6 @@ fn scan_wikilink(
     let inner: String = chars[inner_start..close].iter().collect();
     let end = close + 2;
 
-    // `[[target|alias]]` -> alias; `[[target#h]]` / `[[target^b]]` ->
-    // heading/block suffix stripped from the resolution target.
     let (target_part, alias) = match inner.split_once('|') {
         Some((t, a)) => (t.trim().to_owned(), Some(a.trim().to_owned())),
         None => (inner.trim().to_owned(), None),
@@ -624,7 +608,6 @@ fn scan_bare_url(
 fn push_target(raw_target: &str, line: usize, alias: Option<String>, raw: &mut Vec<RawLink>) {
     let target = raw_target.trim();
     if target.is_empty() || target.starts_with('#') {
-        // Pure self-anchor: not an outbound document/URL link.
         return;
     }
     if is_url(target) {
@@ -660,7 +643,6 @@ fn strip_target_suffix(target: &str) -> String {
 /// brackets, then percent-decode spaces.
 fn clean_md_target(raw_target: &str) -> String {
     let trimmed = raw_target.trim();
-    // `[t](url "title")` — drop the quoted title.
     let without_title = trimmed.split_once(" \"").map_or(trimmed, |(url, _)| url);
     without_title
         .trim()

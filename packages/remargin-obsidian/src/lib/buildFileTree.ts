@@ -7,14 +7,12 @@
  * as a single `src/components` directory node rather than two nested levels.
  */
 
+/** One directory or file node of the tree. */
 export interface FileTreeNode {
-  /** Display name for this node (directory segment or filename). */
   name: string;
-  /** Full vault-relative path. For collapsed dirs this is the deepest segment path. */
+  /** Vault-relative; for a collapsed directory chain, the path of its deepest segment. */
   fullPath: string;
-  /** `true` for directory nodes, `false` for leaf files. */
   isDir: boolean;
-  /** Sorted children. Empty for leaf nodes. */
   children: FileTreeNode[];
 }
 
@@ -30,7 +28,6 @@ export interface FileTreeNode {
 export function buildFileTree(paths: string[]): FileTreeNode[] {
   if (paths.length === 0) return [];
 
-  // ---- Step 1: insert paths into a nested map ----
   interface RawNode {
     children: Map<string, RawNode>;
     isFile: boolean;
@@ -62,25 +59,20 @@ export function buildFileTree(paths: string[]): FileTreeNode[] {
     }
   }
 
-  // ---- Step 2: convert map to FileTreeNode[] ----
   function toNodes(map: Map<string, RawNode>, parentPath: string): FileTreeNode[] {
     const nodes: FileTreeNode[] = [];
     for (const [name, raw] of map) {
       const fullPath = parentPath ? `${parentPath}/${name}` : name;
       if (raw.isFile && raw.children.size === 0) {
-        // Pure leaf
         nodes.push({ name, fullPath: raw.fullPath, isDir: false, children: [] });
       } else if (raw.isFile && raw.children.size > 0) {
-        // A path that is both a file and has children sharing its prefix.
-        // Add both a directory node (for children) and a file node.
+        // A path can be both a file and a prefix of others: emit a directory node and a file node.
         nodes.push({ name, fullPath: raw.fullPath, isDir: false, children: [] });
         const children = toNodes(raw.children, fullPath);
-        // Wrap children in a synthetic directory only if there are some
         if (children.length > 0) {
           nodes.push({ name, fullPath, isDir: true, children });
         }
       } else {
-        // Directory only
         const children = toNodes(raw.children, fullPath);
         nodes.push({ name, fullPath, isDir: true, children });
       }
@@ -90,7 +82,6 @@ export function buildFileTree(paths: string[]): FileTreeNode[] {
 
   const tree = toNodes(root, "");
 
-  // ---- Step 3: collapse single-child directory chains ----
   function collapse(nodes: FileTreeNode[]): FileTreeNode[] {
     return nodes.map((node) => {
       if (!node.isDir) return node;
@@ -98,8 +89,6 @@ export function buildFileTree(paths: string[]): FileTreeNode[] {
       // Recurse first so children are already collapsed.
       let collapsed = { ...node, children: collapse(node.children) };
 
-      // Collapse: if a dir has exactly one child and that child is also a dir,
-      // merge them into one node.
       while (
         collapsed.children.length === 1 &&
         collapsed.children[0].isDir
@@ -119,7 +108,6 @@ export function buildFileTree(paths: string[]): FileTreeNode[] {
 
   const collapsedTree = collapse(tree);
 
-  // ---- Step 4: sort ----
   function sortNodes(nodes: FileTreeNode[]): FileTreeNode[] {
     const dirs = nodes.filter((n) => n.isDir).sort((a, b) => a.name.localeCompare(b.name));
     const leaves = nodes.filter((n) => !n.isDir).sort((a, b) => a.name.localeCompare(b.name));

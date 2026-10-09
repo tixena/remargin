@@ -1,3 +1,5 @@
+/** The sidebar's Inbox section: fetches comments for the selected filter and lists them. */
+
 import { toRegex } from "diacritic-regex";
 import { ChevronDown, Clock, FileText, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,27 +33,23 @@ import { collectKinds, matchesKindFilter, pruneKindFilter } from "@/lib/kindFilt
 import type { InboxFilter, ViewMode } from "@/types";
 
 /**
- * Build the diacritic- and case-insensitive pattern shipped to
- * `remargin query --content-regex`. `diacritic-regex` produces character
- * classes like `[CcÇç][AaÀàÁáÂâ...]...` that are compatible with the Rust
- * `regex` crate. The generator leaves non-alpha characters (spaces,
- * punctuation) as literals and leaves consonants without diacritics as
- * lowercase literals — pairing it with the CLI's `--ignore-case` flag
- * promotes those consonants to case-insensitive matches.
+ * Builds the diacritic-insensitive pattern sent to `remargin query --content-regex`. The
+ * generator leaves consonants without diacritics as lowercase literals, so the query also
+ * passes `--ignore-case`.
  */
 const buildSearchPattern = toRegex({ flags: "i" });
 
+/** One inbox row: a comment and the file it lives in. */
 interface InboxItem {
   file: string;
   comment: ExpandedComment;
 }
 
+/** Props for {@link InboxSection}. */
 interface InboxSectionProps {
   onOpenAtLine?: (filePath: string, line?: number) => void;
   refreshKey?: number;
-  /** View mode owned by RemarginSidebar (persisted in plugin settings). */
   viewMode?: ViewMode;
-  /** Filter mode owned by RemarginSidebar (persisted in plugin settings). */
   filter?: InboxFilter;
   onFilterChange?: (next: InboxFilter) => void;
 }
@@ -79,20 +77,11 @@ export function InboxSection({
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [kindFilter, setKindFilter] = useState<string[]>([]);
-  // Resolved identity of the caller. Used by the inbox leaf
-  // to decide whether a row is "directed at me" and to detect "acked by
-  // me" without a second round-trip. Null while the probe is in flight —
-  // leaves render as neutral in that window (see `deriveLeafState`).
+  // Null while the probe is in flight; leaves render as neutral in that window.
   const [me, setMe] = useState<string | null>(null);
-  // Separate from `me` because `null` alone cannot tell "probe still in
-  // flight" from "probe finished without an identity" — the identity-
-  // dependent modes need that distinction to choose between the loading
-  // state and the identity-unavailable notice.
+  // `null` cannot tell "probe in flight" from "probe found no identity"; this flag can.
   const [identityResolved, setIdentityResolved] = useState(false);
-  // The submitted query only advances on explicit user action (Enter key or
-  // search-button click). Typing alone does nothing — the old debounce
-  // version felt jittery because every keystroke eventually spawned a CLI
-  // call after the pause. Manual submit keeps the search intentional.
+  // The submitted query advances only on Enter or the search button, never on typing.
   const [submittedSearch, setSubmittedSearch] = useState("");
 
   const isSearching = submittedSearch.trim().length > 0;
@@ -106,18 +95,14 @@ export function InboxSection({
     setSubmittedSearch("");
   }, []);
 
-  // Token of the newest fetch issued. Every run tags itself and re-checks
-  // the tag before touching state, so a slow response that a newer fetch
-  // has already superseded is dropped instead of overwriting it.
+  // Token of the newest fetch: a slow response that a newer fetch superseded is dropped.
   const newestFetch = useRef<string | null>(null);
 
   const refresh = useCallback(
     async (generation: number) => {
       const token = inboxFetchToken(generation, filter, me, submittedSearch);
       newestFetch.current = token;
-      // `from-me` needs a resolved identity to name its `--author`. Skip the
-      // fetch entirely rather than querying the whole vault; the render path
-      // shows the loading state or the identity-unavailable notice.
+      // `from-me` needs a resolved identity for `--author`; without one the fetch is skipped.
       const modeOpts = inboxFilterQueryOpts(filter, me);
       if (!modeOpts) {
         setItems([]);
@@ -127,9 +112,7 @@ export function InboxSection({
       }
       setLoading(true);
       try {
-        // Single refresh path: text filtering composes with every mode via
-        // the CLI's own `--content-regex` + `--ignore-case` options so we
-        // make exactly one `query` call regardless of search state.
+        // Text filtering rides the CLI's `--content-regex`, so every mode makes exactly one `query` call.
         const opts: Parameters<typeof backend.query>[1] = { ...modeOpts };
         if (isSearching) {
           opts.contentRegex = buildSearchPattern(submittedSearch).source;
@@ -152,8 +135,7 @@ export function InboxSection({
         setItems([]);
         setError(errorMessage(err));
       } finally {
-        // A superseded run leaves the loading state to the fetch that
-        // replaced it, so the list never flashes stale rows in between.
+        // A superseded run leaves the loading state to the fetch that replaced it.
         if (newestFetch.current === token) setLoading(false);
       }
     },
@@ -166,16 +148,10 @@ export function InboxSection({
 
   const probeKey = identityProbeKey(me, refreshKey);
 
-  // Resolve identity once per mount on the healthy path. No retry loop:
-  // if the CLI errors we keep `me` as `null` and leaves render as neutral
-  // — an acceptable fallback that does not block the inbox from loading.
-  // Recovery is user-triggered via the header's Refresh button (which
-  // moves `probeKey`), never a timer.
+  // One probe per mount, no retry loop: recovery is the header's Refresh button moving `probeKey`.
   useEffect(() => {
     if (probeKey === null) return;
     let cancelled = false;
-    // A re-probe re-enters the loading state so the identity-unavailable
-    // notice does not flash while the new call is in flight.
     setIdentityResolved(false);
     backend
       .identity()
@@ -198,25 +174,17 @@ export function InboxSection({
 
   const availableKinds = useMemo(() => collectKinds(items.map((i) => i.comment)), [items]);
 
-  // Drop any selected kinds that are no longer present in the visible
-  // set (e.g. after switching from All to Pending).
   useEffect(() => {
     setKindFilter((prev) => pruneKindFilter(prev, availableKinds));
   }, [availableKinds]);
 
-  // Apply the kind filter client-side. The fetch itself is unfiltered
-  // so switching chips is instant (no CLI round-trip) and the chip
-  // set stays stable — if we filtered on the server and the user
-  // selected `question`, we'd never see the other kinds to offer
-  // chips for.
+  // The kind filter is client-side so chips switch instantly and the chip set stays whole.
   const visibleItems = useMemo(() => {
     if (kindFilter.length === 0) return items;
     return items.filter((i) => matchesKindFilter(i.comment.remargin_kind, kindFilter));
   }, [items, kindFilter]);
 
-  // Hold the loading state while an identity-dependent mode waits on the
-  // probe, so the notice below only ever means "the probe finished and
-  // produced nothing" rather than "not yet".
+  // An identity-dependent mode stays in the loading state until the probe finishes.
   if (loading || (needsIdentity && !identityResolved)) {
     return <div className="px-4 py-3 text-xs text-text-faint">Loading...</div>;
   }
@@ -337,6 +305,7 @@ export function InboxSection({
   );
 }
 
+/** Props for {@link InboxFlatRow}. */
 interface InboxFlatRowProps {
   item: InboxItem;
   me: string | null;

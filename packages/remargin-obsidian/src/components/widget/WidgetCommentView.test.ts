@@ -1,3 +1,5 @@
+/** Tests for the single-comment widget: collapsed and expanded markup, click and toggle wiring. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement, type ReactElement } from "react";
@@ -11,8 +13,6 @@ import type RemarginPlugin from "../../main.ts";
 import { DEFAULT_SETTINGS } from "../../types.ts";
 import { WidgetCommentView } from "./WidgetCommentView.tsx";
 
-// Same minimal stand-ins as CommentHeader.test.ts — useParticipants
-// only reads `plugin.settings` and calls `backend.registryShow`.
 const pluginStub = { settings: DEFAULT_SETTINGS } as unknown as RemarginPlugin;
 const backendStub = {
   registryShow: (): Promise<Participant[]> => Promise.resolve([]),
@@ -73,14 +73,10 @@ const noop = () => {
 };
 
 /**
- * Walk the React element tree returned by `WidgetCommentView` and find
- * the `onClick` handler attached to the root `remargin-widget-comment`
- * div. Used to drive tests #3 and #4 since react-dom/server cannot
- * dispatch DOM events.
+ * Finds the `onClick` handler on the root `remargin-widget-comment` div of the element tree
+ * `WidgetCommentView` returns; react-dom/server cannot dispatch DOM events.
  */
 function findRootOnClick(element: ReactElement): ((event: unknown) => void) | undefined {
-  // The component returns a single <div className="remargin-widget-comment">.
-  // We invoke the function component directly so we can introspect props.
   const props = element.props as Record<string, unknown>;
   const onClick = props.onClick;
   return typeof onClick === "function" ? (onClick as (event: unknown) => void) : undefined;
@@ -92,10 +88,7 @@ function buildElement(props: {
   onClick: (id: string, file: string) => void;
   onToggle: () => void;
 }): ReactElement {
-  // Call the component as a plain function — function components are
-  // pure during this kind of inspection. Returns the same element tree
-  // React would otherwise reconcile, which lets us reach `onClick` /
-  // toggle props without standing up a DOM.
+  // Called as a plain function: the returned element tree exposes the props without a DOM.
   const tree = WidgetCommentView({
     sourcePath: "notes/test.md",
     ...props,
@@ -104,20 +97,15 @@ function buildElement(props: {
 }
 
 describe("WidgetCommentView", () => {
-  // Test #1 (T36 spec): collapsed=true renders header but NOT body.
   it("renders header but no markdown body when collapsed", () => {
     const html = render(fixture(), true);
-    // Header always present (id badge from CommentHeader).
     assert.match(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*"[^>]*>abc<\/div>/);
-    // MarkdownContent renders a div with `remargin-markdown-content`
-    // — must NOT appear when collapsed.
     assert.ok(
       !html.includes("remargin-markdown-content"),
       `expected no MarkdownContent body, got: ${html}`
     );
   });
 
-  // Test #2: collapsed=false renders header AND body.
   it("renders header and markdown body when expanded", () => {
     const html = render(fixture(), false);
     assert.match(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*"[^>]*>abc<\/div>/);
@@ -145,7 +133,6 @@ describe("WidgetCommentView", () => {
     assert.ok(!collapsed.includes("remargin-widget-comment__tags"), collapsed);
   });
 
-  // Test #3: clicking the widget root invokes onClick(commentId, sourcePath).
   it("widget-root click invokes onClick with comment id and source path", () => {
     const calls: Array<[string, string]> = [];
     const onClick = (id: string, file: string) => {
@@ -159,14 +146,11 @@ describe("WidgetCommentView", () => {
     });
     const handler = findRootOnClick(tree);
     assert.ok(handler, "expected a root onClick handler");
-    // Synthetic-event shape doesn't matter — the handler ignores the
-    // event argument and forwards (id, file) directly.
     handler({});
     assert.deepStrictEqual(calls, [["abc", "notes/test.md"]]);
   });
 
-  // Test #4: clicking the CollapseToggle invokes onToggle and does NOT
-  // bubble to onClick (event stopped at the toggle).
+  // The click is stopped at the toggle and never reaches `onClick`.
   it("CollapseToggle click invokes onToggle without firing onClick", () => {
     const onClickCalls: Array<[string, string]> = [];
     const onToggleCalls: Array<true> = [];
@@ -177,15 +161,10 @@ describe("WidgetCommentView", () => {
       onToggle: () => onToggleCalls.push(true),
     });
 
-    // The root child is the header wrapper; CollapseToggle is the first
-    // grandchild. Walk the tree until we find a button with a real
-    // `onClick` (the toggle is the only `<button>` rendered in
-    // collapsed state since the body is hidden).
+    // In the collapsed state the toggle is the only `<button>` with an `onClick`.
     const toggleHandler = findToggleHandler(tree);
     assert.ok(toggleHandler, "expected CollapseToggle to render an onClick handler");
 
-    // Drive the handler with a stopPropagation-aware mock event so the
-    // toggle's `event.stopPropagation()` call has something to invoke.
     let stopped = false;
     toggleHandler({
       stopPropagation: () => {
@@ -210,9 +189,6 @@ function findToggleHandler(element: unknown): ((event: unknown) => void) | undef
     type?: unknown;
     props?: { onClick?: unknown; children?: unknown };
   };
-  // We need to step inside CollapseToggle: it's a function component
-  // whose returned element IS the button. Call the function with its
-  // resolved props to descend.
   if (typeof node.type === "function") {
     const rendered = (node.type as (props: unknown) => ReactElement)(node.props);
     return findToggleHandler(rendered);

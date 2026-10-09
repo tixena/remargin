@@ -1,3 +1,5 @@
+/** Badge primitive and its variants. */
+
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 
@@ -22,6 +24,7 @@ const badgeVariants = cva(
   }
 );
 
+/** Props for {@link Badge}: div attributes plus the variant. */
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {}

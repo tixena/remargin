@@ -1,3 +1,6 @@
+//! Tests for the plan projection: the comment partition, changed line ranges, the subset gate
+//! and the warn-tier notes.
+
 use std::path::{Path, PathBuf};
 
 use os_shim::mock::MemorySystem;
@@ -14,23 +17,17 @@ use crate::parser;
 use crate::parser::AuthorType;
 use crate::writer::InsertPosition;
 
-// DOC_AAA_BAD_CHECKSUM deliberately keeps the original sha256 value
-// from DOC_ONE_COMMENT while editing the content — the checksum is
-// re-verified inside the plan projection and must be flagged as
-// checksum_ok=false (a bad row under every mode).
+// Keeps the checksum of DOC_ONE_COMMENT over edited content, so its row is `checksum_ok = false`.
 const DOC_AAA_BAD_CHECKSUM: &str = "# Test\n\nSome body text here.\n\n```remargin\n---\nid: aaa\nauthor: alice\ntype: human\nts: 2026-04-06T10:00:00-04:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment, edited.\n```\n";
 
-// DOC_AAA_EDITED is the valid follow-up to DOC_ONE_COMMENT: same id,
-// new content, and the recomputed checksum for the new content. Used
-// to test the `modified` bucket of CommentDiff.
+// Same id as DOC_ONE_COMMENT, with new content and its recomputed checksum.
 const DOC_AAA_EDITED: &str = "# Test\n\nSome body text here.\n\n```remargin\n---\nid: aaa\nauthor: alice\ntype: human\nts: 2026-04-06T10:00:00-04:00\nchecksum: sha256:be02ec5d99642fe8cb4aa92cf85b1c7a05673353e7e4e8069ca3ce5a227162a6\n---\nFirst comment, edited.\n```\n";
 
 const DOC_ONE_COMMENT: &str = "# Test\n\nSome body text here.\n\n```remargin\n---\nid: aaa\nauthor: alice\ntype: human\nts: 2026-04-06T10:00:00-04:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment.\n```\n";
 
 const DOC_TWO_COMMENTS: &str = "# Test\n\nSome body text here.\n\n```remargin\n---\nid: aaa\nauthor: alice\ntype: human\nts: 2026-04-06T10:00:00-04:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment.\n```\n\n```remargin\n---\nid: bbb\nauthor: bob\ntype: human\nts: 2026-04-06T11:00:00-04:00\nchecksum: sha256:91f4d2a3dce415f7e893f7d93f37be404da42b1a7a1133ef759ab3fe747ad726\n---\nSecond comment.\n```\n";
 
-/// The one warn-tier body the plan tests share: a reference by id, which
-/// the gate reports and never refuses.
+/// A reference by id, which the gate reports and never refuses.
 const WARNING_BODY: &str = "The recipient list is derived from the parent, as in ow6.\n";
 
 fn open_config() -> ResolvedConfig {
@@ -138,10 +135,6 @@ fn plan_report_includes_verify_rows_for_every_after_comment() {
 
 #[test]
 fn bad_checksum_drives_would_commit_false_with_reason() {
-    // `DOC_AAA_BAD_CHECKSUM` keeps the original checksum value while
-    // editing the content; the projected verify therefore flags the
-    // row as checksum_ok=false, which is always "bad" regardless of
-    // mode.
     let before = parser::parse(DOC_ONE_COMMENT).unwrap();
     let after = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
 
@@ -166,7 +159,6 @@ fn changed_line_ranges_coalesce_contiguous_runs() {
     let report = project_report("write", &before, &after, &open_config(), test_identity()).unwrap();
 
     assert!(!report.noop);
-    // Lines 3 and 4 (1-indexed) differ; expect a single coalesced range.
     assert_eq!(report.changed_line_ranges, vec![[3_usize, 4_usize]]);
 }
 
@@ -197,7 +189,6 @@ fn project_doc_report_clean_projection_has_no_subset_gate() {
 
 #[test]
 fn project_doc_report_introduced_anomaly_populates_subset_gate() {
-    // Q introduces (aaa, checksum_invalid) that wasn't in P.
     let before = parser::parse(DOC_ONE_COMMENT).unwrap();
     let after = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
     let path = Path::new("/d/file.md");
@@ -230,8 +221,6 @@ fn project_doc_report_introduced_anomaly_populates_subset_gate() {
 
 #[test]
 fn project_doc_report_pre_existing_anomaly_does_not_refuse() {
-    // Both before and after have the same (aaa, checksum_invalid)
-    // entry; Q ⊆ P so the gate must not refuse.
     let before = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
     let after = parser::parse(DOC_AAA_BAD_CHECKSUM).unwrap();
     let path = Path::new("/d/file.md");
@@ -256,12 +245,8 @@ fn project_doc_report_pre_existing_anomaly_does_not_refuse() {
 
 #[test]
 fn project_doc_report_escalates_mode_to_realm_yaml() {
-    // The realm yaml flips mode from Open to Strict. An introduced
-    // bad-checksum is mode-independent, so the subset gate fires
-    // either way; we assert the gate's `mode` field reflects the
-    // *realm* mode, proving escalate_mode_for_doc ran. The registry
-    // admits the caller so the strict realm's read gate lets the
-    // projection run.
+    // An introduced bad checksum trips the gate in any mode, so the gate's `mode` field is what
+    // proves the realm escalation ran.
     let path = Path::new("/d/file.md");
     let system = MemorySystem::new()
         .with_file(Path::new("/d/.remargin.yaml"), b"mode: strict\n")

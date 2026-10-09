@@ -14,26 +14,18 @@ use serde_json::{Value, json};
 use crate::config::ResolvedConfig;
 use crate::document::{self, mime};
 
-/// Default upper bound on width/height for the output.
 const DEFAULT_MAX_DIMENSION: u32 = 1024;
 
-/// Default target ceiling on the encoded output byte size.
 const DEFAULT_MAX_BYTES: u64 = 256 * 1024;
 
-/// Hard floor on the byte budget — below this we cannot produce a useful
-/// thumbnail regardless of the encoder, so we reject upfront.
+/// Below this no encoder produces a useful thumbnail, so the request is rejected upfront.
 const MIN_MAX_BYTES: u64 = 1024;
 
-/// JPEG quality used on the first encode pass. Subsequent passes step
-/// down by [`JPEG_QUALITY_STEP`] until either the output fits or
-/// [`JPEG_QUALITY_FLOOR`] is reached.
 const JPEG_QUALITY_INITIAL: u8 = 85;
 const JPEG_QUALITY_STEP: u8 = 10;
 const JPEG_QUALITY_FLOOR: u8 = 30;
 
-/// When even the quality floor overshoots the byte budget, the encoder
-/// halves the dimension cap and retries. The retry stops when the
-/// dimension cap drops below this floor (output gets useless smaller).
+/// The dimension cap halves on each retry, and the retry stops below this floor.
 const DIMENSION_RETRY_FLOOR: u32 = 64;
 
 /// Output encoding for the returned image.
@@ -162,28 +154,24 @@ impl GetImageOptions {
         }
     }
 
-    /// Builder-style setter for the crop region.
     #[must_use]
     pub const fn with_crop(mut self, crop: CropRegion) -> Self {
         self.crop = Some(crop);
         self
     }
 
-    /// Builder-style setter for the output format override.
     #[must_use]
     pub const fn with_format(mut self, format: OutputFormat) -> Self {
         self.format = Some(format);
         self
     }
 
-    /// Builder-style setter for the byte budget.
     #[must_use]
     pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
         self.max_bytes = Some(max_bytes);
         self
     }
 
-    /// Builder-style setter for the dimension cap.
     #[must_use]
     pub const fn with_max_dimension(mut self, max_dimension: u32) -> Self {
         self.max_dimension = Some(max_dimension);

@@ -1,3 +1,5 @@
+//! Runs `remargin keygen` and reads the keypair back from disk.
+
 use core::str;
 use std::fs;
 

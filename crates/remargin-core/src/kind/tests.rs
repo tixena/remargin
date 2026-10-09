@@ -1,3 +1,5 @@
+//! Tests for kind validation, the kind filter and the canonical order used for hashing.
+
 use super::*;
 
 fn s(value: &str) -> String {
@@ -71,7 +73,6 @@ fn matches_kind_filter_empty_is_always_true() {
 fn matches_kind_filter_uses_or_semantics() {
     let kinds = vec![s("question"), s("todo")];
     let want = vec![s("todo"), s("blocker")];
-    // Matches because `todo` is in both.
     assert!(matches_kind_filter(&kinds, &want));
 }
 

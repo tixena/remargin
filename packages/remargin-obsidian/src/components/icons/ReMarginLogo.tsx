@@ -1,17 +1,15 @@
+/** The ReMargin logo as an inline SVG component. */
+
+/** Props for {@link ReMarginLogo}. */
 export interface ReMarginLogoProps {
-  /** Square side length in pixels. Defaults to 24. */
   size?: number;
-  /** Optional class applied to the root `<svg>` element. */
   className?: string;
 }
 
 /**
- * Tixena Labs ReMargin mark: a speech-bubble outline wrapping the Tixena
- * Labs symbol. The source of truth lives in
- * `packages/remargin-obsidian/src/assets/remargin-logo.svg` (copied from
- * `eburgos_notes/src/02_tixena/assets/tixena_labs_mono_purple_remargin_logo.svg`);
- * this component mirrors that path data inline so the logo bundles with
- * the plugin and can inherit `currentColor` for theming.
+ * The ReMargin mark: a speech-bubble outline wrapping the Tixena Labs symbol. The path data of
+ * `src/assets/remargin-logo.svg` is mirrored inline so the logo bundles with the plugin and
+ * inherits `currentColor` for theming.
  */
 export function ReMarginLogo({ size = 24, className }: ReMarginLogoProps) {
   return (

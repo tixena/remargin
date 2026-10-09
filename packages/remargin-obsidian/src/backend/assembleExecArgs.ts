@@ -1,3 +1,10 @@
+/** Argv assembly for one CLI invocation. */
+
+/**
+ * Places the per-subcommand flags (identity, then `--json`) right after the subcommand name,
+ * ahead of its own arguments. Identity flags are dropped when the caller skips them or the
+ * subcommand does not accept them.
+ */
 export function assembleExecArgs(params: {
   args: string[];
   identityArgs: string[];

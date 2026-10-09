@@ -1,3 +1,5 @@
+/** Tests for building the collapsible file tree from a flat path list. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { buildFileTree, type FileTreeNode } from "./buildFileTree.ts";
@@ -44,11 +46,9 @@ describe("buildFileTree", () => {
 
   it("groups files by directory", () => {
     const tree = buildFileTree(["src/a.ts", "src/b.ts", "docs/readme.md"]);
-    // Two top-level dirs
     assert.strictEqual(tree.length, 2);
     assert.strictEqual(tree[0].isDir, true);
     assert.strictEqual(tree[1].isDir, true);
-    // Sorted alphabetically: docs before src
     assert.strictEqual(tree[0].name, "docs");
     assert.strictEqual(tree[1].name, "src");
     assert.strictEqual(tree[0].children.length, 1);
@@ -57,7 +57,6 @@ describe("buildFileTree", () => {
 
   it("collapses single-child directory chains", () => {
     const tree = buildFileTree(["a/b/c/file.md"]);
-    // a, b, c each have one child -> collapsed into "a/b/c"
     assert.strictEqual(tree.length, 1);
     assert.strictEqual(tree[0].isDir, true);
     assert.strictEqual(tree[0].name, "a/b/c");
@@ -68,7 +67,6 @@ describe("buildFileTree", () => {
 
   it("does not collapse directories with multiple children", () => {
     const tree = buildFileTree(["a/b/x.ts", "a/b/y.ts"]);
-    // a has one child (b), so a/b collapses. b has two children, so it stops.
     assert.strictEqual(tree.length, 1);
     assert.strictEqual(tree[0].name, "a/b");
     assert.strictEqual(tree[0].children.length, 2);
@@ -105,11 +103,9 @@ describe("buildFileTree", () => {
 
   it("handles mixed depth files correctly", () => {
     const tree = buildFileTree(["root.md", "a/deep/file.ts", "a/shallow.ts"]);
-    // "a" has 2 children (deep/ and shallow.ts), so it is not collapsed.
     const dirA = tree.find((n) => n.isDir && n.name === "a");
     assert.ok(dirA, "should have a directory node for 'a'");
     assert.strictEqual(dirA.children.length, 2);
-    // "deep" is a single-child dir under "a" — it collapses but "a" doesn't.
     const deepDir = dirA.children.find((n) => n.isDir);
     assert.ok(deepDir);
     assert.strictEqual(deepDir.name, "deep");

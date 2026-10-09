@@ -1,3 +1,5 @@
+/* The plugin stylesheet: Tailwind, the Sandbox hierarchy, and the comment markdown and editor
+ * widget styles. */
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 
@@ -146,8 +148,8 @@
 }
 
 /* ----------------------------------------------------------------------
- * Pretty-print foundation (T36): widget-side classes consumed by the
- * editor surfaces shipped in T37 (reading mode) and T38 (Live Preview).
+ * Widget-side classes shared by the editor surfaces: reading mode and
+ * Live Preview.
  * ---------------------------------------------------------------------- */
 
 /* Per-thread visual container. The outermost `.remargin-widget-thread`

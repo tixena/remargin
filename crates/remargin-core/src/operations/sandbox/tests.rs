@@ -34,7 +34,6 @@ fn open_config() -> ResolvedConfig {
     }
 }
 
-/// A tiny markdown document with no sandbox state.
 fn simple_doc() -> &'static str {
     "\
 ---
@@ -47,7 +46,6 @@ Body text.
 "
 }
 
-/// A markdown document with one existing sandbox entry for `jorge`.
 fn doc_with_jorge() -> &'static str {
     "\
 ---
@@ -62,13 +60,8 @@ Body.
 "
 }
 
-/// A markdown document that already contains a remargin comment with a
-/// real checksum we will later assert survives frontmatter mutation.
-///
-/// Note: a `signature:` field is intentionally omitted so the
-/// `signature=missing` verify status is neutral under open mode. The test
-/// still asserts the full signature byte (here `None`) survives the
-/// sandbox round-trip.
+/// A document holding a comment with a real checksum. `signature:` is omitted so the verify
+/// status stays neutral in open mode.
 fn doc_with_comment() -> &'static str {
     "\
 ---
@@ -91,9 +84,6 @@ Hello.
 }
 
 fn write_file(system: &MemorySystem, path: &str, content: &str) {
-    // `with_file` semantics: implicitly creates parent directories. We use
-    // the corresponding `MemorySystem::create_dir_all` call here so that
-    // subsequent writes succeed.
     if let Some(parent) = Path::new(path).parent() {
         system.create_dir_all(parent).unwrap();
     }
@@ -103,10 +93,6 @@ fn write_file(system: &MemorySystem, path: &str, content: &str) {
 fn read_file(system: &MemorySystem, path: &str) -> String {
     system.read_to_string(Path::new(path)).unwrap()
 }
-
-// ---------------------------------------------------------------------------
-// parser::parse_sandbox_entry — the QA table's #1/#2/#3 cases.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn parse_sandbox_entry_success() {
@@ -118,9 +104,7 @@ fn parse_sandbox_entry_success() {
     );
 }
 
-/// Legacy frontmatter spells a zero offset `+00:00`; the writer now emits
-/// `Z`. Both must read back as the same instant, and a legacy entry must
-/// converge to `Z` when it is written out again.
+/// `+00:00` and `Z` read back as the same instant, and a `+00:00` entry is rewritten as `Z`.
 #[test]
 fn sandbox_entry_round_trips_legacy_zero_offset_to_z() {
     let legacy = parser::parse_sandbox_entry("alice@2026-04-11T12:00:00+00:00").unwrap();
@@ -153,10 +137,6 @@ fn parse_sandbox_entry_bad_timestamp() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// add_to_files
-// ---------------------------------------------------------------------------
-
 #[test]
 fn add_to_new_file_adds_entry() {
     let system = MemorySystem::new();
@@ -174,14 +154,7 @@ fn add_to_new_file_adds_entry() {
     assert!(content.contains("eduardo@"));
 }
 
-/// re-adding the same identity refreshes its
-/// timestamp (so the activity command can surface re-sandboxing as a
-/// distinct event). The roster stays one-entry-per-identity, but
-/// the entry's `ts` field advances on every successful call.
-///
-/// The op-level test runs both calls back-to-back; the wall clock
-/// almost always advances between the two, so the second call
-/// rewrites the file with the newer ts. The roster size stays at 1.
+/// Re-adding the same identity advances its timestamp while the roster stays at one entry.
 #[test]
 fn add_refreshes_timestamp_on_repeat() {
     let system = MemorySystem::new();
@@ -203,7 +176,6 @@ fn add_refreshes_timestamp_on_repeat() {
         first, second,
         "second add must refresh the timestamp and rewrite the file"
     );
-    // Still exactly one eduardo entry — roster stays idempotent.
     assert_eq!(second.matches("eduardo@").count(), 1);
 }
 
@@ -242,7 +214,6 @@ fn add_partial_failure_best_effort() {
     write_file(&system, "/docs/a.md", simple_doc());
     write_file(&system, "/docs/c.md", simple_doc());
 
-    // b.md is intentionally missing.
     let files = vec![
         PathBuf::from("/docs/a.md"),
         PathBuf::from("/docs/b.md"),
@@ -254,14 +225,9 @@ fn add_partial_failure_best_effort() {
     assert_eq!(result.failed.len(), 1);
     assert_eq!(result.failed[0].path, PathBuf::from("/docs/b.md"));
 
-    // a.md and c.md still mutated despite b.md failing.
     assert!(read_file(&system, "/docs/a.md").contains("eduardo@"));
     assert!(read_file(&system, "/docs/c.md").contains("eduardo@"));
 }
-
-// ---------------------------------------------------------------------------
-// remove_from_files
-// ---------------------------------------------------------------------------
 
 #[test]
 fn remove_last_entry_deletes_key() {
@@ -286,7 +252,6 @@ fn remove_preserves_other_identities() {
     write_file(&system, "/docs/a.md", doc_with_jorge());
     let files = vec![PathBuf::from("/docs/a.md")];
 
-    // Eduardo joins, then Eduardo leaves — jorge must still be there.
     add_to_files(&system, &files, "eduardo", &open_config()).unwrap();
     let result = remove_from_files(&system, &files, "eduardo", &open_config()).unwrap();
     assert_eq!(result.changed.len(), 1);
@@ -302,7 +267,6 @@ fn remove_noop_when_no_entry() {
     write_file(&system, "/docs/a.md", doc_with_jorge());
     let files = vec![PathBuf::from("/docs/a.md")];
 
-    // Eduardo removes even though only jorge is staged.
     let result = remove_from_files(&system, &files, "eduardo", &open_config()).unwrap();
     assert_eq!(result.changed, [] as [PathBuf; 0]);
     assert_eq!(result.skipped.len(), 1);
@@ -316,7 +280,6 @@ fn remove_does_not_touch_other_identity_entries() {
     let system = MemorySystem::new();
     write_file(&system, "/docs/a.md", doc_with_jorge());
 
-    // Eduardo tries to remove jorge's entry — must be a no-op.
     let result = remove_from_files(
         &system,
         &[PathBuf::from("/docs/a.md")],
@@ -330,10 +293,6 @@ fn remove_does_not_touch_other_identity_entries() {
     assert!(content.contains("jorge@"));
 }
 
-// ---------------------------------------------------------------------------
-// list_for_identity
-// ---------------------------------------------------------------------------
-
 #[test]
 fn list_walks_and_filters_by_identity() {
     let system = MemorySystem::new();
@@ -342,7 +301,6 @@ fn list_walks_and_filters_by_identity() {
     write_file(&system, "/root/nested/c.md", simple_doc());
     write_file(&system, "/root/nested/d.md", doc_with_jorge());
 
-    // Stage a.md and b.md as eduardo; d.md only has jorge.
     add_to_files(
         &system,
         &[
@@ -385,24 +343,17 @@ fn list_filters_jorge_returns_jorge_only_files() {
     assert_eq!(eduardo[0].path, Path::new("/root/shared.md"));
 }
 
-// ---------------------------------------------------------------------------
-// scan_all_entries — the realm-wide, all-identities enumeration.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn scan_all_entries_enumerates_every_identity() {
     let system = MemorySystem::new();
     write_file(&system, "/root/shared.md", doc_with_jorge());
     write_file(&system, "/root/nested/b.md", simple_doc());
-    // A non-markdown file whose text merely looks like sandbox state; the
-    // walk must skip it without aborting.
     write_file(
         &system,
         "/root/notes.txt",
         "sandbox: ghost@2026-01-01T00:00:00+00:00",
     );
 
-    // shared.md gains eduardo on top of jorge; b.md gains eduardo.
     add_to_files(
         &system,
         &[
@@ -416,7 +367,6 @@ fn scan_all_entries_enumerates_every_identity() {
 
     let scanned = scan_all_entries(&system, Path::new("/root")).unwrap();
 
-    // Both identities on shared.md plus eduardo on b.md — the .txt is skipped.
     assert_eq!(scanned.len(), 3, "unexpected: {scanned:#?}");
     let pairs: Vec<(&str, &Path)> = scanned
         .iter()
@@ -440,13 +390,6 @@ fn scan_all_entries_carries_author_and_timestamp() {
         DateTime::parse_from_rfc3339("2026-04-11T12:00:00+00:00").unwrap()
     );
 }
-
-// ---------------------------------------------------------------------------
-// Integrity: sandbox mutations must not invalidate existing signatures.
-// Comment-level checksums and signatures do not include any document-level
-// frontmatter, so the test asserts the serialized comment byte range is
-// untouched after a sandbox add.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn sandbox_mutation_preserves_signed_comment_payload() {
@@ -472,7 +415,6 @@ fn sandbox_mutation_preserves_signed_comment_payload() {
     let after_doc = parser::parse(&after).unwrap();
     let after_comment = after_doc.comments()[0].clone();
 
-    // Every field that participates in the signature payload is unchanged.
     assert_eq!(after_comment.id, before_comment.id);
     assert_eq!(after_comment.author, before_comment.author);
     assert_eq!(after_comment.author_type, before_comment.author_type);
@@ -486,10 +428,6 @@ fn sandbox_mutation_preserves_signed_comment_payload() {
     assert_eq!(after_comment.signature, before_comment.signature);
 }
 
-// ---------------------------------------------------------------------------
-// frontmatter::read_sandbox_entries / write_sandbox_entries round-trip.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn frontmatter_sandbox_round_trip() {
     let doc = parser::parse(doc_with_jorge()).unwrap();
@@ -498,10 +436,6 @@ fn frontmatter_sandbox_round_trip() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].author, "jorge");
 }
-
-// ---------------------------------------------------------------------------
-// SandboxBulkResult::to_json canonical shape — CLI and MCP both emit this.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn bulk_result_to_json_strips_base_dir_and_uses_changed_key() {

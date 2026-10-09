@@ -1,3 +1,5 @@
+/** Hook that tracks an element's width. */
+
 import type { RefObject } from "react";
 import { useEffect, useState } from "react";
 
@@ -16,12 +18,10 @@ export function useContainerWidth(ref: RefObject<HTMLElement | null>): number {
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        // contentBoxSize is an array; use the first item's inlineSize.
         const inlineSize = entry.contentBoxSize?.[0]?.inlineSize;
         if (inlineSize !== undefined) {
           setWidth(inlineSize);
         } else {
-          // Fallback for older browsers.
           setWidth(entry.contentRect.width);
         }
       }

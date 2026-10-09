@@ -1,14 +1,14 @@
+/** The inbox filter modes: their labels, their `remargin query` options and empty-state copy. */
+
 import type { QueryOpts } from "@/backend/types";
 import type { InboxFilter } from "@/types";
 
+/** One entry of the filter dropdown. */
 interface InboxFilterOption {
   value: InboxFilter;
   label: string;
 }
 
-// Extensible list of filter options. Add entries here and extend the
-// `InboxFilter` union to light up additional dropdown choices without
-// touching the trigger markup.
 export const INBOX_FILTER_OPTIONS: readonly InboxFilterOption[] = [
   { value: "for-me", label: "Pending for me" },
   { value: "from-me", label: "Pending from me" },

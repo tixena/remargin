@@ -1,3 +1,5 @@
+/** Card primitives: container, header, title, description, content and footer. */
+
 import * as React from "react";
 
 import { cn } from "@/lib/utils";

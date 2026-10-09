@@ -1,3 +1,5 @@
+/** Home-directory expansion for user-provided paths. */
+
 import { homedir } from "node:os";
 
 /**
@@ -24,18 +26,15 @@ export function expandPath(input: string | undefined | null): string {
   const home = homedir();
   let out = trimmed;
 
-  // Leading `~` or `~/...` — but not `~user`.
   if (out === "~") {
     out = home;
   } else if (out.startsWith("~/") || out.startsWith("~\\")) {
     out = home + out.slice(1);
   }
 
-  // $HOME and ${HOME}. Use a regex so it works mid-path too.
   out = out.replace(/\$\{HOME\}/g, home);
   out = out.replace(/\$HOME\b/g, home);
 
-  // Windows-style %USERPROFILE% / %HOME%.
   out = out.replace(/%USERPROFILE%/gi, home);
   out = out.replace(/%HOME%/gi, home);
 

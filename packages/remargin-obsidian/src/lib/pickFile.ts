@@ -1,3 +1,5 @@
+/** The native file-open dialog, reached through Electron when it is available. */
+
 import { dirname } from "node:path";
 
 /**
@@ -6,28 +8,21 @@ import { dirname } from "node:path";
  * not need to import Electron types (Electron is optional at runtime).
  */
 export interface FilePickerFilter {
-  /** Human-readable label shown in the dialog's file-type dropdown. */
   name: string;
   /** Extensions without the leading dot; use `["*"]` for "All Files". */
   extensions: string[];
 }
 
+/** Options for {@link pickFile}. */
 export interface PickFileOptions {
-  /**
-   * File-type filters for the dialog. Always include an "All Files"
-   * fallback so the user can escape strict extension filtering when needed
-   * (signing keys, for example, frequently have no extension).
-   */
+  /** Always include an "All Files" entry: signing keys, for one, often have no extension. */
   filters?: FilePickerFilter[];
-  /**
-   * Starting directory/path for the dialog. If a file path is passed, its
-   * parent directory is used. Omit to let the OS pick the default.
-   */
+  /** A file path here opens the dialog in its parent directory. */
   defaultPath?: string;
-  /** Window title (platforms that display one). */
   title?: string;
 }
 
+/** The subset of Electron's open-dialog options this module passes. */
 interface ElectronOpenDialogOptions {
   filters?: FilePickerFilter[];
   defaultPath?: string;
@@ -35,17 +30,20 @@ interface ElectronOpenDialogOptions {
   title?: string;
 }
 
+/** The subset of Electron's open-dialog result this module reads. */
 interface ElectronOpenDialogResult {
   canceled: boolean;
   filePaths: string[];
 }
 
+/** The one method of Electron's `dialog` module this module calls. */
 interface ElectronDialogModule {
   showOpenDialog: (
     options: ElectronOpenDialogOptions
   ) => Promise<ElectronOpenDialogResult>;
 }
 
+/** Node's `require`, typed for the runtime probe. */
 interface NodeRequire {
   (id: string): unknown;
 }
@@ -130,9 +128,6 @@ export async function pickFile(options: PickFileOptions = {}): Promise<string | 
 function deriveDefaultPath(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return trimmed;
-  // If the last segment contains a dot it looks like a filename — open the
-  // parent directory instead. `dirname` returns "." for plain names, which
-  // Electron happily resolves to the process cwd.
   const lastSep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   const lastSegment = lastSep >= 0 ? trimmed.slice(lastSep + 1) : trimmed;
   if (lastSegment.includes(".")) {

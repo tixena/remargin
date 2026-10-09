@@ -1,3 +1,5 @@
+//! `remargin goose session-guard` dispatch diagnostics, install lifecycle, `test` and `doctor`.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -91,10 +93,7 @@ fn status_of(out: &Output) -> String {
     report["status"].as_str().unwrap().to_owned()
 }
 
-// ---- dispatch ----------------------------------------------------------
-
-/// A wired guard plus a parseable realm is silence. goose reads hook output
-/// as signal, so a chatty healthy session is a guard nobody reads.
+/// goose reads hook output as signal, so a wired guard over a parseable realm says nothing.
 #[test]
 fn healthy_stack_is_silent_and_exits_zero() {
     let home = TempDir::new().unwrap();
@@ -107,9 +106,7 @@ fn healthy_stack_is_silent_and_exits_zero() {
     assert_eq!(stderr_of(&out), "");
 }
 
-/// No guard plugin at all: the diagnostic lands on stdout and the exit code
-/// stays 0, because goose treats a non-zero hook exit as a failure to
-/// swallow — the diagnostic would go with it.
+/// goose swallows a non-zero hook exit, so the diagnostic goes to stdout and the exit code stays 0.
 #[test]
 fn absent_plugin_prints_a_diagnostic_on_stdout_and_exits_zero() {
     let home = TempDir::new().unwrap();
@@ -128,9 +125,7 @@ fn absent_plugin_prints_a_diagnostic_on_stdout_and_exits_zero() {
     );
 }
 
-/// The fail-open trap the backstop exists for: the plugin is there and
-/// parses, but the binary its command names is gone, so goose spawns
-/// nothing and waves every tool call through.
+/// The plugin parses but its binary is gone, so goose spawns nothing and waves every call through.
 #[test]
 fn plugin_pointing_at_a_missing_binary_is_reported() {
     let home = TempDir::new().unwrap();
@@ -157,8 +152,7 @@ fn plugin_pointing_at_a_missing_binary_is_reported() {
     );
 }
 
-/// A realm config that no longer parses is enforcement that fails at
-/// tool-call time; the guard names it at session start instead.
+/// An unparseable realm config would fail at tool-call time; the guard names it at session start.
 #[test]
 fn unparseable_realm_config_is_reported() {
     let home = TempDir::new().unwrap();
@@ -175,10 +169,7 @@ fn unparseable_realm_config_is_reported() {
     );
 }
 
-// ---- lifecycle ---------------------------------------------------------
-
-/// `install` merges into the plugin the pretool installer wrote, and
-/// `uninstall` takes back exactly its own entry.
+/// `install` merges into the pretool installer's plugin; `uninstall` takes back only its own entry.
 #[test]
 fn install_and_uninstall_touch_only_the_session_entry() {
     let home = TempDir::new().unwrap();
@@ -222,9 +213,7 @@ fn install_and_uninstall_touch_only_the_session_entry() {
     assert!(sibling.is_dir(), "sibling plugin must survive");
 }
 
-/// The generated entry carries no `matcher` key (goose reads it as a regex
-/// and silently drops an invalid one) and names the binary by absolute path
-/// (a `PATH` miss at spawn time fails open).
+/// goose silently drops an invalid `matcher` regex, and a `PATH` miss at spawn time fails open.
 #[test]
 fn generated_entry_omits_matcher_and_uses_an_absolute_binary() {
     let home = TempDir::new().unwrap();
@@ -260,8 +249,7 @@ fn local_install_targets_the_project_scope() {
     assert!(!guard_dir(home.path()).exists());
 }
 
-/// `test` distinguishes wired from absent, and a pretool-only plugin counts
-/// as absent — the shared directory says nothing about this entry.
+/// A pretool-only plugin counts as absent: the shared directory says nothing about this entry.
 #[test]
 fn test_subcommand_reports_wired_and_absent() {
     let home = TempDir::new().unwrap();
@@ -295,11 +283,7 @@ fn test_subcommand_reports_wired_and_absent() {
     assert_eq!(status_of(&wired), "installed");
 }
 
-// ---- doctor ------------------------------------------------------------
-
-/// `doctor --check=goose-session-guard` flags a goose stack whose blocking
-/// guard is wired but whose backstop is not, and installing it clears the
-/// same scoped run.
+/// A wired blocking guard without the backstop is flagged, and installing it clears the same run.
 #[test]
 fn doctor_flags_a_goose_stack_without_the_backstop() {
     let home = TempDir::new().unwrap();

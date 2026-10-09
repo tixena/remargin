@@ -17,8 +17,6 @@ use crate::crypto;
 use crate::operations::cp::{CpArgs, CpKind, CpOutcome, cp, render_cp_outcome};
 use crate::parser::{self, AuthorType};
 
-// ---- Key pair (from sign/tests.rs) ----------------------------------------
-
 const TEST_PRIVATE_KEY: &str = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -28,8 +26,6 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 1PyMrur+yoibLd5o/hmVAAAADXRlc3RAcmVtYXJnaW4=
 -----END OPENSSH PRIVATE KEY-----
 ";
-
-// ---- Fixtures ---------------------------------------------------------------
 
 fn base() -> &'static Path {
     Path::new("/realm")
@@ -58,8 +54,6 @@ fn realm_with(file: &str, contents: &[u8]) -> MemorySystem {
         .unwrap()
 }
 
-// ---- Group A: byte copy / verbatim ----------------------------------------
-
 #[test]
 fn non_markdown_copies_verbatim() {
     let system = realm_with("photo.png", b"PNG_BYTES");
@@ -69,7 +63,7 @@ fn non_markdown_copies_verbatim() {
     assert_eq!(outcome.kind, CpKind::Verbatim);
     assert_eq!(outcome.comments_dropped, 0);
     assert_eq!(outcome.bytes_copied, 9);
-    assert!(system.exists(&base().join("photo.png")).unwrap()); // src untouched
+    assert!(system.exists(&base().join("photo.png")).unwrap());
     assert_eq!(
         system.read_to_string(&base().join("photo2.png")).unwrap(),
         "PNG_BYTES"
@@ -85,13 +79,9 @@ fn comment_free_markdown_copies_verbatim() {
 
     assert_eq!(outcome.kind, CpKind::Verbatim);
     assert_eq!(outcome.comments_dropped, 0);
-    // src untouched
     assert_eq!(system.read_to_string(&base().join("a.md")).unwrap(), src);
-    // dst exists and is parseable
     assert!(system.exists(&base().join("b.md")).unwrap());
 }
-
-// ---- Group B: body-only (core) --------------------------------------------
 
 /// Build a comment-bearing markdown string with `n` comment blocks.
 /// Uses real checksums so parse doesn't fail.
@@ -123,13 +113,9 @@ fn comment_bearing_markdown_copies_body_only() {
 
     let dst_content = system.read_to_string(&base().join("dst.md")).unwrap();
     let dst_parsed = parser::parse(&dst_content).unwrap();
-    // No comment blocks in the copy.
     assert_eq!(dst_parsed.comments().len(), 0);
-    // src is byte-for-byte unchanged.
     assert_eq!(system.read_to_string(&base().join("src.md")).unwrap(), src);
 }
-
-// ---- Group C: source untouched --------------------------------------------
 
 #[test]
 fn source_bytes_unchanged_after_copy() {
@@ -143,19 +129,15 @@ fn source_bytes_unchanged_after_copy() {
 
 #[test]
 fn source_signatures_intact_after_copy() {
-    // Build a signed comment and verify that after the cp the signature
-    // still passes.
     let content = "signed note";
     let checksum = crypto::compute_checksum(content, &[]);
     let key_path = Path::new("/keys/ed25519");
-    // Build a MemorySystem with the key and a simple signed doc.
     let system = MemorySystem::new()
         .with_dir(base())
         .unwrap()
         .with_file(key_path, TEST_PRIVATE_KEY.as_bytes())
         .unwrap();
 
-    // We build the doc with an unsigned comment first.
     let src = format!(
         "---\ntitle: src\n---\n\n# Body\n\n```remargin\n---\nid: c0001\nauthor: alice\ntype: human\nts: 2024-01-01T00:00:00+00:00\nchecksum: {checksum}\n---\n{content}\n```\n"
     );
@@ -166,15 +148,11 @@ fn source_signatures_intact_after_copy() {
     let args = CpArgs::new(PathBuf::from("src.md"), PathBuf::from("dst.md"));
     cp(&system, base(), &open_config(), &args).unwrap();
 
-    // Source must be byte-identical.
     assert_eq!(system.read_to_string(&base().join("src.md")).unwrap(), src);
 }
 
-// ---- Group E: frontmatter reset -------------------------------------------
-
 #[test]
 fn copy_resets_frontmatter_pending_and_sandbox() {
-    // Source has a sandbox entry and pending comments.
     let content = "hello";
     let checksum = crypto::compute_checksum(content, &[]);
     let src = format!(
@@ -185,8 +163,6 @@ fn copy_resets_frontmatter_pending_and_sandbox() {
     cp(&system, base(), &open_config(), &args).unwrap();
 
     let dst_content = system.read_to_string(&base().join("dst.md")).unwrap();
-    // Copy drops the comments, so nothing is pending and both pending
-    // fields are absent; no sandbox either.
     assert!(
         !dst_content.contains("remargin_pending"),
         "copy should not inherit pending count: {dst_content}"
@@ -198,8 +174,6 @@ fn copy_resets_frontmatter_pending_and_sandbox() {
         "copy should not inherit sandbox entry: {dst_content}"
     );
 }
-
-// ---- Group F: shape / edge guards -----------------------------------------
 
 #[test]
 fn same_path_is_noop() {
@@ -223,7 +197,6 @@ fn dst_exists_without_force_errors() {
     let args = CpArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md"));
     let err = cp(&system, base(), &open_config(), &args).unwrap_err();
     assert!(format!("{err}").contains("destination exists"), "{err}");
-    // Both files unchanged.
     assert_eq!(system.read_to_string(&base().join("a.md")).unwrap(), "src");
     assert_eq!(system.read_to_string(&base().join("b.md")).unwrap(), "dst");
 }
@@ -241,7 +214,6 @@ fn dst_exists_with_force_overwrites() {
     let args = CpArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md")).with_force(true);
     let outcome = cp(&system, base(), &open_config(), &args).unwrap();
     assert!(outcome.overwritten);
-    // src still present
     assert!(system.exists(&base().join("a.md")).unwrap());
 }
 
@@ -284,15 +256,12 @@ fn src_missing_errors() {
     assert!(format!("{err}").contains("source not found"), "{err}");
 }
 
-// ---- Group H: tixschema shape ---------------------------------------------
-
 #[test]
 fn outcome_serializes_to_snake_case_json() {
     let system = realm_with("a.md", b"# Hello\n");
     let args = CpArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md"));
     let outcome = cp(&system, base(), &open_config(), &args).unwrap();
     let json = serde_json::to_value(&outcome).unwrap();
-    // All required keys present with snake_case names.
     for key in &[
         "bytes_copied",
         "comments_dropped",
@@ -303,11 +272,8 @@ fn outcome_serializes_to_snake_case_json() {
     ] {
         assert!(json.get(key).is_some(), "missing key {key} in: {json}");
     }
-    // CpKind::Verbatim serialises as "verbatim".
     assert_eq!(json["kind"].as_str().unwrap(), "verbatim");
 }
-
-// --- render_cp_outcome unit tests ---
 
 fn outcome(kind: CpKind, bytes: u64, dropped: usize, overwritten: bool) -> CpOutcome {
     CpOutcome {

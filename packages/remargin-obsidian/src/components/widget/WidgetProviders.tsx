@@ -1,28 +1,20 @@
+/** The provider stack around an editor-side widget's React tree. */
+
 import { createElement, type ReactNode } from "react";
 import { BackendContext } from "@/hooks/useBackend";
 import { PluginContext } from "@/hooks/usePlugin";
 import { PortalContainerContext } from "@/hooks/usePortalContainer";
 import type RemarginPlugin from "@/main";
 
+/** Props for {@link WidgetProviders}. */
 export interface WidgetProvidersProps {
   plugin: RemarginPlugin;
   /**
-   * Element that should host Radix portals for this widget's children
-   * (tooltips, popovers). Pass the host element the React root is
-   * mounted into so Tailwind's `important: ".remargin-container"` scope
-   * (or whichever ancestor carries it) still applies. When the host
-   * does not sit inside a `.remargin-container` ancestor, pass the
-   * widget's own host element — better than `document.body` for class
-   * scoping.
+   * Hosts Radix portals for the widget's children. Pass the element the React root is mounted
+   * into so the `.remargin-container` class scoping still applies.
    */
   portalContainer: HTMLElement;
-  /**
-   * Optional in the props object so callers can pass children as the
-   * third `createElement` argument (the canonical React pattern) without
-   * TypeScript demanding a duplicate `children` field on the props
-   * literal. The component still requires children at runtime — passing
-   * none renders nothing useful, but never throws.
-   */
+  /** Optional so callers can pass children as the third `createElement` argument. */
   children?: ReactNode;
 }
 

@@ -1,3 +1,5 @@
+/** The identity of one read the sidebar issues. */
+
 /**
  * Identity of one read the sidebar issues. A result whose token is no
  * longer the current one has been superseded and must not be shown or

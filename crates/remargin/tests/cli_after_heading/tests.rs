@@ -1,3 +1,5 @@
+//! `--after-heading` on `comment` and `batch`, driven through the real binary.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,10 +11,6 @@ use tempfile::TempDir;
 
 const ALICE_CONFIG: &str = "identity: alice\ntype: human\nmode: open\n";
 
-/// A short multi-section doc with two prefixed sub-headings (a10
-/// and p11 in their respective epics) under different top-level
-/// parents: matches the path-syntax disambiguation case in the
-/// test plan.
 const HEADINGS_DOC: &str = "\
 ---
 title: Headings

@@ -1,3 +1,5 @@
+/** Static-render tests for the editor-widgets toggle in the settings tab. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -7,8 +9,7 @@ import { BackendContext } from "../../hooks/useBackend.ts";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "../../types.ts";
 import { SettingsTab } from "./SettingsTab.tsx";
 
-// Minimal backend stub — the tab calls `resolveMode` inside a useEffect,
-// which static-render skips, so a never-resolving promise is enough.
+// `resolveMode` runs in a useEffect that static render skips; a never-resolving promise is enough.
 const backendStub = {
   resolveMode: (): Promise<{ mode: string | undefined }> =>
     new Promise(() => {
@@ -35,7 +36,6 @@ function render(settings: RemarginSettings, onSave: (s: RemarginSettings) => voi
 }
 
 describe("SettingsTab — editor widgets toggle (T36 AC #13)", () => {
-  // Verifies the copy required by the spec is on screen.
   it("renders the editor widgets label and description copy verbatim", () => {
     const html = render({ ...DEFAULT_SETTINGS }, noopSave);
     assert.ok(html.includes("Editor widgets"), `expected 'Editor widgets' label, got: ${html}`);
@@ -47,11 +47,7 @@ describe("SettingsTab — editor widgets toggle (T36 AC #13)", () => {
     );
   });
 
-  // Verifies the toggle reflects `settings.editorWidgets === false`.
-  // After commit 3f49304 the editor-widgets toggle is a single Radix
-  // Toggle button (not a ToggleGroup of On/Off pills). The button
-  // renders `aria-pressed="false"` + `data-state="off"` and shows
-  // the label "Disabled" when editorWidgets is false (the default).
+  // One Radix toggle button: `aria-pressed="false"`, `data-state="off"`, labelled "Disabled".
   it("toggle reflects editorWidgets=false (the default)", () => {
     const html = render({ ...DEFAULT_SETTINGS, editorWidgets: false }, noopSave);
     const widgetsBlock = sliceBlock(html, "Editor widgets", "Check for updates");
@@ -62,8 +58,6 @@ describe("SettingsTab — editor widgets toggle (T36 AC #13)", () => {
     );
   });
 
-  // And the inverse: with editorWidgets=true the toggle is pressed
-  // (`aria-pressed="true"` + `data-state="on"`) and shows "Enabled".
   it("toggle reflects editorWidgets=true", () => {
     const html = render({ ...DEFAULT_SETTINGS, editorWidgets: true }, noopSave);
     const widgetsBlock = sliceBlock(html, "Editor widgets", "Check for updates");

@@ -1,3 +1,5 @@
+/** Opens a vault file in the editor and scrolls to a line. */
+
 import { MarkdownView, Notice, normalizePath, TFile } from "obsidian";
 import type RemarginPlugin from "@/main";
 
@@ -44,7 +46,6 @@ export async function openFileAtLine(
     return;
   }
 
-  // 1. Target the last-known markdown leaf, not the active (sidebar) leaf.
   const lastView = plugin.getLastMarkdownView();
   let leaf = lastView?.leaf ?? null;
   if (!leaf || !(leaf.view instanceof MarkdownView)) {
@@ -52,10 +53,7 @@ export async function openFileAtLine(
     leaf = leaves[0] ?? plugin.app.workspace.getLeaf(false);
   }
 
-  // Detect whether we are switching files (cross-file navigation) so we can
-  // use a longer settle delay below. Reading the current file path BEFORE
-  // openFile is the only reliable moment -- afterwards the leaf already
-  // references the new file.
+  // Read before `openFile`: afterwards the leaf already references the new file.
   const currentPath =
     leaf.view instanceof MarkdownView ? leaf.view.file?.path : undefined;
   const isCrossFile = currentPath !== rel;
@@ -64,30 +62,22 @@ export async function openFileAtLine(
   plugin.app.workspace.revealLeaf(leaf);
 
   if (line && line > 0) {
-    // 2. Wait for the editor buffer to initialise. A cross-file switch needs
-    //    more time than a same-file scroll because Obsidian tears down the old
-    //    CodeMirror state and builds a new one for the target file.
+    // A cross-file switch needs longer: Obsidian rebuilds the CodeMirror state for the new file.
     const settleMs = isCrossFile ? 200 : 50;
     await rafDelay(settleMs);
 
-    // Re-read the view from the leaf -- after openFile the MarkdownView
-    // instance may have been replaced (Obsidian can create a new view for the
-    // new file).
+    // Re-read from the leaf: `openFile` may have replaced the MarkdownView instance.
     const view = leaf.view instanceof MarkdownView ? leaf.view : null;
 
-    // 3. If the view is in reading mode, switch to source (live preview) so
-    //    the editor API is available for cursor placement and scrolling.
+    // Reading mode has no editor API, so switch to source mode for cursor placement and scrolling.
     if (view) {
       const state = view.getState();
       if (state.mode === "preview") {
         await view.setState({ ...state, mode: "source" }, { history: false });
-        // Give Obsidian a tick to finish the mode switch.
         await rafDelay(100);
       }
     }
 
-    // 4. Scroll after the buffer has settled.  Re-read the view one more time
-    //    in case the mode switch replaced it.
     const scrollView = leaf.view instanceof MarkdownView ? leaf.view : null;
     if (scrollView?.editor) {
       const pos = { line: line - 1, ch: 0 };

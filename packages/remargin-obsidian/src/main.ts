@@ -1,3 +1,5 @@
+/** The Obsidian plugin entry point: views, commands, settings and the editor extensions. */
+
 import {
   ItemView,
   MarkdownView,
@@ -38,23 +40,14 @@ export interface RemarginFocusDetail {
 
 export const VIEW_TYPE_REMARGIN = "remargin-sidebar";
 
-/** How long a startup update Notice stays on screen. */
 const UPDATE_NOTICE_MS = 8000;
 
-/**
- * Human-readable name for each component shown in the Notice. Kept next
- * to the Notice call site so future copy changes live in one place.
- */
 const COMPONENT_LABELS: Record<UpdateComponent, string> = {
   plugin: "plugin",
   cli: "CLI",
 };
 
-/**
- * Adapter that turns Obsidian's CORS-free `requestUrl` into the
- * `ReleasesFetcher` shape the update-check pipeline consumes. Extracted
- * so tests can inject a pure in-memory stub without touching Obsidian.
- */
+/** Adapts Obsidian's CORS-free `requestUrl` to the update check's `ReleasesFetcher` shape. */
 const obsidianReleasesFetcher: ReleasesFetcher = async (url) => {
   try {
     const response = await requestUrl({
@@ -80,6 +73,7 @@ const obsidianReleasesFetcher: ReleasesFetcher = async (url) => {
   }
 };
 
+/** The sidebar view: mounts the React sidebar into its leaf. */
 class RemarginView extends ItemView {
   private root: Root | null = null;
 
@@ -129,6 +123,7 @@ class RemarginView extends ItemView {
   }
 }
 
+/** The settings tab: mounts the React settings UI. */
 class RemarginSettingTab extends PluginSettingTab {
   private root: Root | null = null;
 
@@ -172,65 +167,37 @@ export interface ComposeRequest {
   afterLine: number;
 }
 
+/** The plugin: owns settings, the backend, shared widget state and the sidebar bridges. */
 export default class RemarginPlugin extends Plugin {
   settings: RemarginSettings = DEFAULT_SETTINGS;
   backend!: RemarginBackend;
 
   /**
-   * Per-session collapse state for editor-side widget comments. Owned by
-   * the plugin so reading mode (T37) and Live Preview (T38) can both
-   * subscribe and stay in sync. Created in `onload`. Reset on plugin
-   * reload — not persisted to plugin data (per-session scope, T36 spec).
+   * Per-session collapse state for editor-side widget comments, shared by reading mode and Live
+   * Preview. Created in `onload` and not persisted to plugin data.
    */
   collapseState!: CollapseState;
 
-  /**
-   * Cached resolved identity for the active settings, used by the
-   * pretty-print thread widgets to compute "pending for me" auto-expand
-   * and the per-thread badge text without an async hop on every render.
-   * Refreshed by `refreshIdentity()` on plugin load and after settings
-   * saves. `null` means no identity is configured (or resolution is
-   * still in flight).
-   */
+  /** Cached resolved identity the widgets read synchronously; `null` when none is configured. */
   currentIdentity: string | null = null;
 
-  /**
-   * Plugin-scoped event bus for sidebar-focus requests. `focusComment`
-   * dispatches `remargin:focus` here, and the React `SidebarShell`
-   * subscribes/unsubscribes on mount/unmount. Picked over the workspace
-   * event surface so the bridge does not leak into other plugins'
-   * namespace. Created in `onload`.
-   */
+  /** Plugin-scoped bus for sidebar-focus requests, kept out of other plugins' event namespace. */
   focusEvents!: EventTarget;
 
   /**
-   * Most recently focused markdown view. Used as the stable "active editor"
-   * that survives clicks into the sidebar. `getActiveViewOfType(MarkdownView)`
-   * flips to null the moment the sidebar leaf becomes active, so the `+`
-   * button cannot rely on it. This cache is only *set* when the event fires
-   * with a markdown view; it is never cleared just because focus moved.
-   * It IS invalidated when the cached view's file is closed.
+   * Most recently focused markdown view. `getActiveViewOfType(MarkdownView)` turns null the
+   * moment the sidebar takes focus; this is cleared only when the cached view's file closes.
    */
   private lastMarkdownView: MarkdownView | null = null;
 
-  /** Registered by RemarginSidebar on mount; called by `requestCompose`. */
   private composeHandler: ((request: ComposeRequest) => void) | null = null;
 
-  /**
-   * Compose request that arrived before the React sidebar registered its
-   * handler (e.g. when the command is invoked while the sidebar is closed).
-   * Drained on the next `setComposeHandler` call.
-   */
+  /** A compose request that arrived before the sidebar registered its handler. */
   private pendingCompose: ComposeRequest | null = null;
 
-  /** Registered by RemarginSidebar on mount; called by `requestRefresh`. */
   private refreshHandler: (() => void) | null = null;
 
-  /**
-   * `true` when a refresh was requested before the React sidebar registered
-   * its handler (e.g. the command was fired while the sidebar was closed).
-   * Drained on the next `setRefreshHandler` call.
-   */
+  /** Set when a refresh was requested before the sidebar registered its handler. */
   private pendingRefresh = false;
 
   async onload() {
@@ -241,47 +208,27 @@ export default class RemarginPlugin extends Plugin {
     const vaultPath = adapter.basePath ?? "";
     this.backend = new RemarginBackend(this.settings, vaultPath);
 
-    // Pretty-print foundation (T36): per-session collapse store + focus
-    // bus, both consumed by the editor-side widgets shipped in T37/T38.
-    // Created here so reload semantics match the design (state resets
-    // when the plugin reloads).
+    // Created in `onload` so both reset whenever the plugin reloads.
     this.collapseState = new CollapseState();
     this.focusEvents = new EventTarget();
 
     this.addSettingTab(new RemarginSettingTab(this));
 
-    // T38: pretty-print Live Preview widget. The plugin closure reads
-    // `settings.editorWidgets` and the live-preview class on every
-    // `build()`, so toggling the setting or flipping editor modes
-    // takes effect on the next document change.
-    //
-    // `collapseEffectBridge` adapts the plugin-wide `CollapseState`
-    // store into CM6 transactions so the StateField rebuilds on chevron
-    // clicks without waiting for a doc change.
+    // The Live Preview widget reads `settings.editorWidgets` on every build. `collapseEffectBridge`
+    // turns `CollapseState` changes into CM6 transactions so chevron clicks rebuild at once.
     this.registerEditorExtension([commentWidgetPlugin(this), collapseEffectBridge(this)]);
-    // T37: pretty-print reading-mode widget. The post-processor reads
-    // `settings.editorWidgets` on every render call, so toggling the
-    // setting at runtime takes effect on the next render — no need to
-    // re-register.
+    // The post-processor reads `settings.editorWidgets` on every render, so no re-registration.
     this.registerMarkdownPostProcessor(remarginPostProcessor(this));
 
-    // Resolve identity once at startup so the widget thread renderer
-    // has it without an async hop per block. Failures (no config yet,
-    // CLI missing) leave `currentIdentity` null — the widget falls
-    // back to broadcast-pending semantics, which match the no-identity
-    // case the user spec describes.
+    // A failure leaves `currentIdentity` null and the widgets on broadcast-pending semantics.
     void this.refreshIdentity();
 
     this.registerView(VIEW_TYPE_REMARGIN, (leaf) => new RemarginView(leaf, this));
 
-    // Seed the last-markdown-view cache from current workspace state.
     const initialView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (initialView) this.lastMarkdownView = initialView;
 
-    // Keep the cache fresh. `active-leaf-change` and `file-open` both fire
-    // when the user is actively editing a markdown file. We only *set* on a
-    // non-null view -- never overwrite with null -- so the cached view
-    // survives sidebar focus.
+    // Set only on a non-null view, never to null, so the cache survives sidebar focus.
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -294,8 +241,6 @@ export default class RemarginPlugin extends Plugin {
         if (view) this.lastMarkdownView = view;
       })
     );
-    // On layout change, invalidate the cache if the cached view's file is
-    // gone (pane closed, file deleted, etc.).
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         if (this.lastMarkdownView && !this.lastMarkdownView.file) {
@@ -322,10 +267,6 @@ export default class RemarginPlugin extends Plugin {
       id: "refresh",
       name: "Refresh comments",
       callback: () => {
-        // Open the sidebar if it isn't already, then ask it to refetch.
-        // If the sidebar is closed, `requestRefresh` stashes the request
-        // and the sidebar drains it on its next `setRefreshHandler` call
-        // (mirrors the compose-handler pattern).
         void this.activateView();
         this.requestRefresh();
       },
@@ -355,15 +296,12 @@ export default class RemarginPlugin extends Plugin {
       this.activateView();
     });
 
-    // Kick off the version probe after the vault is ready. Runs entirely
-    // in the background: any failure is folded into the check-failed
-    // status and never bubbles up as an error Notice.
+    // Background only: a failure becomes the check-failed status, never an error Notice.
     void this.runUpdateCheck(false);
   }
 
   onunload(): void {
-    // Drop the shared font-scale var so a disabled plugin leaves no stray
-    // styling hook on <body>.
+    // A disabled plugin leaves no styling hook on <body>.
     if (typeof document === "undefined") return;
     document.body.style.removeProperty("--remargin-md-scale");
   }
@@ -394,20 +332,15 @@ export default class RemarginPlugin extends Plugin {
         cache: before,
       });
     } catch {
-      // The backend wrapper is supposed to swallow errors, but guard the
-      // call site too so an unexpected bug can't crash `onload`.
+      // The backend wrapper swallows errors, but an unexpected bug here must not crash `onload`.
       return;
     }
-    // Short-circuit: cache was fresh and the wrapper returned it unchanged.
     if (after === before) return;
 
-    // Persist through saveSettings so the backend's in-memory copy stays
-    // in sync (it reads from the same settings object).
+    // Through saveSettings, so the backend's in-memory copy stays in sync.
     await this.saveSettings({ ...this.settings, updateCheck: after });
 
-    // Only fire Notices on the passive (non-forced) path so the Settings
-    // "Check now" button — which renders its own inline status — does
-    // not double-surface.
+    // Notices fire only on the passive path: "Check now" renders its own inline status.
     if (force) return;
     const newlyAvailable = detectNewUpdates(before, after);
     for (const component of newlyAvailable) {
@@ -423,19 +356,14 @@ export default class RemarginPlugin extends Plugin {
   async loadSettings() {
     const saved = await this.loadData();
     if (saved) {
-      // Migration: older plugin versions persisted a `remarginMode` field in
-      // data.json that was never actually wired to the CLI. The vault-root
-      // .remargin.yaml is now the single source of truth for mode, so drop
-      // the ghost field on load (saveSettings will persist without it).
+      // A stored `remarginMode` was never wired to the CLI: the vault's .remargin.yaml owns mode.
       if (saved && typeof saved === "object" && "remarginMode" in saved) {
         delete (saved as { remarginMode?: unknown }).remarginMode;
       }
       this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
       return;
     }
-    // First run: ask the CLI where a human identity config lives by
-    // walking up from the vault. If it finds one, use config mode with
-    // the resolved path. Otherwise fall back to manual mode.
+    // First run: use config mode if the CLI finds a human identity config above the vault.
     this.settings = { ...DEFAULT_SETTINGS };
     try {
       const vaultPath = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
@@ -456,8 +384,6 @@ export default class RemarginPlugin extends Plugin {
     this.backend?.updateSettings(settings);
     await this.saveData(settings);
 
-    // Push the (possibly changed) font scale to the shared CSS var so both
-    // the sidebar and editor widgets restyle live, no reload needed.
     this.applyMarkdownScale();
 
     if (previousSide !== settings.sidebarSide) {
@@ -467,9 +393,7 @@ export default class RemarginPlugin extends Plugin {
       await this.activateView();
     }
 
-    // Settings change may have flipped to a different identity config;
-    // refresh the cached identity so widget threads pick up the new
-    // "pending for me" identity on the next render.
+    // A settings change may point at another identity config, so the cached identity is refreshed.
     void this.refreshIdentity();
   }
 
@@ -479,8 +403,7 @@ export default class RemarginPlugin extends Plugin {
    * live under <body>, so this one assignment restyles them together.
    */
   applyMarkdownScale(): void {
-    // Guard the DOM access so headless unit tests that drive `onload`
-    // without a document don't throw.
+    // Headless unit tests drive `onload` without a document.
     if (typeof document === "undefined") return;
     document.body.style.setProperty(
       "--remargin-md-scale",
@@ -527,8 +450,7 @@ export default class RemarginPlugin extends Plugin {
    * Resolve the active identity through the backend and stash it on
    * `currentIdentity` so the editor-side widgets can read it
    * synchronously. Failures (CLI missing, no config) leave the field
-   * null — the widget falls back to broadcast-only auto-expand, which
-   * matches the no-identity case the user spec describes.
+   * null — the widget falls back to broadcast-only auto-expand.
    */
   async refreshIdentity(): Promise<void> {
     try {
@@ -635,10 +557,6 @@ export default class RemarginPlugin extends Plugin {
    * silently drop the request. When nothing is subscribed (sidebar
    * closed, no view mounted) the dispatch is a no-op — no exception,
    * no console noise — by EventTarget contract.
-   *
-   * Wired in T36; consumed by T37 (reading-mode widget) and T38 (Live
-   * Preview CM6 widget) when a user clicks an editor-side comment
-   * widget.
    */
   focusComment(commentId: string, file: string): void {
     this.focusEvents.dispatchEvent(

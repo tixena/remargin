@@ -1,3 +1,5 @@
+/** The Updates section of the settings tab. */
+
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { ComponentCheck, UpdateCheckState, UpdateComponent } from "@/lib/githubReleases";
@@ -11,41 +13,27 @@ import {
 } from "./updatesSection.helpers";
 
 /**
- * Renders the Settings → Updates section.
- *
- * Keeps all I/O concerns as callbacks so the component can be tested
- * with node's built-in test runner: the caller owns the cache refresh
- * (`onCheckNow`) and the shell-out (`onUpdatePlugin`). The component
- * only orchestrates local "in-progress" state + status messages.
- *
- * Placement matches the design doc (2026-04-23__a7s_update_button_design.md):
- * two rows (Plugin / CLI) with installed/latest/status chip, plus a
- * section-level "Check now" button. The Plugin row exposes an Update
- * button enabled exactly when the status chip reads `update-available`.
- * The CLI row is info-only with a one-line hint emphasised when outdated.
+ * Props for the Settings → Updates section: two rows (Plugin / CLI) with installed/latest/status
+ * chip, plus a section-level "Check now" button. All I/O arrives as callbacks: the caller owns
+ * the cache refresh (`onCheckNow`) and the shell-out (`onUpdatePlugin`), and the component only
+ * orchestrates local in-progress state and status messages.
  */
 export interface UpdatesSectionProps {
   state: UpdateCheckState | undefined;
-  /**
-   * Force a refresh via the plugin's update-check pipeline. Resolves
-   * once the plugin data has been persisted; the parent will re-render
-   * with a new `state` prop.
-   */
+  /** Resolves once the plugin data is persisted; the parent then re-renders with a new `state`. */
   onCheckNow: () => Promise<void>;
-  /**
-   * Shell out to `remargin obsidian install --vault-path <vault>`.
-   * Resolves to `{ ok, stderr }` — the component surfaces the stderr
-   * tail verbatim on failure so the user sees the CLI's own message.
-   */
+  /** Shells out to `remargin obsidian install`; the stderr tail is shown verbatim on failure. */
   onUpdatePlugin: () => Promise<{ ok: boolean; stderr: string }>;
 }
 
+/** What the section is doing: idle, checking, installing, or showing an outcome message. */
 type ActionState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "installing" }
   | { kind: "message"; ok: boolean; text: string };
 
+/** Props for {@link ComponentRow}. */
 interface RowProps {
   label: string;
   component: UpdateComponent;

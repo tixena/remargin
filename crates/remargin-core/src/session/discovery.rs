@@ -20,23 +20,17 @@ use crate::config::{CONFIG_FILENAME, Config, SessionConfig};
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DiscoveredSession {
-    /// The realm root this session launches in. `cwd` for the root session
-    /// even when its identity is inherited from an ancestor.
+    /// The realm root this session launches in; `cwd` for the root session even when its identity
+    /// is inherited.
     pub folder: PathBuf,
-    /// The identity that governs this session. For a downward-discovered
-    /// realm it is the identity that realm's own `.remargin.yaml` declares;
-    /// for the root session it is the identity governing `cwd` (declared
-    /// there or inherited from an ancestor).
+    /// The identity the realm's own `.remargin.yaml` declares; for the root session, the one
+    /// governing `cwd`.
     pub identity: String,
-    /// Root of the subtree this session owns — the folder itself. The
-    /// owned subtree stops at each nested realm that declares its own
-    /// identity. Informational only: coordination is the workflow owner's
-    /// concern, and writes are atomic.
+    /// The folder itself: the owned subtree stops at each nested realm that declares its own
+    /// identity. Informational only.
     pub scope_root: PathBuf,
-    /// The declaring folder's `session:` block, if any. Validated later
-    /// (task 84), not here.
+    /// The declaring folder's `session:` block; not validated here.
     pub session: Option<SessionConfig>,
-    /// Resolved nearest `system_prompt:` for [`Self::folder`].
     pub system_prompt: ResolvedSystemPrompt,
 }
 

@@ -14,9 +14,7 @@ use crate::permissions::doctor::{
 use crate::permissions::pretool_install::{HOOK_MATCHER, HOOK_SUBCOMMAND};
 use crate::permissions::session_guard_install::SESSION_HOOK_SUBCOMMAND;
 
-/// The binary both Claude hook commands name. Present in every mock below,
-/// so the seeded entries read as live rather than stale. Deliberately not
-/// the path the goose cases use for a binary that is *gone*.
+/// The binary both hook commands name; present in every mock, so seeded entries read as live.
 const EXE: &str = "/usr/local/bin/remargin";
 
 /// The `PreToolUse` command a current install writes.
@@ -29,9 +27,7 @@ fn guard_command() -> String {
     format!("{EXE} {SESSION_HOOK_SUBCOMMAND}")
 }
 
-/// Test shim: [`run_doctor`](super::run_doctor) with the default (all
-/// checks) selection, so the pre-existing call sites stay byte-identical
-/// while the scoped-selection tests call `super::run_doctor` directly.
+/// [`run_doctor`](super::run_doctor) with every check selected.
 fn run_doctor(
     system: &dyn System,
     cwd: &Path,
@@ -150,7 +146,6 @@ fn mock_with_files(files: &[(&str, &str)]) -> MemorySystem {
     system
 }
 
-/// Hook present in user-scope → clean report.
 #[test]
 fn hook_in_user_scope_is_clean() {
     let system = mock_with_file("/home/u/.claude/settings.json", &hook_settings_json());
@@ -165,8 +160,7 @@ fn hook_in_user_scope_is_clean() {
     assert_eq!(report.findings, [] as [DoctorFinding; 0]);
 }
 
-/// Hook present in project-scope → clean report. Project scope is
-/// `.claude/settings.json` — the file `install --local` writes.
+/// Project scope is `.claude/settings.json`, the file `install --local` writes.
 #[test]
 fn hook_in_project_scope_is_clean() {
     let system = mock_with_file("/r/.claude/settings.json", &hook_settings_json());
@@ -180,7 +174,6 @@ fn hook_in_project_scope_is_clean() {
     assert!(report.is_clean());
 }
 
-/// Hook absent from both scopes → `HookMissing` finding (critical severity).
 #[test]
 fn hook_absent_from_both_scopes_reports_hook_missing() {
     let system = MemorySystem::new()
@@ -211,10 +204,7 @@ fn hook_absent_from_both_scopes_reports_hook_missing() {
     );
 }
 
-/// The entry is registered but names a binary that is gone. Claude Code
-/// treats a command it cannot spawn as non-blocking, which is the same
-/// exposure as no entry at all, so the gate fails — and the finding names
-/// the fault and a reinstall rather than a first install.
+/// A command that cannot spawn fails open like a missing entry: the gate fails, naming the fault.
 #[test]
 fn stale_hook_binary_fails_the_gate_and_names_the_fault() {
     let settings = settings_json_with_commands(
@@ -247,9 +237,7 @@ fn stale_hook_binary_fails_the_gate_and_names_the_fault() {
     );
 }
 
-/// An entry an older install left behind still enforces while `PATH`
-/// resolves it, so the gate passes — with a warning naming the file, the
-/// command, and the reinstall that rewrites it.
+/// The entry still enforces while `PATH` resolves it, so the gate passes with a warning.
 #[test]
 fn path_relative_hook_entry_passes_the_gate_with_a_warning() {
     let legacy = format!("remargin {HOOK_SUBCOMMAND}");
@@ -279,9 +267,7 @@ fn path_relative_hook_entry_passes_the_gate_with_a_warning() {
     );
 }
 
-/// The same for the backstop: a `PATH`-relative guard entry is registered,
-/// so `SessionGuardMissing` stays silent and the warning names the guard's
-/// own reinstall.
+/// A `PATH`-relative guard entry is registered, so it warns instead of reporting missing.
 #[test]
 fn path_relative_session_guard_entry_warns_instead_of_missing() {
     let legacy = format!("remargin {SESSION_HOOK_SUBCOMMAND}");
@@ -303,8 +289,6 @@ fn path_relative_session_guard_entry_warns_instead_of_missing() {
     );
 }
 
-/// A backstop whose binary is gone runs at no session, so it reports as
-/// missing — with the fault named and a reinstall as the repair.
 #[test]
 fn stale_session_guard_binary_reports_missing_with_the_fault() {
     let settings = settings_json_with_commands(
@@ -335,8 +319,7 @@ fn stale_session_guard_binary_reports_missing_with_the_fault() {
     );
 }
 
-/// The `PATH`-relative warning belongs to the check that owns the entry, so
-/// selecting only the other check drops it.
+/// The warning belongs to the check that owns the entry.
 #[test]
 fn path_relative_findings_follow_their_check_selection() {
     let settings = settings_json_with_commands(
@@ -359,7 +342,6 @@ fn path_relative_findings_follow_their_check_selection() {
     );
 }
 
-/// `HookMissing` finding references both settings file paths.
 #[test]
 fn hook_missing_finding_names_both_files() {
     let system = MemorySystem::new()
@@ -386,7 +368,6 @@ fn hook_missing_finding_names_both_files() {
     );
 }
 
-/// Findings order: `HookMissing` comes first (it gates everything else).
 #[test]
 fn hook_missing_is_first_finding() {
     let system = MemorySystem::new()
@@ -404,7 +385,6 @@ fn hook_missing_is_first_finding() {
     assert_eq!(report.findings[0].kind, FindingKind::HookMissing);
 }
 
-/// `DoctorReport` serializes to JSON without losing fields.
 #[test]
 fn doctor_report_json_round_trip() {
     let system = MemorySystem::new()
@@ -423,7 +403,6 @@ fn doctor_report_json_round_trip() {
     assert_eq!(report, parsed);
 }
 
-/// Returns correct `project_settings_file` and `user_settings_file` paths.
 #[test]
 fn report_includes_correct_settings_file_paths() {
     let system = MemorySystem::new()
@@ -447,10 +426,6 @@ fn report_includes_correct_settings_file_paths() {
     );
 }
 
-// --- SessionStart guard (SessionGuardMissing) unit tests ---
-
-/// Case 1: both hooks present in user-scope, guard installed, no
-/// `SessionGuardMissing`, clean report.
 #[test]
 fn guard_in_user_scope_is_clean() {
     let system = mock_with_file("/home/u/.claude/settings.json", &hook_settings_json());
@@ -472,8 +447,6 @@ fn guard_in_user_scope_is_clean() {
     );
 }
 
-/// Case 2: `PreToolUse` hook in user-scope, `SessionStart` guard in
-/// project-scope only, both checks pass, no finding.
 #[test]
 fn guard_in_project_scope_only_is_clean() {
     let system = mock_with_files(&[
@@ -494,9 +467,6 @@ fn guard_in_project_scope_only_is_clean() {
     assert!(report.is_clean(), "expected no findings: {report:#?}");
 }
 
-/// Case 3: `PreToolUse` hook present but the guard is absent from both
-/// scopes, exactly one `SessionGuardMissing` finding (Critical) naming
-/// the install command.
 #[test]
 fn guard_absent_from_both_scopes_reports_session_guard_missing() {
     let system = mock_with_file(
@@ -530,8 +500,6 @@ fn guard_absent_from_both_scopes_reports_session_guard_missing() {
         finding.remedy,
     );
 }
-
-// --- render_doctor_text unit tests ---
 
 fn clean_report() -> DoctorReport {
     DoctorReport {
@@ -616,8 +584,6 @@ fn render_doctor_findings_verbose() {
     );
 }
 
-// --- LeftoverProjectedRule (drift detection) unit tests ---
-
 fn leftover_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
     report
         .findings
@@ -626,10 +592,7 @@ fn leftover_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
         .collect()
 }
 
-/// Case 1: a settings file carrying the stale `Bash(remargin *)` CLI
-/// deny — a shape `rules_for` no longer emits — yields one
-/// `LeftoverProjectedRule` (Warning) naming the file, the rule, and a
-/// removal remedy.
+/// One warning naming the file, the rule and a removal remedy.
 #[test]
 fn leftover_flags_stale_remargin_cli_deny() {
     let system = mock_with_files(&[
@@ -667,9 +630,6 @@ fn leftover_flags_stale_remargin_cli_deny() {
     );
 }
 
-/// Case 2: a settings file carrying a path deny that `rules_for` still
-/// projects for the realm (`Edit(/r/**)` under a wildcard trusted
-/// root) is flagged as leftover.
 #[test]
 fn leftover_flags_projected_path_deny() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: \"*\"\n";
@@ -696,8 +656,6 @@ fn leftover_flags_projected_path_deny() {
     );
 }
 
-/// Case 3: a clean, hook-only settings tree (no projected or stale deny
-/// rules) yields no `LeftoverProjectedRule` and a clean report.
 #[test]
 fn leftover_clean_when_no_projected_or_stale_denies() {
     let system = mock_with_file("/home/u/.claude/settings.json", &hook_settings_json());
@@ -714,12 +672,7 @@ fn leftover_clean_when_no_projected_or_stale_denies() {
     assert!(report.is_clean(), "expected clean report: {report:#?}");
 }
 
-// --- TrustedRootEscape (out-of-realm entry) unit tests ---
-
-/// An out-of-realm `trusted_roots` entry makes `resolve_permissions` fail
-/// closed. Doctor must still produce a finding — naming the entry and the
-/// resolved anchor, with a move-it-back remedy — rather than crash on the
-/// resolve error it exists to explain.
+/// Doctor names the entry and the resolved anchor instead of crashing on the resolve error.
 #[test]
 fn out_of_realm_trusted_root_emits_finding_without_crashing() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: /other/secret\n";
@@ -761,9 +714,7 @@ fn leftover_finding_fixture(rule: &str, file: &str) -> DoctorFinding {
     }
 }
 
-/// Case 4: `--prompt-mode` over two leftover findings emits one
-/// imperative instruction per finding, naming both rules and both
-/// files.
+/// One imperative instruction per finding, naming its rule and its file.
 #[test]
 fn render_prompt_names_each_finding_rule_and_file() {
     let report = DoctorReport {
@@ -794,8 +745,6 @@ fn render_prompt_names_each_finding_rule_and_file() {
     );
 }
 
-/// Case 5: `--prompt-mode` over a clean report emits a "nothing to do"
-/// prompt with no instructions.
 #[test]
 fn render_prompt_clean_says_nothing_to_do() {
     let out = render_doctor_prompt(&clean_report());
@@ -808,9 +757,6 @@ fn render_prompt_clean_says_nothing_to_do() {
         "clean prompt must list no steps: {out}"
     );
 }
-
-// --- identity / key resolvability (IdentityKeyUnresolvable,
-//     AgentKeyUnderUserSsh) unit tests ---
 
 fn strict_agent_registry() -> &'static str {
     "participants:\n  agent1:\n    type: agent\n    status: active\n"
@@ -860,8 +806,6 @@ fn run_at_r(system: &MemorySystem) -> DoctorReport {
     .unwrap()
 }
 
-/// Scenario 1: strict realm whose `key:` is set but points at no file →
-/// one `IdentityKeyUnresolvable` naming the identity, key, and config.
 #[test]
 fn strict_missing_key_reports_identity_key_unresolvable() {
     let system = identity_mock(&[
@@ -886,10 +830,7 @@ fn strict_missing_key_reports_identity_key_unresolvable() {
     );
 }
 
-/// Scenario 2: strict realm whose `key:` resolves to a path that exists
-/// but does not read back as a file (a directory here) → still one
-/// `IdentityKeyUnresolvable`. Proves the probe checks readability, not
-/// mere existence.
+/// A `key:` that exists but is a directory still fails: the probe checks readability.
 #[test]
 fn strict_present_but_unreadable_key_reports_identity_key_unresolvable() {
     let system = identity_mock(&[
@@ -906,8 +847,6 @@ fn strict_present_but_unreadable_key_reports_identity_key_unresolvable() {
     );
 }
 
-/// Scenario 3: strict realm whose `key:` points at a readable file → no
-/// identity finding.
 #[test]
 fn strict_readable_key_has_no_finding() {
     let system = identity_mock(&[
@@ -923,8 +862,6 @@ fn strict_readable_key_has_no_finding() {
     );
 }
 
-/// Scenario 4: open mode with a missing key → the strict-only readability
-/// check does not fire.
 #[test]
 fn open_mode_missing_key_has_no_finding() {
     let yaml = "mode: open\ntype: agent\nidentity: agent1\nkey: /r/keys/missing\n";
@@ -936,8 +873,6 @@ fn open_mode_missing_key_has_no_finding() {
     );
 }
 
-/// Scenario 5: an agent identity whose `key:` resolves under the user's
-/// `~/.ssh` → one `AgentKeyUnderUserSsh` naming the identity and key.
 #[test]
 fn agent_key_under_user_ssh_reports_finding() {
     let yaml = "mode: open\ntype: agent\nidentity: agent1\nkey: id_ed25519\n";
@@ -966,8 +901,7 @@ fn agent_key_under_user_ssh_reports_finding() {
     );
 }
 
-/// Scenario 6: a human identity whose `key:` lives under `~/.ssh` → no
-/// finding (`~/.ssh` is the expected home for a human key).
+/// `~/.ssh` is the expected home for a human key.
 #[test]
 fn human_key_under_user_ssh_has_no_finding() {
     let yaml = "mode: open\ntype: human\nidentity: human1\nkey: id_ed25519\n";
@@ -982,8 +916,6 @@ fn human_key_under_user_ssh_has_no_finding() {
     );
 }
 
-/// Scenario 7: the hook is absent → the report leads with `HookMissing`
-/// and every later check, including the identity/key check, is skipped.
 #[test]
 fn hook_missing_skips_identity_key_check() {
     let system = MemorySystem::new()
@@ -1013,9 +945,6 @@ fn hook_missing_skips_identity_key_check() {
     );
 }
 
-/// The new kinds serialize to their `snake_case` wire names, round-trip
-/// through JSON, render as WARNING in text, and each contributes one
-/// prompt-mode instruction.
 #[test]
 fn identity_findings_render_and_serialize() {
     let report = DoctorReport {
@@ -1070,9 +999,6 @@ fn identity_findings_render_and_serialize() {
     );
 }
 
-// --- ConfigSchemaLint (permissions-schema drift across the realm tree)
-//     unit tests ---
-
 fn schema_lint_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
     report
         .findings
@@ -1081,9 +1007,6 @@ fn schema_lint_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
         .collect()
 }
 
-/// Scenario 1: a `.remargin.yaml` with a YAML syntax error in the parent
-/// walk yields one `ConfigSchemaLint` (Warning) naming the file, with a
-/// remedy pointing at the schema in that file.
 #[test]
 fn schema_lint_flags_yaml_syntax_error() {
     let system = mock_with_files(&[
@@ -1108,9 +1031,6 @@ fn schema_lint_flags_yaml_syntax_error() {
     );
 }
 
-/// Scenario 2: an unknown key under `permissions:` (serde rejects unknown
-/// fields) yields one `ConfigSchemaLint` carrying the parser diagnostic
-/// with the offending field name.
 #[test]
 fn schema_lint_flags_unknown_permissions_key() {
     let system = mock_with_files(&[
@@ -1127,11 +1047,7 @@ fn schema_lint_flags_unknown_permissions_key() {
     );
 }
 
-/// Scenario 3: a `deny_ops` entry carrying the legacy `to:` field yields a
-/// `ConfigSchemaLint` with the migration hint. The same input also fails
-/// serde (the entry rejects the unknown `to:`), so a second parse-error
-/// schema lint accompanies it — the migration hint is asserted by
-/// presence, matching the standalone lint's behavior.
+/// The `to:` field also fails serde, so a parse-error lint accompanies the migration hint.
 #[test]
 fn schema_lint_flags_legacy_to_field() {
     let system = mock_with_files(&[
@@ -1151,9 +1067,7 @@ fn schema_lint_flags_legacy_to_field() {
     );
 }
 
-/// Scenario 4: an out-of-realm `trusted_roots` entry is reported once — by
-/// the dedicated `TrustedRootEscape` check — and NOT duplicated as a
-/// `ConfigSchemaLint`, since both consult the same escape detector.
+/// The escape is reported once, by the dedicated check, not again as a schema lint.
 #[test]
 fn schema_lint_does_not_duplicate_trusted_root_escape() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: /other/secret\n";
@@ -1173,8 +1087,6 @@ fn schema_lint_does_not_duplicate_trusted_root_escape() {
     );
 }
 
-/// Scenario 5: a clean realm tree with valid configs produces zero
-/// `ConfigSchemaLint` findings.
 #[test]
 fn schema_lint_clean_tree_has_no_findings() {
     let yaml = "permissions:\n  deny_ops:\n    - path: src/secret\n      ops: [purge, delete]\n";
@@ -1189,9 +1101,6 @@ fn schema_lint_clean_tree_has_no_findings() {
     );
 }
 
-/// The new kind serializes to its `snake_case` wire name, round-trips
-/// through JSON, renders as WARNING in text, and contributes one
-/// prompt-mode instruction.
 #[test]
 fn config_schema_lint_serializes_and_renders() {
     let report = DoctorReport {
@@ -1231,8 +1140,6 @@ fn config_schema_lint_serializes_and_renders() {
     );
 }
 
-// --- StaleSandboxEntry (sandbox staging hygiene) unit tests ---
-
 /// A registry with one active human and one revoked agent. Any sandbox
 /// author outside this active set (absent or revoked) is stale.
 fn sandbox_registry() -> &'static str {
@@ -1247,9 +1154,6 @@ fn sandbox_doc(entry: &str) -> String {
     format!("---\ntitle: Roster\nsandbox:\n- {entry}\n---\n\n# Roster\n\nBody.\n")
 }
 
-/// Scenario 1: a doc staged for an author absent from the registry yields
-/// one `StaleSandboxEntry` (Warning) naming the file and the orphaned
-/// author, with a removal remedy.
 #[test]
 fn stale_sandbox_flags_orphaned_author() {
     let system = mock_with_files(&[
@@ -1277,7 +1181,6 @@ fn stale_sandbox_flags_orphaned_author() {
     );
 }
 
-/// Scenario 2: a doc staged for an active participant yields no finding.
 #[test]
 fn stale_sandbox_active_author_is_clean() {
     let system = mock_with_files(&[
@@ -1296,9 +1199,6 @@ fn stale_sandbox_active_author_is_clean() {
     assert!(report.is_clean(), "expected clean report: {report:#?}");
 }
 
-/// Scenario 3: a doc staged for a present-but-revoked participant is
-/// flagged — a retired identity's staging is exactly the drift this check
-/// exists to surface.
 #[test]
 fn stale_sandbox_revoked_participant_is_flagged() {
     let system = mock_with_files(&[
@@ -1323,9 +1223,6 @@ fn stale_sandbox_revoked_participant_is_flagged() {
     );
 }
 
-/// Scenario 4: a realm with no registry yields no findings — with no
-/// registry there is no notion of an author "not backed" by a live
-/// identity.
 #[test]
 fn stale_sandbox_no_registry_has_no_findings() {
     let system = mock_with_files(&[
@@ -1343,9 +1240,7 @@ fn stale_sandbox_no_registry_has_no_findings() {
     assert!(report.is_clean(), "expected clean report: {report:#?}");
 }
 
-/// Scenario 5: a stale entry on file A and a live entry on file B produce
-/// exactly one finding, naming file A only. A non-markdown file carrying
-/// sandbox-looking text is skipped, proving the walk continues past it.
+/// A non-markdown file with sandbox-looking text is skipped and the walk continues.
 #[test]
 fn stale_sandbox_mixed_files_flags_only_the_stale_one() {
     let system = mock_with_files(&[
@@ -1374,8 +1269,6 @@ fn stale_sandbox_mixed_files_flags_only_the_stale_one() {
     );
 }
 
-/// Scenario 6: the hook is absent → the report leads with `HookMissing`
-/// and the resolve-dependent stale-sandbox check is skipped.
 #[test]
 fn stale_sandbox_skipped_when_hook_missing() {
     let system = MemorySystem::new()
@@ -1399,9 +1292,6 @@ fn stale_sandbox_skipped_when_hook_missing() {
     assert_eq!(report.findings[0].kind, FindingKind::HookMissing);
 }
 
-/// The new kind serializes to its `snake_case` wire name, round-trips
-/// through JSON, renders as WARNING in text, and contributes one
-/// prompt-mode instruction.
 #[test]
 fn stale_sandbox_serializes_and_renders() {
     let report = DoctorReport {
@@ -1446,11 +1336,7 @@ fn stale_sandbox_serializes_and_renders() {
     );
 }
 
-// --- TrustedRootMissing (contained but absent anchor) unit tests ---
-
-/// A `trusted_roots` entry that stays inside its realm but resolves to a
-/// path that does not exist yields one `TrustedRootMissing` naming the
-/// resolved anchor and the declaring `.remargin.yaml`. It is not an escape.
+/// An absent anchor inside the realm is not an escape.
 #[test]
 fn trusted_root_missing_flags_contained_but_absent_anchor() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
@@ -1479,8 +1365,6 @@ fn trusted_root_missing_flags_contained_but_absent_anchor() {
     );
 }
 
-/// The same entry resolving to a directory that exists yields no
-/// `TrustedRootMissing` and a clean report.
 #[test]
 fn trusted_root_existing_anchor_has_no_finding() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: src/secret\n";
@@ -1498,8 +1382,7 @@ fn trusted_root_existing_anchor_has_no_finding() {
     assert!(report.is_clean(), "expected clean report: {report:#?}");
 }
 
-/// A wildcard root anchors at the declaring realm's own directory, which
-/// exists by construction, so it never reports missing.
+/// A wildcard root anchors at the realm's own directory, which exists by construction.
 #[test]
 fn trusted_root_wildcard_never_reports_missing() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: \"*\"\n";
@@ -1515,9 +1398,6 @@ fn trusted_root_wildcard_never_reports_missing() {
     assert!(report.is_clean(), "expected clean report: {report:#?}");
 }
 
-/// An out-of-realm entry is reported once — as `TrustedRootEscape` — and
-/// the existence pass is gated off, so no `TrustedRootMissing` is added for
-/// the same misconfig.
 #[test]
 fn trusted_root_missing_skipped_when_escape_present() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: /other/secret\n";
@@ -1537,9 +1417,6 @@ fn trusted_root_missing_skipped_when_escape_present() {
     );
 }
 
-/// The new kind serializes to its `snake_case` wire name, round-trips
-/// through JSON, renders as WARNING in text, and contributes one
-/// prompt-mode instruction.
 #[test]
 fn trusted_root_missing_serializes_and_renders() {
     let report = DoctorReport {
@@ -1584,8 +1461,6 @@ fn trusted_root_missing_serializes_and_renders() {
     );
 }
 
-// --- --check / CheckName selective-run unit tests ---
-
 /// A realm that trips two independent checks at once: the `SessionStart`
 /// guard is absent (`SessionGuardMissing`) and a stale `Bash(remargin *)`
 /// deny sits in `settings.local.json` (`LeftoverProjectedRule`). The
@@ -1607,9 +1482,6 @@ fn kinds(report: &DoctorReport) -> Vec<FindingKind> {
     report.findings.iter().map(|f| f.kind.clone()).collect()
 }
 
-/// Scenario 1: the default (`CheckName::all`) selection surfaces every
-/// check's findings — here both `SessionGuardMissing` and
-/// `LeftoverProjectedRule`.
 #[test]
 fn default_selection_runs_every_check() {
     let system = guard_missing_and_leftover_mock();
@@ -1628,9 +1500,6 @@ fn default_selection_runs_every_check() {
     );
 }
 
-/// Scenario 2: a single-check selection reports only that check — the
-/// other, deselected check contributes nothing even though the same realm
-/// would trip it under the default.
 #[test]
 fn single_check_selection_suppresses_other_findings() {
     let system = guard_missing_and_leftover_mock();
@@ -1650,9 +1519,6 @@ fn single_check_selection_suppresses_other_findings() {
     );
 }
 
-/// Scenario 3: a multi-check selection runs exactly the named checks. Here
-/// `session-guard` is selected but `leftover-rules` is not, so the guard
-/// finding appears and the leftover finding does not.
 #[test]
 fn multiple_check_selection_runs_exactly_those() {
     let system = guard_missing_and_leftover_mock();
@@ -1673,8 +1539,6 @@ fn multiple_check_selection_runs_exactly_those() {
     );
 }
 
-/// Scenario 4: an unknown slug is a hard error whose message names the bad
-/// slug and lists the valid ones — never a silent empty run.
 #[test]
 fn unknown_check_name_errors_and_lists_valid() {
     let err = CheckName::parse_set("bogus").unwrap_err().to_string();
@@ -1688,11 +1552,7 @@ fn unknown_check_name_errors_and_lists_valid() {
     );
 }
 
-/// Scenario 5: the hook-installed gate runs regardless of selection, but
-/// its finding follows the selection like every other check. With the hook
-/// absent from both scopes and `hook` NOT selected, the run short-circuits
-/// — `hook_installed` is `false` and the deselected `session-guard` check
-/// contributes nothing — while no `HookMissing` finding is reported.
+/// The gate still short-circuits, but reports no `HookMissing` when `hook` is not selected.
 #[test]
 fn hook_gate_short_circuits_silently_when_deselected() {
     let system = mock_with_files(&[]);
@@ -1714,8 +1574,6 @@ fn hook_gate_short_circuits_silently_when_deselected() {
     );
 }
 
-/// The same hookless realm with `hook` selected reports the gate finding
-/// and nothing else — the short-circuit is unchanged by the selection.
 #[test]
 fn hook_gate_reports_when_selected() {
     let system = mock_with_files(&[]);
@@ -1734,8 +1592,6 @@ fn hook_gate_reports_when_selected() {
     );
 }
 
-/// `parse_set` trims whitespace, skips empty tokens, and maps slugs to
-/// variants; `all` carries one entry per slug.
 #[test]
 fn parse_set_trims_and_all_is_complete() {
     let parsed = CheckName::parse_set(" hook , session-guard ,").unwrap();
@@ -1750,8 +1606,6 @@ fn parse_set_trims_and_all_is_complete() {
     );
     assert!(CheckName::parse_set("").unwrap().is_empty());
 }
-
-// ---- goose guard --------------------------------------------------------
 
 /// A mock carrying both Claude hooks (so the gate does not short-circuit),
 /// a `HOME` env var, and whichever extra files the case needs.
@@ -1786,8 +1640,7 @@ fn run_goose_doctor(system: &dyn System) -> DoctorReport {
     .unwrap()
 }
 
-/// No goose installation (`~/.agents` absent) means no goose finding — the
-/// check is silent on machines that do not run goose.
+/// No `~/.agents` means no goose installation, so the check is silent.
 #[test]
 fn goose_absent_produces_no_finding() {
     let report = run_goose_doctor(&goose_mock(&[]));
@@ -1800,8 +1653,6 @@ fn goose_absent_produces_no_finding() {
     );
 }
 
-/// goose present without the guard plugin: a critical `GooseGuardMissing`
-/// naming the install command.
 #[test]
 fn goose_present_without_guard_is_flagged() {
     let system = goose_mock(&[("/home/u/.agents/plugins/other/plugin.json", "{}")]);
@@ -1822,8 +1673,7 @@ fn goose_present_without_guard_is_flagged() {
     );
 }
 
-/// A guard plugin whose hook manifest is unparseable is a different repair
-/// than an absent one, and is reported as `GooseGuardBroken`.
+/// An unparseable hook manifest is a different repair from an absent plugin.
 #[test]
 fn goose_present_with_broken_guard_is_flagged_as_broken() {
     let system = goose_mock(&[(
@@ -1837,7 +1687,6 @@ fn goose_present_with_broken_guard_is_flagged_as_broken() {
     );
 }
 
-/// A wired guard plugin clears the check.
 #[test]
 fn goose_present_with_wired_guard_is_clean() {
     let system = goose_mock(&[
@@ -1857,8 +1706,6 @@ fn goose_present_with_wired_guard_is_clean() {
     );
 }
 
-/// A project-scope guard satisfies the check even when the user scope has
-/// none — `install --local` is a supported wiring.
 #[test]
 fn goose_project_scope_guard_satisfies_the_check() {
     let system = goose_mock(&[
@@ -1879,8 +1726,6 @@ fn goose_project_scope_guard_satisfies_the_check() {
     );
 }
 
-/// The check is selectable by slug, and deselecting it suppresses the
-/// finding.
 #[test]
 fn goose_guard_check_is_selectable_by_slug() {
     let system = goose_mock(&[("/home/u/.agents/marker", "x")]);
@@ -1910,8 +1755,6 @@ fn goose_guard_check_is_selectable_by_slug() {
     );
 }
 
-// ---- goose SessionStart backstop ----------------------------------------
-
 /// A manifest carrying the `PreToolUse` entry and, optionally, the
 /// `SessionStart` backstop beside it.
 fn goose_hooks_json_with_session(binary: &str) -> String {
@@ -1928,7 +1771,6 @@ fn goose_hooks_json_with_session(binary: &str) -> String {
     serde_json::to_string_pretty(&v).unwrap()
 }
 
-/// No goose installation means no backstop finding either.
 #[test]
 fn goose_absent_produces_no_session_guard_finding() {
     let report = run_goose_doctor(&goose_mock(&[]));
@@ -1938,8 +1780,7 @@ fn goose_absent_produces_no_session_guard_finding() {
     );
 }
 
-/// A guard plugin wired for `PreToolUse` only: the blocking guard is live,
-/// but nothing reports it when it breaks.
+/// The blocking guard is live, but nothing reports it when it breaks.
 #[test]
 fn goose_guard_without_the_session_entry_is_flagged() {
     let system = goose_mock(&[
@@ -1968,7 +1809,6 @@ fn goose_guard_without_the_session_entry_is_flagged() {
     );
 }
 
-/// Both entries wired clears both goose checks.
 #[test]
 fn goose_with_the_session_entry_is_clean() {
     let system = goose_mock(&[
@@ -1990,7 +1830,6 @@ fn goose_with_the_session_entry_is_clean() {
     );
 }
 
-/// A project-scope backstop satisfies the check on its own.
 #[test]
 fn goose_project_scope_session_entry_satisfies_the_check() {
     let system = goose_mock(&[
@@ -2008,8 +1847,6 @@ fn goose_project_scope_session_entry_satisfies_the_check() {
     );
 }
 
-/// A backstop whose binary is gone is named in the finding, not silently
-/// folded into a plain absence.
 #[test]
 fn goose_session_entry_pointing_at_a_missing_binary_names_the_fault() {
     let system = goose_mock(&[(
@@ -2028,8 +1865,6 @@ fn goose_session_entry_pointing_at_a_missing_binary_names_the_fault() {
     );
 }
 
-/// The backstop check carries its own slug, so it selects and deselects
-/// independently of the plugin check.
 #[test]
 fn goose_session_guard_check_is_selectable_by_slug() {
     let system = goose_mock(&[
@@ -2065,11 +1900,6 @@ fn goose_session_guard_check_is_selectable_by_slug() {
     );
 }
 
-// ---- goose verdicts on the report ---------------------------------------
-
-/// No goose installation leaves both verdicts unset: a machine that does
-/// not run goose has no verdict to report, and `None` says so instead of
-/// claiming a false.
 #[test]
 fn goose_absent_leaves_both_verdicts_unset() {
     let report = run_goose_doctor(&goose_mock(&[]));
@@ -2077,9 +1907,7 @@ fn goose_absent_leaves_both_verdicts_unset() {
     assert_eq!(report.goose_session_guard_installed, None, "{report:#?}");
 }
 
-/// An unset verdict is omitted from the wire, never nulled: the generated
-/// contract renders `Option` as the absent form, and a `null` fails it.
-/// Deserialize reads the omitted form back as the `None` it came from.
+/// An unset verdict is omitted from the wire, never `null`, and reads back as `None`.
 #[test]
 fn goose_absent_omits_both_verdict_keys_from_the_wire() {
     let report = run_goose_doctor(&goose_mock(&[]));
@@ -2099,8 +1927,6 @@ fn goose_absent_omits_both_verdict_keys_from_the_wire() {
     assert_eq!(report, parsed);
 }
 
-/// goose installed with no guard plugin: both verdicts are a reported
-/// `false`, beside the findings that name the repair.
 #[test]
 fn goose_without_the_plugin_reports_false_verdicts() {
     let system = goose_mock(&[("/home/u/.agents/marker", "x")]);
@@ -2113,8 +1939,6 @@ fn goose_without_the_plugin_reports_false_verdicts() {
     );
 }
 
-/// A fully wired stack reports both verdicts true, and the `--json` shape
-/// carries them for consumers that never see the text render.
 #[test]
 fn goose_wired_stack_reports_true_verdicts() {
     let system = goose_mock(&[
@@ -2142,8 +1966,6 @@ fn goose_wired_stack_reports_true_verdicts() {
     assert_eq!(report, parsed);
 }
 
-/// The two entries are verdicts of their own: a `PreToolUse`-only install
-/// is a live guard with no backstop, and the report says exactly that.
 #[test]
 fn goose_pretool_only_install_splits_the_verdicts() {
     let system = goose_mock(&[
@@ -2162,9 +1984,7 @@ fn goose_pretool_only_install_splits_the_verdicts() {
     );
 }
 
-/// A broken plugin is not a wired one: the verdict agrees with the
-/// `GooseGuardBroken` finding beside it rather than reading the plugin
-/// directory's presence as a pass.
+/// The plugin directory's presence is not a pass.
 #[test]
 fn goose_broken_plugin_reports_a_false_guard_verdict() {
     let system = goose_mock(&[(
@@ -2176,10 +1996,7 @@ fn goose_broken_plugin_reports_a_false_guard_verdict() {
     assert_eq!(report.goose_guard_installed, Some(false), "{report:#?}");
 }
 
-/// The verdicts survive the hook-missing short-circuit. The gate skips the
-/// goose *findings* the same way it skips the Claude session-guard finding,
-/// but a report that dropped the verdicts there would claim there is no
-/// goose installation at all.
+/// Dropping the verdicts at the short-circuit would claim there is no goose installation.
 #[test]
 fn goose_verdicts_survive_the_hook_missing_short_circuit() {
     let system = mock_with_files(&[(
@@ -2202,8 +2019,6 @@ fn goose_verdicts_survive_the_hook_missing_short_circuit() {
     );
 }
 
-/// A report from a non-goose machine renders no goose line at all — the
-/// verbose section stays silent about a stack that is not there.
 #[test]
 fn render_verbose_omits_goose_lines_without_goose() {
     let out = render_doctor_text(&clean_report(), true);
@@ -2218,7 +2033,6 @@ fn render_verbose_omits_goose_lines_without_goose() {
     );
 }
 
-/// Both verdicts render one line each, in the established verdict wording.
 #[test]
 fn render_verbose_names_both_goose_verdicts() {
     let mut report = clean_report();
@@ -2235,8 +2049,6 @@ fn render_verbose_names_both_goose_verdicts() {
     );
 }
 
-/// The goose lines belong to the verbose section: a plain render never
-/// carries them.
 #[test]
 fn render_plain_omits_goose_lines() {
     let mut report = clean_report();

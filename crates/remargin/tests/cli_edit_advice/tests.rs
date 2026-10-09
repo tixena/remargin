@@ -1,3 +1,5 @@
+//! Style notes `edit` reports for a replacement body, in text and `--json` modes.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,8 +23,7 @@ Body.
 
 const CLEAN_BODY: &str = "A clean single-line body.";
 
-/// A replacement body that earns a warn-tier note: a reference that names
-/// a comment by its id instead of saying what that comment said.
+/// Earns a warn-tier note: it names a comment by its id.
 const WARNED_BODY: &str = "See a5q for the field list.";
 
 fn setup_vault() -> (TempDir, PathBuf) {

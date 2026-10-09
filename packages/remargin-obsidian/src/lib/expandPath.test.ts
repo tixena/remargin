@@ -1,3 +1,5 @@
+/** Tests for home-directory expansion in user-provided paths. */
+
 import { strict as assert } from "node:assert";
 import { homedir } from "node:os";
 import { describe, it } from "node:test";

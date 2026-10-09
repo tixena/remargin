@@ -1,3 +1,5 @@
+/** The plugin's sidebar: the React tree mounted in its leaf. */
+
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join as joinPath } from "node:path";
@@ -25,10 +27,12 @@ import { launchInTerminal, resolveTerminal } from "@/lib/terminalLauncher";
 import type RemarginPlugin from "@/main";
 import type { InboxFilter, ViewMode } from "@/types";
 
+/** Props for {@link RemarginSidebar}. */
 interface RemarginSidebarProps {
   plugin: RemarginPlugin;
 }
 
+/** Where the inline composer is open: the file and the line the new comment goes after. */
 interface ComposeState {
   file: string;
   afterLine: number;
@@ -47,8 +51,7 @@ interface ComposeState {
  */
 export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   const [activeFile, setActiveFile] = useState<string | undefined>(() => {
-    // getActiveFile() returns null when the sidebar is the active leaf, so fall
-    // back to the plugin's cached last markdown view.
+    // `getActiveFile()` is null while the sidebar has focus, hence the cached markdown view.
     return plugin.app.workspace.getActiveFile()?.path ?? plugin.getLastMarkdownView()?.file?.path;
   });
   const [compose, setCompose] = useState<ComposeState | null>(null);
@@ -63,9 +66,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     setRefreshKey((k) => k + 1);
   }, []);
 
-  // Keep the create-mode folder picker fed with current vault folders.
-  // Sort lexicographically; vault root (path "") sorts to the top and
-  // renders as "(vault root)" inside the picker.
   useEffect(() => {
     const refreshFolders = () => {
       const folders = plugin.app.vault.getAllFolders(true).map((f) => f.path);
@@ -107,9 +107,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     [plugin]
   );
 
-  // Keep `activeFile` in sync with the workspace so the file-named section and
-  // the inline composer always target whichever markdown file the user last
-  // interacted with.
   useEffect(() => {
     const { workspace } = plugin.app;
 
@@ -120,8 +117,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
 
     const fileOpenRef = workspace.on("file-open", (file: TFile | null) => {
       setActiveFile(file?.path);
-      // Switching files closes any in-progress compose — the cursor target
-      // would be meaningless on a different file.
+      // A compose in progress targets a line of the old file, so switching files closes it.
       setCompose(null);
     });
 
@@ -135,9 +131,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     };
   }, [plugin]);
 
-  // Register our compose handler with the plugin so its `Add comment`
-  // command and `+` button can both request the composer to open. The
-  // plugin drains any compose request that arrived before we registered.
+  // The plugin drains any compose request that arrived before this handler registered.
   useEffect(() => {
     plugin.setComposeHandler((request) => {
       setCompose({ file: request.file, afterLine: request.afterLine });
@@ -145,10 +139,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     return () => plugin.setComposeHandler(null);
   }, [plugin]);
 
-  // Register our refresh handler with the plugin so the `Refresh comments`
-  // command (and any future external triggers) can bump every section's
-  // refreshKey and force a refetch. Mirrors the compose-handler pattern:
-  // the plugin drains any refresh requested before we mounted.
   useEffect(() => {
     plugin.setRefreshHandler(bumpRefresh);
     return () => plugin.setRefreshHandler(null);
@@ -162,8 +152,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
   );
 
   const handlePlusClick = useCallback(() => {
-    // Surface any failure instead of letting the promise reject silently —
-    // the user clicked a button, they deserve to know if it failed.
     plugin.addComment().catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[remargin] addComment failed:", err);
@@ -180,11 +168,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       const target = compose;
       setCompose(null);
       if (target) {
-        // Re-open the file at the new comment's line. This both refreshes
-        // the editor view (so the new block renders) and scrolls to it.
         void openFileAtLine(plugin, target.file, insertedLine);
       }
-      // Fire the plugin-wide refresh so every sidebar section refetches.
       bumpRefresh();
     },
     [compose, plugin, bumpRefresh]
@@ -208,9 +193,8 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
       const usedSlugs = new Set<string>();
       const entries = groups.map((group) => {
         const customRunner = group.prompt.runner?.trim() || "";
-        // Marker cleanup happens in the shell line (`&& sandbox remove`
-        // under the submitter's identity) — the launched agent runs as a
-        // different identity and cannot see the submitter's markers.
+        // Marker cleanup runs in the shell line under the submitter's identity: the launched agent is
+        // a different identity and cannot see the submitter's markers.
         const promptText =
           !customRunner && slashAvailable
             ? `/remargin:process-sandbox-group ${group.prompt.name}`
@@ -269,10 +253,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     bumpRefresh();
   }, [bumpRefresh]);
 
-  // Reply composer — rendered inline below the targeted comment by
-  // ThreadedComments (see `threadContent` below), NOT at the top of the
-  // thread. Keeping it here centralizes the identity/file/callback
-  // plumbing so ThreadedComments only needs to know where to drop it.
+  // Rendered inline below the targeted comment by ThreadedComments, not at the top of the thread.
   const replyEditor = useMemo(() => {
     if (!replyTarget || !activeFile) return null;
     return (
@@ -285,8 +266,6 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     );
   }, [replyTarget, activeFile, handleReplyClose, handleReplySubmitted]);
 
-  // Compose-new-comment — the `+` / "Add comment" flow. This is not tied
-  // to a specific comment row, so it stays in the top-of-thread slot.
   const composeEditor = useMemo(() => {
     if (!compose) return null;
     if (activeFile !== compose.file) return null;
@@ -300,9 +279,7 @@ export function RemarginSidebar({ plugin }: RemarginSidebarProps) {
     );
   }, [compose, activeFile, handleComposeClose, handleComposeSubmitted]);
 
-  // Plugin → sidebar focus bridge: when a widget click in the editor
-  // requests a comment in a different file, switch the active filter
-  // so the targeted card mounts before SidebarShell scrolls + highlights.
+  // A widget click may target another file: switch the filter so the card mounts before the scroll.
   const handleFocusFile = useCallback((file: string) => {
     setActiveFile(file);
   }, []);

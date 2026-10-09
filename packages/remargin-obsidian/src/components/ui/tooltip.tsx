@@ -1,3 +1,5 @@
+/** Tooltip primitives over Radix, portalled into the plugin's container. */
+
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as React from "react";
 

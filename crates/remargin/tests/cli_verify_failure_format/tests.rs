@@ -1,3 +1,5 @@
+//! Runs `ack` against a document whose one comment already fails its checksum.
+
 use core::str;
 use std::fs;
 
@@ -41,8 +43,6 @@ hello
 
 #[test]
 fn ack_against_bad_checksum_succeeds_under_subset_gate() {
-    // ack on a file with a pre-existing bad checksum must succeed —
-    // the anomaly is in P, and ack doesn't add to Q.
     let tmp = build_bad_checksum_workspace();
     let out = Command::cargo_bin("remargin")
         .unwrap()

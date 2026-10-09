@@ -1,3 +1,5 @@
+//! Lowercase hexadecimal encoding of a byte string.
+
 pub fn encode<T>(bytes: T) -> String
 where
     T: AsRef<[u8]>,

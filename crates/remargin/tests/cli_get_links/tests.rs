@@ -1,3 +1,5 @@
+//! `remargin get` link extraction in `--json` and in the default human output.
+
 use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
@@ -26,10 +28,8 @@ fn get_json_returns_links_array() {
     assert!(output.status.success(), "command failed: {output:?}");
     let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
-    // Content is unchanged (additive).
     assert!(payload["content"].as_str().unwrap().contains("[[Budget]]"));
 
-    // Local links only: the external URL is dropped entirely.
     let links = payload["links"].as_array().unwrap();
     assert_eq!(links.len(), 1, "only the local link survives: {links:?}");
     assert!(
@@ -43,7 +43,6 @@ fn get_json_returns_links_array() {
     assert_eq!(budget["count"], 2_i32);
     assert_eq!(budget["lines"].as_array().unwrap().len(), 2);
 
-    // No null keys: absent optionals are omitted, every link has a path.
     let budget_map = budget.as_object().unwrap();
     assert!(!budget_map.values().any(serde_json::Value::is_null));
     assert!(budget_map.contains_key("path"));
@@ -130,9 +129,7 @@ fn get_json_empty_links_when_none() {
     assert_eq!(payload["links"].as_array().unwrap().len(), 0);
 }
 
-/// Regression: `--json` (no `--compact`) keeps today's verbose,
-/// pretty-printed shape — `{line, text}` line objects and verbose link
-/// rows carrying `count` + `path`. Compact must not leak in.
+/// `--json` stays verbose and pretty-printed: `{line, text}` lines and `count` + `path` link rows.
 #[test]
 fn get_verbose_json_line_numbers_unchanged() {
     let tmp = TempDir::new().unwrap();
@@ -148,7 +145,6 @@ fn get_verbose_json_line_numbers_unchanged() {
 
     assert!(output.status.success(), "command failed: {output:?}");
     let raw = String::from_utf8(output.stdout).unwrap();
-    // Verbose stays pretty-printed (multi-line).
     assert!(raw.lines().count() > 3, "pretty-printed: {raw:?}");
 
     let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();

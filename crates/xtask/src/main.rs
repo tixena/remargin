@@ -1,10 +1,7 @@
 //! Internal developer-tooling dispatcher for the remargin workspace.
 //!
-//! Follows the rust-analyzer / Cargo-team `xtask` idiom: invoke via
-//! `cargo xtask <subcommand>`. This binary is marked `publish = false`
-//! and is never installed on end-user machines, so it is a safe home
-//! for build-time tools that used to leak into `~/.cargo/bin/` via
-//! stray `[[bin]]` stanzas.
+//! Follows the `xtask` idiom: invoke via `cargo xtask <subcommand>`. This binary is marked
+//! `publish = false` and is never installed on end-user machines.
 //!
 //! Subcommands:
 //!

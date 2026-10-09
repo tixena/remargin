@@ -1,3 +1,5 @@
+//! Runs `remargin version` and checks the crate version on stderr.
+
 use core::str;
 
 use assert_cmd::Command;

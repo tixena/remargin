@@ -1,3 +1,5 @@
+/** Separator primitive over Radix. */
+
 "use client";
 
 import * as SeparatorPrimitive from "@radix-ui/react-separator";

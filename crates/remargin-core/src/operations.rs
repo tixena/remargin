@@ -45,22 +45,14 @@ use crate::writer::{self, InsertPosition};
 #[non_exhaustive]
 pub struct CreateCommentParams<'params> {
     pub attachments: &'params [PathBuf],
-    /// Acknowledge the parent comment when replying. `Some(true)` always acks,
-    /// `Some(false)` never acks, `None` (default) acks iff the parent's author
-    /// differs from the caller — replies to your own comment don't auto-ack.
+    /// `Some(true)` always acks the parent, `Some(false)` never does, and `None` acks only when the
+    /// parent's author is not the caller.
     pub auto_ack: Option<bool>,
     pub content: &'params str,
     pub position: &'params InsertPosition,
-    /// Optional classification tags for the new comment. Validated
-    /// against [`crate::kind::validate_kinds`] before the comment is
-    /// written; an invalid entry surfaces as a pre-write error so the
-    /// document is never mutated with a malformed tag.
     pub remargin_kind: &'params [String],
     pub reply_to: Option<&'params str>,
-    /// Atomically stage the file in the caller's sandbox in the same
-    /// write cycle as the comment insert. If the caller already has a
-    /// sandbox entry on the document, the existing timestamp is kept
-    /// (idempotent with the standalone `sandbox add` command).
+    /// Stage the file in the caller's sandbox in the same write as the comment.
     pub sandbox: bool,
     pub to: &'params [String],
 }
@@ -87,11 +79,8 @@ impl<'params> CreateCommentParams<'params> {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The author is not allowed to post (mode enforcement)
-/// - Attachment files do not exist
-/// - The file cannot be read or written
-/// - The linter detects structural issues
+/// Returns an error if the author may not post, an attachment is missing, the file cannot be
+/// read or written, or the linter finds a structural problem.
 pub fn create_comment(
     system: &dyn System,
     path: &Path,
@@ -133,9 +122,8 @@ pub fn create_comment(
         copy_attachments(system, path, cfg, params.attachments).context("copying attachments")?;
     let effective_to = build_effective_to(&doc, params.reply_to, params.to);
 
-    // Recipient registry gate: in registered/strict mode every non-empty
-    // to: entry (including the prepended parent author for replies) must
-    // resolve to an active participant. open mode is unchecked.
+    // In registered/strict mode every `to:` entry, the prepended parent author included, must be
+    // an active participant.
     for recipient in &effective_to {
         cfg.can_address(recipient)
             .with_context(|| format!("comment to: {recipient:?}"))?;
@@ -263,9 +251,7 @@ fn apply_auto_ack_to_parent(
     Ok(())
 }
 
-/// Atomic composite write: append the caller's sandbox frontmatter entry
-/// in the same write cycle. Idempotent — re-adding for an identity that
-/// already has an entry preserves the existing timestamp. Runs after
+/// Add or refresh the caller's sandbox entry in the same write cycle as the comment. Runs after
 /// `ensure_frontmatter` so recomputed `remargin_*` fields are preserved.
 fn apply_sandbox_entry(
     doc: &mut ParsedDocument,
@@ -287,10 +273,7 @@ fn apply_sandbox_entry(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The author is not allowed to post
-/// - A comment ID does not exist
-/// - Writing fails
+/// Returns an error if the author may not post, a comment ID does not exist, or writing fails.
 pub fn ack_comments(
     system: &dyn System,
     path: &Path,
@@ -315,17 +298,14 @@ pub fn ack_comments(
             bail!("comment {comment_id:?} not found");
         };
 
-        // Self-heal: keep only the first Acknowledgment per author so
-        // repeated acks or pre-dirty input converge to a single entry
-        // (preserving the original timestamp).
+        // Self-heal: keep only the first ack per author, so repeated acks converge to one entry with
+        // the original timestamp.
         let mut seen: HashSet<String> = HashSet::new();
         cm.ack.retain(|a| seen.insert(a.author.clone()));
 
         if remove {
             cm.ack.retain(|a| a.author != identity);
         } else if cm.ack.iter().any(|a| a.author == identity) {
-            // Idempotent: identity already acked (possibly from a
-            // pre-dedup duplicate above) — nothing to push.
         } else {
             cm.ack.push(Acknowledgment {
                 author: String::from(identity),
@@ -348,10 +328,7 @@ pub fn ack_comments(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The author is not allowed to post
-/// - The comment ID does not exist
-/// - Writing fails
+/// Returns an error if the author may not post, the comment ID does not exist, or writing fails.
 pub fn react(
     system: &dyn System,
     path: &Path,
@@ -396,9 +373,7 @@ pub fn react(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - A comment ID does not exist
-/// - Writing fails
+/// Returns an error if a comment ID does not exist or writing fails.
 pub fn delete_comments(
     system: &dyn System,
     path: &Path,
@@ -504,10 +479,7 @@ pub fn delete_comments(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The comment ID does not exist
-/// - `new_kinds` is present but invalid
-/// - Writing fails
+/// Returns an error if the comment ID does not exist, `new_kinds` is invalid, or writing fails.
 pub fn edit_comment(
     system: &dyn System,
     path: &Path,
@@ -525,12 +497,9 @@ pub fn edit_comment(
 
     let identity = cfg.identity.as_deref();
 
-    // Strict-mode key presence is validated at resolve time;
-    // the op just reads the key when it needs one.
     let signing_key = identity.and_then(|author| cfg.resolve_signing_key(author));
 
-    // Validate replacement kinds before any document mutation so the
-    // file stays byte-identical on invalid input.
+    // Validate the kinds before any mutation, so invalid input leaves the file byte-identical.
     if let Some(kinds) = new_kinds {
         validate_kinds(kinds).context("invalid kind")?;
     }
@@ -553,19 +522,11 @@ pub fn edit_comment(
             Some(kinds.to_vec())
         };
     }
-    // rehash against the (possibly replaced, possibly
-    // preserved) kinds so the fresh checksum stays consistent with
-    // the persisted YAML. `kinds()` returns `&[]` when the field is
-    // absent, matching the pre-kind back-compat hinge in
-    // [`compute_checksum`].
+    // Rehash against the kinds now on the comment, so the checksum matches the persisted YAML.
     cm.checksum = compute_checksum(new_content, cm.kinds());
 
-    // stamp the edit time so the activity command
-    // can surface this edit as a distinct event. Original `ts`
-    // (creation time) is preserved; `edited_at` is the new field.
-    // The signature payload deliberately excludes `edited_at` so
-    // pre-edit signatures stay valid against the canonical metadata
-    // (see [`crate::crypto::signature_payload`]).
+    // `ts` keeps the creation time and `edited_at` records the edit. The signature payload
+    // excludes `edited_at`.
     cm.edited_at = Some(Utc::now().fixed_offset());
 
     cm.ack.clear();
@@ -575,7 +536,6 @@ pub fn edit_comment(
         cm.signature = Some(sig);
     }
 
-    // Cascade ack invalidation through reply chain.
     let descendants = collect_descendants(&doc, comment_id);
     for descendant_id in &descendants {
         if let Some(child) = find_comment_mut(&mut doc, descendant_id) {
@@ -679,7 +639,6 @@ fn cap_newline_run(text: &mut String, join: usize) {
 /// considering the surrounding context when normalizing whitespace-only
 /// body segments.
 pub(crate) fn collapse_body_segments(segments: &mut Vec<Segment>) {
-    // 1. Merge adjacent Body segments into one.
     let mut idx = 0;
     while idx + 1 < segments.len() {
         if matches!(segments[idx], Segment::Body(_))
@@ -695,12 +654,6 @@ pub(crate) fn collapse_body_segments(segments: &mut Vec<Segment>) {
         }
     }
 
-    // 2. Normalize excessive newlines in Body segments.
-    //
-    // Two passes: first a general normalization (collapse 3+ newlines
-    // to 2), then a context-aware pass that accounts for the `\n` that
-    // comment serialization already appends via `writeln!` on the
-    // closing fence.
     for seg in segments.iter_mut() {
         if let Segment::Body(text) = seg {
             while text.contains("\n\n\n") {
@@ -709,10 +662,8 @@ pub(crate) fn collapse_body_segments(segments: &mut Vec<Segment>) {
         }
     }
 
-    // Context-aware pass: a whitespace-only body segment adjacent to a
-    // comment only needs a single `\n` because the comment block itself
-    // already ends with `\n`.  Without this, `Body("\n\n")` between
-    // two comments produces three consecutive newlines in the output.
+    // A whitespace-only body next to a comment needs a single `\n`: the comment block already
+    // ends with one.
     let len = segments.len();
     for pos in 0..len {
         let is_whitespace_body = matches!(&segments[pos], Segment::Body(t) if t.trim().is_empty());

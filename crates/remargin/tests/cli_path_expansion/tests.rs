@@ -1,3 +1,5 @@
+//! Path expansion through the core helper, the CLI binary and the in-process MCP handler.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,8 +25,6 @@ fn make_mock_home_with_note() -> (MemorySystem, String) {
     (system, String::from("/home/alice"))
 }
 
-// --- Core helper contract ------------------------------------------
-
 /// `~` works against the `MemorySystem` HOME env var.
 #[test]
 fn expand_tilde_in_mock_system() {
@@ -33,8 +33,7 @@ fn expand_tilde_in_mock_system() {
     assert_eq!(expanded, PathBuf::from(format!("{home}/note.md")));
 }
 
-/// `~user/...` is an explicit error (named user token), not a silent
-/// passthrough.
+/// `~user/...` is an explicit error naming the user token, not a silent passthrough.
 #[test]
 fn expand_tilde_user_errors_clearly() {
     let (system, _home) = make_mock_home_with_note();
@@ -46,8 +45,7 @@ fn expand_tilde_user_errors_clearly() {
     assert!(err.to_string().contains("~bob"));
 }
 
-/// Undefined env var surfaces the variable name so the user can fix
-/// it without staring at a "file not found" red herring.
+/// The error names the undefined variable, not a "file not found" red herring.
 #[test]
 fn expand_undefined_var_names_the_variable() {
     let system = MemorySystem::new();
@@ -59,12 +57,7 @@ fn expand_undefined_var_names_the_variable() {
     assert!(err.to_string().contains("DEFINITELY_UNSET_FOO"));
 }
 
-// --- CLI `get` with `~` --------------------------------------------
-
-/// `remargin get ~/note.md --json` resolves against the child's HOME
-/// and succeeds. We point HOME at the tmpdir and chdir the child
-/// there so the sandbox check (which disallows escaping cwd) agrees
-/// with the expanded path. The parent process env is not touched.
+/// The child's `HOME` and cwd are the tempdir, so the sandbox check accepts the expanded path.
 #[test]
 fn cli_get_expands_tilde_against_child_home() {
     let tmp = TempDir::new().unwrap();
@@ -89,20 +82,11 @@ fn cli_get_expands_tilde_against_child_home() {
     assert_eq!(parsed["content"].as_str().unwrap(), "# Hi\n");
 }
 
-// The `~user` error path is exercised in-process by
-// `expand_tilde_user_errors_clearly` above (and the MCP variant
-// below). The CLI-binary version was deleted as redundant — it
-// walked up to the real `~/.remargin.yaml`, which we don't isolate
-// via tempdirs.
-
-// --- MCP surface ----------------------------------------------------
-
 fn mcp_test_config(system: &MemorySystem, base: &Path) -> ResolvedConfig {
     ResolvedConfig::resolve(system, base, &IdentityFlags::default(), None).unwrap()
 }
 
-/// MCP `get` expands `~` before dispatching so a tool caller passing
-/// `path: "~/note.md"` is identical to passing the absolute path.
+/// MCP `get` expands `~` before dispatching, as if the caller had passed the absolute path.
 #[test]
 fn mcp_get_expands_tilde() {
     let (system, home) = make_mock_home_with_note();
@@ -124,7 +108,6 @@ fn mcp_get_expands_tilde() {
         .unwrap();
     let parsed: Value = serde_json::from_str(&response).unwrap();
 
-    // The tool response wraps content; any non-error payload passes.
     let result = parsed.get("result").unwrap();
     let content = result.get("content").and_then(Value::as_array).unwrap();
     let text = content[0].get("text").and_then(Value::as_str).unwrap();
@@ -132,15 +115,13 @@ fn mcp_get_expands_tilde() {
         text.contains("# Hello"),
         "expected file contents in response, got: {text}"
     );
-    // Ensure no error surfaced.
     assert!(
         !text.to_lowercase().contains("error"),
         "unexpected error: {text}"
     );
 }
 
-/// MCP undefined env var surfaces the variable name in the tool
-/// result's error text — not "file not found".
+/// An undefined variable is named in the tool result's error text.
 #[test]
 fn mcp_undefined_var_surfaces_named_error() {
     let (system, home) = make_mock_home_with_note();
@@ -170,11 +151,7 @@ fn mcp_undefined_var_surfaces_named_error() {
     );
 }
 
-// --- Adapter parity -------------------------------------------------
-
-/// For every input the helper produces one expanded value — CLI and
-/// MCP both go through the same core helper, so parity holds by
-/// construction. This test pins the contract.
+/// Both surfaces go through the same core helper; this pins one expanded value per input.
 #[test]
 fn cli_and_mcp_expand_identically_over_representative_inputs() {
     let system = MemorySystem::new()

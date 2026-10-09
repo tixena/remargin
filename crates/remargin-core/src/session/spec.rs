@@ -1,7 +1,7 @@
 //! Launch-spec builder for `remargin session launch`.
 //!
-//! [`build_launch_spec`] turns a [`DiscoveredSession`] (task 82) into
-//! everything the backend (task 85) needs to bring up that identity's
+//! [`build_launch_spec`] turns a [`DiscoveredSession`] into
+//! everything the backend needs to bring up that identity's
 //! interactive `claude` session: its working directory, a `remargin mcp`
 //! server scoped to that directory + identity, the composed system prompt,
 //! and the backend params (model / effort / budget). This is also where
@@ -10,7 +10,7 @@
 //!
 //! Pure builder: it composes and validates, it never spawns a process or
 //! writes to disk. The `/loop` interval and `/goal` condition are kept as
-//! separate structured fields (`loop_interval`, `goal`) because task 85
+//! separate structured fields (`loop_interval`, `goal`) because the backend
 //! renders them as separate interactive slash-command submissions via the
 //! multiplexer's send-keys; [`compose_prompt`] additionally folds their
 //! framing into the prompt text so the composed prompt is self-describing.
@@ -25,12 +25,11 @@ use crate::config::Budget;
 use crate::config::SessionConfig;
 use crate::config::system_prompt::ResolvedSystemPrompt;
 
-/// `/loop` cadence used when neither the agent's `session:` block nor a
-/// manifest entry declares one. Settled default: 5 minutes.
+/// Used when neither the agent's `session:` block nor a manifest entry declares a cadence.
 pub const DEFAULT_LOOP: Duration = Duration::from_mins(5);
 
-/// The standard remargin operating rules folded into every launched
-/// session's system prompt, below the resolved `system_prompt:` body.
+/// Folded into every launched session's system prompt, below the resolved `system_prompt:`
+/// body.
 const REMARGIN_OPERATING_RULES: &str = "\
 # Remargin operating rules
 
@@ -54,17 +53,13 @@ exactly as they are.";
 
 /// How to bring up the `remargin mcp` server for one launched session.
 ///
-/// Carries the argv rather than a running server: task 85 decides whether
-/// to attach it inline (`--mcp-config`) or register it (`claude mcp add`),
-/// per task 81's finding.
+/// Carries the argv, not a running server: the backend decides how to attach it.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct McpServerSpec {
-    /// argv for the scoped `remargin mcp` server (`["remargin", "mcp"]`).
     pub argv: Vec<String>,
-    /// Directory the server is scoped to — the session's `cwd`.
+    /// The session's `cwd`.
     pub base_dir: PathBuf,
-    /// Identity the server runs as.
     pub identity: String,
 }
 
@@ -73,36 +68,29 @@ pub struct McpServerSpec {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SessionLaunchSpec {
-    /// Backend that renders this session (e.g. `"claude"`), inferred per agent
-    /// by [`build_launch_spec`] from the params block its config declares.
+    /// Inferred per agent from the params block its config declares, e.g. `"claude"`.
     pub backend: String,
-    /// Per-session resource caps. `None` = no cap.
+    /// `None` means no cap.
     pub budget: Option<Budget>,
-    /// Working directory the session launches in.
     pub cwd: PathBuf,
-    /// `--effort` for the backend, from `session.claude`.
+    /// From `session.claude`.
     pub effort: Option<String>,
-    /// `/goal` stop condition — required, validated at build time.
+    /// Required; validated at build time.
     pub goal: String,
-    /// Identity governing this session.
     pub identity: String,
-    /// `/loop` cadence — the declared value, or [`DEFAULT_LOOP`] when unset.
+    /// The declared value, or [`DEFAULT_LOOP`] when unset.
     pub loop_interval: Duration,
-    /// The scoped `remargin mcp` server to bring up.
     pub mcp: McpServerSpec,
-    /// `--model` for the backend, from `session.claude`.
+    /// From `session.claude`.
     pub model: Option<String>,
-    /// System prompt body + remargin operating rules + `/loop` + `/goal`,
-    /// composed. The authoritative machine-usable cadence and goal live in
-    /// [`Self::loop_interval`] / [`Self::goal`]; this string carries their
-    /// framing as text.
+    /// The system prompt body, the remargin operating rules and the `/loop` + `/goal` framing. The
+    /// authoritative cadence and goal are [`Self::loop_interval`] and [`Self::goal`].
     pub prompt: String,
 }
 
 /// Assemble and validate the launch spec for one discovered session.
 ///
-/// `goal` is the one hard launch requirement: this is the authoritative
-/// enforcement behind task 83's soft dry-run flag. `loop` defaults to
+/// `goal` is the one hard launch requirement. `loop` defaults to
 /// [`DEFAULT_LOOP`] when unset, so an absent `session:` block is treated as
 /// an empty one and fails naming `goal`. `budget == None` passes through as
 /// "no cap"; `model` / `effort` flow from `session.claude`.
@@ -131,11 +119,8 @@ pub fn build_launch_spec(session: &DiscoveredSession) -> Result<SessionLaunchSpe
         .as_ref()
         .map_or((None, None), |c| (c.model.clone(), c.effort.clone()));
 
-    // Backend inference: the params block an agent declares names its backend.
-    // Only `claude:` exists, so a declared `claude:` block and no block at all
-    // both resolve to `"claude"`. A second params-block type would select its
-    // own backend by presence, and two backend blocks on one agent would be a
-    // config error -- unrepresentable until that second type lands.
+    // The params block an agent declares names its backend. Only `claude:` exists, so a declared
+    // block and no block at all both resolve to `"claude"`.
     let backend = String::from("claude");
 
     let prompt = compose_prompt(&session.system_prompt, loop_interval, &goal);

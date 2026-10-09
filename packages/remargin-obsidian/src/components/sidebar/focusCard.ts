@@ -1,8 +1,6 @@
-/**
- * How long the `remargin-highlight` class lingers after a focus call
- * (ms). Exported so tests can advance fake timers by exactly this
- * duration to assert the class clears.
- */
+/** Scrolls a comment card into view and highlights it briefly. */
+
+/** How long the `remargin-highlight` class stays after a focus call, in milliseconds. */
 export const HIGHLIGHT_DURATION_MS = 1000;
 
 /**

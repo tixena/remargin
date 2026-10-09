@@ -90,8 +90,8 @@
 }
 
 /* ========================================================================
- * L2 — Sandbox group (e.g. "Alterna Academy"). Amber rail nested inside
- * the brand rail.
+ * L2 — Sandbox group (the files of one system prompt). Amber rail nested
+ * inside the brand rail.
  * ====================================================================== */
 
 .remargin-container .rmg-l2 {
@@ -466,8 +466,8 @@
 }
 
 /* ========================================================================
- * Sandbox rows. We don't restyle the shadcn Checkbox — just remove the
- * file icon (per user) and tighten the layout.
+ * Sandbox rows. We don't restyle the shadcn Checkbox — rows carry no file
+ * icon and the layout is tightened.
  * ====================================================================== */
 
 .remargin-container .rmg-sandbox-row {

@@ -1,3 +1,5 @@
+/** Tests for finding the nearest Radix scroll viewport. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { findRadixScrollViewport } from "./scrollViewport.ts";
@@ -55,10 +57,7 @@ describe("findRadixScrollViewport", () => {
   });
 
   it("returns the NEAREST viewport when multiple are nested", () => {
-    // The outer SidebarShell ScrollArea sits inside the Obsidian
-    // workspace, which may itself be a ScrollArea in some layouts.
-    // We always want the nearest one so scroll restoration targets
-    // the container that actually moved.
+    // The nearest viewport is the one that actually moved, so scroll restoration targets it.
     const outerViewport: FakeNode = {
       name: "outer",
       attrs: { "data-radix-scroll-area-viewport": "outer" },
@@ -72,10 +71,6 @@ describe("findRadixScrollViewport", () => {
     const found = findRadixScrollViewport(asElement(leaf));
     assert.ok(found);
     assert.equal(found.hasAttribute("data-radix-scroll-area-viewport"), true);
-    // Verify we stopped at the inner one (not walked past it).
-    // Since our shim returns a fresh proxy each call, we check by
-    // walking the parent chain from `found`: its parent should be
-    // the outer viewport.
     const parent = found.parentElement;
     assert.ok(parent);
     assert.equal(parent.hasAttribute("data-radix-scroll-area-viewport"), true);

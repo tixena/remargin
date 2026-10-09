@@ -1,3 +1,5 @@
+//! `remargin mv` and `plan mv` runs against temp dirs on the real filesystem.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -28,8 +30,7 @@ fn assert_status(out: &Output, expected: i32) {
     );
 }
 
-/// Same-directory rename produces the expected on-disk state and
-/// reports a non-zero `bytes_moved` in JSON mode.
+/// A same-directory rename lands on disk and reports a non-zero `bytes_moved` in JSON mode.
 #[test]
 fn renames_within_same_dir_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -67,8 +68,7 @@ fn moves_across_directories_via_cli() {
     assert!(realm.path().join("archive/foo.md").exists());
 }
 
-/// `--force` overwrites an existing destination; the destination
-/// content matches the source after the call.
+/// `--force` overwrites an existing destination with the source's content.
 #[test]
 fn force_overwrites_destination_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -83,7 +83,6 @@ fn force_overwrites_destination_via_cli() {
         "expected destination-exists refusal, got: {stderr}"
     );
 
-    // Source still in place after the refusal.
     assert!(realm.path().join("a.md").exists());
 
     let with_force = run_in(realm.path(), &["mv", "a.md", "b.md", "--force", "--json"]);
@@ -97,8 +96,7 @@ fn force_overwrites_destination_via_cli() {
     );
 }
 
-/// Same-path no-op reports `noop_same_path` and leaves the file
-/// alone.
+/// A same-path move reports `noop_same_path` and leaves the file alone.
 #[test]
 fn same_path_is_noop_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -115,9 +113,7 @@ fn same_path_is_noop_via_cli() {
     );
 }
 
-/// Idempotent re-run: when the source is missing AND the
-/// destination already exists, the op succeeds with `bytes_moved
-/// == 0`. Lets retried `mv` calls settle cleanly.
+/// Source gone and destination present: a retried `mv` succeeds with `bytes_moved == 0`.
 #[test]
 fn idempotent_when_already_settled_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -150,15 +146,9 @@ fn refuses_path_escape_via_cli() {
     assert_ne!(out.status.code(), Some(0_i32));
 }
 
-/// Comments + frontmatter survive a CLI-driven rename: the moved
-/// document parses cleanly with the same comment id and content
-/// checksum it had at the source.
+/// The moved document parses with the same comment id and content checksum it had at the source.
 #[test]
 fn preserves_comments_and_frontmatter_across_rename() {
-    // Hand-rolled fixture with a single signed-shape comment block.
-    // The exact checksum value here is whatever the parser would
-    // report; we capture it from the source file before the move
-    // and assert byte-equality after.
     let realm = TempDir::new().unwrap();
     let source = "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n\n```remargin\n---\nid: aaa111\nauthor: alice\ntype: human\nts: 2026-04-29T10:00:00+00:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment.\n```\n";
     fs::write(realm.path().join("src.md"), source).unwrap();
@@ -173,9 +163,7 @@ fn preserves_comments_and_frontmatter_across_rename() {
     );
 }
 
-/// `remargin plan mv` projects the move without touching the
-/// filesystem and emits the documented `mv_diff` shape with
-/// `would_commit = true`.
+/// `plan mv` touches nothing and emits the `mv_diff` shape with `would_commit = true`.
 #[test]
 fn plan_mv_emits_mv_diff() {
     let realm = TempDir::new().unwrap();
@@ -195,14 +183,11 @@ fn plan_mv_emits_mv_diff() {
     assert_eq!(mv_diff["noop_same_path"], json!(false));
     assert_eq!(mv_diff["idempotent_already_settled"], json!(false));
 
-    // Plan must NOT have moved the file.
     assert!(realm.path().join("a.md").exists());
     assert!(!realm.path().join("b.md").exists());
 }
 
-/// `remargin plan mv` against an existing destination without
-/// `--force` flips `would_commit = false` and surfaces the
-/// destination-exists message in `reject_reason`.
+/// An existing destination without `--force` sets `would_commit = false` and a `reject_reason`.
 #[test]
 fn plan_mv_rejects_existing_destination_without_force() {
     let realm = TempDir::new().unwrap();
@@ -222,9 +207,7 @@ fn plan_mv_rejects_existing_destination_without_force() {
     );
 }
 
-/// `remargin plan mv --force` against an existing destination
-/// flips `would_commit = true` because the projection now mirrors
-/// the live `--force` behaviour.
+/// With `--force` the same projection reports `would_commit = true`, as the live op would.
 #[test]
 fn plan_mv_force_clears_existing_destination_rejection() {
     let realm = TempDir::new().unwrap();
@@ -242,9 +225,7 @@ fn plan_mv_force_clears_existing_destination_rejection() {
     assert_eq!(value["mv_diff"]["dst_exists"], json!(true));
 }
 
-/// directory rename preserves comments / frontmatter on
-/// every nested file. The comments survive byte-for-byte because
-/// the rename is filesystem-level — no re-serialisation runs.
+/// A directory rename is filesystem-level, so nested comments survive byte-for-byte.
 #[test]
 fn renames_directory_with_nested_comments_preserved() {
     let realm = TempDir::new().unwrap();
@@ -260,7 +241,6 @@ fn renames_directory_with_nested_comments_preserved() {
     assert_eq!(value["is_directory"], json!(true));
     assert_eq!(value["nested_files_moved"], 2_u64);
 
-    // Nested files moved to the new location with bytes intact.
     let after = fs::read_to_string(realm.path().join("archive/a.md")).unwrap();
     assert_eq!(after, source);
     assert_eq!(
@@ -270,7 +250,6 @@ fn renames_directory_with_nested_comments_preserved() {
     assert!(!realm.path().join("notes").exists());
 }
 
-/// same-path directory rename is a no-op.
 #[test]
 fn directory_same_path_is_noop_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -286,7 +265,6 @@ fn directory_same_path_is_noop_via_cli() {
     assert!(realm.path().join("notes/a.md").exists());
 }
 
-/// `--force` overwrites an existing destination dir.
 #[test]
 fn directory_force_overwrites_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -301,7 +279,6 @@ fn directory_force_overwrites_via_cli() {
     let value: Value = serde_json::from_str(str::from_utf8(&out.stdout).unwrap()).unwrap();
     assert_eq!(value["overwritten"], json!(true));
     assert_eq!(value["is_directory"], json!(true));
-    // Source removed, old destination wiped, new content lands.
     assert!(!realm.path().join("src").exists());
     assert!(!realm.path().join("dst/old.md").exists());
     assert_eq!(
@@ -310,8 +287,7 @@ fn directory_force_overwrites_via_cli() {
     );
 }
 
-/// `plan mv <dir> <new>` reports `is_directory` plus the
-/// nested-file count without writing anything.
+/// `plan mv <dir> <new>` reports `is_directory` and the nested-file count, writing nothing.
 #[test]
 fn plan_mv_for_directory_emits_is_directory() {
     let realm = TempDir::new().unwrap();
@@ -331,17 +307,11 @@ fn plan_mv_for_directory_emits_is_directory() {
     assert_eq!(mv_diff["dst_exists"], json!(false));
     assert_eq!(mv_diff["src_exists"], json!(true));
 
-    // Plan must not move anything.
     assert!(realm.path().join("src/a.md").exists());
     assert!(!realm.path().join("dst").exists());
 }
 
-/// `remargin claude restrict` no longer projects the `mv` (or any) deny
-/// fence into Claude settings — the `PreToolUse` hook denies every `mv`
-/// touching a managed path (source OR destination) through per-word
-/// resolution, so no `Bash(mv ...)` rules are written. restrict projects
-/// no settings file at all. The hook's `mv` source/dest coverage is
-/// exercised in the pretool tests and the hook-only e2e.
+/// `restrict` writes no `Bash(mv ...)` rules; the `PreToolUse` hook covers `mv` on managed paths.
 #[test]
 fn restrict_projects_no_mv_deny_set() {
     let realm = TempDir::new().unwrap();

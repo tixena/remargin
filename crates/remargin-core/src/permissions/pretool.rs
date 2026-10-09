@@ -28,16 +28,8 @@ use crate::config::permissions::resolve::{
 };
 use crate::permissions::op_guard::dot_folder_reallowed;
 
-/// Verbs from the [`verb_guidance`] vocabulary whose effect on a path *at or
-/// above* a trusted root destroys or relocates the protected subtree: `rm`
-/// (recursive removal), `mv` (relocation / rename, or an overwrite when the
-/// ancestor is the destination), `dd` and `tee` (raw / truncating writes).
-/// Every other verb in that vocabulary only reads (`cat`, `less`, `head`,
-/// `tail`, `grep`, `find`, `ls`, and `cp` reading from the ancestor) or edits
-/// a single named file (`sed`, `awk`, `vim`, ...) -- none can recurse through
-/// the ancestor into the subtree, so a benign `ls /realm` or `cat /realm/x`
-/// stays allowed. Shell redirect writes (`>`, `>>`) are the non-verb member
-/// of this destructive set and are detected separately.
+/// Verbs that destroy or relocate a subtree when aimed at or above a trusted root. Every other
+/// verb reads or edits one named file; shell redirect writes are detected separately.
 const ANCESTOR_DESTRUCTIVE_VERBS: &[&str] = &["dd", "mv", "rm", "tee"];
 
 const WRAPPER_PREFIXES: &[WrapperPrefix] = &[WrapperPrefix {
@@ -45,6 +37,7 @@ const WRAPPER_PREFIXES: &[WrapperPrefix] = &[WrapperPrefix {
     name: "rtk",
 }];
 
+/// A command wrapper that may precede the real verb, with or without a `proxy` subcommand.
 struct WrapperPrefix {
     has_proxy_subcommand: bool,
     name: &'static str,
@@ -122,13 +115,11 @@ pub struct PreToolUseEvent {
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PretoolOutcome {
-    /// Restricted path touched. Emit the decision JSON; exit 0.
+    /// A restricted path was touched: emit the decision JSON and exit 0.
     Deny(Decision),
-    /// Malformed input or unexpected internal error. Emit nothing on
-    /// stdout; write reason to stderr; exit 2 (fail-closed).
+    /// Malformed input or an internal error: nothing on stdout, the reason on stderr, exit 2.
     Fail(String),
-    /// No restricted path touched (or tool not gated). Emit nothing;
-    /// exit 0.
+    /// No restricted path touched, or the tool is not gated: emit nothing and exit 0.
     SilentAllow,
 }
 
@@ -148,13 +139,11 @@ struct AncestorMatch {
 /// host — a second decision path would let the two drift.
 #[non_exhaustive]
 pub enum ToolTarget {
-    /// `Bash` command — every path-shaped word is resolved against the
-    /// realm governing it and denied if it lands inside one.
+    /// Every path-shaped word is resolved against its realm and denied if it lands inside one.
     BashCommand { command: String },
     /// Unknown / ungated tool — never deny.
     NoCheck,
-    /// Path-touching tool (`Read`, `Write`, `Edit`, `MultiEdit`,
-    /// `NotebookEdit`, `Grep`, `Glob`).
+    /// A path-touching tool: `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep`, `Glob`.
     Path { path: PathBuf, tool_name: String },
 }
 
@@ -203,10 +192,8 @@ pub fn decide(
             if path_is_restricted(&resolved, &canonical) {
                 return PretoolOutcome::Deny(build_decision(tool_name, &canonical, tool_prefix));
             }
-            // Grep / Glob search a subtree recursively, so a search root at or
-            // above a trusted root sweeps the protected subtree even though the
-            // root itself is not at/below a trusted root. Read / Write / Edit
-            // touch only the named path, never its subtree, so they are exempt.
+            // `Grep` and `Glob` search recursively, so a root at or above a trusted root sweeps the
+            // protected subtree. The other path tools touch only the named path.
             if is_search_tool(tool_name) {
                 match matching_trusted_root_ancestor(system, &canonical) {
                     Ok(Some(_)) => {
@@ -338,11 +325,8 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 /// re-allow, so it is checked first and never lifted — matching the op
 /// guard, which denies `deny_ops` before consulting `allow_dot_folders`.
 fn path_is_restricted(resolved: &ResolvedPermissions, candidate: &Path) -> bool {
-    // A realm locked to an empty allow-set (`trusted_roots: []`) denies
-    // every target under it. `candidate`'s realm is resolved by walking up
-    // from it, so a lock in `resolved` is an ancestor's — the candidate is
-    // inside the locked realm by construction. Mirrors the op guard's
-    // `find_trusted_roots_violation` fallback so the layers cannot diverge.
+    // A realm locked with `trusted_roots: []` denies every target under it, and the candidate is
+    // inside that realm by construction: the lock was found walking up from it.
     if resolved.locked_to_empty_roots() {
         return true;
     }
@@ -409,7 +393,7 @@ fn realm_root_for(resolved: &ResolvedPermissions, candidate: &Path) -> PathBuf {
 /// (`rm -rf ~/src` wiping a realm at `~/src/vault`) is undetectable -- the
 /// upward walk from the candidate never reaches the realm's `.remargin.yaml`,
 /// which lives below it. Only candidates at or below the realm root are
-/// covered -- the same reach the retired projected deny rules had.
+/// covered.
 fn matching_trusted_root_ancestor(
     system: &dyn System,
     candidate: &Path,
@@ -453,7 +437,7 @@ fn word_covers_root(word: &Path, anchor: &Path) -> bool {
 
 /// Parse `command` into simple commands, resolve every path-shaped word
 /// against the realm that governs it, and deny the first one that lands
-/// inside a protected realm — regardless of verb. The verb is no longer
+/// inside a protected realm — regardless of verb. The verb is not
 /// a gate; it only selects the deny-message guidance.
 fn bash_decision(
     system: &dyn System,
@@ -545,10 +529,8 @@ fn evaluate_simple_command(
                     tool_prefix,
                 )));
             }
-            // Ancestor gap: the word is not itself at/below a trusted root, but
-            // a destructive verb or a redirect write on a word at or above one
-            // would reach into the protected subtree. Reads (`cat`, `ls`) of an
-            // ancestor stay allowed -- only the destructive set gates here.
+            // Ancestor gap: a destructive verb or a redirect write on a word at or above a trusted root
+            // reaches into the protected subtree. Reads of an ancestor stay allowed.
             if destructive_verb || redirect_target {
                 match matching_trusted_root_ancestor(system, &candidate) {
                     Ok(Some(found)) => {

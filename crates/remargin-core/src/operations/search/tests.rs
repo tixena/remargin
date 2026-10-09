@@ -30,7 +30,6 @@ fn open_config() -> ResolvedConfig {
     }
 }
 
-/// Build minimal search options for a literal pattern.
 fn literal_opts(pattern: &str) -> SearchOptions {
     SearchOptions {
         context_lines: 0,
@@ -52,7 +51,6 @@ fn corpus_with_needles(count: usize) -> String {
     doc
 }
 
-/// Create a minimal remargin comment block.
 fn remargin_block(id: &str, content: &str) -> String {
     format!(
         "```remargin\n\
@@ -114,8 +112,6 @@ fn literal_match_in_body() {
 
 #[test]
 fn file_path_searches_that_file() {
-    // Regression: a `path` naming a file must search that file, not
-    // silently return an empty set (the file-path footgun).
     let base = Path::new("/docs");
     let file = Path::new("/docs/note.md");
     let system = MemorySystem::new()
@@ -351,7 +347,6 @@ fn search_match_json_shape_matches_schema() {
         .matches;
     assert!(!results.is_empty());
 
-    // The body match has no comment_id; the comment match does.
     let body_match = results
         .iter()
         .find(|m| matches!(m.location, MatchLocation::Body))
@@ -371,14 +366,11 @@ fn search_match_json_shape_matches_schema() {
         );
     }
 
-    // `location` is a PascalCase enum string in the schema.
     assert_eq!(body_obj["location"], serde_json::json!("Body"));
-    // `comment_id` is omitted when None.
     assert!(
         !body_obj.contains_key("comment_id"),
         "comment_id must be skipped when None"
     );
-    // `path` renders as a plain string.
     assert!(body_obj["path"].is_string());
 
     let comment_value = serde_json::to_value(comment_match).unwrap();
@@ -474,7 +466,6 @@ fn attribution_matches_stored_block_spans() {
 
 #[test]
 fn limit_and_offset_return_bounded_window_with_true_total() {
-    // Spec example: 320 matches, offset 50 limit 50 -> 50 matches, total 320.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(
@@ -488,7 +479,6 @@ fn limit_and_offset_return_bounded_window_with_true_total() {
 
     assert_eq!(results.total, 320);
     assert_eq!(results.matches.len(), 50);
-    // Window starts at the 51st match (offset 50) and spans 50 matches.
     assert_eq!(results.matches[0].text, "needle line 51");
     assert_eq!(results.matches[49].text, "needle line 100");
 }
@@ -571,8 +561,6 @@ fn compact_body_row_is_lowercase_with_null_comment_id() {
 
     let row = to_compact_row(&results.matches[0], false);
     let arr = row.as_array().unwrap();
-    // Base 4-tuple: [line, location, text, comment_id]; body -> lowercase
-    // `body` and a null comment_id column (present, not omitted).
     assert_eq!(arr.len(), 4);
     assert_eq!(arr[0], json!(1_i32));
     assert_eq!(arr[1], json!("body"));
@@ -592,7 +580,6 @@ fn compact_row_widens_with_context() {
 
     let row = to_compact_row(&results.matches[0], true);
     let arr = row.as_array().unwrap();
-    // Context appends before / after string arrays -> 6-tuple.
     assert_eq!(arr.len(), 6);
     assert_eq!(arr[4], json!(["one"]));
     assert_eq!(arr[5], json!(["two"]));
@@ -617,7 +604,6 @@ fn compact_comment_row_carries_comment_id() {
 #[test]
 fn group_compact_preserves_page_order_and_contiguity() {
     let base = Path::new("/docs");
-    // Walk order is sorted (a.md, b.md), which is also first-match order.
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), b"needle 1\nneedle 2\n")
         .unwrap()
@@ -627,7 +613,6 @@ fn group_compact_preserves_page_order_and_contiguity() {
 
     let files = group_compact(&results.matches, false);
     assert_eq!(files.len(), 2);
-    // path stated once per file; files in first-match order; rows contiguous.
     assert_eq!(files[0]["path"], json!("a.md"));
     assert_eq!(files[0]["matches"].as_array().unwrap().len(), 2);
     assert_eq!(files[1]["path"], json!("b.md"));

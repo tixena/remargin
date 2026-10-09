@@ -1,3 +1,5 @@
+/** Dropdown menu primitives over Radix, portalled into the plugin's container. */
+
 "use client";
 
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";

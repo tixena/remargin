@@ -1,3 +1,5 @@
+//! Style notes `batch` reports per operation, in text and `--json` modes.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,8 +21,7 @@ title: Batch advice
 Body.
 ";
 
-/// Two ops, and only the second one earns a note: a reference that names
-/// a comment by its id instead of saying what that comment said.
+/// Only the second op earns a note: it names a comment by its id.
 const OPS_WITH_ONE_WARNED_BODY: &str = r#"[
   { "content": "A clean single-line body." },
   { "content": "See a5q for the field list." }

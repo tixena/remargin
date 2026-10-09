@@ -1,3 +1,5 @@
+//! `remargin activity` output modes, the `--since` cutoff and flag validation.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -49,9 +51,7 @@ fn doc(id: &str, author: &str, ts: &str) -> String {
     )
 }
 
-/// JSON output is the default: `remargin activity` returns
-/// the structured `ActivityResult` as pretty-printed JSON on
-/// stdout.
+/// With no mode flag, `remargin activity` prints the `ActivityResult` as JSON on stdout.
 #[test]
 fn json_output_is_default() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -69,12 +69,7 @@ fn json_output_is_default() {
     assert_eq!(changes[0]["kind"], json!("comment"));
 }
 
-/// `--pretty` switches to the human-readable timeline; output
-/// goes to stderr so stdout stays clean for CLI piping.
-///: each per-file block opens with a cutoff header so
-/// the reader can tell which timeline they are looking at; the
-/// initial-touch fallback (caller has no prior activity in the
-/// file) renders the explicit "since the beginning" wording.
+/// `--pretty` renders the timeline on stderr, each per-file block opening with its cutoff header.
 #[test]
 fn pretty_output_renders_timeline() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -103,13 +98,9 @@ fn pretty_output_renders_timeline() {
     );
 }
 
-///: explicit `--since` echoes the cutoff in the
-/// `--pretty` header line so the reader can confirm it.
+/// An explicit `--since` is echoed in the `--pretty` header line.
 #[test]
 fn pretty_output_renders_explicit_since_header() {
-    // Use a future-enough cutoff so something is filtered, but
-    // also keep a comment after the cutoff so the per-file
-    // block (and its header) is rendered.
     let realm = realm_with(&[
         ("a.md", &doc("c1", "bob", "2026-04-08T12:00:00-04:00")),
         ("b.md", &doc("c2", "bob", "2026-04-06T12:00:00-04:00")),
@@ -135,8 +126,7 @@ fn pretty_output_renders_explicit_since_header() {
     );
 }
 
-/// `--since` parses ISO 8601 and applies as an explicit
-/// cutoff. A comment before the cutoff is dropped.
+/// `--since` parses ISO 8601 and drops a comment older than the cutoff.
 #[test]
 fn since_cutoff_filters_comments() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -160,8 +150,6 @@ fn since_cutoff_filters_comments() {
     );
 }
 
-/// `--since` with malformed input errors with a clear
-/// message.
 #[test]
 fn malformed_since_errors() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -182,7 +170,6 @@ fn malformed_since_errors() {
     assert!(stderr.contains("--since"), "{stderr}");
 }
 
-/// `--pretty` and `--json` together is rejected.
 #[test]
 fn pretty_and_json_are_mutually_exclusive() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -203,9 +190,7 @@ fn pretty_and_json_are_mutually_exclusive() {
     assert!(stderr.contains("mutually exclusive"), "{stderr}");
 }
 
-/// Regression: `--json` (no `--compact`) keeps today's verbose, pretty
-/// payload — tagged `Change` objects with named fields. Compact must not
-/// leak in.
+/// `--json` keeps the verbose shape: pretty-printed, tagged `Change` objects with named fields.
 #[test]
 fn cli_activity_verbose_json_unchanged() {
     let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
@@ -222,7 +207,6 @@ fn cli_activity_verbose_json_unchanged() {
     );
     assert_status(&out, 0);
     let raw = str::from_utf8(&out.stdout).unwrap();
-    // Verbose stays pretty-printed (multi-line).
     assert!(raw.lines().count() > 3, "pretty-printed: {raw:?}");
 
     let payload: Value = serde_json::from_str(raw).unwrap();

@@ -1,3 +1,5 @@
+/** Static-markup tests for the comment card header. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -11,9 +13,6 @@ import type RemarginPlugin from "../../main.ts";
 import { DEFAULT_SETTINGS } from "../../types.ts";
 import { CommentHeader } from "./CommentHeader.tsx";
 
-// Minimal plugin + backend stand-ins. `useParticipants` only reads
-// `plugin.settings` (for the cache key) and calls `backend.registryShow()`,
-// so we stub exactly those.
 const pluginStub = { settings: DEFAULT_SETTINGS } as unknown as RemarginPlugin;
 const backendStub = {
   registryShow: (): Promise<Participant[]> => Promise.resolve([]),
@@ -61,14 +60,12 @@ function render(comment: Comment): string {
 describe("CommentHeader", () => {
   it("renders a badge containing the exact comment id", () => {
     const html = render(fixture({ id: "oi5" }));
-    // Match the id-badge styling (bg-slate-500 text-white) with oi5 inside.
     assert.match(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*text-white[^"]*"[^>]*>oi5<\/div>/);
   });
 
   it("renders the id verbatim for a different comment", () => {
     const html = render(fixture({ id: "xyz" }));
     assert.match(html, /<div[^>]*class="[^"]*bg-slate-500[^"]*text-white[^"]*"[^>]*>xyz<\/div>/);
-    // Ensure the fixture id from the previous test didn't leak.
     assert.ok(!html.includes(">oi5<"), "expected previous id to be absent");
   });
 

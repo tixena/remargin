@@ -1,8 +1,11 @@
+/** Renders comment markdown through Obsidian's own renderer. */
+
 import { MarkdownRenderer } from "obsidian";
 import { useEffect, useRef } from "react";
 import { usePlugin } from "@/hooks/usePlugin";
 import { cn } from "@/lib/utils";
 
+/** Props for {@link MarkdownContent}. */
 interface MarkdownContentProps {
   content: string;
   sourcePath: string;

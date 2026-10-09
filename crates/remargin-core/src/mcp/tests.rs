@@ -26,7 +26,6 @@ use crate::parser::{self, AuthorType};
 use crate::permissions::pretool_install::{HOOK_MATCHER, HOOK_SUBCOMMAND};
 use crate::writer::InsertPosition;
 
-/// Document with two comments for expanded query tests.
 const DOC_EXPANDED: &str = "\
 ---
 title: Expanded
@@ -59,9 +58,8 @@ Acked comment from bob.
 ```
 ";
 
-/// A four-shape fixture used by the `pending_for_me` / `pending_broadcast`
-/// tests. Covers: fresh broadcast (no acks), broadcast the
-/// caller already acked, directed-to-caller, and directed-to-someone-else.
+/// Four shapes: a fresh broadcast, a broadcast the caller acked, one directed to the caller and
+/// one directed to someone else.
 const DOC_FOUR_SHAPES: &str = "\
 ---
 title: Four Shapes
@@ -116,7 +114,6 @@ Directed to bob.
 ```
 ";
 
-/// A document with a comment in the middle for reply placement tests.
 const DOC_WITH_COMMENT: &str = "\
 ---
 title: Test
@@ -140,9 +137,7 @@ Original comment.
 Body paragraph two.
 ";
 
-/// doc with two top-level sections each containing a sibling
-/// heading whose label collides — used to exercise the path-disambiguation
-/// resolver and the multi-anchor `batch` flow.
+/// Two top-level sections, each holding a sibling heading with the same label.
 const DOC_WITH_HEADINGS: &str = "\
 ---
 title: Headings
@@ -165,7 +160,6 @@ Body for P11.
 Body for P3.
 ";
 
-/// Create a default config for testing.
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -181,7 +175,6 @@ fn test_config() -> ResolvedConfig {
     }
 }
 
-/// Create a mock system with a document at the given path.
 fn system_with_doc(base: &Path, filename: &str, content: &str) -> MemorySystem {
     let path = base.join(filename);
     MemorySystem::new()
@@ -189,7 +182,6 @@ fn system_with_doc(base: &Path, filename: &str, content: &str) -> MemorySystem {
         .unwrap()
 }
 
-/// Send a JSON-RPC request and parse the response.
 fn call(
     system: &dyn os_shim::System,
     base_dir: &Path,
@@ -265,7 +257,6 @@ fn compact_row_count(result: &Value) -> usize {
     })
 }
 
-/// Extract the text content from an MCP tool result.
 fn extract_tool_text(response: &Value) -> Value {
     let result = &response["result"];
     let content = result["content"].as_array().unwrap();
@@ -282,7 +273,6 @@ fn extract_tool_raw_text(response: &Value) -> String {
         .to_owned()
 }
 
-/// Check that a response is an MCP tool error.
 fn is_tool_error(response: &Value) -> bool {
     response["result"]["isError"].as_bool().unwrap_or(false)
 }
@@ -316,8 +306,6 @@ fn initialize_returns_capabilities() {
 
 #[test]
 fn tools_list_returns_all_tools() {
-    /// Every MCP tool name the server is expected to register. Update
-    /// here when a new MCP-exposed tool lands.
     const EXPECTED_TOOLS: &[&str] = &[
         "ack",
         "activity",
@@ -358,8 +346,6 @@ fn tools_list_returns_all_tools() {
         "whoami",
         "write",
     ];
-    /// Tool names that are intentionally CLI-only and must NOT appear
-    /// on the MCP surface.
     const CLI_ONLY_TOOLS: &[&str] = &["claude_restrict", "claude_unrestrict"];
 
     let base = Path::new("/docs");
@@ -460,7 +446,6 @@ fn comments_lists_created_comment() {
     let system = system_with_doc(base, "doc.md", "# Hello\n\nSome text.\n");
     let config = test_config();
 
-    // Create a comment first.
     let create_resp = call(
         &system,
         base,
@@ -480,7 +465,6 @@ fn comments_lists_created_comment() {
     );
     let created_id = String::from(extract_tool_text(&create_resp)["id"].as_str().unwrap());
 
-    // List comments.
     let list_resp = call(
         &system,
         base,
@@ -503,7 +487,6 @@ fn comments_lists_created_comment() {
     assert_eq!(comments[0]["id"].as_str().unwrap(), created_id);
     assert_eq!(comments[0]["author"], "tester");
     assert_eq!(comments[0]["content"], "First comment");
-    // Line number should be present and positive (comment is appended after body text).
     assert!(
         comments[0]["line"].as_u64().unwrap() > 0,
         "line number should be a positive integer"
@@ -641,9 +624,7 @@ fn batch_refuses_an_invalid_kind_before_writing() {
     );
 }
 
-/// A batch sub-op documents itself as having the same fields as a single
-/// `comment`; a field missing from its schema is one agents are never told
-/// they can send.
+/// A field missing from the sub-op schema is one agents are never told they can send.
 #[test]
 fn batch_op_schema_declares_every_comment_field() {
     let base = Path::new("/docs");
@@ -677,9 +658,7 @@ fn batch_op_schema_declares_every_comment_field() {
     assert!(missing.is_empty(), "batch ops lack {missing:?}");
 }
 
-/// Ops refuse any key outside their accepted list, so a field the schema
-/// advertises but the parser does not accept would refuse every call that
-/// uses it.
+/// A field the schema advertises but the parser refuses would fail every call that uses it.
 #[test]
 fn batch_op_schemas_declare_exactly_the_accepted_fields() {
     let base = Path::new("/docs");
@@ -772,8 +751,6 @@ fn search_finds_text_in_document() {
         }),
     );
 
-    // Compact grouped shape, minified: no top-level `matches`; rows are
-    // positional [line, location, text, comment_id] grouped by file.
     let raw = extract_tool_raw_text(&response);
     assert!(
         !raw.contains('\n'),
@@ -797,7 +774,6 @@ fn search_finds_text_in_document() {
     assert_eq!(row[0], 3_i32);
     assert_eq!(row[1], "body");
     assert!(row[2].as_str().unwrap().contains("notification"));
-    // Body match: the comment_id column is null, not omitted.
     assert!(row[3].is_null(), "body comment_id must be null: {row:?}");
 }
 
@@ -831,14 +807,11 @@ fn search_limit_offset_envelope_carries_total() {
     );
 
     let result = extract_tool_text(&response);
-    // Single file: the page's two rows land in one file group.
     let files = result["files"].as_array().unwrap();
     assert_eq!(files.len(), 1_usize);
     let rows = files[0]["matches"].as_array().unwrap();
     assert_eq!(rows.len(), 2_usize);
-    // The full corpus has five matches even though the page shows two.
     assert_eq!(result["total"], 5_i32);
-    // Offset 1 skips the first needle; the page starts at line 4.
     assert_eq!(rows[0].as_array().unwrap()[0], 4_i32);
 }
 
@@ -850,8 +823,6 @@ fn report_spill_infers_size_from_last_result() {
     let mut session = super::SessionState::default();
     assert_eq!(session.spill_cap, super::DEFAULT_SPILL_CAP);
 
-    // A full search sits well under the default cap: no clamp, and its
-    // emitted size is recorded as last_response_size.
     let response = call_session(
         &system,
         base,
@@ -866,8 +837,6 @@ fn report_spill_infers_size_from_last_result() {
     assert!(learned > 0);
     assert!(learned < super::DEFAULT_SPILL_CAP);
 
-    // report_spill with no explicit size infers the offending size from that
-    // last result and ratchets the cap down to it.
     let spill = call_session(
         &system,
         base,
@@ -889,7 +858,6 @@ fn report_spill_lowers_the_cap_and_never_raises() {
     let config = test_config();
     let mut session = super::SessionState::default();
 
-    // Explicit size lowers the cap.
     let low = call_session(
         &system,
         base,
@@ -903,7 +871,6 @@ fn report_spill_lowers_the_cap_and_never_raises() {
     );
     assert_eq!(session.spill_cap, 1000_usize);
 
-    // A larger explicit report must not raise it — the cap only ratchets down.
     let high = call_session(
         &system,
         base,
@@ -916,8 +883,6 @@ fn report_spill_lowers_the_cap_and_never_raises() {
     assert_eq!(high_result["spill_cap"].as_u64().unwrap(), 1000_u64);
     assert_eq!(session.spill_cap, 1000_usize);
 
-    // Nor does an inferred report from a larger real result raise it: a full
-    // search records a size above the cap, yet the cap holds.
     call_session(
         &system,
         base,
@@ -942,8 +907,6 @@ fn search_page_sized_under_cap() {
     let system = system_with_doc(base, "doc.md", &needle_doc(100));
     let config = test_config();
 
-    // Tight cap: the emitted page is clamped well below the 100-match corpus,
-    // and effective_limit signals the clamp so the agent knows to page.
     let mut tight = super::SessionState::default();
     call_session(
         &system,
@@ -967,7 +930,6 @@ fn search_page_sized_under_cap() {
         tight_n
     );
 
-    // A looser cap admits strictly more rows: page sizing tracks the cap.
     let mut loose = super::SessionState::default();
     call_session(
         &system,
@@ -987,8 +949,6 @@ fn search_page_sized_under_cap() {
     assert_eq!(loose_page["total"].as_u64().unwrap(), 100_u64);
     assert!(loose_n > tight_n);
 
-    // An explicit caller limit is never widened by the cap: with the default
-    // (high) cap, limit=3 yields exactly three rows and no clamp signal.
     let mut caller = super::SessionState::default();
     let bounded = extract_tool_text(&call_session(
         &system,
@@ -1005,8 +965,6 @@ fn search_page_sized_under_cap() {
 #[test]
 fn search_compact_groups_matches_by_file_in_page_order() {
     let base = Path::new("/docs");
-    // Two files; walk order is sorted (a.md, b.md), which is also the
-    // first-match order for this scan.
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), b"needle one\nneedle two\n")
         .unwrap()
@@ -1019,14 +977,11 @@ fn search_compact_groups_matches_by_file_in_page_order() {
 
     let files = result["files"].as_array().unwrap();
     assert_eq!(files.len(), 2_usize, "one group per file: {result}");
-    // Path stated once per file, files in first-match order, rows contiguous.
     assert_eq!(files[0]["path"].as_str().unwrap(), "a.md");
     assert_eq!(files[0]["matches"].as_array().unwrap().len(), 2_usize);
     assert_eq!(files[1]["path"].as_str().unwrap(), "b.md");
     assert_eq!(files[1]["matches"].as_array().unwrap().len(), 1_usize);
-    // total counts every match across the corpus.
     assert_eq!(result["total"].as_u64().unwrap(), 3_u64);
-    // The base header is the 4-column arity (no context requested).
     assert_eq!(result["match_cols"].as_array().unwrap().len(), 4_usize);
 }
 
@@ -1056,14 +1011,12 @@ fn search_compact_context_widens_rows_and_cols() {
     );
     let result = extract_tool_text(&response);
 
-    // The header widens to six columns, before / after last.
     let cols = result["match_cols"].as_array().unwrap();
     assert_eq!(cols.len(), 6_usize);
     assert_eq!(cols[4], "before");
     assert_eq!(cols[5], "after");
 
     let row = result["files"][0]["matches"][0].as_array().unwrap();
-    // Row widens to a 6-tuple; before / after are string arrays.
     assert_eq!(row.len(), 6_usize);
     assert_eq!(row[1], "body");
     assert!(row[3].is_null(), "body comment_id null: {row:?}");
@@ -1083,13 +1036,11 @@ fn search_compact_comment_match_carries_comment_id() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // "Original" appears only inside the comment block (id `aaa`).
     let response = call(&system, base, &config, &search_request("Original", None));
     let result = extract_tool_text(&response);
 
     let row = result["files"][0]["matches"][0].as_array().unwrap();
     assert_eq!(row[1], "comment");
-    // comment_id is populated (non-null) for a comment-scoped match.
     assert_eq!(row[3].as_str().unwrap(), "aaa");
 }
 
@@ -1130,10 +1081,6 @@ fn replace_rewrites_body_via_mcp() {
 
 #[test]
 fn replace_requires_explicit_path() {
-    // The replace tool is deliberately absent from
-    // `PATH_DEFAULTS_TO_CWD_TOOLS`: a mutating folder op must not
-    // silently fan out over cwd. Omitting `path` is a hard error, not a
-    // default-to-cwd.
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "foo\n");
     let config = test_config();
@@ -1157,7 +1104,6 @@ fn replace_requires_explicit_path() {
     );
 
     assert!(is_tool_error(&response));
-    // Disk untouched (no silent cwd fan-out).
     let after = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
     assert_eq!(after, "foo\n");
 }
@@ -1249,10 +1195,7 @@ fn get_returns_links_array() {
     );
 
     let result = extract_tool_text(&response);
-    // Content is the whole file as one string.
     assert!(result["content"].as_str().unwrap().contains("[[Target]]"));
-    // Columnar links: header names the four surviving columns; rows are
-    // positional [alias, lines, target, title] (count / path dropped).
     assert_eq!(
         result["links_cols"],
         json!(["alias", "lines", "target", "title"])
@@ -1291,7 +1234,6 @@ fn get_compact_line_numbers_minified() {
         }),
     );
 
-    // Minified: the payload text carries no literal newline.
     let raw = extract_tool_raw_text(&response);
     assert!(
         !raw.contains('\n'),
@@ -1300,11 +1242,9 @@ fn get_compact_line_numbers_minified() {
 
     let result: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(result["start_line"], 1_i32);
-    // Bare strings, not {line, text} objects; line i's number = start_line + i.
     let lines = result["lines"].as_array().unwrap();
     assert!(lines[0].is_string(), "lines are bare strings: {lines:?}");
     assert!(lines[0].as_str().unwrap().contains("[[Target]]"));
-    // Columnar links: header + positional [alias, lines, target, title].
     assert_eq!(
         result["links_cols"],
         json!(["alias", "lines", "target", "title"])
@@ -1316,7 +1256,6 @@ fn get_compact_line_numbers_minified() {
     assert!(row[0].is_null(), "absent alias is null: {row:?}");
     assert_eq!(row[2], "Target");
     assert_eq!(row[3], "The Target");
-    // No verbose keys leaked; elapsed_ms survives the injector.
     assert!(result.get("content").is_none());
     assert!(result["elapsed_ms"].is_number());
 }
@@ -1346,8 +1285,6 @@ fn get_compact_no_line_numbers_minified() {
         }),
     );
 
-    // Minified even though `content` carries embedded newlines (escaped, not
-    // literal, in the serialized text).
     let raw = extract_tool_raw_text(&response);
     assert!(
         !raw.contains('\n'),
@@ -1437,9 +1374,7 @@ fn get_lone_end_line_returns_head_not_whole_file() {
     );
 }
 
-/// The `elapsed_ms` injector re-serializes with the payload's own style: a
-/// minified compact `get` stays minified; a pretty tool (`metadata`) stays
-/// pretty. Both keep their injected `elapsed_ms`.
+/// A minified `get` stays minified and a pretty `metadata` stays pretty; both keep `elapsed_ms`.
 #[test]
 fn injector_preserves_payload_style() {
     let base = Path::new("/docs");
@@ -1545,8 +1480,7 @@ fn unknown_tool_returns_error() {
     assert!(is_tool_error(&response));
 }
 
-/// `claude_restrict` is intentionally absent from the MCP surface;
-/// dispatching it returns a tool error pointing the caller at the CLI.
+/// The tool error points the caller at the CLI.
 #[test]
 fn claude_restrict_tool_dispatch_rejected() {
     let base = Path::new("/docs");
@@ -1578,8 +1512,7 @@ fn claude_restrict_tool_dispatch_rejected() {
     assert!(text.contains("remargin claude restrict"), "got: {text}");
 }
 
-/// `claude_unrestrict` is intentionally absent from the MCP surface;
-/// dispatching it returns a tool error pointing the caller at the CLI.
+/// The tool error points the caller at the CLI.
 #[test]
 fn claude_unrestrict_tool_dispatch_rejected() {
     let base = Path::new("/docs");
@@ -1611,8 +1544,7 @@ fn claude_unrestrict_tool_dispatch_rejected() {
     assert!(text.contains("remargin claude unrestrict"), "got: {text}");
 }
 
-/// `plan` with `op="claude_restrict"` rejects with a CLI-pointing
-/// error; the projection itself stays reachable via the CLI.
+/// The error points the caller at the CLI.
 #[test]
 fn plan_claude_restrict_op_rejected_via_mcp() {
     let base = Path::new("/docs");
@@ -1647,8 +1579,7 @@ fn plan_claude_restrict_op_rejected_via_mcp() {
     );
 }
 
-/// `plan` with `op="claude_unrestrict"` rejects with a CLI-pointing
-/// error; the projection itself stays reachable via the CLI.
+/// The error points the caller at the CLI.
 #[test]
 fn plan_claude_unrestrict_op_rejected_via_mcp() {
     let base = Path::new("/docs");
@@ -1720,7 +1651,6 @@ fn verify_checks_checksum_integrity() {
     let system = system_with_doc(base, "doc.md", "# Hello\n\nText.\n");
     let config = test_config();
 
-    // Create a comment.
     call(
         &system,
         base,
@@ -1739,7 +1669,6 @@ fn verify_checks_checksum_integrity() {
         }),
     );
 
-    // Verify.
     let response = call(
         &system,
         base,
@@ -1761,8 +1690,6 @@ fn verify_checks_checksum_integrity() {
     let results = result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1_usize);
     assert!(results[0]["checksum_ok"].as_bool().unwrap());
-    // No signature block on the freshly-written comment + no registry in
-    // the test config → status is `missing` (neutral in open mode).
     assert_eq!(results[0]["signature"], "missing");
     assert!(result["ok"].as_bool().unwrap(), "verify should pass");
 }
@@ -1794,8 +1721,6 @@ checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b982
 hello
 ```
 ";
-    // `caller` is registered so the strict realm admits its read; the
-    // escalation under test is proved by alice's unsigned comment.
     let alice_active_yaml = "\
 participants:
   alice:
@@ -1832,8 +1757,6 @@ participants:
 
     let registry: Registry = serde_yaml::from_str(alice_active_yaml).unwrap();
 
-    // Caller is mounted at /parent (open mode). The registry knows alice
-    // as active so the post-fix Strict + Missing path can flip to bad.
     let caller_cfg = ResolvedConfig {
         assets_dir: String::from("assets"),
         author_type: Some(AuthorType::Agent),
@@ -1877,11 +1800,6 @@ participants:
 
 #[test]
 fn verify_keeps_open_verdict_when_no_stricter_subrealm_exists() {
-    // Sanity: when the file is NOT inside a stricter sub-realm, the
-    // caller's open-mode verdict still wins. This guards against an
-    // over-correction in the fix that would always re-walk regardless
-    // of whether a stricter realm exists below the caller's mount.
-
     let unsigned_doc = "\
 # Doc
 
@@ -1951,16 +1869,12 @@ participants:
     );
 }
 
-// Note: the purge `dry_run` smoke test was removed in along
-// with the flag itself; `plan` with op="purge" is the preview path.
-
 #[test]
 fn metadata_returns_document_info() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Hello\n\nSome text.\n");
     let config = test_config();
 
-    // Create a comment so metadata has something to report.
     call(
         &system,
         base,
@@ -1995,7 +1909,6 @@ fn metadata_returns_document_info() {
     assert_eq!(result["comment_count"], 1_i32);
     assert_eq!(result["pending_count"], 1_i32);
     assert!(result["line_count"].as_u64().unwrap() > 0_u64);
-    // File-level fields are always present.
     assert_eq!(result["binary"], false);
     assert_eq!(result["mime"], "text/markdown");
     assert!(result["path"].is_string());
@@ -2026,8 +1939,6 @@ fn get_binary_returns_resource_block() {
     let content = response["result"]["content"].as_array().unwrap();
     assert_eq!(content.len(), 2, "content is a resource + metadata pair");
 
-    // Block 0: an embedded resource block; Claude Code saves the blob outside the
-    // realm and hands the model the file:// pointer.
     assert_eq!(content[0]["type"], "resource");
     let resource = &content[0]["resource"];
     assert_eq!(resource["mimeType"], "image/png");
@@ -2047,7 +1958,6 @@ fn get_binary_returns_resource_block() {
         "blob decodes to the original file bytes"
     );
 
-    // Block 1: the metadata envelope, carrying the injected elapsed_ms.
     assert_eq!(content[1]["type"], "text");
     let metadata: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
     assert_eq!(metadata["binary"], true);
@@ -2061,8 +1971,6 @@ fn get_binary_returns_resource_block() {
 #[test]
 fn get_binary_records_nonzero_response_size() {
     let base = Path::new("/docs");
-    // A payload whose base64 blob dwarfs the metadata text: only counting the
-    // nested resource.blob makes last_response_size reach it.
     let payload = "x".repeat(4096);
     let system = system_with_doc(base, "blob.png", &payload);
     let config = test_config();
@@ -2116,7 +2024,6 @@ fn get_binary_rejects_markdown() {
         }),
     );
 
-    // Error surfaces as an `isError: true` tool response, not a JSON-RPC error.
     let is_error = response["result"]["isError"].as_bool().unwrap_or(false);
     assert!(is_error, "binary get on .md should be an error response");
 }
@@ -2124,9 +2031,7 @@ fn get_binary_rejects_markdown() {
 #[test]
 fn metadata_binary_file_omits_markdown_fields() {
     let base = Path::new("/docs");
-    // Content is irrelevant for PNG metadata: only the extension drives
-    // mime/binary detection. Use an ASCII placeholder to keep the helper's
-    // &str signature happy.
+    // Only the extension drives mime detection, so the content is a placeholder.
     let system = system_with_doc(base, "pic.png", "fake-png-bytes");
     let config = test_config();
 
@@ -2150,7 +2055,6 @@ fn metadata_binary_file_omits_markdown_fields() {
     assert_eq!(result["mime"], "image/png");
     assert!(result["path"].is_string());
     assert!(result["size_bytes"].is_number());
-    // Markdown-shaped fields must be absent.
     assert!(result.get("comment_count").is_none());
     assert!(result.get("line_count").is_none());
     assert!(result.get("pending_count").is_none());
@@ -2206,7 +2110,6 @@ fn reply_placed_after_parent_not_appended() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // Reply to comment "aaa" without explicit positioning.
     let reply_resp = call(
         &system,
         base,
@@ -2227,7 +2130,6 @@ fn reply_placed_after_parent_not_appended() {
     );
     let reply_id = String::from(extract_tool_text(&reply_resp)["id"].as_str().unwrap());
 
-    // List comments to get line numbers.
     let list_resp = call(
         &system,
         base,
@@ -2251,15 +2153,10 @@ fn reply_placed_after_parent_not_appended() {
     let parent_line = parent["line"].as_u64().unwrap();
     let reply_line = reply["line"].as_u64().unwrap();
 
-    // Reply must appear right after the parent, not at the end of the document.
     assert!(
         reply_line > parent_line,
         "reply (line {reply_line}) should be after parent (line {parent_line})"
     );
-    // "Body paragraph two" is after the parent comment. The reply should be
-    // between the parent and that trailing body text — not appended after it.
-    // The parent is at roughly line 9. The reply should be near line 20,
-    // not at the very end (which would be ~30+).
     assert!(
         reply_line < parent_line + 20,
         "reply (line {reply_line}) should be near parent (line {parent_line}), not appended to end"
@@ -2272,7 +2169,6 @@ fn reply_ignores_explicit_after_line() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // Reply to "aaa" but also pass after_line=1 — reply_to should win.
     let reply_resp = call(
         &system,
         base,
@@ -2317,7 +2213,6 @@ fn reply_ignores_explicit_after_line() {
     let parent_line = parent["line"].as_u64().unwrap();
     let reply_line = reply["line"].as_u64().unwrap();
 
-    // reply_to takes priority over after_line — reply is after parent, not at line 1.
     assert!(
         reply_line > parent_line,
         "reply (line {reply_line}) should be after parent (line {parent_line}), not at line 1"
@@ -2330,7 +2225,6 @@ fn non_reply_still_appends() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // Comment without reply_to or explicit position — should append.
     let resp = call(
         &system,
         base,
@@ -2373,7 +2267,6 @@ fn non_reply_still_appends() {
     let parent_line = parent["line"].as_u64().unwrap();
     let new_line = new_comment["line"].as_u64().unwrap();
 
-    // Non-reply appends to end — should be well past the parent and trailing body.
     assert!(
         new_line > parent_line,
         "appended comment (line {new_line}) should be after parent (line {parent_line})"
@@ -2386,7 +2279,6 @@ fn non_reply_with_after_line_respected() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // Non-reply with after_line=5 — should place near line 5.
     let resp = call(
         &system,
         base,
@@ -2426,7 +2318,6 @@ fn non_reply_with_after_line_respected() {
     let new_comment = comments.iter().find(|c| c["id"] == new_id).unwrap();
     let new_line = new_comment["line"].as_u64().unwrap();
 
-    // Should be placed near line 5, not at the end.
     assert!(
         new_line < 15,
         "comment with after_line=5 placed at line {new_line}, expected near line 6"
@@ -2522,7 +2413,6 @@ fn get_image_returns_image_content_block() {
     let content = result["content"].as_array().unwrap();
     assert_eq!(content.len(), 2, "content is an image + metadata pair");
 
-    // Block 0: a real MCP image block with bare base64 and the detected MIME.
     assert_eq!(content[0]["type"], "image");
     assert_eq!(content[0]["mimeType"], "image/png");
     let data = content[0]["data"].as_str().unwrap();
@@ -2533,20 +2423,17 @@ fn get_image_returns_image_content_block() {
     let decoded = BASE64_STANDARD.decode(data).unwrap();
     assert_eq!(&decoded[..8], b"\x89PNG\r\n\x1a\n", "data decodes to a PNG");
 
-    // Block 1: the metadata envelope, carrying the injected elapsed_ms.
     assert_eq!(content[1]["type"], "text");
     let metadata: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
     assert_eq!(metadata["mime"], "image/png");
     assert!(metadata.get("elapsed_ms").is_some(), "elapsed_ms injected");
     assert!(metadata["elapsed_ms"].is_u64());
-    // The image bytes live in the image block, never the metadata text.
     assert!(metadata.get("content").is_none());
 }
 
 #[test]
 fn get_image_gif_returns_first_frame() {
     let base = Path::new("/docs");
-    // Frame 1 red, frame 2 blue — the returned pixel proves which frame won.
     let gif = two_frame_gif(16, 16, [255, 0, 0, 255], [0, 0, 255, 255]);
     let system = MemorySystem::new()
         .with_file(base.join("pic.gif"), &gif)
@@ -2607,8 +2494,6 @@ fn get_image_records_nonzero_response_size() {
         }),
     );
 
-    // The image block's base64 dominates the payload; a content[0]-only text
-    // measure would record 0 here.
     let data_len = response["result"]["content"][0]["data"]
         .as_str()
         .unwrap()
@@ -2703,8 +2588,7 @@ fn query_base_path(system: &MemorySystem, base: &Path, path: &str) -> String {
     String::from(extract_tool_text(&response)["base_path"].as_str().unwrap())
 }
 
-/// Regression: `base_path` is the join root for every result path, so a
-/// file argument renders its parent directory, never the file itself.
+/// `base_path` is the join root for result paths: a file argument renders its parent directory.
 #[test]
 fn mcp_query_file_base_path_is_parent_directory() {
     let base = Path::new("/docs");
@@ -2787,7 +2671,6 @@ fn mcp_query_expanded_returns_comments() {
         }),
     );
 
-    // Minified: the payload text carries no literal newline.
     let raw = extract_tool_raw_text(&response);
     assert!(
         !raw.contains('\n'),
@@ -2795,8 +2678,6 @@ fn mcp_query_expanded_returns_comments() {
     );
 
     let result = extract_tool_text(&response);
-    // Base (no-integrity) columns: 14 names, `content` last, no
-    // checksum / signature / file.
     let cols = result["comment_cols"].as_array().unwrap();
     assert_eq!(cols.len(), 14_usize);
     assert_eq!(cols[0], "id");
@@ -2813,9 +2694,6 @@ fn mcp_query_expanded_returns_comments() {
     let comments = results[0]["comments"].as_array().unwrap();
     assert_eq!(comments.len(), 2_usize);
 
-    // Rows are positional: [id, line, author, author_type, ts, reply_to,
-    // thread, to, ack, reactions, remargin_kind, edited_at, attachments,
-    // content].
     let row0 = comments[0].as_array().unwrap();
     assert_eq!(row0.len(), 14_usize);
     assert_eq!(row0[0].as_str().unwrap(), "ex1");
@@ -2824,21 +2702,19 @@ fn mcp_query_expanded_returns_comments() {
     assert_eq!(row0[13].as_str().unwrap(), "Pending comment from alice.");
     assert!(row0[7].as_array().unwrap().contains(&json!("bob")));
     assert_eq!(row0[8].as_array().unwrap().as_slice(), [] as [Value; 0]);
-    // Nullable columns serialize as null, not omitted.
     assert!(row0[5].is_null(), "reply_to null: {row0:?}");
     assert!(row0[10].is_null(), "remargin_kind null: {row0:?}");
 
     let row1 = comments[1].as_array().unwrap();
     assert_eq!(row1[0].as_str().unwrap(), "ex2");
     assert_eq!(row1[3].as_str().unwrap(), "agent");
-    // Acks compact to "author@ts" strings.
     let acks = row1[8].as_array().unwrap();
     assert_eq!(acks.len(), 1_usize);
     assert!(acks[0].as_str().unwrap().contains('@'));
 }
 
-// Scope contract, MCP side: a comment-level filter narrows `comments` and
-// `matched_count` while the summary counts keep describing the whole file.
+/// A comment-level filter narrows `comments` and `matched_count`; the summary counts stay
+/// file-wide.
 #[test]
 fn mcp_query_reports_matched_count_beside_file_wide_counts() {
     let base = Path::new("/docs");
@@ -2865,7 +2741,6 @@ fn mcp_query_reports_matched_count_beside_file_wide_counts() {
     let result = extract_tool_text(&response);
     let results = result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1_usize);
-    // ex1 is pending; ex2 is acked.
     assert_eq!(results[0]["comment_count"].as_u64().unwrap(), 2_u64);
     assert_eq!(results[0]["matched_count"].as_u64().unwrap(), 1_u64);
     let comments = results[0]["comments"].as_array().unwrap();
@@ -2897,7 +2772,6 @@ fn mcp_query_compact_include_integrity_widens_rows() {
     );
 
     let result = extract_tool_text(&response);
-    // 16 columns: checksum + signature inserted immediately before content.
     let cols = result["comment_cols"].as_array().unwrap();
     assert_eq!(cols.len(), 16_usize);
     assert_eq!(cols[13], "checksum");
@@ -2907,7 +2781,6 @@ fn mcp_query_compact_include_integrity_widens_rows() {
     let comments = result["results"][0]["comments"].as_array().unwrap();
     let row0 = comments[0].as_array().unwrap();
     assert_eq!(row0.len(), 16_usize);
-    // checksum carries the on-disk value; signature is null when unsigned.
     assert_eq!(row0[13].as_str().unwrap(), "sha256:ex1");
     assert!(row0[14].is_null(), "unsigned signature is null: {row0:?}");
     assert_eq!(row0[15].as_str().unwrap(), "Pending comment from alice.");
@@ -2972,9 +2845,7 @@ fn doctor_call(system: &MemorySystem, arguments: &Value) -> Value {
     )
 }
 
-/// MCP parity: omitting `check` runs every check (both findings surface),
-/// while `check: "leftover-rules"` scopes the run to that check alone — the
-/// `session-guard` finding the same realm would otherwise carry is absent.
+/// Omitting `check` runs every check; naming one scopes the run to it alone.
 #[test]
 fn mcp_doctor_check_scopes_findings() {
     let system = doctor_two_finding_system();
@@ -3001,8 +2872,7 @@ fn mcp_doctor_check_scopes_findings() {
     );
 }
 
-/// MCP parity: an unknown `check` slug surfaces as an `isError` tool
-/// response naming the bad slug — not a silent empty run.
+/// An unknown `check` is an `isError` response naming the slug, not a silent empty run.
 #[test]
 fn mcp_doctor_unknown_check_errors() {
     let system = doctor_two_finding_system();
@@ -3022,8 +2892,7 @@ fn mcp_doctor_unknown_check_errors() {
 }
 
 /// Assert the three compact change rows (comment, ack, sandbox) carry the
-/// right populated / null columns. Extracted so the caller stays under the
-/// cognitive-complexity cap.
+/// right populated / null columns.
 fn assert_activity_change_rows(rows: &[Value]) {
     assert_eq!(rows.len(), 3_usize);
     let comment = rows[0].as_array().unwrap();
@@ -3048,9 +2917,6 @@ fn assert_activity_change_rows(rows: &[Value]) {
     assert!(sandbox[8].is_null(), "sandbox to null: {sandbox:?}");
 }
 
-/// MCP `activity` returns the compact columnar envelope, minified, with all
-/// three change kinds sharing one `change_cols` header. Acks / sandboxes
-/// null the comment-only columns; sandboxes also null `comment_id`.
 #[test]
 fn mcp_activity_compact_columnar_minified() {
     let base = Path::new("/docs");
@@ -3080,7 +2946,6 @@ fn mcp_activity_compact_columnar_minified() {
         }),
     );
 
-    // Minified: the payload text carries no literal newline.
     let raw = extract_tool_raw_text(&response);
     assert!(
         !raw.contains('\n'),
@@ -3088,7 +2953,6 @@ fn mcp_activity_compact_columnar_minified() {
     );
 
     let result = extract_tool_text(&response);
-    // Envelope header: nine columns, ts first, kind second, to last.
     let cols = result["change_cols"].as_array().unwrap();
     assert_eq!(cols.len(), 9_usize);
     assert_eq!(cols[0], "ts");
@@ -3096,7 +2960,6 @@ fn mcp_activity_compact_columnar_minified() {
     assert_eq!(cols[8], "to");
     assert_eq!(result["cutoff_explicit"], json!(true));
     assert!(result["newest_ts_overall"].is_string());
-    // elapsed_ms survives the style-preserving injector without un-minifying.
     assert!(result["elapsed_ms"].is_number());
 
     let files = result["files"].as_array().unwrap();
@@ -3109,7 +2972,6 @@ fn mcp_activity_compact_columnar_minified() {
         "2026-01-01T00:00:00-04:00"
     );
 
-    // Rows sorted by ts: comment (12:00), ack (14:00), sandbox (17:00).
     let rows = file["changes"].as_array().unwrap();
     assert_activity_change_rows(rows);
 }
@@ -3137,7 +2999,6 @@ fn mcp_query_summary_omits_comments() {
         }),
     );
 
-    // Summary stays light — still minified, just no comments.
     let raw = extract_tool_raw_text(&response);
     assert!(
         !raw.contains('\n'),
@@ -3148,7 +3009,6 @@ fn mcp_query_summary_omits_comments() {
     let results = result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1_usize);
 
-    // With summary mode, there should be no comments key.
     assert!(results[0].get("comments").is_none());
 }
 
@@ -3160,7 +3020,6 @@ fn mcp_ack_without_file_resolves_from_tree() {
         .unwrap();
     let config = test_config();
 
-    // Ack comment "aaa" without specifying file.
     let response = call(
         &system,
         base,
@@ -3193,7 +3052,6 @@ fn mcp_ack_without_file_scopes_to_path() {
         .unwrap();
     let config = test_config();
 
-    // Ack with path scoping to subdirectory.
     let response = call(
         &system,
         base,
@@ -3253,7 +3111,6 @@ fn mcp_ack_without_file_not_found_returns_error() {
 #[test]
 fn mcp_ack_without_file_ambiguous_returns_error() {
     let base = Path::new("/docs");
-    // Two documents with the same comment ID.
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_WITH_COMMENT.as_bytes())
         .unwrap()
@@ -3294,7 +3151,6 @@ fn mcp_comment_auto_ack() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // Reply to aaa with auto_ack.
     let response = call(
         &system,
         base,
@@ -3318,7 +3174,6 @@ fn mcp_comment_auto_ack() {
     let result = extract_tool_text(&response);
     assert!(result["id"].is_string());
 
-    // Verify the parent was acked.
     let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
@@ -3328,8 +3183,6 @@ fn mcp_comment_auto_ack() {
 
 #[test]
 fn mcp_comment_auto_ack_omitted_acks_other_author() {
-    // auto_ack field absent from the MCP args. Parent `aaa` is by
-    // eduardo; caller is `tester`. Smart default must ack the parent.
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
@@ -3365,8 +3218,6 @@ fn mcp_comment_auto_ack_omitted_acks_other_author() {
 
 #[test]
 fn mcp_comment_auto_ack_omitted_skips_self_authored_parent() {
-    // auto_ack field absent. Parent is authored by the same identity as
-    // the caller (eduardo in both cases). Smart default must NOT ack.
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let mut config = test_config();
@@ -3468,7 +3319,6 @@ fn mcp_batch_auto_ack_per_op() {
     let ids = result["ids"].as_array().unwrap();
     assert_eq!(ids.len(), 3_usize);
 
-    // Verify parent aaa was acked exactly once (from op1).
     let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
@@ -3700,8 +3550,6 @@ fn mcp_write_binary_rejected_for_md() {
 
 #[test]
 fn mcp_write_partial_params_splice_range() {
-    // MCP `write` accepts start_line/end_line and splices the
-    // provided content into that range, mirroring CLI --lines semantics.
     let base = Path::new("/docs");
     let original = "\
 ---
@@ -3721,7 +3569,6 @@ body C
         .unwrap();
     let config = test_config();
 
-    // Lines 9/10/11 are `body A`, `body B`, `body C` — replace line 10.
     let response = call(
         &system,
         base,
@@ -3754,8 +3601,6 @@ body C
 
 #[test]
 fn mcp_write_partial_rejects_missing_end_line() {
-    // Both start_line and end_line must be provided together — a lone
-    // start_line is a nonsense request.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/doc.md"), b"A\nB\nC\n")
@@ -3786,9 +3631,6 @@ fn mcp_write_partial_rejects_missing_end_line() {
 
 #[test]
 fn mcp_write_reports_noop_true_on_identical_content() {
-    // the `write` tool response must carry `noop: true` when
-    // the proposed content is byte-identical to what's on disk so
-    // agents can branch on it (e.g. skip follow-up verification).
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/notes.txt"), b"hello\n")
@@ -3821,8 +3663,6 @@ fn mcp_write_reports_noop_true_on_identical_content() {
 
 #[test]
 fn mcp_write_reports_noop_false_on_real_change() {
-    // Mirror test: a real byte change produces `noop: false` so the
-    // flag is reliable as a branch condition.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/notes.txt"), b"hello\n")
@@ -3854,13 +3694,10 @@ fn mcp_write_reports_noop_false_on_real_change() {
 
 #[test]
 fn mcp_reply_prepends_parent_author_to_list() {
-    // Parity test for: the MCP `comment` tool inherits the
-    // "parent author always first in `to:`" invariant from operations.
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // Reply to `aaa` (authored by `eduardo`) with explicit to=[bob].
     let response = call(
         &system,
         base,
@@ -3918,7 +3755,6 @@ fn mcp_plan_ack_returns_report_without_touching_disk() {
     let base = Path::new("/docs");
     let (system, config, id) = seed_real_comment(base, "doc.md");
 
-    // Capture on-disk bytes before the call so we can assert idempotence.
     let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
 
     let response = call(
@@ -3947,12 +3783,8 @@ fn mcp_plan_ack_returns_report_without_touching_disk() {
     assert!(report["checksum_before"].is_string());
     assert!(report["checksum_after"].is_string());
     assert_ne!(report["checksum_before"], report["checksum_after"]);
-    // ack mutates the `ack` metadata list; the comment content is
-    // unchanged so its content-derived checksum stays identical, and the
-    // diff classes it as `preserved`.
     assert_eq!(report["comments"]["preserved"].as_array().unwrap().len(), 1);
 
-    // Disk is untouched: plan is side-effect-free.
     let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
     assert_eq!(before_bytes, after_bytes);
 }
@@ -4015,9 +3847,6 @@ fn mcp_plan_react_adds_emoji() {
     let report = extract_tool_text(&response);
     assert_eq!(report["op"], "react");
     assert_eq!(report["would_commit"], true);
-    // React touches the reactions map on the comment (metadata, not
-    // content), so the diff reports it as preserved rather than
-    // modified — content-derived checksums are unchanged.
     assert_eq!(report["comments"]["preserved"].as_array().unwrap().len(), 1);
     assert_ne!(report["checksum_before"], report["checksum_after"]);
 }
@@ -4059,14 +3888,9 @@ fn mcp_plan_rejects_missing_comment_id() {
 
 #[test]
 fn mcp_plan_write_markdown_create_projects_without_writing_disk() {
-    // `plan write` now projects the same PlanReport the CLI
-    // emits, without touching disk. Use `create: true` against a fresh
-    // filename so the preservation check has no prior comments to
-    // enforce.
     let base = Path::new("/docs");
-    // Seed a sibling file so `/docs` exists as a directory in the
-    // `MemorySystem`; the sandbox resolver needs the parent to be present
-    // even when the target file is still missing.
+    // A sibling file makes `/docs` exist in the `MemorySystem`; the sandbox resolver needs the
+    // parent directory even when the target is missing.
     let system = MemorySystem::new()
         .with_file(base.join("seed.md"), b"# seed\n")
         .unwrap();
@@ -4109,11 +3933,6 @@ fn mcp_plan_write_markdown_create_projects_without_writing_disk() {
 
 #[test]
 fn mcp_plan_write_raw_non_markdown_returns_unsupported_reject_reason() {
-    // `raw` / `binary` writes to non-markdown files produce a degraded
-    // `WriteProjection::Unsupported` report with `reject_reason` and
-    // `would_commit: false`. `.md` + `raw` is a hard error in
-    // `validate_write_opts` (symmetric with CLI), so exercise the
-    // reachable branch with a `.txt` path.
     let base = Path::new("/docs");
     let path = base.join("data.txt");
     let system = MemorySystem::new()
@@ -4184,7 +4003,6 @@ fn mcp_plan_comment_projects_new_comment() {
         "expected 1 added comment, got report: {report:#}"
     );
 
-    // Disk untouched.
     let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
     assert_eq!(before_bytes, after_bytes);
 }
@@ -4218,8 +4036,6 @@ fn mcp_plan_comment_reply_auto_acks_parent() {
     let report = extract_tool_text(&response);
     assert_eq!(report["op"], "comment");
     assert_eq!(report["comments"]["added"].as_array().unwrap().len(), 1);
-    // Parent stays in the `preserved` set (its content-checksum is
-    // unchanged; only the ack list flipped).
     let preserved_has_parent = report["comments"]["preserved"]
         .as_array()
         .unwrap()
@@ -4255,8 +4071,6 @@ fn mcp_plan_edit_changes_content_and_clears_acks() {
 
     let report = extract_tool_text(&response);
     assert_eq!(report["op"], "edit");
-    // Edit recomputes the content-derived checksum, so the comment moves
-    // to the `modified` set.
     assert_eq!(report["comments"]["modified"].as_array().unwrap().len(), 1);
 }
 
@@ -4404,12 +4218,6 @@ fn mcp_plan_purge_destroys_every_comment_id() {
     assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
 }
 
-// ---------------------------------------------------------------------
-// Recursive purge MCP coverage. Confirms the directory form
-// is wired through the MCP surface and produces the documented
-// per-file outcome shape.
-// ---------------------------------------------------------------------
-
 #[test]
 fn mcp_purge_recursive_clears_every_md_file() {
     let base = Path::new("/realm");
@@ -4544,7 +4352,6 @@ fn mcp_plan_purge_recursive_emits_purge_dir_diff() {
     assert_eq!(files[0]["outcome"], "would_purge");
     assert_eq!(files[0]["comments_removed"], 1_u64);
 
-    // Plan must not write disk.
     let after_bytes = system.read_to_string(&path_a).unwrap();
     assert_eq!(before_bytes, after_bytes);
 }
@@ -4651,12 +4458,7 @@ fn mcp_plan_rejects_unknown_op() {
     );
 }
 
-// ---------- identity-flag rejection on MCP surface ----------
-
-/// No MCP tool — mutating or read-only — may advertise the four
-/// identity-declaration flags. `identity_create` is exempt: there
-/// `identity`/`type`/`key` name the NEW identity being created, not
-/// the caller's principal.
+/// `identity_create` is exempt: its `identity`/`type`/`key` name the new identity, not the caller.
 #[test]
 fn no_identity_flags_on_any_mcp_tool_schema() {
     let base = Path::new("/docs");
@@ -4696,8 +4498,6 @@ fn no_identity_flags_on_any_mcp_tool_schema() {
     }
 }
 
-/// No MCP tool schema may surface a `mode` or `dry_run` field. Mode is a
-/// tree property and `dry_run` migrated to `plan`.
 #[test]
 fn no_mode_or_dry_run_in_any_schema() {
     let base = Path::new("/docs");
@@ -4731,9 +4531,6 @@ fn no_mode_or_dry_run_in_any_schema() {
     }
 }
 
-/// Every MCP tool (except `identity_create`) rejects each of the four
-/// identity-declaration flags at the handler layer. Defense against
-/// clients that ignore the schema.
 #[test]
 fn every_mcp_tool_rejects_identity_flags() {
     let base = Path::new("/docs");
@@ -4818,9 +4615,7 @@ fn every_mcp_tool_rejects_identity_flags() {
     }
 }
 
-/// The rejection envelope is JSON-stringified and carries
-/// `error_kind: "mcp_identity_flag_rejected"` so hosts can branch on
-/// the structured field instead of regex-matching the message.
+/// Hosts branch on `error_kind: "mcp_identity_flag_rejected"`, not on the message text.
 #[test]
 fn identity_flag_rejection_is_structured() {
     let base = Path::new("/docs");
@@ -4864,9 +4659,7 @@ fn human_config() -> ResolvedConfig {
     }
 }
 
-/// The MCP surface is an agent surface: a human identity resolved from
-/// the config walk is rejected at dispatch, with a structured error
-/// naming the recovery path (ask the user, then `identity_create`).
+/// A human identity from the config walk is refused at dispatch, with the recovery path named.
 #[test]
 fn mcp_human_identity_rejects_comment() {
     let base = Path::new("/docs");
@@ -4897,8 +4690,7 @@ fn mcp_human_identity_rejects_comment() {
     assert!(headline.contains("permission"), "{headline}");
 }
 
-/// The ban is blanket, not write-only: a read under a human identity
-/// still acts in the human's name downstream.
+/// The ban is blanket: a read under a human identity is refused too.
 #[test]
 fn mcp_human_identity_rejects_read_only_get() {
     let base = Path::new("/docs");
@@ -4925,8 +4717,7 @@ fn mcp_human_identity_rejects_read_only_get() {
     assert_eq!(payload["tool"], "get");
 }
 
-/// `whoami` and `identity_create` stay callable under a human identity —
-/// they are the diagnosis and recovery path the rejection points at.
+/// They are the diagnosis and recovery path the rejection points at.
 #[test]
 fn mcp_human_identity_allows_whoami_and_identity_create() {
     let base = Path::new("/docs");
@@ -4968,7 +4759,6 @@ fn mcp_human_identity_allows_whoami_and_identity_create() {
     assert!(!is_tool_error(&create), "{create}");
 }
 
-/// An agent identity does not trip the guard.
 #[test]
 fn mcp_agent_identity_passes() {
     let base = Path::new("/docs");
@@ -4991,8 +4781,7 @@ fn mcp_agent_identity_passes() {
     assert!(!is_tool_error(&response), "{response}");
 }
 
-/// No resolved identity at all (the no-config soft-miss) is not the
-/// human case; whatever happens downstream, the guard must not fire.
+/// No resolved identity is not the human case: the guard must not fire.
 #[test]
 fn mcp_no_identity_not_rejected_by_human_guard() {
     let base = Path::new("/docs");
@@ -5023,9 +4812,6 @@ fn mcp_no_identity_not_rejected_by_human_guard() {
     }
 }
 
-/// `identity_create` keeps `identity`/`type`/`key` in its schema —
-/// those name the NEW identity being created, not a per-call caller
-/// principal.
 #[test]
 fn identity_create_keeps_identity_fields() {
     let base = Path::new("/docs");
@@ -5058,13 +4844,8 @@ fn identity_create_keeps_identity_fields() {
     }
 }
 
-// ===========================================================================
-// query.pending_for_me + pending_broadcast MCP tests
-// ===========================================================================
-
 #[test]
 fn mcp_query_pending_includes_broadcast_rem_4j91() {
-    // --pending must now surface broadcast comments (the bug fix).
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
@@ -5093,15 +4874,11 @@ fn mcp_query_pending_includes_broadcast_rem_4j91() {
     let comments = result["results"][0]["comments"].as_array().unwrap();
     let mut ids: Vec<&str> = comments.iter().map(|c| c[0].as_str().unwrap()).collect();
     ids.sort_unstable();
-    // Expected pending: brd_open (broadcast, no acks), dir_me, dir_other.
-    // brd_mine is NOT pending (tester's ack closes the broadcast).
     assert_eq!(ids, vec!["brd_open", "dir_me", "dir_other"]);
 }
 
 #[test]
 fn mcp_query_pending_for_me_uses_server_identity() {
-    // pending_for_me=true must use the server's configured identity
-    // ("tester" from test_config), surfacing only dir_me.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
@@ -5134,9 +4911,6 @@ fn mcp_query_pending_for_me_uses_server_identity() {
 
 #[test]
 fn mcp_query_pending_broadcast_only_surfaces_unacked_broadcasts() {
-    // pending_broadcast=true with the server identity (tester): only
-    // brd_open surfaces — brd_mine is already acked by tester, and
-    // directed comments never count as broadcast.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
@@ -5169,8 +4943,6 @@ fn mcp_query_pending_broadcast_only_surfaces_unacked_broadcasts() {
 
 #[test]
 fn mcp_query_pending_for_me_and_broadcast_union() {
-    // Union of directed-to-me (dir_me) and unacked broadcasts for me
-    // (brd_open). brd_mine is acked by tester, so excluded.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
@@ -5205,8 +4977,6 @@ fn mcp_query_pending_for_me_and_broadcast_union() {
 
 #[test]
 fn mcp_query_pending_for_me_errors_without_identity() {
-    // A config with no identity must fail loudly when pending_for_me
-    // is requested.
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())
@@ -5248,10 +5018,6 @@ fn mcp_query_pending_for_me_errors_without_identity() {
         "expected identity diagnostic, got: {msg}"
     );
 }
-
-// ===========================================================================
-// identity_create MCP tests
-// ===========================================================================
 
 #[test]
 fn mcp_identity_create_minimal_returns_yaml() {
@@ -5356,7 +5122,6 @@ fn mcp_identity_create_rejects_invalid_type() {
 
 #[test]
 fn mcp_identity_create_yaml_never_contains_mode() {
-    // Parity with the CLI: mode is tree-level, never identity-scoped.
     let base = Path::new("/docs");
     let system = MemorySystem::new();
     let config = test_config();
@@ -5413,10 +5178,6 @@ fn mcp_identity_create_missing_identity_errors() {
 
     assert!(is_tool_error(&response));
 }
-
-// ===========================================================================
-// whoami MCP tests
-// ===========================================================================
 
 #[test]
 fn mcp_whoami_returns_resolved_identity_from_walked_config() {
@@ -5482,9 +5243,6 @@ fn mcp_whoami_with_no_config_returns_found_false() {
     assert!(result.get("identity").is_none() || result["identity"].is_null());
 }
 
-/// `whoami` returns the server's startup identity; per-call projection
-/// via `config_path` is rejected. Use the CLI to project a different
-/// identity.
 #[test]
 fn mcp_whoami_rejects_config_path() {
     let base = Path::new("/docs");
@@ -5512,8 +5270,6 @@ fn mcp_whoami_rejects_config_path() {
     let msg = response["result"]["content"][0]["text"].as_str().unwrap();
     assert!(msg.contains("config_path"), "got: {msg}");
 }
-
-// ---------- remargin_kind surface ----------
 
 #[test]
 fn mcp_comment_accepts_remargin_kind_and_persists_to_yaml() {
@@ -5617,7 +5373,6 @@ fn mcp_query_kind_filter_or_semantics() {
         .unwrap();
     let config = test_config();
 
-    // Seed comments directly via the core API so we skip MCP boilerplate.
     let pos = InsertPosition::Append;
     let kinds_q = vec![String::from("question")];
     let kinds_t = vec![String::from("todo")];
@@ -5758,7 +5513,6 @@ fn mcp_comment_after_heading_resolves_section_path() {
         .iter()
         .position(|l| l.contains(&format!("id: {new_id}")))
         .unwrap();
-    // Comment block lands strictly after the P3 heading line.
     assert!(
         new_block_line > p3_line,
         "expected new comment block (line {new_block_line}) after P3 heading (line {p3_line})"
@@ -6006,8 +5760,6 @@ fn mcp_batch_omits_warnings_when_every_body_reads_cleanly() {
     );
 }
 
-/// `mv` MCP tool moves a file and reports the documented outcome
-/// shape.
 #[test]
 fn mcp_mv_renames_file() {
     let base = Path::new("/docs");
@@ -6043,7 +5795,6 @@ fn mcp_mv_renames_file() {
     assert!(!result["fallback_copy"].as_bool().unwrap());
 }
 
-/// `mv` MCP tool refuses an existing destination without `force`.
 #[test]
 fn mcp_mv_refuses_existing_destination_without_force() {
     let base = Path::new("/docs");
@@ -6076,8 +5827,6 @@ fn mcp_mv_refuses_existing_destination_without_force() {
     assert!(is_tool_error(&response));
 }
 
-/// `mv` MCP tool with `force = true` overwrites an existing
-/// destination and reports `overwritten = true`.
 #[test]
 fn mcp_mv_force_overwrites_destination() {
     let base = Path::new("/docs");
@@ -6113,8 +5862,6 @@ fn mcp_mv_force_overwrites_destination() {
     assert!(result["overwritten"].as_bool().unwrap());
 }
 
-/// `plan mv` MCP tool surfaces the documented `mv_diff` shape with
-/// `would_commit = true` for a clean projection.
 #[test]
 fn mcp_plan_mv_emits_mv_diff() {
     let base = Path::new("/docs");
@@ -6152,12 +5899,6 @@ fn mcp_plan_mv_emits_mv_diff() {
     assert!(!mv_diff["dst_exists"].as_bool().unwrap());
     assert!(!mv_diff["noop_same_path"].as_bool().unwrap());
 }
-
-// ---------------------------------------------------------------------
-// Directory mv MCP coverage. Confirms the directory form is
-// auto-detected and produces the documented `is_directory` /
-// `nested_files_moved` outcome shape — same surface CLI emits.
-// ---------------------------------------------------------------------
 
 #[test]
 fn mcp_mv_renames_directory() {
@@ -6243,14 +5984,11 @@ fn mcp_plan_mv_directory_emits_is_directory() {
     assert!(mv_diff["src_exists"].as_bool().unwrap());
     assert!(!mv_diff["dst_exists"].as_bool().unwrap());
 
-    // Plan must not move anything.
     assert!(system.is_dir(&base.join("src")).unwrap());
     assert!(!system.exists(&base.join("dst")).unwrap());
 }
 
-/// Under the subset gate, an `ack` on a file whose only anomaly is
-/// a pre-existing bad checksum must SUCCEED — the anomaly is in P,
-/// so it's also in Q, Q ⊆ P. The old absolute-gate trip is gone.
+/// The subset gate admits an anomaly that was already on disk before the op.
 #[test]
 fn mcp_ack_succeeds_when_pre_existing_bad_checksum() {
     let base = Path::new("/docs");
@@ -6473,7 +6211,6 @@ fn prompt_set_runner_round_trips_and_clears() {
     let resolved = extract_tool_text(&resolve_response);
     assert_eq!(resolved["runner"], "goose run -i -");
 
-    // Replacing the block without `runner` clears the stored one.
     let clear_response = call(
         &system,
         base,
@@ -6517,8 +6254,6 @@ fn prompt_set_runner_round_trips_and_clears() {
 
 #[test]
 fn mcp_reply_acks_parent_when_authors_differ() {
-    // Parent `aaa` authored by `eduardo`; caller is `tester`. Smart
-    // default (auto_ack omitted) must ack the parent.
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
@@ -6923,7 +6658,6 @@ fn tool_error_text(response: &Value) -> String {
     String::from(response["result"]["content"][0]["text"].as_str().unwrap())
 }
 
-/// Fetch the comment with `id` from a `comments` listing.
 fn fetch_comment(
     system: &dyn os_shim::System,
     base: &Path,
@@ -6991,7 +6725,6 @@ fn reply_auto_ack_false_to_other_without_reason_is_rejected() {
     assert!(is_tool_error(&response));
     let text = tool_error_text(&response);
     assert!(text.contains("ack_skip_reason"), "got: {text}");
-    // Document was not mutated — only the original comment remains.
     let parent = fetch_comment(&system, base, &config, "aaa");
     assert_eq!(
         parent["ack"].as_array().unwrap().as_slice(),
@@ -7020,7 +6753,6 @@ fn reply_auto_ack_false_to_other_with_reason_succeeds_unacked() {
     );
 
     assert!(!is_tool_error(&response));
-    // auto_ack:false honored — parent stays unacked.
     let parent = fetch_comment(&system, base, &config, "aaa");
     assert_eq!(
         parent["ack"].as_array().unwrap().as_slice(),
@@ -7034,7 +6766,6 @@ fn reply_auto_ack_false_to_own_comment_needs_no_reason() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
     let config = test_config();
 
-    // tester posts a root comment, then replies to it suppressing the ack.
     let posted = call(
         &system,
         base,
@@ -7086,7 +6817,6 @@ fn reply_with_smart_default_still_acks_parent() {
     );
 
     assert!(!is_tool_error(&response));
-    // Smart default unchanged: replying to another author acks the parent.
     let parent = fetch_comment(&system, base, &config, "aaa");
     let ack = parent["ack"].as_array().unwrap();
     assert_eq!(ack.len(), 1);
@@ -7118,7 +6848,6 @@ fn batch_reply_auto_ack_false_without_reason_rejects_whole_batch() {
     assert!(is_tool_error(&response));
     let text = tool_error_text(&response);
     assert!(text.contains("ack_skip_reason"), "got: {text}");
-    // Atomic: nothing was written — only the original comment remains.
     let listing = call(
         &system,
         base,
@@ -7132,10 +6861,7 @@ fn batch_reply_auto_ack_false_without_reason_rejects_whole_batch() {
     assert_eq!(comments["comments"].as_array().unwrap().len(), 1);
 }
 
-// --- Advisory warnings on the comment surfaces ---------------------------
-
-/// A hard-wrapped comment body still posts and still returns its id; the
-/// advice is an extra field on the successful result, not a refusal.
+/// The advice is an extra field on the successful result, not a refusal.
 #[test]
 fn comment_attaches_advice_for_bare_id_reference_without_failing() {
     let base = Path::new("/docs");
@@ -7177,8 +6903,6 @@ fn comment_attaches_advice_for_bare_id_reference_without_failing() {
     );
 }
 
-/// The reject tier fires for agent authors: a hard-wrapped body is refused
-/// outright instead of posting with a warning.
 #[test]
 fn comment_rejects_hard_wrapped_body_from_agent() {
     let base = Path::new("/docs");
@@ -7208,8 +6932,6 @@ fn comment_rejects_hard_wrapped_body_from_agent() {
     assert!(text.contains("comment body rejected"), "{text}");
 }
 
-/// A one-line comment body draws nothing, keeping the result exactly the
-/// shape callers already parse.
 #[test]
 fn comment_omits_warnings_for_continuous_body() {
     let base = Path::new("/docs");
@@ -7242,8 +6964,6 @@ fn comment_omits_warnings_for_continuous_body() {
     );
 }
 
-/// `reply` funnels through the comment handler, so it inherits the same
-/// advisory pass over the body it posts.
 #[test]
 fn reply_inherits_the_comment_advisory_pass() {
     let base = Path::new("/docs");
@@ -7294,9 +7014,7 @@ fn reply_inherits_the_comment_advisory_pass() {
     );
 }
 
-/// An edited body runs the same warn tier a created one does. The bare-id
-/// reference is the discriminator: only the style pass reports it, so a
-/// warning here proves the edit result is no longer on the narrower pass.
+/// Only the style pass reports a bare-id reference, so a warning proves the edit ran it.
 #[test]
 fn edit_attaches_the_style_warn_tier_to_a_successful_result() {
     let base = Path::new("/docs");
@@ -7409,8 +7127,6 @@ fn anonymous_reads_in_a_strict_realm_are_tool_errors() {
         );
     }
 }
-
-// --- Paging, comment columns and unknown arguments ------------------------
 
 /// A `tools/call` request for `name` with `arguments`.
 fn tool_request(name: &str, arguments: &Value) -> Value {

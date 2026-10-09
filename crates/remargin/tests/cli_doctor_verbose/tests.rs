@@ -90,10 +90,7 @@ fn run_doctor_with_settings(realm: &Path, user_settings: &Path, extra_args: &[&s
     run_in(realm, &args)
 }
 
-// ---- clean case ---------------------------------------------------------
-
-/// Without `--verbose`, `doctor` in the clean case emits only the
-/// one-liner "doctor: all checks passed" with no `Checks:` section.
+/// The clean case prints only "doctor: all checks passed".
 #[test]
 fn clean_plain_has_no_checks_section() {
     let realm = TempDir::new().unwrap();
@@ -113,8 +110,6 @@ fn clean_plain_has_no_checks_section() {
     );
 }
 
-/// With `--verbose`, `doctor` appends a `Checks:` section even in
-/// the clean case.
 #[test]
 fn clean_verbose_appends_checks_section() {
     let realm = TempDir::new().unwrap();
@@ -150,7 +145,6 @@ fn clean_verbose_appends_checks_section() {
     );
 }
 
-/// The verbose output differs from non-verbose output in the clean case.
 #[test]
 fn clean_verbose_differs_from_plain() {
     let realm = TempDir::new().unwrap();
@@ -166,8 +160,6 @@ fn clean_verbose_differs_from_plain() {
         "verbose and non-verbose output must differ in clean case",
     );
 }
-
-// ---- goose stack --------------------------------------------------------
 
 /// The whole goose stack `remargin goose ... install` writes: both hook
 /// entries and the MCP extension the guard redirects to, all naming a
@@ -207,8 +199,6 @@ fn wire_goose_plugin(root: &Path) {
     .unwrap();
 }
 
-/// The realm has no goose installation, so the verbose section says nothing
-/// about the goose stack.
 #[test]
 fn clean_verbose_omits_goose_lines_without_goose() {
     let realm = TempDir::new().unwrap();
@@ -226,9 +216,7 @@ fn clean_verbose_omits_goose_lines_without_goose() {
     );
 }
 
-/// The same realm's `--json` leaves both verdict keys out entirely. The
-/// generated contract renders an unset verdict as the absent form, so a
-/// `null` here fails every consumer that validates against it.
+/// An unset verdict is absent from `--json`: a `null` would fail every validating consumer.
 #[test]
 fn clean_json_omits_goose_verdict_keys_without_goose() {
     let realm = TempDir::new().unwrap();
@@ -253,8 +241,7 @@ fn clean_json_omits_goose_verdict_keys_without_goose() {
     );
 }
 
-/// A wired goose stack under the pinned `$HOME` renders one verdict line
-/// per goose check, and `--json` carries the same verdicts.
+/// One verdict line per goose check, and `--json` carries the same verdicts.
 #[test]
 fn clean_verbose_reports_a_wired_goose_stack() {
     let realm = TempDir::new().unwrap();
@@ -286,8 +273,7 @@ fn clean_verbose_reports_a_wired_goose_stack() {
     assert_eq!(report["goose_mcp_installed"], json!(true));
 }
 
-/// A goose installation with no guard plugin renders both verdicts as
-/// missing beside the findings that name the repair.
+/// Both verdicts render as missing beside the findings that name the repair.
 #[test]
 fn verbose_reports_an_unwired_goose_stack_as_missing() {
     let realm = TempDir::new().unwrap();
@@ -308,14 +294,9 @@ fn verbose_reports_an_unwired_goose_stack_as_missing() {
     );
 }
 
-// ---- findings case ------------------------------------------------------
-
-/// Without `--verbose`, `doctor` in the findings case emits only the
-/// finding lines with no `Checks:` section.
 #[test]
 fn findings_plain_has_no_checks_section() {
     let realm = TempDir::new().unwrap();
-    // Point at a nonexistent user settings file (no hook installed anywhere).
     let fake_settings = realm.path().join("no_settings.json");
 
     let out = run_doctor_with_settings(realm.path(), &fake_settings, &[]);
@@ -331,8 +312,6 @@ fn findings_plain_has_no_checks_section() {
     );
 }
 
-/// With `--verbose`, `doctor` appends a `Checks:` section in the
-/// findings case (hook-installed verdict = missing).
 #[test]
 fn findings_verbose_appends_checks_section() {
     let realm = TempDir::new().unwrap();
@@ -355,7 +334,6 @@ fn findings_verbose_appends_checks_section() {
     );
 }
 
-/// The verbose output differs from non-verbose output in the findings case.
 #[test]
 fn findings_verbose_differs_from_plain() {
     let realm = TempDir::new().unwrap();
@@ -371,10 +349,7 @@ fn findings_verbose_differs_from_plain() {
     );
 }
 
-// ---- json case ----------------------------------------------------------
-
-/// `--json` is unaffected by `--verbose` — it always emits the full
-/// structured report and is identical with or without the flag.
+/// `--json` emits the full structured report, identical with or without `--verbose`.
 #[test]
 fn json_output_unaffected_by_verbose() {
     let realm = TempDir::new().unwrap();
@@ -387,8 +362,7 @@ fn json_output_unaffected_by_verbose() {
     assert_status(&plain_json, 0);
     assert_status(&verbose_json, 0);
 
-    // Both must be valid JSON. Strip elapsed_ms before comparing — it is a
-    // wall-clock measurement that differs between two separate process runs.
+    // `elapsed_ms` is wall-clock and differs between the two runs, so it is stripped first.
     let mut plain_val: serde_json::Value = serde_json::from_str(stdout_of(&plain_json)).unwrap();
     let mut verbose_val: serde_json::Value =
         serde_json::from_str(stdout_of(&verbose_json)).unwrap();
@@ -404,8 +378,6 @@ fn json_output_unaffected_by_verbose() {
         "--json output must be identical with and without --verbose",
     );
 }
-
-// ---- --check selective-run case -----------------------------------------
 
 /// Settings carrying only the `PreToolUse` hook — enforcement is wired but
 /// the `SessionStart` guard is missing, so a run trips `SessionGuardMissing`
@@ -452,8 +424,7 @@ fn two_finding_realm(realm: &Path) -> PathBuf {
     user_settings
 }
 
-/// `--check leftover-rules` reports only that check; the `session-guard`
-/// finding the same realm carries under a full run is absent.
+/// `--check leftover-rules` reports only that check, though the realm also trips `session-guard`.
 #[test]
 fn check_scopes_run_to_selected() {
     let realm = TempDir::new().unwrap();
@@ -481,10 +452,7 @@ fn check_scopes_run_to_selected() {
     );
 }
 
-/// On a realm with no `PreToolUse` hook, `--check session-guard` exits 0
-/// with no findings — the gate still short-circuits (`hook_installed` is
-/// `false` and the guard check never runs), it just says nothing about a
-/// check the caller did not select. Selecting `hook` reports the gate.
+/// A hookless realm short-circuits before the guard check, so `--check session-guard` is silent.
 #[test]
 fn check_scoped_run_on_hookless_realm_is_silent() {
     let realm = TempDir::new().unwrap();
@@ -519,8 +487,7 @@ fn check_scoped_run_on_hookless_realm_is_silent() {
     );
 }
 
-/// An unknown `--check` name is a hard CLI error naming the bad slug and
-/// listing the valid ones — never a silent empty run.
+/// An unknown `--check` name is a CLI error that names the bad slug and lists the valid ones.
 #[test]
 fn check_unknown_name_errors() {
     let realm = TempDir::new().unwrap();

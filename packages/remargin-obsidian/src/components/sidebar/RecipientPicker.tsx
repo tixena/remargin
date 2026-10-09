@@ -1,3 +1,5 @@
+/** The multi-select `to:` recipient picker of the inline composers. */
+
 import { Lock, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -8,17 +10,11 @@ import { pickerOptions } from "@/lib/pickerOptions";
 
 const MAX_VISIBLE = 20;
 
+/** Props for {@link RecipientPicker}. */
 export interface RecipientPickerProps {
-  /** Currently selected participant ids, rendered as chips in order. */
   selected: string[];
-  /** Called with the new selection after any add/remove. */
   onChange: (next: string[]) => void;
-  /**
-   * Participant ids that cannot be removed via the UI (e.g. the parent
-   * author on a reply). Rendered with a lock icon and no `x` button.
-   * This is purely decorative — the CLI enforces the "parent author
-   * always in `to:`" invariant server-side.
-   */
+  /** Ids the UI will not remove (the parent author on a reply); the CLI is what enforces it. */
   locked?: string[];
 }
 
@@ -36,9 +32,7 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
   const rowRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // The full list of options (active participants minus currently
-  // selected). Filter is applied as a second pass so we can display a
-  // "N more" hint based on the pre-filter size.
+  // The filter is a second pass so the "N more" hint can use the pre-filter size.
   const options = useMemo(() => pickerOptions(participants, selected), [participants, selected]);
   const filtered = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
@@ -52,8 +46,6 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
   const visible = filtered.slice(0, MAX_VISIBLE);
   const hiddenCount = filtered.length - visible.length;
 
-  // Close the popover on outside click so it feels like a real popover
-  // without pulling in a portal-rendering component.
   useEffect(() => {
     if (!open) return;
     const handler = (ev: MouseEvent) => {
@@ -73,7 +65,6 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
     (id: string) => {
       onChange([...selected, id]);
       setQuery("");
-      // Close after picking so the user can continue typing the comment.
       setOpen(false);
     },
     [onChange, selected]
@@ -101,8 +92,6 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
         return;
       }
       if (event.key === "Backspace" && query.length === 0) {
-        // Drop the last removable (non-locked) chip on backspace with an
-        // empty query — classic chip-input UX.
         for (let i = selected.length - 1; i >= 0; i -= 1) {
           const id = selected[i];
           if (id && !locked.includes(id)) {
@@ -116,10 +105,7 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
     [handleAdd, locked, onChange, query, selected, visible]
   );
 
-  // Registry not yet loaded OR empty — hide the row entirely so
-  // composers on un-registered vaults behave exactly like before. We
-  // still wait for `loading` to settle so the row doesn't flash in and
-  // out on the first render.
+  // Waits for `loading` to settle so the row does not flash in and out on the first render.
   if (!loading && participants.length === 0) return null;
 
   return (
@@ -149,12 +135,8 @@ export function RecipientPicker({ selected, onChange, locked = [] }: RecipientPi
           </Badge>
         );
       })}
-      {/*
-       * Inline style mirrors the panel-header refresh button so this
-       * icon-only trigger renders borderless across Obsidian themes;
-       * Tailwind/Button utility classes alone don't reliably suppress
-       * the default Obsidian button chrome here.
-       */}
+      {/* The inline style keeps this icon-only trigger borderless across Obsidian themes, which
+          utility classes alone do not reliably do. */}
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}

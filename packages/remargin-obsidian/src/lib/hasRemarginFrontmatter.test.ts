@@ -1,3 +1,5 @@
+/** Tests for detecting remargin-managed frontmatter. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { hasRemarginFrontmatter } from "./hasRemarginFrontmatter.ts";
@@ -56,8 +58,7 @@ describe("hasRemarginFrontmatter", () => {
   });
 
   it("is case-sensitive: only lowercase remargin_ is a hit", () => {
-    // The CLI only emits lowercase `remargin_*`; uppercase is a user
-    // field, not a managed one.
+    // The CLI only emits lowercase `remargin_*`; an uppercase key is the user's own field.
     const doc = "---\nRemargin_Pending: 0\n---\n";
     assert.strictEqual(hasRemarginFrontmatter(doc), false);
   });

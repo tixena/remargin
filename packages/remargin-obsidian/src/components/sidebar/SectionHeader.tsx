@@ -1,6 +1,9 @@
+/** The header of a top-level sidebar section. */
+
 import { ChevronDown, type LucideIcon } from "lucide-react";
 import { CollapsibleTrigger } from "@/components/ui/collapsible";
 
+/** Props for {@link SectionHeader}. */
 interface SectionHeaderProps {
   icon: LucideIcon;
   title: string;
@@ -30,9 +33,7 @@ export function SectionHeader({
       ? "rmg-l1-head__badge rmg-l1-head__badge--warning"
       : "rmg-l1-head__badge";
 
-  // The trigger (a native <button>) wraps only the non-interactive
-  // header content; {actions} render as a sibling so ViewToggle's
-  // buttons never nest inside the trigger button.
+  // `actions` render as a sibling of the trigger so their buttons never nest inside its <button>.
   return (
     <div className="rmg-l1-head" data-open={open ? "true" : "false"}>
       <CollapsibleTrigger className="rmg-l1-head__trigger">

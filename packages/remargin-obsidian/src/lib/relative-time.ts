@@ -1,3 +1,5 @@
+/** Timestamp formatting for comment cards. */
+
 /**
  * Format a timestamp as a short relative string for the comment card header.
  *
@@ -29,7 +31,6 @@ export function formatRelative(ts: string | Date | undefined, now: Date = new Da
   if (diffMs < day) return `${Math.floor(diffMs / hour)}h`;
   if (diffMs < 7 * day) return `${Math.floor(diffMs / day)}d`;
 
-  // Older than a week — show `Mon D` (e.g. `Apr 7`).
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${months[then.getMonth()]} ${then.getDate()}`;
 }

@@ -1,9 +1,5 @@
-//! Tests for the advisory review pass.
-//!
-//! Two halves: it must catch the hand-wrapped paragraph that motivated the
-//! check, and it must stay silent on every construct whose newlines are
-//! genuine content. Advice nobody is obliged to follow earns its keep only
-//! by being quiet when it has nothing to say.
+//! Tests for the advisory review pass: it must catch a hand-wrapped paragraph and stay silent on
+//! every construct whose newlines are genuine content.
 
 use serde_json::json;
 
@@ -55,8 +51,6 @@ fn flags_each_wrapped_paragraph_separately() {
 
 #[test]
 fn never_flags_fenced_code_or_remargin_blocks() {
-    // A remargin comment block is itself a ```remargin fence, so excluding
-    // fenced code excludes every stored comment.
     let content = "```remargin\nid: abc\nauthor: someone\ntype: comment\n```\n\
                    \n\
                    ```rust\nlet a = 1;\nlet b = 2;\n```\n\
@@ -108,7 +102,6 @@ fn never_flags_indented_blocks() {
 
 #[test]
 fn respects_explicit_markdown_hard_breaks() {
-    // Two trailing spaces and a trailing backslash are deliberate breaks.
     let content = "Address line one  \nAddress line two  \nAddress line three\n\
                    \n\
                    Backslash break\\\nsecond line\n";

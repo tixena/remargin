@@ -1,3 +1,5 @@
+//! Runs `get`, `ls`, `comments` and `search` with the identity flag group.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,8 +43,6 @@ A comment.
 ```
 ";
 
-/// Representative invocation per read subcommand. The tail is the
-/// minimum needed to exercise a real run against the fixture realm.
 const READ_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("get", &["doc.md"]),
     ("ls", &["."]),
@@ -130,12 +130,8 @@ fn read_subcommands_unchanged_without_identity_flags() {
 
 #[test]
 fn read_subcommands_resolve_passed_identity_not_walked_one() {
-    // The walk resolves alice (registered + keyed, so it passes the
-    // strict-mode gate: control below). A passed unregistered identity
-    // must be the one the resolver validates — the registry gate
-    // rejecting mallory proves the flags reached resolution instead of
-    // being ignored in favor of the walk. `--key` completes the manual
-    // declaration, which strict mode requires for branch-2 resolution.
+    // The registry gate rejecting an unregistered identity proves the flags reached resolution;
+    // `--key` completes the manual declaration strict mode requires.
     let (_tmp, cwd) = setup_strict_realm();
     for &(cmd, tail) in READ_SUBCOMMANDS {
         let mut args = vec![
@@ -159,7 +155,6 @@ fn read_subcommands_resolve_passed_identity_not_walked_one() {
             "stderr must name the passed identity, got: {stderr}"
         );
     }
-    // Control: the walked identity still resolves fine.
     for &(cmd, tail) in READ_SUBCOMMANDS {
         let mut args = vec![cmd];
         args.extend_from_slice(tail);

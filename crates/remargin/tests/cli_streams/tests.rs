@@ -1,14 +1,13 @@
+//! Runs `remargin resolve-mode` in both modes and looks for a timing footer on each stream.
+
 use core::str;
 
 use assert_cmd::Command;
 
-/// `remargin resolve-mode` (non-JSON) must not emit an `elapsed:`
-/// line on stdout *or* stderr. stdout stays pure command output and
-/// stderr carries only command diagnostics / errors.
+/// Non-JSON `resolve-mode` emits no `elapsed:` line on stdout or stderr.
 #[test]
 fn non_json_mode_emits_no_elapsed_footer() {
-    // Run from `/` so the parent walk for `.remargin.yaml` finds
-    // nothing — keeps the test hermetic without a tempfile.
+    // Run from `/` so the parent walk for `.remargin.yaml` finds nothing.
     let output = Command::cargo_bin("remargin")
         .unwrap()
         .current_dir("/")
@@ -32,8 +31,7 @@ fn non_json_mode_emits_no_elapsed_footer() {
     );
 }
 
-/// `--json` mode carries the timing value inside the JSON payload
-/// as `elapsed_ms` and emits no plaintext footer on either stream.
+/// `--json` carries the timing as `elapsed_ms` in the payload and prints no footer.
 #[test]
 fn json_mode_carries_elapsed_in_payload_only() {
     let output = Command::cargo_bin("remargin")

@@ -6,9 +6,8 @@
 //!
 //! Semantics:
 //!
-//! - **Idempotent**: adding twice as the same identity preserves the
-//!   original timestamp. "Is it staged" is the observable state, not
-//!   "when was it last touched".
+//! - **One entry per identity**: adding again as the same identity refreshes
+//!   that entry's timestamp instead of adding a second one.
 //! - **Per-identity scope**: removing only ever touches the caller's own
 //!   entry. Another identity's entries are invisible.
 //! - **Best-effort multi-file**: operations continue across files on
@@ -46,11 +45,9 @@ use crate::writer::ensure_not_forbidden_target;
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct SandboxBulkResult {
-    /// Files that were mutated (entry added or removed).
     pub changed: Vec<PathBuf>,
-    /// Files that failed: path plus a human-readable reason.
     pub failed: Vec<SandboxFailure>,
-    /// Files that matched a no-op (already staged, or nothing to remove).
+    /// A no-op: nothing to remove, or an entry that already carries the current timestamp.
     pub skipped: Vec<PathBuf>,
 }
 
@@ -192,9 +189,10 @@ fn display_paths(paths: &[PathBuf], base_dir: &Path) -> Vec<String> {
 ///
 /// - Non-markdown files fail with `not a markdown file` and are recorded
 ///   in `failed`.
-/// - Files where the caller already has an entry are recorded in
-///   `skipped` with the existing timestamp preserved.
-/// - Files where a new entry was appended are recorded in `changed`.
+/// - Files whose entry for the caller already carries the current timestamp
+///   are recorded in `skipped`.
+/// - Files where an entry was appended or its timestamp refreshed are recorded
+///   in `changed`.
 ///
 /// # Errors
 ///
@@ -352,9 +350,8 @@ pub fn scan_all_entries(system: &dyn System, root: &Path) -> Result<Vec<SandboxS
     Ok(out)
 }
 
-/// Parse a file, append the caller's sandbox entry if absent, and write
-/// the result back. Returns `Ok(true)` when a new entry was appended,
-/// `Ok(false)` when the file already contained one for the caller.
+/// Parse a file, add or refresh the caller's sandbox entry, and write the result back. Returns
+/// `Ok(false)` only when the entry already carries `now`, in which case nothing is written.
 fn add_one(
     system: &dyn System,
     file: &Path,
@@ -407,9 +404,8 @@ fn remove_one(
     Ok(removed)
 }
 
-/// Convenience used by sandbox add/remove and by the `comment --sandbox`
-/// atomic path. Appends `identity@now` to the passed-in entries vector if
-/// absent. Returns whether a new entry was appended.
+/// Appends `identity@now` to `entries`, or refreshes the timestamp of the identity's existing
+/// entry. Returns whether `entries` changed.
 #[must_use]
 pub fn upsert_entry(
     entries: &mut Vec<SandboxEntry>,

@@ -1,3 +1,5 @@
+/** Tests for parsing `claude plugins list` output. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { parsePluginsListOutput } from "./detectPlugin.ts";

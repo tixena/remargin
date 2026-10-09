@@ -1,3 +1,5 @@
+/** Tests for the gate deciding which subcommands receive the identity flags. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS, type RemarginSettings } from "@/types";
@@ -6,7 +8,6 @@ import { buildIdentityArgs } from "./buildIdentityArgs.ts";
 import { buildQueryArgs } from "./buildQueryArgs.ts";
 import { acceptsIdentity, IDENTITY_FREE_SUBCOMMANDS } from "./identityFreeSubcommands.ts";
 
-/** Every distinct subcommand spawned by the backend's identity-relevant methods. */
 const IDENTITY_RELEVANT_SUBCOMMANDS = [
   "ack",
   "batch",
@@ -57,18 +58,12 @@ describe("identity forwarding gate", () => {
   });
 
   it("forwards identity for subcommands unknown to the plugin (loud-failure contract)", () => {
-    // A future subcommand missing from the exception list gets identity
-    // flags; if it rejects them the CLI errors visibly instead of
-    // silently running as the walked identity.
+    // A subcommand missing from the list gets identity flags, so a rejection is a visible error.
     assert.ok(acceptsIdentity("some-future-subcommand"));
   });
 });
 
 describe("pending-for-me regression", () => {
-  // Incident: `query` was missing from the old allowlist, so the
-  // sidebar's "Pending for me" resolved `me` by walking to the vault's
-  // agent config instead of the plugin-configured human identity.
-
   it("query with pendingForMe carries --config in config mode", () => {
     const args = buildQueryArgs(".", { pendingForMe: true, expanded: true });
     const out = assembleExecArgs({

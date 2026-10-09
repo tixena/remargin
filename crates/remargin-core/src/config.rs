@@ -45,29 +45,17 @@ pub struct Config {
     pub ignore: Vec<String>,
     pub key: Option<String>,
     pub mode: Option<Mode>,
-    /// Permissions block. Missing in legacy
-    /// `.remargin.yaml` files; defaults to an empty
-    /// [`Permissions`] so back-compat parsing stays lossless.
-    /// Enforcement is added in T23 and beyond — this loader is data-
-    /// only.
+    /// Defaults to an empty [`Permissions`] when the file has no `permissions:` block.
     #[serde(default)]
     pub permissions: Permissions,
-    /// Per-agent `remargin session launch` parameters. Gated behind the
-    /// `session` feature and absent from the default build; a
-    /// `.remargin.yaml` with no `session:` block parses to `None`, and
-    /// with the feature off the key is ignored entirely.
+    /// Parsed only with the `session` feature; the key is ignored without it.
     #[cfg(feature = "session")]
     #[serde(default)]
     pub session: Option<SessionConfig>,
-    /// Named session definitions for `remargin session launch <name>`.
-    /// Gated behind the `session` feature; absent = downward discovery
-    /// only (same gating as [`Config::session`]).
+    /// Absent means downward discovery only.
     #[cfg(feature = "session")]
     #[serde(default)]
     pub sessions: Option<SessionsManifest>,
-    /// Optional folder-scoped system prompt for AI runs over docs in
-    /// this realm. Resolved by walking parents via
-    /// [`system_prompt::resolve_system_prompt`]; identity-free.
     #[serde(default)]
     pub system_prompt: Option<SystemPrompt>,
 }
@@ -81,15 +69,11 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
 pub struct SystemPrompt {
-    /// Human-readable label. When absent, callers derive a name from
-    /// the basename of the owning folder.
+    /// When absent, callers derive a name from the owning folder.
     pub name: Option<String>,
-    /// The literal prompt body. Written verbatim into the AI payload
-    /// by the caller — this loader does no templating.
     pub prompt: String,
-    /// Optional single-line command the composed prompt is piped into
-    /// (stdin contract: `cat <promptfile> | <runner>`). Absent = the
-    /// caller's default runner.
+    /// Single-line command the composed prompt is piped into on stdin; absent means the caller's
+    /// default runner.
     #[serde(default)]
     pub runner: Option<String>,
 }
@@ -97,23 +81,20 @@ pub struct SystemPrompt {
 /// Per-agent session parameters for `remargin session launch`.
 ///
 /// Optional block; `goal` is required to *launch* (enforced in the
-/// launch-spec builder, task 84), `loop` defaults to `5m` when unset, and
+/// launch-spec builder), `loop` defaults to `5m` when unset, and
 /// none of it is required to parse. Gated behind the `session` feature.
 #[cfg(feature = "session")]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
-    /// Optional per-session resource caps. Absent = no cap.
     #[serde(default)]
     pub budget: Option<Budget>,
-    /// Optional Claude backend parameters (`model`, `effort`).
     #[serde(default)]
     pub claude: Option<ClaudeParams>,
     /// `/goal` stop condition passed to the backend.
     pub goal: Option<String>,
-    /// `/loop` cadence as a duration string (`30s`, `5min`, `1h`).
-    /// Stored raw; parsed via [`SessionConfig::loop_duration`].
+    /// Raw duration string (`30s`, `5min`, `1h`), parsed by [`SessionConfig::loop_duration`].
     #[serde(rename = "loop")]
     pub loop_interval: Option<String>,
 }
@@ -150,10 +131,9 @@ pub struct Budget {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SessionsManifest {
-    /// Session a bare `remargin session launch` uses. Validated to name a
-    /// defined session at parse time.
+    /// The session a bare `remargin session launch` uses; checked at parse time to name a defined
+    /// one.
     pub default: Option<String>,
-    /// Named session definitions, name -> definition.
     pub sessions: BTreeMap<String, SessionDef>,
 }
 
@@ -169,7 +149,7 @@ pub struct SessionDef {
 
 /// One agent folder in a roster. `path` is required; every other field,
 /// when set, wins over the same-named field of the target folder's own
-/// `session:` block (consumed by the fleet resolver, task 93).
+/// `session:` block.
 #[cfg(feature = "session")]
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
@@ -181,8 +161,7 @@ pub struct AgentEntry {
     pub claude: Option<ClaudeParams>,
     #[serde(default)]
     pub goal: Option<String>,
-    /// Raw duration string (`30s`, `5min`, `1h`), parsed late like
-    /// [`SessionConfig::loop_interval`].
+    /// Raw duration string (`30s`, `5min`, `1h`), parsed late.
     #[serde(rename = "loop", default)]
     pub loop_interval: Option<String>,
     pub path: String,
@@ -244,9 +223,8 @@ impl SessionConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error naming the offending value when `loop_interval`
-    /// is set but not a valid duration string; the caller adds the
-    /// identity context (task 84). Never panics.
+    /// Returns an error naming the offending value when `loop_interval` is set but is not a valid
+    /// duration string.
     pub fn loop_duration(&self) -> Result<Option<Duration>> {
         self.loop_interval
             .as_deref()
@@ -260,7 +238,6 @@ impl SessionConfig {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Mode {
-    /// Default — registry / signing not enforced.
     #[default]
     Open,
     Registered,
@@ -298,17 +275,10 @@ pub struct ResolvedConfig {
     pub key_path: Option<PathBuf>,
     pub mode: Mode,
     pub registry: Option<Registry>,
-    /// Path to the `.remargin.yaml` that declared the identity. `Some`
-    /// for branch-1 (`--config`) and branch-3 (walk) resolutions;
-    /// `None` for branch-2 (manual declaration via
-    /// `--identity`/`--type`/`--key`) and for the no-config fallback
-    /// used by read-only invocations in directories that lack a config
-    /// file entirely. Exposed so the `remargin identity` JSON output
-    /// (and any tooling that wants to report provenance) can name the
-    /// file without re-walking.
+    /// The `.remargin.yaml` that declared the identity; `None` for a manual declaration or when no
+    /// config exists.
     pub source_path: Option<PathBuf>,
-    /// Allow-listed roots derived from `permissions.trusted_roots` in
-    /// the parent walk; `[cwd]` when none declared.
+    /// From `permissions.trusted_roots` in the parent walk; `[cwd]` when none is declared.
     pub trusted_roots: Vec<PathBuf>,
     /// Only settable via CLI when compiled with `--features unrestricted`.
     pub unrestricted: bool,
@@ -358,9 +328,8 @@ impl ResolvedConfig {
 
     /// Check if a participant is allowed to post (mode + registry enforcement).
     ///
-    /// Kept as a crate-private helper used by [`Self::resolve`] as a
-    /// belt-and-braces final gate. Op handlers do NOT call this directly
-    ///; they consume a pre-validated [`ResolvedConfig`].
+    /// [`Self::resolve`] runs it as a final gate; op handlers consume a pre-validated
+    /// [`ResolvedConfig`] and do not call it.
     ///
     /// # Errors
     ///
@@ -537,12 +506,8 @@ impl ResolvedConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error when:
-    /// - Any branch of identity resolution fails (see
-    ///   [`identity::resolve_identity`] for the per-branch error list).
-    /// - The configured assets dir value is malformed.
-    /// - The resolved identity fails the strict-mode or registry gate in
-    ///   [`Self::validate_identity`].
+    /// Returns an error when identity resolution fails, the assets dir value is malformed, or the
+    /// resolved identity fails the strict-mode or registry gate.
     pub fn resolve(
         system: &dyn System,
         cwd: &Path,
@@ -612,13 +577,8 @@ impl ResolvedConfig {
     /// Return the signing key for `author` when the active mode requires
     /// signing, otherwise `None`.
     ///
-    /// This is a trivial accessor: the key-presence fail-fast that used
-    /// to live here has moved into [`Self::validate_identity`],
-    /// so every caller-visible [`ResolvedConfig`] has already been
-    /// verified to carry a key path when strict mode requires one.
-    /// Unregistered authors in strict mode return `None` here because
-    /// they never reach op handlers — the resolver rejects them up
-    /// front.
+    /// [`Self::validate_identity`] has already verified that the key path is present when strict
+    /// mode requires one. An unregistered author in strict mode gets `None`.
     #[must_use]
     pub fn resolve_signing_key(&self, author: &str) -> Option<&Path> {
         if !self.requires_signature(author) {
@@ -650,9 +610,7 @@ impl ResolvedConfig {
 
         self.can_post(identity)?;
 
-        // Strict + registered active identity but no key path: fail-fast.
-        // Use `requires_signature` so unregistered authors in strict
-        // (already rejected by can_post above) do not reach this branch.
+        // `requires_signature` keeps unregistered authors, already rejected above, out of this branch.
         if self.mode == Mode::Strict && self.requires_signature(identity) && self.key_path.is_none()
         {
             bail!(
@@ -705,11 +663,9 @@ impl ReadGate<'_> {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ResolvedMode {
-    /// Effective mode for `start_dir`. Defaults to [`Mode::Open`] when no
-    /// config with a `mode:` field is found on the walk.
+    /// [`Mode::Open`] when no config on the walk declares a mode.
     pub mode: Mode,
-    /// Path to the `.remargin.yaml` that declared the mode, or `None` when
-    /// the resolution fell back to the default.
+    /// `None` when the resolution fell back to the default.
     pub source: Option<PathBuf>,
 }
 
@@ -741,8 +697,7 @@ fn default_assets_dir() -> String {
 }
 
 /// Parse a `loop:` duration string (`30s`, `5min`, `1h`, `500ms`) via
-/// `humantime`. The error names the bad value so a launch-time failure
-/// (task 84) is attributable to the config that declared it.
+/// `humantime`. The error names the bad value.
 #[cfg(feature = "session")]
 fn parse_loop_interval(s: &str) -> Result<Duration> {
     humantime::parse_duration(s).with_context(|| format!("invalid loop interval {s:?}"))
@@ -948,13 +903,10 @@ pub fn load_registry(system: &dyn System, start_dir: &Path) -> Result<Option<Reg
     }
 }
 
-/// # Errors
+/// Parse the canonical lowercase name of an [`AuthorType`] (`"human"` or `"agent"`).
 ///
-/// Returns an error for unknown type strings.
-/// Parse the canonical lowercase name of an [`AuthorType`] (`"human"` or
-/// `"agent"`). Exposed publicly so per-call adapters (MCP tool handlers,
-/// future IPC surfaces) can accept the same strings the config loader does
-/// and reject unknown values identically.
+/// Public so per-call adapters accept the same strings the config loader does and reject
+/// unknown values identically.
 ///
 /// # Errors
 ///

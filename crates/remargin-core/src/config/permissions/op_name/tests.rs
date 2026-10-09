@@ -1,17 +1,12 @@
+//! Tests for the op-name partitions and the kebab-case wire form.
+
 use super::OpName;
 
-/// `OpName::ALL` enumerates exactly the variants — adding a new
-/// variant without listing it in `ALL` would break the
-/// "valid ops" diagnostic and is caught here.
 #[test]
 fn all_covers_every_variant() {
-    // Sum of READ + WRITE must equal ALL — they partition the
-    // space.
     assert_eq!(OpName::READ.len() + OpName::WRITE.len(), OpName::ALL.len());
 }
 
-/// READ and WRITE partition the op space — no name appears on
-/// both lists.
 #[test]
 fn read_and_write_are_disjoint() {
     for read in OpName::READ {
@@ -46,8 +41,7 @@ fn as_str_matches_kebab_serialisation() {
     }
 }
 
-/// A typo deserialises to an error that names the offending value
-/// AND lists the valid names.
+/// The error names the offending value and lists the valid names.
 #[test]
 fn unknown_op_rejected_on_deserialise() {
     let result: Result<OpName, _> = serde_yaml::from_str("purg");
@@ -55,7 +49,6 @@ fn unknown_op_rejected_on_deserialise() {
     assert!(err.contains("purg"), "error did not name typo: {err}");
 }
 
-/// `valid_names_csv` returns a sorted, comma-separated list.
 #[test]
 fn valid_names_csv_alphabetical() {
     let csv = OpName::valid_names_csv();
@@ -63,7 +56,6 @@ fn valid_names_csv_alphabetical() {
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted);
-    // Sanity: every variant is listed.
     assert_eq!(names.len(), OpName::ALL.len());
     assert!(names.contains(&"purge"));
     assert!(names.contains(&"sandbox-add"));

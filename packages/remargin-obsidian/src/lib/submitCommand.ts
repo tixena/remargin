@@ -36,6 +36,7 @@ export interface SubmitCleanup {
   identityArgs: string[];
 }
 
+/** One group of a Submit: its prompt file, runner and staged files. */
 export interface SubmitEntry {
   promptFile: string;
   runner: string;

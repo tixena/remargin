@@ -15,12 +15,8 @@ use crate::permissions::restrict::{self, RestrictArgs};
 use crate::permissions::sidecar;
 use crate::permissions::unprotect::{UnprotectArgs, unprotect};
 
-/// Mimic a pre-retirement `restrict`: write the `.remargin.yaml` entry
-/// (via the current `restrict`) AND project a legacy deny set into the
-/// settings files + sidecar, so `unprotect`'s sidecar-driven reverse has
-/// something to scrub — the state a realm restricted by an older binary
-/// carries into the migration. The current `restrict` writes no settings
-/// or sidecar (the hook is the single source of truth).
+/// Restrict `path`, then seed the settings files and the sidecar with a deny set, so the
+/// sidecar-driven reverse has something to scrub. The current `restrict` writes neither.
 fn restrict_with_legacy_sidecar(
     system: &MemorySystem,
     anchor: &Path,
@@ -75,9 +71,7 @@ fn read_yaml(system: &MemorySystem, path: &Path) -> Value {
     serde_yaml::from_str(&body).unwrap()
 }
 
-/// Scenario 1: clean reverse — a realm carrying legacy projected rules
-/// (the migration state) is scrubbed byte-equivalent to "before
-/// restrict" by `unprotect` via the sidecar.
+/// A realm carrying projected rules is scrubbed back to its state before `restrict`.
 #[test]
 fn clean_reverse_restores_state() {
     let (system, anchor) = realm_with_claude();
@@ -93,10 +87,6 @@ fn clean_reverse_restores_state() {
     assert!(outcome.yaml_entry_removed);
     assert!(outcome.warnings.is_empty(), "{:#?}", outcome.warnings);
 
-    // the empty restrict array (and the wrapping
-    // permissions: block, since it has no other sub-keys) gets
-    // compacted out of the YAML. The body should no longer mention
-    // either key.
     let yaml_body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
         .unwrap();
@@ -105,13 +95,9 @@ fn clean_reverse_restores_state() {
         ".remargin.yaml should be compacted after the last restrict is removed: {yaml_body}",
     );
 
-    // Sidecar is empty.
     let sc = sidecar::load(&system, &anchor).unwrap();
     assert!(sc.entries.is_empty());
 
-    // Project-scope settings file no longer carries any of the
-    // projected path-deny rules. `Bash(remargin *)` is NOT projected
-    // (CLI denial is hook-enforced); editor-tool denies are removed.
     let settings_body = system.read_to_string(&files[0]).unwrap();
     assert!(
         !settings_body.contains("src/secret"),
@@ -120,8 +106,6 @@ fn clean_reverse_restores_state() {
     assert!(!settings_body.contains("Bash(remargin *)"));
 }
 
-/// Scenario 2: a path that was never restricted yields a warn +
-/// no-op.
 #[test]
 fn never_restricted_path_warns_and_no_ops() {
     let (system, anchor) = realm_with_claude();
@@ -143,16 +127,13 @@ fn never_restricted_path_warns_and_no_ops() {
     );
 }
 
-/// Scenario 3: YAML present, sidecar absent (user hand-edited the
-/// YAML). The YAML entry is removed; settings stay untouched; a
-/// warning surfaces.
+/// The YAML entry is removed, the settings stay untouched, and a warning surfaces.
 #[test]
 fn yaml_present_sidecar_absent_removes_yaml_only() {
     let (system, anchor) = realm_with_claude();
     let files = settings_files(&anchor);
     restrict_with_legacy_sidecar(&system, &anchor, "src/secret", &files);
 
-    // Strip the sidecar by hand (simulating the user's edit).
     let sidecar_path = anchor.join(".claude/.remargin-restrictions.json");
     system
         .write(&sidecar_path, b"{\"version\":1,\"entries\":{}}")
@@ -175,9 +156,6 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
         outcome.warnings
     );
 
-    // Settings still carry the projected rules because we couldn't
-    // know which ones to scrub without the sidecar. Verify an
-    // editor-tool deny is still present.
     let body = system.read_to_string(&files[0]).unwrap();
     assert!(
         body.contains("Edit(") && body.contains("src/secret"),
@@ -185,15 +163,13 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
     );
 }
 
-/// Scenario 4: YAML missing, sidecar present (inverse hand-edit).
-/// Sidecar removal proceeds; warning surfaces.
+/// The sidecar removal proceeds and a warning surfaces.
 #[test]
 fn yaml_missing_sidecar_present_reverts_settings_only() {
     let (system, anchor) = realm_with_claude();
     let files = settings_files(&anchor);
     restrict_with_legacy_sidecar(&system, &anchor, "src/secret", &files);
 
-    // Strip the YAML entry by hand: rewrite without permissions.trusted_roots.
     restrict::write_remargin_yaml(&system, &anchor, "permissions:\n  trusted_roots: []\n").unwrap();
 
     let outcome = unprotect(
@@ -209,9 +185,6 @@ fn yaml_missing_sidecar_present_reverts_settings_only() {
         outcome.warnings
     );
 
-    // Settings WERE scrubbed because the sidecar told us which
-    // rules to remove. The projected editor-tool deny is gone.
-    // `Bash(remargin *)` is NOT projected (CLI denial is hook-enforced).
     let body = system.read_to_string(&files[0]).unwrap();
     assert!(
         !body.contains("src/secret"),
@@ -220,24 +193,16 @@ fn yaml_missing_sidecar_present_reverts_settings_only() {
     assert!(!body.contains("Bash(remargin *)"));
 }
 
-/// Scenario 5: manual rule deletion between restrict and unprotect
-/// surfaces as a warning (propagated from `revert_rules`'s
-/// `RevertReport`).
 #[test]
 fn manual_rule_deletion_surfaces_warning() {
     let (system, anchor) = realm_with_claude();
     let files = settings_files(&anchor);
     restrict_with_legacy_sidecar(&system, &anchor, "src/secret", &files);
 
-    // Hand-delete one of the projected editor-tool deny rules from
-    // the project-scope file, mirroring what a user does when they
-    // manually edit settings. `Bash(remargin *)` is NOT projected
-    // (CLI denial is hook-enforced), so we use an Edit deny.
     let local = files[0].clone();
     let body = system.read_to_string(&local).unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&body).unwrap();
     let deny = value["permissions"]["deny"].as_array_mut().unwrap();
-    // Find an Edit deny for src/secret and remove it.
     let edit_rule = deny
         .iter()
         .find(|v| {
@@ -267,7 +232,6 @@ fn manual_rule_deletion_surfaces_warning() {
     );
 }
 
-/// Scenario 6: wildcard restrict + wildcard unprotect.
 #[test]
 fn wildcard_restrict_and_unprotect_round_trip() {
     let (system, anchor) = realm_with_claude();
@@ -278,9 +242,6 @@ fn wildcard_restrict_and_unprotect_round_trip() {
     assert!(outcome.yaml_entry_removed);
     assert!(outcome.warnings.is_empty(), "{:#?}", outcome.warnings);
 
-    // the wildcard-only realm collapses entirely:
-    // the empty restrict array gets pruned and the now-empty
-    // permissions: block is removed.
     let body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
         .unwrap();
@@ -290,7 +251,6 @@ fn wildcard_restrict_and_unprotect_round_trip() {
     );
 }
 
-/// Scenario 7: no `.claude/` ancestor → clear error.
 #[test]
 fn anchor_not_found_errors() {
     let system = MemorySystem::new().with_dir(Path::new("/r")).unwrap();
@@ -304,8 +264,6 @@ fn anchor_not_found_errors() {
     assert!(msg.contains("no `.claude/`"), "got: {msg}");
 }
 
-/// Scenario 8: idempotent — second unprotect on the same path is a
-/// warn + no-op.
 #[test]
 fn second_unprotect_is_noop() {
     let (system, anchor) = realm_with_claude();
@@ -336,8 +294,6 @@ fn second_unprotect_is_noop() {
     );
 }
 
-/// Scenario 9: when multiple restrict entries exist, unprotect
-/// removes only the matching one.
 #[test]
 fn other_restrict_entries_are_preserved() {
     let (system, anchor) = realm_with_claude();
@@ -358,9 +314,6 @@ fn other_restrict_entries_are_preserved() {
     assert_eq!(restricts[0]["path"], Value::String(String::from("archive")));
 }
 
-/// Removing the only entry compacts the empty array out of the YAML.
-/// Since `permissions:` had no other sub-keys, the wrapping mapping
-/// is also removed.
 #[test]
 fn last_removal_compacts_permissions_block_out_of_yaml() {
     let (system, anchor) = realm_with_claude();
@@ -382,20 +335,13 @@ fn last_removal_compacts_permissions_block_out_of_yaml() {
     );
 }
 
-// ---------------------------------------------------------------------
-// scenarios (compaction + --strict).
-// ---------------------------------------------------------------------
-
-/// scenario 3: removing the last `restrict` while
-/// `deny_ops` still has entries prunes only the empty `restrict`,
-/// leaving the rest of the `permissions:` block intact.
+/// Only the empty array is pruned; the rest of the `permissions:` block stays.
 #[test]
 fn last_restrict_removal_keeps_other_permissions_subkeys() {
     let (system, anchor) = realm_with_claude();
     let files = settings_files(&anchor);
     restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();
 
-    // Append a deny_ops sibling by hand.
     let yaml_path = anchor.join(".remargin.yaml");
     let body = system.read_to_string(&yaml_path).unwrap();
     let mut value: Value = serde_yaml::from_str(&body).unwrap();
@@ -438,9 +384,7 @@ fn last_restrict_removal_keeps_other_permissions_subkeys() {
     );
 }
 
-/// scenario 4: hand-edited YAML carrying an empty
-/// `restrict: []` next to a populated `deny_ops:` is compacted on
-/// the next unprotect call, even when no entry matches.
+/// A hand-left empty array is compacted on the next call, even when no entry matches.
 #[test]
 fn next_unprotect_compacts_pre_existing_empty_restrict() {
     let (system, anchor) = realm_with_claude();
@@ -455,8 +399,6 @@ fn next_unprotect_compacts_pre_existing_empty_restrict() {
         &UnprotectArgs::new(String::from("src/secret")),
     )
     .unwrap();
-    // No matching entry, so yaml_entry_removed stays false; the
-    // compaction is a side-effect that still rewrites the file.
     assert!(!outcome.yaml_entry_removed);
 
     let final_body = system
@@ -472,9 +414,6 @@ fn next_unprotect_compacts_pre_existing_empty_restrict() {
     );
 }
 
-/// scenario 5: when every `permissions:` sub-array winds
-/// up empty (e.g. `restrict: []`, `allow_dot_folders: []`) the
-/// whole `permissions:` block is removed.
 #[test]
 fn empty_permissions_block_is_removed_entirely() {
     let (system, anchor) = realm_with_claude();
@@ -498,8 +437,6 @@ fn empty_permissions_block_is_removed_entirely() {
     );
 }
 
-/// scenario 6: `--strict` against an unrestricted path
-/// returns an error.
 #[test]
 fn strict_unprotect_against_unrestricted_path_errors() {
     let (system, anchor) = realm_with_claude();
@@ -516,8 +453,6 @@ fn strict_unprotect_against_unrestricted_path_errors() {
     );
 }
 
-/// scenario 7: default (non-strict) unprotect against an
-/// unrestricted path is still a warn-and-no-op (regression check).
 #[test]
 fn default_unprotect_against_unrestricted_path_is_still_warn_noop() {
     let (system, anchor) = realm_with_claude();
@@ -538,11 +473,7 @@ fn default_unprotect_against_unrestricted_path_is_still_warn_noop() {
     );
 }
 
-/// Scenario 11: the bypass stays scoped to the dedicated
-/// helper. We verify the public surface works (which means the
-/// helper was used internally) and pin that the helper itself is
-/// callable from this module — any future re-export would break
-/// the audit boundary intentionally.
+/// The public surface works through the dedicated helper, which stays callable only from here.
 #[test]
 fn rem_is4z_bypass_uses_dedicated_helper() {
     let (system, anchor) = realm_with_claude();
@@ -555,15 +486,10 @@ fn rem_is4z_bypass_uses_dedicated_helper() {
     )
     .unwrap();
 
-    // The bypass succeeded — the YAML was rewritten without going
-    // through the public `write` op (which guards).
     system
         .read_to_string(&anchor.join(".remargin.yaml"))
         .unwrap();
 
-    // Pin the only sanctioned entry point so a future change
-    // re-exporting `write_remargin_yaml` from another module fails
-    // this test deliberately.
     let body = "permissions:\n  trusted_roots: []\n";
     restrict::write_remargin_yaml(&system, &anchor, body).unwrap();
 }

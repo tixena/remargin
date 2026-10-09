@@ -1,3 +1,5 @@
+/** The plugin's gateway to the `remargin` CLI: one method per subcommand, each spawning the binary. */
+
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { spawn } from "child_process";
@@ -42,11 +44,7 @@ import type {
   WriteOpts,
 } from "./types";
 
-// The identity-forwarding gate lives in its own file
-// (`identityFreeSubcommands.ts`) so tests can import it without
-// pulling in this module, whose TypeScript parameter-property
-// constructor the test runner's strip-only loader cannot parse.
-
+/** Runs `remargin` subcommands for the plugin and parses their `--json` output. */
 export class RemarginBackend {
   private pluginPresenceCache: PluginPresence | null = null;
 
@@ -171,14 +169,13 @@ export class RemarginBackend {
   async sandboxRemove(files: string[]): Promise<void> {
     if (files.length === 0) return;
     const raw = await this.exec(["sandbox", "remove", ...files]);
-    // Validate the failure rows; result discarded (we refetch after).
     parsePayloadArray(raw, "failed", SandboxFailureEntry$Schema, "sandbox remove");
   }
 
   /**
    * Stage one or more markdown files in the current identity's sandbox.
    * Calls `remargin sandbox add <files...>`. The operation is idempotent:
-   * re-adding a file that is already staged preserves its existing timestamp.
+   * re-adding a file that is already staged refreshes its timestamp.
    */
   async sandboxAdd(files: string[]): Promise<void> {
     if (files.length === 0) return;
@@ -238,8 +235,7 @@ export class RemarginBackend {
   }
 
   async version(): Promise<string> {
-    // Bare-flag probe: `args[0]` starts with "-", so the exec gate
-    // already withholds identity flags.
+    // A bare-flag probe: the exec gate withholds identity flags.
     const raw = await this.exec(["--version"], { useJson: false });
     return raw.trim();
   }
@@ -264,8 +260,7 @@ export class RemarginBackend {
   async installPluginToVault(): Promise<{ ok: boolean; stderr: string }> {
     const cwd = expandPath(this.settings.workingDirectory) || this.vaultPath;
     try {
-      // `obsidian` is in IDENTITY_FREE_SUBCOMMANDS, so the exec gate
-      // already withholds identity flags.
+      // `obsidian` is identity-free, so the exec gate withholds identity flags.
       await this.exec(["obsidian", "install", "--vault-path", cwd], {
         useJson: false,
         timeout: 60000,
@@ -282,12 +277,8 @@ export class RemarginBackend {
   /**
    * Run a version-check against the remargin GitHub releases feed.
    *
-   * Thin method wrapper around the standalone `performUpdateCheck`
-   * helper (see `./performUpdateCheck.ts`) so callers working with a
-   * `RemarginBackend` instance do not have to thread the CLI-version
-   * probe themselves. The standalone helper exists because the
-   * test-runner's strip-only TypeScript loader cannot parse this class's
-   * parameter-property constructor, so tests import the helper directly.
+   * Thin method wrapper around the standalone `performUpdateCheck` helper, so callers holding
+   * a `RemarginBackend` do not have to thread the CLI-version probe themselves.
    */
   async checkForUpdates(args: {
     force: boolean;
@@ -357,11 +348,8 @@ export class RemarginBackend {
   }
 
   /**
-   * Resolve prompts for a batch of files in parallel. Naive but correct:
-   * the CLI invocation cost is dominated by process spawn, not the walk
-   * itself. If sandboxes ever grow large enough that this becomes a
-   * bottleneck a `--batch` CLI mode can be added without changing the
-   * public surface here.
+   * Resolve prompts for a batch of files in parallel, one CLI invocation per file: the cost is
+   * dominated by process spawn, not the walk itself.
    */
   async resolvePrompts(files: string[]): Promise<Map<string, ResolvedSystemPrompt>> {
     const entries = await Promise.all(
@@ -539,12 +527,9 @@ export class RemarginBackend {
   resolveBinary(): string {
     const configured = expandPath(this.settings.remarginPath);
     if (!configured) return "remargin";
-    // If the user typed a bare command name (no path separator), trust
-    // PATH lookup — don't stat it.
     const looksLikePath = configured.includes("/") || configured.includes("\\");
     if (!looksLikePath) return configured;
     if (existsSync(configured)) return configured;
-    // Fallback: try the bare name on PATH.
     return "remargin";
   }
 

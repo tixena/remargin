@@ -1,3 +1,5 @@
+/** Option and response shapes for the backend's CLI calls. */
+
 /**
  * A single entry from `remargin registry show --json`. Mirrors the CLI JSON
  * shape: `display_name` is always present (the CLI substitutes the id when
@@ -15,6 +17,7 @@ export interface Participant {
   pubkeys: number;
 }
 
+/** Options for `remargin comment`. */
 export interface CommentOpts {
   replyTo?: string;
   afterLine?: number;
@@ -22,12 +25,7 @@ export interface CommentOpts {
   to?: string[];
   attachments?: string[];
   autoAck?: boolean;
-  /**
-   * Stage the target file in the caller's sandbox in the same atomic write
-   * (`remargin comment ... --sandbox`). Preferred over issuing a separate
-   * `sandbox add` call because it avoids split-brain states where the comment
-   * was written but the sandbox entry was not (or vice versa).
-   */
+  /** Stages the file in the same atomic write, so comment and sandbox entry cannot diverge. */
   sandbox?: boolean;
 }
 
@@ -36,15 +34,11 @@ export interface CommentOpts {
  * the current identity has staged for a future Submit-to-Claude.
  */
 export interface SandboxListEntry {
-  /**
-   * Path reported by the CLI. Relative to the vault (or the `--path` root)
-   * unless `absolute` was requested.
-   */
   path: string;
-  /** ISO 8601 timestamp of when the file was staged by this identity. */
   since: string;
 }
 
+/** Filters for `remargin query`. */
 export interface QueryOpts {
   pending?: boolean;
   pendingFor?: string;
@@ -56,30 +50,25 @@ export interface QueryOpts {
   since?: string;
   expanded?: boolean;
   commentId?: string;
-  /**
-   * Regex applied to comment content. Composes with metadata filters (pending,
-   * author, since, comment-id) and runs after them so the regex only executes
-   * against the already-filtered comment set.
-   */
+  /** Runs after the metadata filters, so the regex only sees the already-filtered comments. */
   contentRegex?: string;
-  /**
-   * Case-insensitive match for `contentRegex`. Has no effect without
-   * `contentRegex` set.
-   */
   ignoreCase?: boolean;
 }
 
+/** Line-window options for `remargin get`. */
 export interface GetOpts {
   startLine?: number;
   endLine?: number;
   lineNumbers?: boolean;
 }
 
+/** Options for `remargin write`. */
 export interface WriteOpts {
   create?: boolean;
   raw?: boolean;
 }
 
+/** Options for `remargin search`. */
 export interface SearchOpts {
   path?: string;
   scope?: "all" | "body" | "comments";
@@ -88,6 +77,7 @@ export interface SearchOpts {
   context?: number;
 }
 
+/** One comment in a `remargin batch`. */
 export interface BatchCommentOp {
   content: string;
   replyTo?: string;
@@ -97,6 +87,7 @@ export interface BatchCommentOp {
   autoAck?: boolean;
 }
 
+/** Response from `remargin identity --json`; `found` is false when no config resolved. */
 export interface IdentityInfo {
   found: boolean;
   path?: string;
@@ -118,10 +109,7 @@ export interface IdentityInfo {
 export interface ResolvedMode {
   /** Effective mode: `"open"`, `"registered"`, or `"strict"`. */
   mode: string;
-  /**
-   * Absolute path of the `.remargin.yaml` that declared the mode, or
-   * `null` when the resolution fell back to the default.
-   */
+  /** `null` when the resolution fell back to the default. */
   source: string | null;
 }
 
@@ -129,29 +117,17 @@ export interface ResolvedMode {
  * Response from `remargin prompt resolve <file> --json`. The prompt walk
  * is identity-free: a folder's prompt is a property of the directory
  * tree, not the caller. When no `.remargin.yaml` in the parent chain
- * declared a `system_prompt:` block, the CLI returns the y76 Default
+ * declared a `system_prompt:` block, the CLI returns the Default
  * body with `is_default = true` and `source = null`.
  */
 export interface ResolvedSystemPrompt {
-  /** True when the walk exhausted and the resolver returned the Default body. */
   is_default: boolean;
-  /**
-   * Human-readable label. Resolved from the YAML `name:` field when
-   * present, otherwise from the owning folder basename. `"default"`
-   * for the Default fallback.
-   */
+  /** From the YAML `name:` field, else the owning folder's basename; `"default"` for the fallback. */
   name: string;
-  /** Body to forward to Claude. */
   prompt: string;
-  /**
-   * Single-line command the composed prompt is piped into. `null` (or
-   * absent) means the caller's default runner.
-   */
+  /** `null` or absent means the caller's default runner. */
   runner?: string | null;
-  /**
-   * Absolute path of the `.remargin.yaml` that declared the prompt, or
-   * `null` for the Default fallback.
-   */
+  /** `null` for the Default fallback. */
   source: string | null;
 }
 
@@ -161,18 +137,14 @@ export interface ResolvedSystemPrompt {
  * `system_prompt:` block surfaces as a row.
  */
 export interface PromptListEntry {
-  /** Absolute path of the folder containing the `.remargin.yaml`. */
   folder: string;
-  /** `system_prompt.name` when present in the YAML, else `null`. */
   name: string | null;
-  /** Verbatim prompt body. */
   prompt: string;
-  /** `system_prompt.runner` when present in the YAML, else `null`. */
   runner?: string | null;
-  /** Absolute path of the `.remargin.yaml` that declared the prompt. */
   source: string;
 }
 
+/** Whether the remargin Claude Code plugin is absent, installed but disabled, or enabled. */
 export type PluginPresence =
   | { kind: "absent" }
   | { kind: "installed_disabled" }

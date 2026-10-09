@@ -8,57 +8,27 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Result, bail};
 use os_shim::System;
 
-/// File extensions visible through remargin.
 const ALLOWED_EXTENSIONS: &[&str] = &[
-    // Prose / data
-    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base",
-    // Design
-    "pen", // Web markup / styles
-    "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
-    // JavaScript / TypeScript
-    "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", // Python
-    "py", "pyi", "pyw", // Rust
-    "rs",  // Go
-    "go",  // .NET
-    "cs", "csx", "fs", "fsx", "vb", // JVM
-    "java", "kt", "kts", "scala", "sc", "groovy", // C / C++
-    "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", // Ruby / PHP
-    "rb", "php", "phtml", // Swift / Objective-C
-    "swift", "m", "mm", // Other mainstream languages
-    "dart", "lua", "r", "pl", "pm", "jl", "hs", "ex", "exs", "clj", "cljs", "cljc", "edn", "ml",
-    "mli", "erl", "hrl", "zig", "nim", // Shell / scripting
-    "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1", // SQL
-    "sql",  // Infrastructure as code
-    "tf", "tfvars", "hcl", // Images
-    "png", "jpg", "jpeg", "gif", "svg", "webp", // Documents
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", // Audio
-    "mp3", "wav", "ogg", "flac", "m4a", // Video
-    "mp4", "webm", "mov", "avi",
+    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base", "pen",
+    "html", "htm", "css", "scss", "sass", "less", "vue", "svelte", "js", "mjs", "cjs", "jsx", "ts",
+    "tsx", "mts", "cts", "py", "pyi", "pyw", "rs", "go", "cs", "csx", "fs", "fsx", "vb", "java",
+    "kt", "kts", "scala", "sc", "groovy", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "rb",
+    "php", "phtml", "swift", "m", "mm", "dart", "lua", "r", "pl", "pm", "jl", "hs", "ex", "exs",
+    "clj", "cljs", "cljc", "edn", "ml", "mli", "erl", "hrl", "zig", "nim", "sh", "bash", "zsh",
+    "fish", "ps1", "psm1", "psd1", "sql", "tf", "tfvars", "hcl", "png", "jpg", "jpeg", "gif",
+    "svg", "webp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "wav", "ogg", "flac",
+    "m4a", "mp4", "webm", "mov", "avi",
 ];
 
-/// Extensions that are text-based (support `--lines`).
-/// Every non-binary entry in `ALLOWED_EXTENSIONS` also appears here.
+/// Every non-binary entry of `ALLOWED_EXTENSIONS` also appears here.
 const TEXT_EXTENSIONS: &[&str] = &[
-    // Prose / data
-    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base",
-    // Design
-    "pen", // Web markup / styles
-    "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
-    // JavaScript / TypeScript
-    "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", // Python
-    "py", "pyi", "pyw", // Rust
-    "rs",  // Go
-    "go",  // .NET
-    "cs", "csx", "fs", "fsx", "vb", // JVM
-    "java", "kt", "kts", "scala", "sc", "groovy", // C / C++
-    "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", // Ruby / PHP
-    "rb", "php", "phtml", // Swift / Objective-C
-    "swift", "m", "mm", // Other mainstream languages
-    "dart", "lua", "r", "pl", "pm", "jl", "hs", "ex", "exs", "clj", "cljs", "cljc", "edn", "ml",
-    "mli", "erl", "hrl", "zig", "nim", // Shell / scripting
-    "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1", // SQL
-    "sql",  // Infrastructure as code
-    "tf", "tfvars", "hcl",
+    "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base", "pen",
+    "html", "htm", "css", "scss", "sass", "less", "vue", "svelte", "js", "mjs", "cjs", "jsx", "ts",
+    "tsx", "mts", "cts", "py", "pyi", "pyw", "rs", "go", "cs", "csx", "fs", "fsx", "vb", "java",
+    "kt", "kts", "scala", "sc", "groovy", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "rb",
+    "php", "phtml", "swift", "m", "mm", "dart", "lua", "r", "pl", "pm", "jl", "hs", "ex", "exs",
+    "clj", "cljs", "cljc", "edn", "ml", "mli", "erl", "hrl", "zig", "nim", "sh", "bash", "zsh",
+    "fish", "ps1", "psm1", "psd1", "sql", "tf", "tfvars", "hcl",
 ];
 
 /// Check if a path is visible (allowed extension, not a dotfile).
@@ -69,17 +39,14 @@ pub fn is_visible(path: &Path, is_dir: bool) -> bool {
         return false;
     };
 
-    // Dotfiles and dot-directories are always hidden.
     if filename.starts_with('.') {
         return false;
     }
 
-    // Directories are always visible (for navigation).
     if is_dir {
         return true;
     }
 
-    // Check extension against allowlist.
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ALLOWED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
@@ -122,19 +89,12 @@ pub fn is_text(path: &Path) -> bool {
 /// When `unrestricted` is `true`, the sandbox check is skipped and the
 /// path is resolved directly (absolute paths bypass the base join).
 ///
-/// `trusted_roots`: when the resolved path is not under
-/// `base` but IS under one of the declared trusted roots, the call
-/// succeeds. This is what makes `mcp__remargin__write` to a path
-/// inside a declared trusted root that lives outside the spawn cwd
-/// work — the per-op sandbox layer consults the same trusted-root set
-/// the boot-time MCP cover already used.
+/// A resolved path outside `base` is accepted when it sits under one of `trusted_roots`.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path cannot be canonicalized
-/// - The resolved path escapes both `base` and every trusted root
-///   (when `unrestricted` is false)
+/// Returns an error if the path cannot be canonicalized or, unless `unrestricted`, escapes both
+/// `base` and every trusted root.
 pub fn resolve_sandboxed(
     system: &dyn System,
     base: &Path,
@@ -151,11 +111,8 @@ pub fn resolve_sandboxed(
         return Ok(resolved);
     }
 
-    // Absolute requests resolve against themselves; relative requests
-    // join onto base. A trusted_root caller would otherwise be forced
-    // to relative-out-of-tree (`../../trusted/foo.md`), which is
-    // awkward. Allowing absolute-from-anywhere is safe because the
-    // sandbox check below still gates access.
+    // An absolute request resolves against itself; the sandbox check below still gates it, so a
+    // trusted-root caller need not spell a relative path out of the tree.
     let resolved = if requested.is_absolute() {
         system.canonicalize(requested)?
     } else {
@@ -184,20 +141,10 @@ pub fn resolve_sandboxed(
 /// When `unrestricted` is `true`, the sandbox check is skipped
 /// (absolute paths bypass the base join).
 ///
-/// `trusted_roots`: when the parent / nearest ancestor is
-/// not under `base` but IS under one of the declared trusted roots,
-/// the call succeeds and the missing directories are created. This
-/// lets `mcp__remargin__write` create new files inside a declared
-/// trusted root that lives outside the MCP spawn cwd.
-///
 /// # Errors
 ///
-/// Returns an error if:
-/// - No existing ancestor directory can be found
-/// - The resolved path escapes both `base` and every trusted root
-///   (when `unrestricted` is false)
-/// - The requested path has no filename component
-/// - Directory creation fails
+/// Returns an error if no existing ancestor is found, the path has no filename, directory
+/// creation fails or, unless `unrestricted`, the path escapes both `base` and every trusted root.
 pub fn resolve_sandboxed_create(
     system: &dyn System,
     base: &Path,
@@ -210,9 +157,7 @@ pub fn resolve_sandboxed_create(
     } else {
         base.join(requested)
     };
-    // Normalize to resolve `.` and `..` components so that sandbox
-    // checks work correctly even when the system's canonicalize does
-    // not (e.g. mocks).
+    // Normalize first: a mocked `canonicalize` does not resolve `.` and `..`.
     let joined = normalize_path(&raw_joined);
     let parent = joined
         .parent()
@@ -224,9 +169,7 @@ pub fn resolve_sandboxed_create(
     let parent_exists = system.exists(parent).unwrap_or(false);
 
     if !parent_exists {
-        // Parent doesn't exist. Walk up to find the nearest existing
-        // ancestor and sandbox-check it before creating any
-        // directories.
+        // Sandbox-check the nearest existing ancestor before creating any directory.
         let nearest = find_existing_ancestor(system, parent)?;
         let canonical_nearest = system.canonicalize(&nearest)?;
 
@@ -239,7 +182,6 @@ pub fn resolve_sandboxed_create(
             }
         }
 
-        // Create the missing directories.
         system.create_dir_all(parent).map_err(|source| {
             anyhow::anyhow!(
                 "failed to create parent directories: {}: {source}",
@@ -274,11 +216,8 @@ fn path_under(target: &Path, anchor: &Path) -> bool {
 
 /// `true` when `target` is at-or-below any trusted root.
 ///
-/// Best-effort: each trusted root is canonicalized (when possible)
-/// before the comparison. The expanded form is used as a fallback so
-/// trusted roots that don't exist on disk yet still match — same
-/// best-effort semantics as the resolver in
-/// [`crate::config::permissions::resolve`].
+/// Each trusted root is canonicalized when possible; the expanded form is the fallback, so a
+/// trusted root that does not exist on disk yet still matches.
 fn any_trusted_root_covers(system: &dyn System, trusted_roots: &[PathBuf], target: &Path) -> bool {
     trusted_roots.iter().any(|root| {
         let canonical = system.canonicalize(root).unwrap_or_else(|_| root.clone());
@@ -311,7 +250,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::ParentDir => {
-                // Pop the last Normal component if there is one; otherwise keep the `..`.
                 if parts
                     .last()
                     .is_some_and(|c| matches!(c, Component::Normal(_)))
@@ -321,9 +259,7 @@ fn normalize_path(path: &Path) -> PathBuf {
                     parts.push(component);
                 }
             }
-            Component::CurDir => {
-                // Skip `.` — it's a no-op.
-            }
+            Component::CurDir => {}
             Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
                 parts.push(component);
             }

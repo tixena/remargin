@@ -1,14 +1,11 @@
+/** Tests that `onload` creates the plugin's collapse state and focus bus. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import RemarginPlugin from "./main.ts";
 import { CollapseState } from "./state/collapseState.ts";
 
-/**
- * Build the smallest `App` shape the plugin's `onload` actually
- * touches. The test asserts the T36 foundation pieces (`collapseState`,
- * `focusEvents`) are populated after `onload`, so anything onload
- * touches before/after that point must not throw.
- */
+/** The smallest `App` shape the plugin's `onload` touches. */
 function makeApp(): unknown {
   const noopRef = {};
   const noop = () => {
@@ -35,15 +32,11 @@ function makeManifest(): unknown {
 }
 
 describe("RemarginPlugin onload (T36 foundation)", () => {
-  // Test #12 (T36 spec): onload creates collapseState + focusEvents.
   it("creates plugin.collapseState and plugin.focusEvents", async () => {
     const plugin = new RemarginPlugin(makeApp() as never, makeManifest() as never);
-    // Disable the update probe so onload's tail does not spawn the CLI
-    // in a sandboxed test environment.
+    // The update probe is disabled so `onload` does not spawn the CLI.
     plugin.settings = { ...plugin.settings, checkForUpdates: false };
-    // `loadData` is the persistence shim from the stubbed Plugin base.
-    // Returning a populated object steers `loadSettings` away from its
-    // first-run CLI probe (which would spawn a process otherwise).
+    // A populated object steers `loadSettings` away from its first-run CLI probe.
     Object.assign(plugin, {
       loadData: async () => ({ ...plugin.settings, checkForUpdates: false }),
       saveData: async () => {

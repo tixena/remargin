@@ -62,7 +62,6 @@ const SUMMARY_LINE_LIMIT: usize = 5;
 #[non_exhaustive]
 pub enum RecipientStatus {
     Ok,
-    /// One or more `to:` recipients are absent from or revoked in the registry.
     Unknown(Vec<String>),
 }
 
@@ -83,16 +82,10 @@ impl RecipientStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SignatureStatus {
-    /// Signature was present but did not match any of the author's active
-    /// pubkeys in the registry (or any pubkey at all if the author has no
-    /// registered keys).
+    /// Present, but matching none of the author's active pubkeys.
     Invalid,
-    /// Comment has no signature block.
     Missing,
-    /// Comment author is not present in the registry at all.
     UnknownAuthor,
-    /// Signature matched one of the author's active pubkeys in the
-    /// registry.
     Valid,
 }
 
@@ -129,13 +122,13 @@ pub struct RowStatus {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct VerifyReport {
-    /// `false` when any row contributes to a failure under the active
-    /// [`Mode`]. See module docs for the severity table.
+    /// `false` when any row is bad under the active [`Mode`].
     pub ok: bool,
-    /// Per-comment rows, one per parsed comment in document order.
+    /// One per parsed comment, in document order.
     pub results: Vec<RowStatus>,
 }
 
+/// JSON form of a row's recipient status.
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 enum Recipients {
@@ -143,6 +136,7 @@ enum Recipients {
     Unknown { unresolved: Vec<String> },
 }
 
+/// JSON form of one [`RowStatus`].
 #[derive(Serialize)]
 struct VerifyRow {
     author: String,
@@ -153,6 +147,7 @@ struct VerifyRow {
     signature: &'static str,
 }
 
+/// JSON form of a [`VerifyReport`].
 #[derive(Serialize)]
 struct VerifyReportView {
     ok: bool,
@@ -179,12 +174,9 @@ impl VerifyReport {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct FileVerifyOutcome {
-    /// Per-file read/parse failure. `Some` when the file could not be
-    /// verified; the sweep records it and continues.
     pub error: Option<String>,
-    /// Relative file path (against the sweep's `base_dir`).
+    /// Relative to the sweep's `base_dir`.
     pub path: PathBuf,
-    /// The single-file verify report. `Some` when the file verified.
     pub report: Option<VerifyReport>,
 }
 
@@ -192,18 +184,19 @@ pub struct FileVerifyOutcome {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct FolderVerifyReport {
-    /// Per-file outcomes, in walk order.
+    /// In walk order.
     pub files: Vec<FileVerifyOutcome>,
-    /// `false` when any file failed to read/parse, or any file's report
-    /// is `ok == false` under the active mode.
+    /// `false` when any file failed to read or parse, or any report is not `ok` under the active
+    /// mode.
     pub ok: bool,
 }
 
+/// One failing file in the folder summary: its not-clean rows, or the read or parse error.
 #[derive(Serialize)]
 struct VerifyFailureFile {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     bad: Vec<VerifyRow>,
-    /// Total comments verified in this file; `None` for parse/read-error files.
+    /// `None` for a file that failed to read or parse.
     #[serde(skip_serializing_if = "Option::is_none")]
     comments: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,6 +204,7 @@ struct VerifyFailureFile {
     path: String,
 }
 
+/// JSON form of a [`FolderVerifyReport`] that enumerates only the failing files.
 #[derive(Serialize)]
 struct FolderVerifySummaryView {
     failures: Vec<VerifyFailureFile>,
@@ -279,12 +273,9 @@ impl FolderVerifyReport {
 #[error("{}", self.legacy_text())]
 #[non_exhaustive]
 pub struct VerifyFailure {
-    /// Failing rows only (rows that contributed to `ok == false` under
-    /// the active mode). Order matches document order.
+    /// Only the rows that failed under the active mode, in document order.
     pub failures: Vec<RowStatus>,
-    /// Active mode at refusal time.
     pub mode: Mode,
-    /// The document the gate was protecting.
     pub path: PathBuf,
 }
 
@@ -490,9 +481,7 @@ pub struct VerifyFailurePayload {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Anomaly {
-    /// Comment ID the anomaly is attached to.
     pub id: String,
-    /// What kind of anomaly fired on this comment.
     pub kind: AnomalyKind,
 }
 
@@ -501,16 +490,10 @@ pub struct Anomaly {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AnomalyKind {
-    /// Recomputed content checksum did not match the stored one.
     ChecksumInvalid,
-    /// At least one `to:` recipient is absent from or revoked in the
-    /// registry.
     RecipientUnknown,
-    /// Signature block present but did not match any active pubkey.
     SignatureInvalid,
-    /// No signature block.
     SignatureMissing,
-    /// Author is not in the registry.
     SignatureUnknownAuthor,
 }
 
@@ -539,18 +522,18 @@ impl AnomalyKind {
 pub struct SubsetGateFailure {
     /// `Q \ P`: anomalies in the post-state that weren't in the pre-state.
     pub introduced: Vec<Anomaly>,
-    /// Active mode at refusal time.
     pub mode: Mode,
-    /// Document the gate was protecting.
     pub path: PathBuf,
 }
 
+/// JSON form of one introduced [`Anomaly`].
 #[derive(Serialize)]
 struct Introduced {
     id: String,
     kind: &'static str,
 }
 
+/// JSON form of a [`SubsetGateFailure`].
 #[derive(Serialize)]
 struct SubsetGate {
     error_kind: &'static str,
@@ -614,7 +597,6 @@ impl SubsetGateFailure {
     }
 }
 
-/// Project a single [`RowStatus`] to its JSON row shape.
 fn row_to_json(row: &RowStatus) -> VerifyRow {
     VerifyRow {
         author: row.author.clone(),
@@ -959,11 +941,8 @@ where
     // unparsable bytes) means P = empty — fresh writes start clean.
     let pre = pre_anomalies(system, path, &realm_cfg);
 
-    // Q: anomalies the in-memory candidate would have.
     let post = anomalies_for_doc(doc, &realm_cfg);
 
-    // Subset gate: refuse iff Q ⊄ P (anything in Q that wasn't in P
-    // is a NEW anomaly this op would introduce).
     let mut introduced: Vec<Anomaly> = post.difference(&pre).cloned().collect();
     if !introduced.is_empty() {
         introduced.sort_by(|a, b| {
@@ -1016,16 +995,11 @@ fn row_is_bad(
 /// registry.
 fn resolve_signature(cm: &Comment, registry: Option<&Registry>) -> SignatureStatus {
     let Some(reg) = registry else {
-        // No registry is present. The best we can do is say the comment has
-        // no signature; a present-but-unverifiable signature is `Invalid`
-        // because we cannot match it against anything. `UnknownAuthor` is
-        // reserved for the case where a registry exists but does not list
-        // the author.
+        // With no registry a signature cannot be matched, so a present one is `Invalid`.
+        // `UnknownAuthor` is reserved for a registry that does not list the author.
         return if cm.signature.is_none() {
             SignatureStatus::Missing
         } else {
-            // A signature exists but we cannot validate it — this is a
-            // crypto mismatch from the verifier's perspective.
             SignatureStatus::Invalid
         };
     };
@@ -1038,11 +1012,8 @@ fn resolve_signature(cm: &Comment, registry: Option<&Registry>) -> SignatureStat
         return SignatureStatus::Missing;
     }
 
-    // Only active pubkeys count. Revoked participants were rejected at
-    // identity-resolve time before the op even ran; but
-    // historical signed comments from a now-revoked participant should
-    // still resolve as `UnknownAuthor` because none of their keys are
-    // active anymore.
+    // Only active pubkeys count, so a signed comment from a now-revoked participant resolves as
+    // `UnknownAuthor`.
     if participant.status != RegistryParticipantStatus::Active {
         return SignatureStatus::UnknownAuthor;
     }

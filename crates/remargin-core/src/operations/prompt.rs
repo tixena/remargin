@@ -28,13 +28,10 @@ use crate::permissions::op_guard::pre_mutate_check_for_caller;
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PromptDeleteOutcome {
-    /// True when the target file had no `system_prompt:` block to
-    /// remove (the call was a no-op).
+    /// The file had no `system_prompt:` block, so the call was a no-op.
     pub absent: bool,
-    /// True when, after the strip, the resulting file would be empty
-    /// of meaningful content. The file is left in place regardless.
+    /// The strip left the file with no meaningful content; it stays in place regardless.
     pub left_empty: bool,
-    /// `.remargin.yaml` that was modified (or would have been).
     pub source: PathBuf,
 }
 
@@ -42,18 +39,12 @@ pub struct PromptDeleteOutcome {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PromptListEntry {
-    /// Absolute path of the folder containing the `.remargin.yaml`.
     pub folder: PathBuf,
-    /// `system_prompt.name`, if set in the YAML. Folder basename is
-    /// the display fallback (computed by the caller, e.g. CLI/MCP).
+    /// `None` leaves the display name to the caller, which falls back to the folder basename.
     pub name: Option<String>,
-    /// Verbatim prompt body. Callers that don't want huge JSON should
-    /// truncate at the adapter layer.
     pub prompt: String,
-    /// `system_prompt.runner`, if set in the YAML. `None` means the
-    /// caller's default runner.
+    /// `None` means the caller's default runner.
     pub runner: Option<String>,
-    /// Absolute path of the `.remargin.yaml` that declared the prompt.
     pub source: PathBuf,
 }
 
@@ -61,25 +52,25 @@ pub struct PromptListEntry {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PromptSetOutcome {
-    /// True when the target file was created by this op.
     pub created: bool,
-    /// True when the splice produced byte-identical content (no write
-    /// performed).
+    /// The splice produced byte-identical content, so nothing was written.
     pub noop: bool,
-    /// `.remargin.yaml` that was written (or created).
     pub source: PathBuf,
 }
 
+/// Byte range of the `system_prompt:` block inside a `.remargin.yaml`, end exclusive.
 pub(crate) struct BlockRange {
     pub end: usize,
     pub start: usize,
 }
 
+/// The YAML text after a splice, and whether it equals the text before it.
 pub(crate) struct SpliceResult {
     pub content: String,
     pub noop: bool,
 }
 
+/// The fields rendered into a `system_prompt:` block.
 pub(crate) struct SystemPromptBlock<'block> {
     pub name: &'block str,
     pub prompt: &'block str,
@@ -92,11 +83,8 @@ pub(crate) struct SystemPromptBlock<'block> {
 ///
 /// # Errors
 ///
-/// - `folder` doesn't exist or isn't a directory.
-/// - The op-guard refuses.
-/// - The post-splice diff finds a field other than `system_prompt:`
-///   changed.
-/// - The filesystem write fails.
+/// Returns an error when `folder` is not a directory, the op-guard refuses, the splice changed
+/// a field other than `system_prompt:`, or the write fails.
 pub fn delete(
     system: &dyn System,
     folder: &Path,
@@ -217,12 +205,8 @@ pub fn list(system: &dyn System, root: &Path) -> Result<Vec<PromptListEntry>> {
 ///
 /// # Errors
 ///
-/// - `folder` doesn't exist or isn't a directory.
-/// - The op-guard refuses (restrict policy or default-deny).
-/// - The existing `.remargin.yaml` fails to parse as YAML.
-/// - The post-splice diff finds a field other than `system_prompt:`
-///   changed.
-/// - The filesystem write fails.
+/// Returns an error when `folder` is not a directory, the op-guard refuses, the existing YAML
+/// does not parse, the splice changed a field other than `system_prompt:`, or the write fails.
 pub fn set(
     system: &dyn System,
     folder: &Path,
@@ -288,6 +272,7 @@ fn collapse_blank_runs(s: &str) -> String {
     out
 }
 
+/// Refuses a rewrite that changed any top-level field other than `system_prompt`.
 pub(crate) fn diff_only_system_prompt(old: &str, new: &str) -> Result<()> {
     let old_map = parse_top_mapping(old, "old")?;
     let new_map = parse_top_mapping(new, "new")?;
@@ -318,6 +303,8 @@ fn ensure_folder(system: &dyn System, folder: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The `system_prompt:` block: from its key line to the next unindented line, or to the end of
+/// the text.
 pub(crate) fn find_block_range(existing: &str) -> Option<BlockRange> {
     let lines: Vec<&str> = existing.split('\n').collect();
     let start_line = lines
@@ -347,6 +334,7 @@ pub(crate) fn find_block_range(existing: &str) -> Option<BlockRange> {
     Some(BlockRange { end, start })
 }
 
+/// `true` when `s` holds a YAML-significant character or leading or trailing whitespace.
 fn needs_block_style(s: &str) -> bool {
     s.chars().any(|c| {
         matches!(
@@ -406,8 +394,7 @@ pub(crate) fn remove_system_prompt(existing: &str) -> SpliceResult {
     let mut next = String::with_capacity(existing.len());
     next.push_str(&existing[..range.start]);
     next.push_str(&existing[range.end..]);
-    // Collapse 3+ consecutive newlines to 2 so a removal in the
-    // middle of the file leaves at most one blank line.
+    // Collapse three or more newlines to two, so a removal leaves at most one blank line.
     let collapsed = collapse_blank_runs(&next);
     let trimmed = trim_trailing_blank_lines(&collapsed);
     let noop = trimmed == existing;
@@ -447,6 +434,8 @@ fn render_prompt_field(prompt: &str) -> Vec<String> {
     vec![format!("  prompt: {}", quote_scalar(prompt))]
 }
 
+/// Replaces the existing `system_prompt:` block in place, or appends one after a blank line
+/// when there is none.
 pub(crate) fn splice_system_prompt(existing: &str, block: &SystemPromptBlock<'_>) -> SpliceResult {
     let rendered = render_block(block);
     if let Some(range) = find_block_range(existing) {

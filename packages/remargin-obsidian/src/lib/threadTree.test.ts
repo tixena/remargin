@@ -1,3 +1,5 @@
+/** Tests for building, indexing and walking comment thread trees. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { Comment } from "@/generated/types";

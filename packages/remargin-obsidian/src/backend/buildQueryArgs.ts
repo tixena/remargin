@@ -1,8 +1,9 @@
+/** Argv builder for `remargin query`. */
+
 import type { QueryOpts } from "./types";
 
 /**
- * Build the argv for a `remargin query`. Extracted from `RemarginBackend`
- * so the flag mapping is unit-testable without spawning the CLI.
+ * Build the argv for a `remargin query`.
  *
  * The pending flavors (`--pending`, `--pending-for`, `--pending-for-me`,
  * `--pending-broadcast`) union together in the CLI and AND-compose with

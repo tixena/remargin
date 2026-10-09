@@ -1,21 +1,15 @@
-//! `--config` must clap-conflict with `--identity`,
-//! `--type`, and `--key` on every identity-aware subcommand. Mixing a
-//! whole-identity declaration with partial-identity flags produces the
-//! "inherited-part-from-walk, replaced-part-from-flag" class of silent
-//! misattribution. Clap rejects the combination at parse time
-//! rather than letting the three-branch resolver see it.
+//! `--config` must clap-conflict with `--identity`, `--type`, and `--key` on every
+//! identity-aware subcommand.
 //!
-//! the identity group is per-subcommand (not global), so
-//! the flags go AFTER the subcommand name. This file iterates over
-//! every subcommand that flattens `IdentityArgs` and locks the conflict
-//! in — regressing any of them would silently drop `--config` for that
-//! subcommand (the exact bug that motivated this test file).
+//! Mixing a whole-identity declaration with partial-identity flags produces the
+//! "inherited-part-from-walk, replaced-part-from-flag" class of silent misattribution, so clap
+//! rejects the combination at parse time, before the resolver sees it.
 //!
-//! The subcommand table below must list every subcommand that flattens
-//! `IdentityArgs`. `subcommands_table_matches_identity_flattening_commands`
-//! enforces this by parsing `cli.rs`'s `Commands` enum directly, so a new
-//! `IdentityArgs`-flattening subcommand that isn't added here fails the
-//! build instead of silently escaping this conflict test.
+//! The identity group is per-subcommand (not global), so the flags go AFTER the subcommand
+//! name. This file iterates over every subcommand that flattens `IdentityArgs` and locks the
+//! conflict in; `subcommands_table_matches_identity_flattening_commands` parses the `Commands`
+//! enum in `cli.rs` directly, so a new `IdentityArgs`-flattening subcommand missing from the
+//! table fails the test run.
 
 #[cfg(test)]
 #[path = "cli_config_conflicts/tests.rs"]

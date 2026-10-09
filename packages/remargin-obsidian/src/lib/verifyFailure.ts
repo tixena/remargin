@@ -1,6 +1,9 @@
+/** Reads the CLI's structured verify-gate refusal out of an error. */
+
 import { z } from "zod/v4";
 import { VerifyFailurePayload$Schema } from "@/generated";
 
+/** The structured payload of a verify-gate refusal. */
 export type VerifyFailure = z.infer<typeof VerifyFailurePayload$Schema>;
 
 /**
@@ -17,11 +20,9 @@ export type VerifyFailure = z.infer<typeof VerifyFailurePayload$Schema>;
 export function parseVerifyFailure(err: unknown): VerifyFailure | null {
   const message = readMessage(err);
   if (!message) return null;
-  // The backend prepends nothing to the JSON, but the rejection includes a
-  // trailing `\n  command: …` footer — strip the footer before parsing.
+  // The rejection carries a trailing `command: …` footer, stripped before parsing.
   const trimmed = stripCommandFooter(message);
-  // Find the first balanced `{ … }` block; users sometimes see the JSON
-  // preceded by a stray "error: " or a leading whitespace prefix.
+  // The JSON can follow a stray "error: " prefix, so take the first balanced `{ … }` block.
   const candidate = extractJsonObject(trimmed);
   if (!candidate) return null;
   let parsed: unknown;

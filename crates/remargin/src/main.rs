@@ -39,11 +39,8 @@ use os_shim::real::RealSystem;
 
 use crate::io::IoSinks;
 
-/// Default user-scope settings file used by `remargin claude restrict`.
-/// Resolved through [`expand_path`] so `$HOME` follows the active
-/// [`System`] (the `obsidian` feature already exercises this pattern;
-/// we follow the same approach so tests stay hermetic via the
-/// `--user-settings` flag).
+/// Default user-scope settings file for `remargin claude restrict`, expanded through
+/// [`expand_path`] so `$HOME` follows the active [`System`].
 pub(crate) const DEFAULT_USER_SETTINGS: &str = "~/.claude/settings.json";
 
 pub(crate) const PLUGIN_MARKETPLACE_SOURCE: &str = "tixena/remargin";
@@ -83,9 +80,7 @@ fn main() -> ExitCode {
     let mut stderr = stderr_handle().lock();
     let mut sinks = IoSinks::new(&mut stdout, &mut stderr);
 
-    // Non-JSON mode does not emit a timing footer on any stream:
-    // stdout stays pure command output and stderr stays clean. The timing
-    // value survives as `elapsed_ms` inside the JSON payload.
+    // Text mode prints no timing footer; the value survives as `elapsed_ms` in the JSON payload.
     dispatch::run(&cli, &system, &cwd, &mut sinks)
 }
 

@@ -45,7 +45,6 @@ use crate::writer::ensure_not_forbidden_target;
 pub struct BinaryPayload {
     pub bytes: Vec<u8>,
     pub mime: &'static str,
-    /// Resolved (canonical) path of the file that was read.
     pub path: PathBuf,
     pub size_bytes: u64,
 }
@@ -104,12 +103,10 @@ impl RmResult {
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct RmDirReport {
-    /// Visible files removed, deepest-first.
+    /// Deepest-first.
     pub files_deleted: Vec<PathBuf>,
-    /// Directories left in place because a no-force remove failed: they
-    /// still hold entries remargin cannot list.
     pub folders_left_behind: Vec<PathBuf>,
-    /// Directories removed, deepest-first.
+    /// Deepest-first.
     pub folders_removed: Vec<PathBuf>,
 }
 
@@ -149,15 +146,11 @@ impl RmDirReport {
 /// Outcome of an [`rm`] call.
 ///
 /// `rm` deletes a single file or, when pointed at a directory, removes
-/// the directory tree recursively. The two cases surface different
-/// reports; this enum lets callers render each without the directory
-/// report leaking into the long-standing single-file JSON shape.
+/// the directory tree recursively. The two cases carry different reports.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum RmOutcome {
-    /// A directory was removed recursively.
     Directory(RmDirReport),
-    /// A single file was removed (or was already absent).
     File(RmResult),
 }
 
@@ -179,7 +172,7 @@ impl RmOutcome {
 
     /// `requested_path` echoes the caller-supplied path verbatim so the
     /// response round-trips through the same surface. The `File` variant
-    /// emits the long-standing `{deleted, existed}` shape unchanged.
+    /// emits `{deleted, existed}`.
     #[must_use]
     pub fn to_json(&self, requested_path: &str) -> Value {
         match self {
@@ -199,9 +192,7 @@ impl RmOutcome {
 #[non_exhaustive]
 pub struct WriteOutcome {
     pub noop: bool,
-    /// Advisory notes about the payload the caller supplied. Never a
-    /// reason to treat the write as failed: the write already succeeded
-    /// by the time these are attached.
+    /// Advisory only: the write has already succeeded when these are attached.
     pub warnings: Vec<Advice>,
 }
 
@@ -218,8 +209,7 @@ impl WriteOutcome {
     /// `raw` is forced true for binary writes (they skip the frontmatter
     /// / comment-preservation pass), so callers don't need to OR it in.
     ///
-    /// `warnings` appears only when there is something to say, so a clean
-    /// write keeps the payload it has always had.
+    /// `warnings` appears only when there is something to say.
     #[must_use]
     pub fn to_json(self, written: &str, binary: bool, raw: bool) -> Value {
         let mut payload = json!({
@@ -254,7 +244,6 @@ pub struct DocumentMetadata {
     pub line_count: Option<usize>,
     /// Extension-based MIME type. Unknown extensions → `application/octet-stream`.
     pub mime: &'static str,
-    /// Resolved (canonical) path of the file.
     pub path: PathBuf,
     pub pending_count: Option<usize>,
     /// Unique recipients on unacked comments. Empty for binary files.
@@ -302,10 +291,8 @@ pub struct WriteOptions {
     pub binary: bool,
     /// Missing parent dirs are created; the file itself must not already exist.
     pub create: bool,
-    /// When set, replace only lines `[start..=end]` (1-indexed, inclusive)
-    /// with the provided content and leave the rest of the file
-    /// byte-identical. Incompatible with `create`, `raw`, and `binary`.
-    ///
+    /// Replace only lines `[start..=end]` (1-indexed, inclusive), leaving the rest byte-identical.
+    /// Incompatible with `create`, `raw` and `binary`.
     pub lines: Option<(usize, usize)>,
     /// Skip frontmatter/comment management.
     pub raw: bool,
@@ -355,25 +342,15 @@ impl WriteOptions {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum WriteProjection {
-    /// Normal markdown projection: `before` is the parsed on-disk
-    /// document (empty-segmented for `--create`), `after` is the parsed
-    /// prospective content with frontmatter already normalized through
-    /// [`frontmatter::ensure_frontmatter`]. `noop` mirrors the byte-
-    /// identical shortcut [`write`] uses pre-commit.
+    /// `before` is the on-disk document (empty for `--create`); `after` has its frontmatter
+    /// normalized.
     Markdown {
         after: parser::ParsedDocument,
         before: parser::ParsedDocument,
         noop: bool,
     },
-    /// Projection not representable as a markdown document diff
-    /// (`--raw` or `--binary` mode). The caller should emit a degraded
-    /// plan report whose comment diff is empty and whose `reject_reason`
-    /// explains the limitation.
-    Unsupported {
-        /// Human-readable reason (`"raw mode"`, `"binary mode"`) suitable
-        /// for the `PlanReport::reject_reason` field.
-        reason: String,
-    },
+    /// `--raw` or `--binary`: not representable as a markdown document diff.
+    Unsupported { reason: String },
 }
 
 /// Body text + outbound links for a `get` call.
@@ -400,9 +377,7 @@ pub struct GetResult {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path escapes the sandbox
-/// - The directory cannot be read
+/// Returns an error if the path escapes the sandbox or the directory cannot be read.
 pub fn ls(
     system: &dyn System,
     base_dir: &Path,
@@ -476,16 +451,13 @@ pub fn ls(
     Ok(result)
 }
 
-/// Returns an error for dotfiles, disallowed extensions, and paths outside
-/// the sandbox.
+/// Reads a text file, whole or as the 1-indexed inclusive `lines` window, optionally with line
+/// numbers.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path escapes the sandbox
-/// - The file is a dotfile or has a disallowed extension
-/// - `lines` is specified for a binary file
-/// - The file cannot be read
+/// Returns an error if the path escapes the sandbox, the file is a dotfile or has a disallowed
+/// extension, `lines` is given for a binary file, or the file cannot be read.
 pub fn get(
     system: &dyn System,
     base_dir: &Path,
@@ -616,7 +588,6 @@ pub fn get_with_links(
         .with_context(|| format!("reading {}", resolved.display()))?;
     let total_lines = full.split('\n').count();
 
-    // Raw (un-numbered) text for the window the caller asked for.
     let window: String = match lines {
         Some((start, end)) => full
             .split('\n')
@@ -628,9 +599,7 @@ pub fn get_with_links(
         None => full,
     };
 
-    // Scan body only: blank comment blocks (newline-preserving) so their
-    // contents are excluded while reference line numbers stay aligned with
-    // the window text.
+    // Blank comment blocks, keeping their newlines, so reference lines stay aligned with the window.
     let scan_text = mask_comment_blocks(&window);
     let doc_dir = resolved.parent().unwrap_or_else(|| Path::new("."));
     let outbound = links::extract_links(&scan_text, doc_dir, system);
@@ -655,10 +624,6 @@ pub fn get_with_links(
 /// body-only link scan never sees comment-block contents while line
 /// numbers stay aligned with the original `text`. Non-comment text,
 /// including ordinary code fences, is preserved verbatim.
-///
-/// This mirrors the parser's `Body` / `Comment` split: comment blocks are
-/// the only segments excluded from the scan; everything else (including
-/// code fences, which the link scanner skips on its own) is kept.
 fn mask_comment_blocks(text: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
     let mut in_comment = false;
@@ -669,8 +634,6 @@ fn mask_comment_blocks(text: &str) -> String {
         let ticks = trimmed.chars().take_while(|&c| c == '`').count();
 
         if in_comment {
-            // Inside a comment block: blank every line, including the
-            // closing fence, until the matching fence depth closes it.
             let rest_after_ticks = trimmed[ticks.min(trimmed.len())..].trim();
             if ticks == fence_ticks && rest_after_ticks.is_empty() {
                 in_comment = false;
@@ -705,11 +668,8 @@ fn mask_comment_blocks(text: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path escapes the sandbox.
-/// - The file is a dotfile or has a disallowed extension.
-/// - The file is markdown (`.md`) — use the text `get` path instead.
-/// - The file cannot be opened or read.
+/// Returns an error if the path escapes the sandbox, the file is hidden, has a disallowed
+/// extension or is markdown, or it cannot be read.
 pub fn read_binary(
     system: &dyn System,
     base_dir: &Path,
@@ -729,8 +689,7 @@ pub fn read_binary(
         bail!("{}", allowlist::not_visible_message(path));
     }
 
-    // Never bypass comment-preservation through the binary surface. Symmetric
-    // with `write`'s markdown-rejects-binary behaviour.
+    // Markdown must never bypass comment preservation through the binary surface.
     if is_markdown_extension(&resolved) {
         bail!(
             "cannot fetch markdown file as binary: {} (use `get` without --binary)",
@@ -797,12 +756,8 @@ fn format_with_line_numbers(lines: &[&str], start_num: usize) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path escapes the sandbox
-/// - The path is a forbidden target (e.g. `.remargin.yaml`)
-/// - The path is a single file that is a dotfile or otherwise not visible
-/// - (Directory case) any listed resource fails the readability /
-///   per-file gate pre-flight
+/// Returns an error if the path escapes the sandbox, is a forbidden target or a file that is not
+/// visible, or any listed resource of a directory fails the pre-flight.
 pub fn rm(
     system: &dyn System,
     base_dir: &Path,
@@ -827,9 +782,7 @@ pub fn rm(
         bail!("{}", allowlist::not_visible_message(path));
     }
 
-    // Existence is a filesystem fact — NOT "are the bytes valid UTF-8".
-    // `read_to_string` fails on binary files (e.g. PNGs), which made `rm`
-    // report `existed: false` and skip the unlink for any non-text file.
+    // Existence is a filesystem fact: `read_to_string` fails on binary files, so it cannot decide it.
     let existed = system.exists(&resolved).unwrap_or(false);
 
     if existed {
@@ -884,9 +837,6 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
         .walk_dir(resolved, false, false)
         .with_context(|| format!("walking {}", resolved.display()))?;
 
-    // The resources remargin can see: visible files, plus every
-    // subdirectory (directories are always visible for navigation, but
-    // dot-directories are not — and ls would not descend into them).
     let mut visible_files: Vec<PathBuf> = Vec::new();
     let mut directories: Vec<PathBuf> = Vec::new();
     for entry in &entries {
@@ -900,10 +850,7 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
         }
     }
 
-    // Pre-flight (all-or-nothing): every visible file must pass the
-    // per-file gate (config-file guard) and be readable before we delete
-    // anything. Readability is an actual open — a `stat`-only check would
-    // pass for a `000`-mode file whose bytes cannot be read.
+    // Readability is an actual open: a `stat`-only check passes for a `000`-mode file.
     for file in &visible_files {
         ensure_not_forbidden_target(file)?;
         if system.open(file).is_err() {
@@ -927,7 +874,6 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
 
     let mut report = RmDirReport::default();
 
-    // Files first, deepest-first.
     visible_files.sort_by_key(|path| Reverse(depth_of(path)));
     for file in visible_files {
         system
@@ -936,7 +882,6 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
         report.files_deleted.push(file);
     }
 
-    // Then directories deepest-first, finishing with the root itself.
     directories.push(resolved.to_path_buf());
     directories.sort_by_key(|path| Reverse(depth_of(path)));
     for dir in directories {
@@ -989,12 +934,8 @@ fn display_paths(paths: &[PathBuf]) -> Vec<String> {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path escapes the sandbox
-/// - Comments were added, removed, or modified (when `create` is false)
-/// - `create` is true but the file already exists
-/// - `create` is true and creating the parent directories would escape the sandbox
-/// - The file cannot be written
+/// Returns an error if the path escapes the sandbox, comments were added, removed or modified,
+/// `create` is set and the file already exists, or the file cannot be written.
 pub fn write(
     system: &dyn System,
     base_dir: &Path,
@@ -1094,9 +1035,7 @@ fn write_content(
         return Ok(WriteOutcome::new(false));
     }
 
-    // Non-markdown extensions skip parse / ensure_frontmatter / verify
-    // and write the payload as-is. Partial-line writes still splice
-    // textually; frontmatter injection is markdown-only.
+    // Non-markdown files are written as-is: no parse, no frontmatter, no verify.
     if !is_markdown_extension(&resolved) {
         let bytes: Vec<u8> = if let Some((start, end)) = opts.lines {
             let existing = system
@@ -1115,13 +1054,8 @@ fn write_content(
         return Ok(WriteOutcome::new(false));
     }
 
-    // Partial write: splice the replacement content into `[start..=end]`,
-    // then fall through to the same parse + comment-preservation +
-    // verify-gate pipeline whole-file writes use. Everything after this
-    // block treats `content_to_parse` as if the caller had supplied it
-    // as a full-document payload — so the preservation check still
-    // catches any comment block that was clipped or destroyed by the
-    // caller's range, and the verify gate still runs pre-commit.
+    // A partial write is spliced, then treated as a full-document payload, so the preservation
+    // check and the verify gate still run on it.
     let content_to_parse: String = if let Some((start, end)) = opts.lines {
         let existing = system
             .read_to_string(&resolved)
@@ -1162,11 +1096,9 @@ pub(crate) fn commit_markdown(
 ) -> Result<WriteOutcome> {
     let new_doc = parser::parse(content_to_parse).context("parsing incoming content")?;
 
-    // Realm-mode floor: the doc's realm is the source of truth for the
-    // author gate, exactly as `create_comment` escalates before writing.
+    // The doc's realm is the source of truth for the author gate.
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
 
-    // Comment preservation + on-disk author: only when overwriting.
     let old_author = if create {
         None
     } else if let Ok(old_content) = system.read_to_string(resolved) {
@@ -1185,12 +1117,8 @@ pub(crate) fn commit_markdown(
         old_author.as_deref(),
     )?;
 
-    // No-op detection: if the canonical output would be
-    // byte-identical to what is already on disk, skip both the disk
-    // write AND the post-write verify gate. The verify gate is
-    // semantically satisfied: the file is already in the verified state
-    // this payload would produce. `create` never no-ops (the path is
-    // guaranteed not to exist, ruled out above).
+    // A byte-identical output skips the write and the verify gate: the file is already in the
+    // verified state this payload would produce.
     let final_content = final_doc.to_markdown()?;
     if !create && is_byte_identical(system, resolved, final_content.as_bytes()) {
         return Ok(WriteOutcome::new(true));
@@ -1231,12 +1159,8 @@ pub(crate) fn project_commit_markdown(
 ) -> Result<bool> {
     let new_doc = parser::parse(content_to_parse).context("parsing incoming content")?;
 
-    // Realm-mode floor: mirror `commit_markdown`'s escalation so the
-    // dry-run reports the same author-gate refusal a real commit would.
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
 
-    // `project_commit_markdown` only ever projects an edit (replace never
-    // creates), so read the on-disk author to gate an author change.
     let old_author = if let Ok(old_content) = system.read_to_string(resolved) {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
         check_comment_preservation(&old_doc, &new_doc)?;
@@ -1258,9 +1182,7 @@ pub(crate) fn project_commit_markdown(
         return Ok(false);
     }
 
-    // Run the subset gate without writing: the no-op closure proves the
-    // candidate passes `Q ⊆ P`, so a damaging dry-run reports the same
-    // refusal a real commit would.
+    // The no-op closure runs the subset gate without writing.
     commit_with_verify(system, &final_doc, &realm_cfg, resolved, |_verified_doc| {
         Ok(())
     })?;
@@ -1347,8 +1269,6 @@ pub fn project_write(
 
     let new_doc = parser::parse(&content_to_parse).context("parsing incoming content")?;
 
-    // Realm-mode floor: mirror `commit_markdown`'s escalation so the plan
-    // projection reports the same author-gate refusal a real write would.
     let realm_cfg = config.escalate_for_doc(system, &resolved)?;
 
     let (before, old_author) = if opts.create {
@@ -1389,14 +1309,6 @@ pub fn project_write(
     })
 }
 
-/// Return true when the on-disk bytes at `path` exactly match `new_bytes`.
-///
-/// A missing file or a read error returns false, so the caller falls
-/// through to a real write (safer default — the write will surface any
-/// underlying I/O error with a proper diagnostic). Uses `read_to_string`
-/// because that is the only read primitive `System` exposes; binary
-/// files that aren't valid UTF-8 won't trip the no-op fast path, but the
-/// correctness guarantee (never skip a real change) still holds.
 /// True when the path's extension marks it as part of the markdown family
 /// (`.md` or `.mdx`, case-insensitive). Frontmatter injection,
 /// comment-preservation, and the post-mutation verify gate apply only to
@@ -1410,6 +1322,8 @@ fn is_markdown_extension(path: &Path) -> bool {
         })
 }
 
+/// `true` when the on-disk bytes at `path` exactly match `new_bytes`. A missing file or a read
+/// error returns `false`, so the caller falls through to a real write.
 fn is_byte_identical(system: &dyn System, path: &Path, new_bytes: &[u8]) -> bool {
     system
         .read_to_string(path)
@@ -1448,9 +1362,7 @@ fn validate_write_opts(path: &Path, opts: &WriteOptions) -> Result<()> {
 
 /// Enforce the comment-preservation invariant: every comment in
 /// `old_doc` must still be present (by id and byte-for-byte checksum)
-/// in `new_doc`, and no unexpected ids may have appeared. Factored out
-/// of `write` so the partial-write and whole-file paths share the same
-/// diagnostics.
+/// in `new_doc`, and no unexpected ids may have appeared.
 fn check_comment_preservation(
     old_doc: &parser::ParsedDocument,
     new_doc: &parser::ParsedDocument,
@@ -1499,10 +1411,8 @@ pub(crate) fn splice_lines(existing: &str, start: usize, end: usize, replacement
     let existing_lines: Vec<&str> = existing.split('\n').collect();
     let line_count = existing_lines.len();
 
-    // Clamp to bounds. 1-indexed, so `start..=end` maps to 0-indexed
-    // `start-1..=end-1` in the `Vec`. When `end` overshoots the file,
-    // splice to the end of the buffer; when `start` also overshoots,
-    // the prefix is the whole file and the splice is an append.
+    // When `end` overshoots the file the splice runs to the end; when `start` does too, it is an
+    // append.
     let start_idx = start.saturating_sub(1).min(line_count);
     let end_idx = end.min(line_count);
 
@@ -1521,9 +1431,7 @@ pub(crate) fn splice_lines(existing: &str, start: usize, end: usize, replacement
 
 /// # Errors
 ///
-/// Returns an error if:
-/// - The path escapes the sandbox
-/// - The file cannot be read or parsed
+/// Returns an error if the path escapes the sandbox or the file cannot be read or parsed.
 pub fn metadata(
     system: &dyn System,
     base_dir: &Path,
@@ -1551,7 +1459,6 @@ pub fn metadata(
         .with_context(|| format!("stat {}", resolved.display()))?
         .len;
 
-    // Binary files: return file-level metadata only; skip the parse step.
     if binary {
         return Ok(DocumentMetadata {
             binary,
@@ -1567,7 +1474,6 @@ pub fn metadata(
         });
     }
 
-    // Text files: read + parse for markdown-shaped fields.
     let content = system
         .read_to_string(&resolved)
         .with_context(|| format!("reading {}", resolved.display()))?;

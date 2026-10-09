@@ -21,11 +21,7 @@ use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::parser;
 
-/// Compact match-row column names for the base (no-context) arity.
-///
-/// Emitted once per response in the envelope's `match_cols` header;
-/// [`to_compact_row`] fills the positions in this order. `comment_id`
-/// is `null` for body matches.
+/// Column names of a compact match row; `comment_id` is `null` for a body match.
 pub const MATCH_COLS: [&str; 4] = ["line", "location", "text", "comment_id"];
 
 /// [`MATCH_COLS`] widened with `before` / `after` (both string arrays),
@@ -35,9 +31,7 @@ pub const MATCH_COLS_CTX: [&str; 6] = ["line", "location", "text", "comment_id",
 /// Segment attribution for a single line in the document.
 #[derive(Debug, Clone)]
 enum LineAttribution {
-    /// This line is body text.
     Body,
-    /// This line is inside a comment with this ID.
     Comment(String),
 }
 
@@ -103,9 +97,7 @@ pub struct SearchMatch {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct SearchResults {
-    /// The clamped page of matches.
     pub matches: Vec<SearchMatch>,
-    /// Total matches across the corpus, before offset/limit.
     pub total: usize,
 }
 
@@ -138,19 +130,13 @@ pub struct CompactFileMatches {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct SearchOptions {
-    /// Number of context lines around each match.
     pub context_lines: usize,
-    /// Case-insensitive matching.
     pub ignore_case: bool,
-    /// Page size: return at most this many matches. `None` returns all.
+    /// `None` returns all.
     pub limit: Option<usize>,
-    /// Number of matches to skip before the returned page.
     pub offset: usize,
-    /// The search pattern (literal or regex).
     pub pattern: String,
-    /// Treat the pattern as a regex.
     pub regex: bool,
-    /// What to search: body, comments, or all.
     pub scope: SearchScope,
 }
 
@@ -158,11 +144,8 @@ pub struct SearchOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SearchScope {
-    /// Search everything (body + comments).
     All,
-    /// Search only document body text.
     Body,
-    /// Search only comment content.
     Comments,
 }
 
@@ -173,14 +156,12 @@ impl Matcher {
 }
 
 impl SearchOptions {
-    /// Set the number of context lines around matches.
     #[must_use]
     pub const fn context_lines(mut self, n: usize) -> Self {
         self.context_lines = n;
         self
     }
 
-    /// Enable case-insensitive matching.
     #[must_use]
     pub const fn ignore_case(mut self, yes: bool) -> Self {
         self.ignore_case = yes;
@@ -194,7 +175,6 @@ impl SearchOptions {
         self
     }
 
-    /// Create a new set of search options.
     #[must_use]
     pub const fn new(pattern: String) -> Self {
         Self {
@@ -208,21 +188,18 @@ impl SearchOptions {
         }
     }
 
-    /// Skip this many matches before the returned page.
     #[must_use]
     pub const fn offset(mut self, offset: usize) -> Self {
         self.offset = offset;
         self
     }
 
-    /// Enable regex mode.
     #[must_use]
     pub const fn regex(mut self, yes: bool) -> Self {
         self.regex = yes;
         self
     }
 
-    /// Set the search scope.
     #[must_use]
     pub const fn scope(mut self, scope: SearchScope) -> Self {
         self.scope = scope;
@@ -304,9 +281,7 @@ pub fn group_compact(matches: &[SearchMatch], with_context: bool) -> Vec<Value> 
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The directory cannot be walked
-/// - The pattern is an invalid regex (when `options.regex` is true)
+/// Returns an error if the directory cannot be walked or the pattern is an invalid regex.
 pub fn search(
     system: &dyn System,
     base_dir: &Path,
@@ -385,7 +360,6 @@ fn paginate(all: Vec<SearchMatch>, options: &SearchOptions) -> SearchResults {
     SearchResults { matches, total }
 }
 
-/// Build a `Matcher` from the search options.
 fn build_matcher(options: &SearchOptions) -> Result<Matcher> {
     let pattern = if options.regex {
         options.pattern.clone()
@@ -424,7 +398,6 @@ fn build_line_attribution(content: &str, doc: &parser::ParsedDocument) -> Vec<Li
     attribution
 }
 
-/// Search a single file's content for matches.
 fn search_file(
     content: &str,
     relative_path: &Path,
@@ -434,7 +407,6 @@ fn search_file(
 ) {
     let lines: Vec<&str> = content.lines().collect();
 
-    // Parse and build attribution for scope filtering and comment ID attribution.
     let attribution = parser::parse(content).map_or_else(
         |_| vec![LineAttribution::Body; lines.len()],
         |doc| build_line_attribution(content, &doc),
@@ -445,7 +417,6 @@ fn search_file(
             continue;
         }
 
-        // Check scope filter.
         let attr = attribution
             .get(idx)
             .cloned()
@@ -468,7 +439,6 @@ fn search_file(
             SearchScope::All | SearchScope::Body | SearchScope::Comments => {}
         }
 
-        // Collect context lines.
         let start = idx.saturating_sub(options.context_lines);
         let end = (idx + options.context_lines + 1).min(lines.len());
 
@@ -486,7 +456,7 @@ fn search_file(
             after,
             before,
             comment_id,
-            line: idx + 1, // 1-indexed
+            line: idx + 1,
             location,
             path: relative_path.to_path_buf(),
             text: String::from(*line),

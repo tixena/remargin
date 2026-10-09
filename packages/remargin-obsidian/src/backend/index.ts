@@ -1,3 +1,5 @@
+/** Public surface of the backend module. */
+
 export { ActionQueue } from "./ActionQueue";
 export { RemarginBackend } from "./RemarginBackend";
 export type {

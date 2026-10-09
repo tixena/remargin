@@ -1,3 +1,5 @@
+/** The header row of a comment card. */
+
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Comment } from "@/generated";
@@ -5,12 +7,10 @@ import { useParticipants } from "@/hooks/useParticipants";
 import { authorLabel } from "@/lib/authorLabel";
 import { formatFullTime, formatRelative } from "@/lib/relative-time";
 
+/** Props for {@link CommentHeader}. */
 interface CommentHeaderProps {
   comment: Comment;
-  /**
-   * True when the author is currently present in the session. Only rendered
-   * for human authors. Defaults to false.
-   */
+  /** Whether the author is present in the session; rendered for human authors only. */
   isOnline?: boolean;
 }
 
@@ -34,14 +34,8 @@ export function CommentHeader({ comment, isOnline = false }: CommentHeaderProps)
   return (
     <div className="flex items-center justify-between gap-2 w-full">
       <div className="flex items-center gap-1.5 min-w-0">
-        {/*
-         * The author-type badge, the id badge, and the line badge share
-         * the same base Badge styling (px-1 py-0 text-[9px] leading-none)
-         * so they all settle at the same visual height. The avatar's
-         * rounded-full shape and colored background are the only
-         * overrides; stray sizing (`h-5 w-5`) would make it taller than
-         * its siblings and break the header row's visual rhythm.
-         */}
+        {/* The three badges share one base styling so they settle at the same height; sizing the
+            avatar (`h-5 w-5`) would make it taller than its siblings. */}
         <Badge
           className={`px-1 py-0 rounded-full font-mono text-[9px] font-semibold leading-none ${avatarClass}`}
           aria-label={isAgent ? "AI agent" : "Human"}

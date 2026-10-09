@@ -1,3 +1,5 @@
+//! Cross-feature permissions runs: restrict, unrestrict and guarded writes on one temp realm.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,12 +80,7 @@ fn write_md(realm: &TempDir, rel: &str, body: &str) {
     fs::write(path, body).unwrap();
 }
 
-/// E3: the MCP `restrict` tool is intentionally absent
-/// from the surface. Calling it leaves the realm completely
-/// untouched (no .remargin.yaml, no settings file mutation), and
-/// the response is a CLI-pointing tool error. Replaces the
-/// previous "CLI and MCP restrict produce same state" parity
-/// check, which no longer applies now that the MCP entry is gone.
+/// Calling the absent MCP `restrict` tool is a CLI-pointing error that leaves the realm untouched.
 #[test]
 fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
     let realm = realm_with_claude();
@@ -116,9 +113,6 @@ fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
         "MCP claude_restrict must surface as a tool error"
     );
 
-    // No realm artifacts may have been created by the rejected
-    // dispatch: no .remargin.yaml, no project-scope settings, no
-    // user-scope settings file, no sidecar.
     assert!(
         !realm.path().join(".remargin.yaml").exists(),
         "rejected MCP restrict must not create .remargin.yaml"
@@ -140,11 +134,7 @@ fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
     );
 }
 
-/// E5: restrict two paths, unprotect one — only the surviving entry
-/// remains in `.remargin.yaml`. Enforcement of `archive` is load-bearing
-/// on `op_guard` and the hook reading `.remargin.yaml`, not on any
-/// projected settings (there are none — the hook is the single source of
-/// truth), so no sidecar is ever created.
+/// With two paths restricted, unrestricting one leaves only the other in `.remargin.yaml`.
 #[test]
 fn unprotect_one_path_leaves_others_intact() {
     let realm = realm_with_claude();
@@ -165,7 +155,6 @@ fn unprotect_one_path_leaves_others_intact() {
         serde_yaml::Value::String(String::from("archive"))
     );
 
-    // No sidecar is created for hook-only realms — nothing to track.
     assert!(
         !realm
             .path()
@@ -175,11 +164,7 @@ fn unprotect_one_path_leaves_others_intact() {
     );
 }
 
-/// Per-op no-cache: edit `.remargin.yaml` between two write
-/// attempts; the second write succeeds because `op_guard` re-resolves
-/// every call. Post-polarity-flip: target a path OUTSIDE the
-/// allow-list so the first write is refused, then drop the
-/// allow-list and the second write proceeds in open mode.
+/// `op_guard` re-resolves per call: a write refused before a `.remargin.yaml` edit passes after it.
 #[test]
 fn per_op_no_cache_picks_up_yaml_edits() {
     let realm = realm_with_claude();
@@ -201,8 +186,7 @@ fn per_op_no_cache_picks_up_yaml_edits() {
     );
     assert_ne!(blocked.status.code(), Some(0_i32));
 
-    // Drop the trusted_roots key entirely. Empty list = locked;
-    // open mode requires the key be absent.
+    // The key is dropped entirely: an empty list means locked, and open mode needs it absent.
     fs::write(realm.path().join(".remargin.yaml"), "permissions: {}\n").unwrap();
 
     let allowed = run_in(
@@ -221,9 +205,7 @@ fn per_op_no_cache_picks_up_yaml_edits() {
     assert_status(&allowed, 0);
 }
 
-/// E13: a realm with no `permissions:` block continues to work.
-/// Mutating ops succeed without any restrict / `deny_ops` in
-/// place — the feature is fully opt-in.
+/// With no `permissions:` block, mutating ops succeed: the feature is opt-in.
 #[test]
 fn realm_without_permissions_block_is_unaffected() {
     let realm = TempDir::new().unwrap();
@@ -245,10 +227,7 @@ fn realm_without_permissions_block_is_unaffected() {
     assert_status(&out, 0);
 }
 
-/// E14: dot-folder default-deny under `trusted_roots`. Once
-/// `src/secret` is restricted, an op against
-/// `src/secret/.git/foo.md` is refused even though `.git` itself
-/// is not in the YAML.
+/// Under a restricted `src/secret`, `src/secret/.git/foo.md` is refused with `.git` unlisted.
 #[test]
 fn dot_folder_under_restrict_is_denied() {
     let realm = realm_with_claude();
@@ -280,7 +259,7 @@ fn dot_folder_under_restrict_is_denied() {
     );
 }
 
-/// E15: `allow_dot_folders: ['.git']` permits the same op.
+/// `allow_dot_folders: ['.git']` lifts the dot-folder refusal; the broader restrict still applies.
 #[test]
 fn allow_dot_folders_permits_named_dot_folder() {
     let realm = realm_with_claude();
@@ -291,7 +270,6 @@ fn allow_dot_folders_permits_named_dot_folder() {
     );
     restrict_in(&realm, "src/secret", &[]);
 
-    // Augment the YAML to allow `.git`.
     let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
     let augmented = format!("{yaml}  allow_dot_folders:\n    - .git\n");
     fs::write(realm.path().join(".remargin.yaml"), augmented).unwrap();
@@ -309,12 +287,8 @@ fn allow_dot_folders_permits_named_dot_folder() {
             "---\ntitle: t\n---\n\n# Updated\n",
         ],
     );
-    // The dot-folder default-deny is bypassed, but the
-    // surrounding `restrict` still covers src/secret. The op is
-    // refused for the broader restrict reason — the test pins
-    // the *specific* dot-folder branch is not the cause. Either
-    // way, success remains gated by the broader restrict, so we
-    // assert the error message no longer mentions dot-folders.
+    // The op is still refused by the surrounding restrict; the assertion is that the refusal does
+    // not mention dot-folders.
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !stderr.contains("dot-folder"),
@@ -322,10 +296,7 @@ fn allow_dot_folders_permits_named_dot_folder() {
     );
 }
 
-/// E16: `also_deny_bash` lands on the `.remargin.yaml` entry — not in a
-/// settings file. The hook denies every command touching a managed path
-/// regardless of verb, so no `Bash(...)` deny is projected. Uses commands
-/// NOT in the default set to prove the flag flows through to the entry.
+/// `also_deny_bash` lands on the `.remargin.yaml` entry and no settings file is projected.
 #[test]
 fn also_deny_bash_lands_on_yaml_entry() {
     let realm = realm_with_claude();
@@ -347,16 +318,13 @@ fn also_deny_bash_lands_on_yaml_entry() {
     assert!(extras.contains(&"aria2c".to_owned()), "got: {extras:?}");
     assert!(extras.contains(&"nc".to_owned()), "got: {extras:?}");
 
-    // No settings file is projected.
     assert!(
         !realm.path().join(".claude/settings.local.json").exists(),
         "no settings file should be written"
     );
 }
 
-/// E17: `--cli-allowed` lands on the `.remargin.yaml` entry; no settings
-/// file is projected. CLI denial (or its exemption) is enforced by the
-/// `PreToolUse` hook via the folder-level `cli_allowed` field.
+/// `--cli-allowed` lands on the `.remargin.yaml` entry; the `PreToolUse` hook reads it from there.
 #[test]
 fn cli_allowed_persists_on_yaml_entry() {
     let realm = realm_with_claude();

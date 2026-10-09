@@ -32,9 +32,7 @@ use crate::writer::ensure_not_forbidden_target;
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct PurgeResult {
-    /// Number of attachment files cleaned up.
     pub attachments_cleaned: usize,
-    /// Number of comment blocks removed.
     pub comments_removed: usize,
 }
 
@@ -59,25 +57,21 @@ impl PurgeResult {
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct PurgeBulkResult {
-    /// Files that were attempted but refused; carries the reason verbatim.
+    /// Attempted but refused, with the reason verbatim.
     pub failed: Vec<PurgeBulkFailure>,
-    /// Files where comments were stripped.
     pub purged: Vec<PurgeBulkFile>,
-    /// Files attempted that already had no comments (no-op writes).
+    /// Already comment-free, so nothing was written.
     pub skipped: Vec<PathBuf>,
 }
 
 impl PurgeBulkResult {
-    /// Sum of per-file `attachments_cleaned` across every entry in
-    /// `purged`. Mirrors [`Self::comments_removed_total`].
+    /// Sum of per-file `attachments_cleaned` across every entry in `purged`.
     #[must_use]
     pub fn attachments_cleaned_total(&self) -> usize {
         self.purged.iter().map(|f| f.attachments_cleaned).sum()
     }
 
     /// Sum of per-file `comments_removed` across every entry in `purged`.
-    /// Convenient for adapters that want a single `comments_removed`
-    /// counter on the response.
     #[must_use]
     pub fn comments_removed_total(&self) -> usize {
         self.purged.iter().map(|f| f.comments_removed).sum()
@@ -128,11 +122,8 @@ impl PurgeBulkResult {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct PurgeBulkFile {
-    /// Number of attachment files cleaned up for this file.
     pub attachments_cleaned: usize,
-    /// Number of comment blocks removed from this file.
     pub comments_removed: usize,
-    /// Absolute path of the purged file.
     pub path: PathBuf,
 }
 
@@ -140,9 +131,8 @@ pub struct PurgeBulkFile {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct PurgeBulkFailure {
-    /// Absolute path of the file that failed to purge.
     pub path: PathBuf,
-    /// Human-readable refusal reason, formatted via `{err:#}`.
+    /// Formatted via `{err:#}`.
     pub reason: String,
 }
 
@@ -155,23 +145,17 @@ fn strip_prefix_display(path: &Path, base: &Path) -> String {
         .to_string()
 }
 
-/// Remove all Remargin comment blocks from a document.
-///
-/// Callers who want to preview the outcome without writing should use
-/// `remargin plan purge`; the per-op `--dry-run` flag has been
-/// dropped in favour of the uniform plan projection.
+/// Remove all Remargin comment blocks from a document. `remargin plan purge` previews the
+/// outcome without writing.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The file cannot be read or written
-/// - The document cannot be parsed
+/// Returns an error if the file cannot be read or written, or the document cannot be parsed.
 pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Result<PurgeResult> {
     ensure_not_forbidden_target(path)?;
     pre_mutate_check_for_caller(system, "purge", path, &config.caller_info())?;
     let mut doc = parser::parse_file(system, path)?;
 
-    // Count comments and collect attachment paths.
     let comments = doc.comments();
     let comments_removed = comments.len();
 
@@ -182,13 +166,10 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
 
     doc.segments.retain(|seg| matches!(seg, Segment::Body(_)));
 
-    // Collapse consecutive empty Body segments and normalize double blank lines.
     collapse_body_segments(&mut doc.segments);
 
-    // Clean up remargin_* frontmatter fields.
     clean_frontmatter(&mut doc);
 
-    // Clean up orphaned attachments.
     let doc_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut attachments_cleaned: usize = 0;
     for attachment in &attachment_paths {
@@ -200,10 +181,8 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
         }
     }
 
-    // Write the clean document. Purge removes every comment, so the
-    // post-write verify gate has no rows to evaluate — report is
-    // vacuously `ok`. Keeping the gate present still guards against
-    // future refactors that might mutate comments as part of purge.
+    // Purge removes every comment, so the verify gate has no rows to evaluate; it stays as a
+    // guard for any purge step that would mutate a comment.
     commit_with_verify(system, &doc, config, path, |verified_doc| {
         let markdown = verified_doc.to_markdown()?;
         system
@@ -251,7 +230,6 @@ fn clean_frontmatter(doc: &mut parser::ParsedDocument) {
         return;
     };
 
-    // Remove remargin_* fields.
     let keys_to_remove: Vec<Value> = mapping
         .keys()
         .filter(|key| key.as_str().is_some_and(|s| s.starts_with("remargin_")))
@@ -262,7 +240,6 @@ fn clean_frontmatter(doc: &mut parser::ParsedDocument) {
         mapping.remove(key);
     }
 
-    // Rebuild frontmatter.
     if mapping.is_empty() {
         // No fields left -- remove frontmatter entirely.
         let remaining = lines[closer_idx + 1..].join("\n");
@@ -279,7 +256,6 @@ fn clean_frontmatter(doc: &mut parser::ParsedDocument) {
 
 /// Collapse consecutive Body segments and remove excessive blank lines.
 fn collapse_body_segments(segments: &mut Vec<Segment>) {
-    // First pass: merge consecutive Body segments.
     let mut merged = Vec::new();
     let mut current_body = String::new();
 
@@ -298,7 +274,6 @@ fn collapse_body_segments(segments: &mut Vec<Segment>) {
         merged.push(Segment::Body(current_body));
     }
 
-    // Second pass: normalize excessive blank lines in Body segments.
     for seg in &mut merged {
         if let Segment::Body(text) = seg {
             // Replace 3+ consecutive newlines with 2 (max one blank line between paragraphs).

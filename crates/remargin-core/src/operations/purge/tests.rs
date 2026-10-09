@@ -107,23 +107,11 @@ fn frontmatter_cleanup() {
     purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
-    // User field preserved.
     assert!(content.contains("title: Test"));
-    // Remargin fields removed.
     assert!(!content.contains("remargin_pending"));
     assert!(!content.contains("remargin_pending_for"));
     assert!(!content.contains("remargin_last_activity"));
 }
-
-// Note: per-op `--dry-run` was removed in; `plan purge` covers
-// that preview path now.
-
-// ---------------------------------------------------------------------
-// Layer 1 op-guard wiring — purge is the
-// representative integration. The follow-up ticket wires the remaining
-// mutating ops; the op_guard helper itself is exhaustively tested under
-// `permissions::op_guard::tests`.
-// ---------------------------------------------------------------------
 
 #[test]
 fn purge_refused_when_target_outside_allow_list() {
@@ -194,19 +182,11 @@ fn no_excessive_blank_lines() {
     purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
-    // Should not have 3+ consecutive newlines.
     assert!(
         !content.contains("\n\n\n"),
         "should not have triple newlines after purge"
     );
 }
-
-// ---------------------------------------------------------------------
-// Directory purge. Recursive `purge --recursive` walks a
-// directory and applies a per-file op_guard check + purge to every
-// visible `.md` file under it. Per-file refusals never abort the
-// rest of the walk.
-// ---------------------------------------------------------------------
 
 #[test]
 fn purge_dir_purges_every_md_file() {
@@ -252,7 +232,6 @@ fn purge_dir_skips_non_markdown_files() {
 
     assert_eq!(result.purged.len(), 1, "only a.md is markdown");
     assert_eq!(result.purged[0].path, Path::new("/realm/a.md"));
-    // Plain-text file untouched.
     let txt = system.read_to_string(Path::new("/realm/keep.txt")).unwrap();
     assert_eq!(txt, "plain text body");
 }
@@ -328,7 +307,6 @@ fn purge_dir_records_skipped_when_no_comments() {
 
 #[test]
 fn purge_dir_partial_block_with_deny_ops() {
-    // deny_ops blocks purge only on b.md; a.md should still be purged.
     let yaml = "permissions:\n  deny_ops:\n    - path: b.md\n      ops: [purge]\n";
     let system = MemorySystem::new()
         .with_dir(Path::new("/realm"))
@@ -355,8 +333,6 @@ fn purge_dir_partial_block_with_deny_ops() {
 
 #[test]
 fn purge_dir_deny_ops_on_parent_blocks_every_file() {
-    // deny_ops `path: .` covers every nested file via op_guard: every
-    // file is refused with DeniedOp, no file is mutated.
     let yaml = "permissions:\n  deny_ops:\n    - path: .\n      ops: [purge]\n";
     let system = MemorySystem::new()
         .with_dir(Path::new("/realm"))
@@ -380,7 +356,6 @@ fn purge_dir_deny_ops_on_parent_blocks_every_file() {
             failure.reason
         );
     }
-    // Comments survive on disk.
     let a = system.read_to_string(Path::new("/realm/a.md")).unwrap();
     let doc = parser::parse(&a).unwrap();
     assert_eq!(doc.comments().len(), 2);
@@ -388,8 +363,6 @@ fn purge_dir_deny_ops_on_parent_blocks_every_file() {
 
 #[test]
 fn purge_dir_skips_dot_folders() {
-    // walk_dir(hidden=false) excludes dot-folders entirely; the .git
-    // file should not be visited.
     let system = MemorySystem::new()
         .with_dir(Path::new("/realm"))
         .unwrap()
@@ -407,7 +380,6 @@ fn purge_dir_skips_dot_folders() {
 
     assert_eq!(result.purged.len(), 1, "only keep.md should be purged");
     assert_eq!(result.purged[0].path, Path::new("/realm/keep.md"));
-    // Dot-folder file untouched.
     let log_content = system
         .read_to_string(Path::new("/realm/.git/log.md"))
         .unwrap();
@@ -454,8 +426,6 @@ fn purge_dir_recurses_into_subdirectories() {
 
 #[test]
 fn purge_dir_replan_after_apply_is_noop() {
-    // Apply -> re-walk: every file should land in `skipped` because
-    // the comments are gone.
     let system = MemorySystem::new()
         .with_dir(Path::new("/realm"))
         .unwrap()
@@ -464,11 +434,9 @@ fn purge_dir_replan_after_apply_is_noop() {
         .with_file(Path::new("/realm/b.md"), doc_with_comments().as_bytes())
         .unwrap();
 
-    // First pass: both purged.
     let first = purge_dir(&system, Path::new("/realm"), &open_config()).unwrap();
     assert_eq!(first.purged.len(), 2);
 
-    // Second pass: both already comment-free -> skipped.
     let second = purge_dir(&system, Path::new("/realm"), &open_config()).unwrap();
     assert!(second.purged.is_empty(), "re-run should be a noop");
     assert_eq!(second.skipped.len(), 2);

@@ -20,24 +20,20 @@ use anyhow::{Context as _, Result};
 use os_shim::System;
 use serde::{Deserialize, Serialize};
 
-/// Current sidecar format version. Bumped only on incompatible shape
-/// changes. Loaders refuse files whose version they do not recognise.
+/// Bumped only on incompatible shape changes; loaders refuse a version they do not recognise.
 pub const SIDECAR_VERSION: u32 = 1;
 
-/// Sidecar relative path under the anchor directory.
+/// Relative to the anchor directory.
 pub const SIDECAR_RELATIVE_PATH: &str = ".claude/.remargin-restrictions.json";
 
-/// `.gitignore` entry written on first sidecar save.
 pub const SIDECAR_GITIGNORE_ENTRY: &str = ".claude/.remargin-restrictions.json";
 
 /// Top-level sidecar shape persisted as JSON.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Sidecar {
-    /// One entry per restricted path (canonical absolute string used
-    /// as the key). [`BTreeMap`] keeps the on-disk JSON deterministic.
+    /// Keyed by the restricted path's canonical absolute string.
     pub entries: BTreeMap<String, SidecarEntry>,
-    /// Format version. Loaders check this against [`SIDECAR_VERSION`].
     pub version: u32,
 }
 
@@ -57,25 +53,20 @@ impl Sidecar {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SidecarEntry {
-    /// ISO 8601 timestamp. Caller-supplied so tests can pin a value
-    /// and the production caller can use [`chrono::Utc::now`].
+    /// ISO 8601, supplied by the caller.
     pub added_at: String,
-    /// Settings files the rules were merged into. Mix of relative
-    /// (project-scope) and absolute (user-scope) paths. Reverse uses
-    /// this list to know which files to scan.
+    /// The settings files the rules were merged into: relative for project scope, absolute for
+    /// user scope.
     pub added_to_files: Vec<PathBuf>,
-    /// Allow rules added by the matching `apply_rules` call.
     pub allow: Vec<String>,
-    /// Deny rules added by the matching `apply_rules` call.
     pub deny: Vec<String>,
 }
 
 /// Add an entry under `target_path`.
 ///
-/// Replaces any prior entry for the same path so a re-apply records
-/// the latest deltas; the apply caller (slice 3) is responsible for
-/// de-duping rules in the settings files themselves. Calls [`save`]
-/// internally so the sidecar is always persisted before returning.
+/// Replaces any prior entry for the same path so a re-apply records the latest deltas; the
+/// apply caller de-dupes rules in the settings files themselves. Calls [`save`], so the sidecar
+/// is persisted before returning.
 ///
 /// # Errors
 ///
@@ -141,9 +132,7 @@ pub fn remove_entry(
 /// `.claude/.remargin-restrictions.json` is in `<anchor>/.gitignore`.
 ///
 /// JSON is pretty-printed for diff-friendly inspection. Writes go
-/// through `system.write` directly — atomic write-then-rename lives
-/// with slice 3 since it needs careful coordination with
-/// the settings-file merge.
+/// through `system.write` directly, without a write-then-rename.
 ///
 /// # Errors
 ///

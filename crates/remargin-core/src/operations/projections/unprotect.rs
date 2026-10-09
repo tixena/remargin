@@ -24,8 +24,6 @@ use crate::permissions::restrict::{RestrictEntryProjection, find_claude_anchor};
 use crate::permissions::sidecar;
 use crate::permissions::unprotect::UnprotectArgs;
 
-/// Wildcard literal accepted in `unprotect.path`. Mirrors the schema
-/// constant in [`crate::config::permissions`].
 const RESTRICT_WILDCARD: &str = "*";
 
 /// Outcome of [`project_unprotect`].
@@ -38,10 +36,7 @@ const RESTRICT_WILDCARD: &str = "*";
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum UnprotectProjection {
-    /// Concrete preview the dispatcher attaches to `PlanReport`.
     Diff(Box<UnprotectConfigDiff>),
-    /// Hard reject. The dispatcher sets `would_commit = false` and
-    /// surfaces the carried reason verbatim.
     Reject(String),
 }
 

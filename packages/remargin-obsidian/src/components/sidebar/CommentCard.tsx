@@ -1,3 +1,5 @@
+/** One comment in the thread list. */
+
 import { AckButton } from "@/components/sidebar/AckButton";
 import { AckToggle } from "@/components/sidebar/AckToggle";
 import { CommentHeader } from "@/components/sidebar/CommentHeader";
@@ -21,38 +23,25 @@ import { ackAffordanceFor } from "@/lib/ack-state";
 import { authorLabel } from "@/lib/authorLabel";
 import { activationKeyHandler } from "@/lib/keyboardActivation";
 
+/** Props for {@link CommentCard}. */
 interface CommentCardProps {
   comment: Comment;
   file: string;
   depth: number;
   isOnline?: boolean;
-  /** Current identity name; used by ReactionPills to mark "mine" pills. */
   me?: string | null;
-  /**
-   * Toggle the current identity's ack on this comment. Invoked from two
-   * places on the card: the inline AckButton (when the viewer hasn't
-   * acked yet, `remove: false`) and the ellipsis-menu `Unack` item (when
-   * the viewer is already in the ack roster, `remove: true`).
-   */
+  /** Toggles the viewer's ack; `remove` is true when it comes from the Unack menu item. */
   onAck: (id: string, remove: boolean) => void;
   onDelete: (id: string) => void;
   onReply?: (id: string) => void;
-  /**
-   * Called when the user wants to add or remove a reaction. `remove` is
-   * true when the click was on a pill the current identity already reacted
-   * to.
-   */
+  /** `remove` is true when the click was on a pill the current identity already reacted to. */
   onReact?: (id: string, emoji: string, remove: boolean) => void;
   onGoToLine?: (line: number) => void;
 }
 
 /**
- * A single comment in the thread list. Owns the visual layout defined in
- * UI task 20: rich header, body, optional reply targets / reactions, and a
- * split action row (Ack + reactions on the left, Reply + More on the right).
- *
- * Ack, reactions, and `to:` chips live here only as placeholders until
- * tasks 21/22/23 replace them with their dedicated components.
+ * A single comment in the thread list: rich header, body, optional reply targets / reactions, and
+ * a split action row (Ack + reactions on the left, Reply + More on the right).
  */
 export function CommentCard({
   comment,
@@ -69,19 +58,13 @@ export function CommentCard({
   const isClickable = comment.line > 0 && !!onGoToLine;
   const ackAuthors: string[] = (comment.ack ?? []).map((a) => a.author);
   const { resolveDisplayName } = useParticipants();
-  // Full ack-affordance decision in one place (see `ackAffordanceFor`):
-  // pill kind (label / button) plus kebab item (ack / unack / none).
-  // Rules are documented on the helper; the card is a pure render of
-  // its output.
   const affordance = ackAffordanceFor(comment.author, ackAuthors, me);
   const toTargets: readonly string[] = comment.to ?? [];
 
   return (
     <div
-      // `data-comment-id` lets the editor-side widget focus bridge
-      // (T36 `plugin.focusComment`) find the right card to scroll into
-      // view + briefly highlight. Empty ids leave the attribute off so
-      // the selector cannot accidentally match unrelated cards.
+      // `data-comment-id` lets the editor-side focus bridge find the card to scroll to and highlight.
+      // An empty id leaves the attribute off so the selector cannot match unrelated cards.
       data-comment-id={comment.id || undefined}
       className={`flex flex-col gap-[5px] px-2.5 py-2 border-b border-bg-border hover:bg-bg-hover remargin-comment-card ${
         depth > 0 ? "border-l-2 border-l-accent" : ""

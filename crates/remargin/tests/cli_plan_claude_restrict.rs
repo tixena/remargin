@@ -1,11 +1,9 @@
 //! `remargin plan claude restrict` integration tests.
 //!
-//! Mirrors the `cli_restrict.rs` patterns: real-filesystem temp dirs,
-//! `assert_cmd` invocations, JSON output assertions. Covers
-//! scenarios 16-22 of the testing plan: plan + apply parity,
-//! the no-write invariant, the noop covenant, allow-vs-deny overlap
-//! detection, anchor-surprise detection, MCP/CLI parity, and the
-//! wildcard projection.
+//! Real-filesystem temp dirs, `assert_cmd` invocations and JSON output assertions cover the
+//! no-write invariant, plan + apply parity with the noop on replan, the absence of projected
+//! settings rules and of allow-vs-deny overlap conflicts, anchor-surprise detection, and the
+//! wildcard form.
 
 #[cfg(test)]
 #[path = "cli_plan_claude_restrict/tests.rs"]

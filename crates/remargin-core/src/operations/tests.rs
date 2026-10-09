@@ -18,15 +18,12 @@ use crate::operations::{
 use crate::parser::{self, AuthorType};
 use crate::writer::{FORBIDDEN_TARGETS, InsertPosition};
 
-/// The body every gate test uses: one paragraph, split by hand across two
-/// lines. Mechanical enough that the reject tier can act on it.
 const DOC_WITH_WIDE_GAP: &str =
     "---\ntitle: Test\nauthor: eduardo\n---\n\n# One\n\nx\n\n\n\ny\n\n# Two\n\nz\n";
 
 const HARD_WRAPPED_BODY: &str = "The import form and the generate form both read their field list from the\n\
                                  gateway, so a change to either one has to land in both controllers.\n";
 
-/// A minimal valid remargin document for testing.
 const MINIMAL_DOC: &str = "\
 ---
 title: Test
@@ -38,8 +35,7 @@ author: eduardo
 Some body text.
 ";
 
-/// A document the pre-write linter refuses: the fenced code block is
-/// never closed.
+/// The fenced code block is never closed, so the pre-write linter refuses it.
 const LINT_FAILING_DOC: &str = "\
 ---
 title: Test
@@ -52,9 +48,8 @@ author: eduardo
 fn main() {}
 ";
 
-/// Ed25519 test key used by the `project_sign` tests. Matched pair with
-/// the public key registered for `eduardo` under `sign_config()` — keeps
-/// the projection's signature output verifiable against the registry.
+/// The private half of the key the `sign_config()` registry holds, so projected signatures
+/// verify.
 const PROJECT_SIGN_PRIVATE_KEY: &str = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -170,7 +165,6 @@ Reply to child1.
     )
 }
 
-/// Create a test config with open mode.
 fn open_config() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -186,17 +180,14 @@ fn open_config() -> ResolvedConfig {
     }
 }
 
-/// Create a mock system with a document file.
 fn system_with_doc(content: &str) -> MemorySystem {
     MemorySystem::new()
         .with_file(Path::new("/docs/test.md"), content.as_bytes())
         .unwrap()
 }
 
-/// Config used by `project_sign` tests. Identity is `eduardo`, key is
-/// wired to `/keys/ed25519`, and the registry maps `eduardo` to the
-/// public half of [`PROJECT_SIGN_PRIVATE_KEY`]. Mode is `open` to keep
-/// the verify gate neutral during fixture setup.
+/// Open-mode config for the `project_sign` tests: the key is at `/keys/ed25519` and the
+/// registry maps the identity to the public half of [`PROJECT_SIGN_PRIVATE_KEY`].
 fn sign_config() -> ResolvedConfig {
     let public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+wwXvHwYjjSVOO1PyMrur+yoibLd5o/hmV test@remargin";
     let yaml = format!(
@@ -311,14 +302,9 @@ fn create_comment_with_sandbox_stages_and_writes_together() {
     assert_eq!(doc.comments()[0].content, "Staged with sandbox.");
 }
 
-/// the sandbox roster stays one-entry-per-
-/// identity, and the timestamp refreshes on every sandbox-add path
-/// (including the `comment --sandbox` shortcut). Pre-existing
-/// timestamp at 10:00:00 is replaced by `now`; the roster size
-/// stays at 1.
+/// The existing 10:00:00 timestamp is replaced by `now` and the roster stays at one entry.
 #[test]
 fn create_comment_with_sandbox_refreshes_existing_entry() {
-    // Seed the document with a pre-existing sandbox entry for eduardo.
     let seeded = "\
 ---
 title: Test
@@ -352,16 +338,12 @@ Body.
     )
     .unwrap();
 
-    // Pre-existing 10:00:00 timestamp is replaced (refresh
-    // semantics ).
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert!(
         !content.contains("eduardo@2026-04-11T10:00:00+00:00"),
         "stale timestamp should have been refreshed, doc was:\n{content}"
     );
-    // Roster stays at one eduardo entry.
     assert_eq!(content.matches("eduardo@").count(), 1);
-    // And the comment was still written.
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 1);
 }
@@ -478,7 +460,6 @@ fn react_add_emoji() {
 
 #[test]
 fn react_remove_emoji() {
-    // Start with a document that has a reaction.
     let doc_content = "\
 ---
 title: Test
@@ -539,7 +520,6 @@ fn delete_comment_with_children_is_refused() {
     let system = system_with_doc(&doc_with_thread());
     let config = open_config();
 
-    // `grandchild` replies to `child1`; deleting `child1` alone orphans it.
     let result = delete_comments(&system, Path::new("/docs/test.md"), &config, &["child1"]);
     assert!(
         result.is_err(),
@@ -563,7 +543,6 @@ fn delete_leaf_comment_with_no_children_is_allowed() {
     let system = system_with_doc(&doc_with_thread());
     let config = open_config();
 
-    // `grandchild` is a leaf — nothing replies to it, so deleting it is safe.
     delete_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -583,7 +562,6 @@ fn delete_whole_thread_at_once_is_allowed() {
     let system = system_with_doc(&doc_with_thread());
     let config = open_config();
 
-    // A parent plus all its descendants in one call orphans nothing.
     delete_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -641,10 +619,7 @@ Original content.
     assert!(cm.ack.is_empty(), "ack should be cleared after edit");
 }
 
-/// every successful edit stamps `edited_at` on
-/// the comment so the activity command can surface the edit. The
-/// original `ts` (creation time) stays put; only `edited_at`
-/// advances.
+/// The original `ts` stays put; only `edited_at` advances.
 #[test]
 fn edit_stamps_edited_at() {
     let doc_content = "\
@@ -683,19 +658,16 @@ Original.
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(cm.edited_at.is_some(), "edit must stamp edited_at");
-    // Original ts unchanged.
     assert_eq!(
         cm.ts.to_rfc3339(),
         "2026-04-06T12:00:00-04:00",
         "creation ts must survive edit"
     );
-    // The serialized form carries the new field.
     assert!(content.contains("edited_at:"));
 }
 
-/// comments parsed from older docs without an
-/// `edited_at:` line round-trip with `edited_at = None`. No
-/// fabricated value, no extra YAML line, no checksum drift.
+/// A comment with no `edited_at:` line round-trips with none: no fabricated value, no extra
+/// line.
 #[test]
 fn pre_existing_comment_without_edited_at_round_trips() {
     let doc_content = "\
@@ -720,8 +692,6 @@ Body.
     let parsed = parser::parse(doc_content).unwrap();
     assert!(parsed.find_comment("abc").unwrap().edited_at.is_none());
 
-    // Round-trip: re-emit the doc and re-parse. No `edited_at:` line
-    // should appear and the second parse should still have None.
     let re_emitted = parsed.to_markdown().unwrap();
     assert!(
         !re_emitted.contains("edited_at:"),
@@ -749,15 +719,12 @@ fn edit_cascade_clears_acks() {
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&content).unwrap();
 
-    // Root's ack should be cleared.
     let root = doc.find_comment("root").unwrap();
     assert!(root.ack.is_empty(), "root ack should be cleared");
 
-    // Child1's ack should be cleared (cascading).
     let child1 = doc.find_comment("child1").unwrap();
     assert!(child1.ack.is_empty(), "child1 ack should be cleared");
 
-    // Grandchild's ack should be cleared (deep cascading).
     let grandchild = doc.find_comment("grandchild").unwrap();
     assert!(
         grandchild.ack.is_empty(),
@@ -771,7 +738,6 @@ fn preservation_invariant() {
     let config = open_config();
     let position = InsertPosition::Append;
 
-    // Create a second comment.
     create_comment(
         &system,
         Path::new("/docs/test.md"),
@@ -794,7 +760,6 @@ fn preservation_invariant() {
     let comments = doc.comments();
     assert_eq!(comments.len(), 2);
 
-    // Original comment still present.
     assert!(doc.find_comment("abc").is_some());
 }
 
@@ -875,7 +840,6 @@ More text here.
     )
     .unwrap();
 
-    // Delete the comment.
     delete_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -886,7 +850,6 @@ More text here.
 
     let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
 
-    // The document should not have triple-newline sequences (max one blank line).
     assert!(
         !after.contains("\n\n\n"),
         "delete left triple-newline artifact:\n{after}"
@@ -1006,7 +969,6 @@ Some body text.
     let system = system_with_doc(original);
     let config = open_config();
 
-    // Insert three comments consecutively.
     let id1 = create_comment(
         &system,
         Path::new("/docs/test.md"),
@@ -1058,7 +1020,6 @@ Some body text.
     )
     .unwrap();
 
-    // Delete all three.
     delete_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1143,7 +1104,6 @@ Some body text.
 
     let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
 
-    // Delete only the middle comment.
     delete_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1155,7 +1115,6 @@ Some body text.
     let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     let doc = parser::parse(&after).unwrap();
 
-    // Two comments should remain.
     assert_eq!(doc.comments().len(), 2);
 
     assert!(
@@ -1194,9 +1153,6 @@ fn delete_collapses_adjacent_body_segments() {
 
 #[test]
 fn delete_preserves_intentional_blank_lines() {
-    // A document with two blank lines between sections (intentional) and a
-    // comment at the end. Deleting the comment should preserve the existing
-    // two-newline separation (one blank line) in the body.
     let original = "\
 ---
 title: Test
@@ -1229,7 +1185,6 @@ A comment at the end.
 
     let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
 
-    // The blank line between Section One and Section Two should be preserved.
     assert!(
         after.contains("Text in section one.\n\n## Section Two"),
         "intentional blank line between sections was removed:\n{after}"
@@ -1283,7 +1238,6 @@ fn ack_remove_preserves_other_acks() {
     let mut agent_config = open_config();
     agent_config.identity = Some(String::from("some_agent"));
 
-    // Both identities ack the same comment.
     ack_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1301,7 +1255,6 @@ fn ack_remove_preserves_other_acks() {
     )
     .unwrap();
 
-    // Eduardo removes only his ack.
     eduardo_config.identity = Some(String::from("eduardo"));
     ack_comments(
         &system,
@@ -1324,7 +1277,6 @@ fn ack_remove_is_idempotent_when_not_acked() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
-    // Removing a non-existent ack should be a no-op (not an error).
     ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
 
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
@@ -1353,7 +1305,6 @@ fn ack_twice_is_idempotent() {
     assert_eq!(first_cm.ack.len(), 1);
     let first_ts = first_cm.ack[0].ts;
 
-    // Second ack by the same identity — should be a no-op (no new entry).
     ack_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1380,9 +1331,6 @@ fn ack_twice_is_idempotent() {
 
 #[test]
 fn ack_self_heals_duplicate_entries() {
-    // Pre-dirty input: two acks from `alice` at different timestamps
-    // (legacy buggy run). A subsequent ack should collapse them to
-    // exactly one entry keyed on the first timestamp.
     let doc_content = "\
 ---
 title: Test
@@ -1437,10 +1385,6 @@ First comment.
 
 #[test]
 fn ack_noop_rewrites_file() {
-    // The file should be rewritten every time `ack` runs, even when
-    // the acting identity is already in the list. This keeps
-    // `remargin_last_activity` and the frontmatter checksum fresh so
-    // downstream inbox queries stay consistent.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
 
@@ -1453,9 +1397,6 @@ fn ack_noop_rewrites_file() {
     )
     .unwrap();
 
-    // No-op ack (eduardo already present) — the ensure_frontmatter +
-    // write_document tail must still run so remargin_last_activity
-    // and the frontmatter checksum stay fresh.
     ack_comments(
         &system,
         Path::new("/docs/test.md"),
@@ -1467,11 +1408,7 @@ fn ack_noop_rewrites_file() {
 
     let second_content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
 
-    // The frontmatter-level `remargin_last_activity` is recomputed on
-    // every `ensure_frontmatter` call.
     assert!(second_content.contains("remargin_last_activity"));
-    // And the ack block must remain a single entry for eduardo
-    // (no duplicate push on no-op).
     let doc = parser::parse(&second_content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert_eq!(cm.ack.len(), 1);
@@ -1480,8 +1417,6 @@ fn ack_noop_rewrites_file() {
 
 #[test]
 fn ack_remove_after_dedup_clears_all_duplicates() {
-    // Pre-dirty: alice has two ack entries. `ack --remove` as alice
-    // should produce zero alice entries (dedup first, then strip).
     let doc_content = "\
 ---
 title: Test
@@ -1582,10 +1517,6 @@ fn auto_ack_on_reply() {
 
 #[test]
 fn auto_ack_reply_delete_reply_does_not_double_ack_parent() {
-    // reproduction: a reply auto-acks the parent; deleting the
-    // reply leaves the parent's ack in place; replying a second time
-    // would historically push a second ack from the same author. The
-    // writer-side dedupe collapses to one entry.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
     let position = InsertPosition::Append;
@@ -1756,9 +1687,6 @@ fn auto_ack_without_reply_to_no_file_modification() {
 
 #[test]
 fn auto_ack_none_replying_to_other_author_acks_parent() {
-    // Parent `abc` is authored by `eduardo` (per doc_with_comment); the
-    // caller is `alice`. With auto_ack omitted (None), the smart default
-    // must ack the parent because parent.author != caller.
     let system = system_with_doc(&doc_with_comment());
     let mut config = open_config();
     config.identity = Some(String::from("alice"));
@@ -1793,9 +1721,6 @@ fn auto_ack_none_replying_to_other_author_acks_parent() {
 
 #[test]
 fn auto_ack_none_replying_to_own_comment_does_not_ack() {
-    // Parent `abc` is authored by `eduardo`, caller is `eduardo`. With
-    // auto_ack omitted, the smart default must NOT ack — don't ack your
-    // own replies.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
     let position = InsertPosition::Append;
@@ -1829,9 +1754,6 @@ fn auto_ack_none_replying_to_own_comment_does_not_ack() {
 
 #[test]
 fn auto_ack_none_without_reply_to_is_noop() {
-    // Top-level comment (no reply_to) with auto_ack=None. No parent to
-    // ack, no error — Some(true) without reply_to is the only erroring
-    // case; None is a silent no-op.
     let system = system_with_doc(MINIMAL_DOC);
     let config = open_config();
     let position = InsertPosition::Append;
@@ -1863,8 +1785,6 @@ fn auto_ack_none_without_reply_to_is_noop() {
 
 #[test]
 fn auto_ack_some_false_replying_to_other_author_skips_ack() {
-    // Explicit Some(false) must override the smart default, even when
-    // replying to someone else's comment.
     let system = system_with_doc(&doc_with_comment());
     let mut config = open_config();
     config.identity = Some(String::from("alice"));
@@ -1897,17 +1817,12 @@ fn auto_ack_some_false_replying_to_other_author_skips_ack() {
     );
 }
 
-// ===========================================================================
-// Reply-to auto-populate `to` tests
-// ===========================================================================
-
 #[test]
 fn reply_auto_populates_to() {
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
     let position = InsertPosition::Append;
 
-    // Reply to "abc" (authored by "eduardo") without specifying `--to`.
     let new_id = create_comment(
         &system,
         Path::new("/docs/test.md"),
@@ -1937,8 +1852,6 @@ fn reply_auto_populates_to() {
 
 #[test]
 fn reply_explicit_to_prepends_parent_author() {
-    // Updated invariant: the parent author is always first
-    // in `to:`; explicit `--to` entries are appended after it.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
     let position = InsertPosition::Append;
@@ -1972,9 +1885,6 @@ fn reply_explicit_to_prepends_parent_author() {
 
 #[test]
 fn reply_dedupes_parent_when_caller_includes_it() {
-    // If the caller explicitly includes the parent author in `--to`,
-    // it should be deduped (not doubled), with the parent still first
-    // and other recipients preserved in input order.
     let system = system_with_doc(&doc_with_comment());
     let config = open_config();
     let position = InsertPosition::Append;
@@ -2008,12 +1918,10 @@ fn reply_dedupes_parent_when_caller_includes_it() {
 
 #[test]
 fn reply_with_multiple_extras_prepends_parent() {
-    // Parent first, then all caller-supplied recipients in input order.
     let system = system_with_doc(&doc_with_thread());
     let config = open_config();
     let position = InsertPosition::Append;
 
-    // Reply to "child1" (authored by "alice") with extras [bob, carol].
     let new_id = create_comment(
         &system,
         Path::new("/docs/test.md"),
@@ -2047,8 +1955,6 @@ fn reply_with_multiple_extras_prepends_parent() {
 
 #[test]
 fn root_comment_preserves_explicit_to() {
-    // When there's no `reply_to`, `effective_to` is just `params.to`
-    // (no parent to prepend).
     let system = system_with_doc(MINIMAL_DOC);
     let config = open_config();
     let position = InsertPosition::Append;
@@ -2107,12 +2013,10 @@ fn root_comment_no_auto_to() {
 
 #[test]
 fn reply_auto_populates_to_different_author() {
-    // Use the thread doc which has comments by "eduardo" and "alice".
     let system = system_with_doc(&doc_with_thread());
     let config = open_config();
     let position = InsertPosition::Append;
 
-    // Reply to "child1" authored by "alice".
     let new_id = create_comment(
         &system,
         Path::new("/docs/test.md"),
@@ -2140,13 +2044,6 @@ fn reply_auto_populates_to_different_author() {
     );
 }
 
-// --- Projection tests ---
-//
-// Each `project_*` helper returns a `(before, after)` pair suitable for
-// feeding into `plan_ops::project_report`. These tests pin the invariant
-// that projections never mutate disk and that their `after` doc matches
-// what the paired mutating op would have written.
-
 #[test]
 fn project_ack_adds_ack_without_mutating_disk() {
     let seeded = doc_with_comment();
@@ -2163,16 +2060,13 @@ fn project_ack_adds_ack_without_mutating_disk() {
     )
     .unwrap();
 
-    // `before` must reflect the on-disk document exactly.
     assert_eq!(before.comments().len(), 1);
     assert!(before.find_comment("abc").unwrap().ack.is_empty());
 
-    // `after` carries the projected ack.
     let after_comment = after.find_comment("abc").unwrap();
     assert_eq!(after_comment.ack.len(), 1);
     assert_eq!(after_comment.ack[0].author, "eduardo");
 
-    // Disk must be unchanged.
     let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(before_bytes, after_disk, "project_ack must not mutate disk");
 }
@@ -2212,7 +2106,6 @@ fn project_delete_removes_comment_without_mutating_disk() {
     assert_eq!(before.comments().len(), 1);
     assert_eq!(after.comments().len(), 0);
 
-    // Disk must be unchanged even though the projection removed a comment.
     let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(
         before_bytes, after_disk,
@@ -2288,19 +2181,13 @@ fn project_react_remove_is_idempotent_for_missing_emoji() {
     )
     .unwrap();
 
-    // Removing a reaction that was never set leaves the map empty.
     assert!(after.find_comment("abc").unwrap().reactions.is_empty());
 }
 
 #[test]
 fn project_ack_matches_real_ack_comments_after_output() {
-    // Property: project_ack's `after` document should be byte-identical
-    // to what `ack_comments` writes to disk — modulo `ts` which is a
-    // wall clock read. We compare structural invariants instead of raw
-    // bytes.
     let seeded = doc_with_comment();
 
-    // Real path.
     let system_real = system_with_doc(&seeded);
     let config = open_config();
     ack_comments(
@@ -2318,7 +2205,6 @@ fn project_ack_matches_real_ack_comments_after_output() {
     )
     .unwrap();
 
-    // Projection path against a fresh mock.
     let system_plan = system_with_doc(&seeded);
     let (_before, projected) = projections::project_ack(
         &system_plan,
@@ -2329,17 +2215,12 @@ fn project_ack_matches_real_ack_comments_after_output() {
     )
     .unwrap();
 
-    // The real writer and the projection should agree on comment ids,
-    // content, and ack authors (the ts field is a wall-clock read, so we
-    // don't compare it).
     assert_eq!(real_doc.comments().len(), projected.comments().len());
     let real_ack = &real_doc.find_comment("abc").unwrap().ack;
     let proj_ack = &projected.find_comment("abc").unwrap().ack;
     assert_eq!(real_ack.len(), proj_ack.len());
     assert_eq!(real_ack[0].author, proj_ack[0].author);
 }
-
-// --- project_comment / project_edit ---
 
 #[test]
 fn project_comment_appends_without_mutating_disk() {
@@ -2356,8 +2237,6 @@ fn project_comment_appends_without_mutating_disk() {
     assert_eq!(before.comments().len(), 1);
     assert_eq!(after.comments().len(), 2);
 
-    // The appended comment carries the body, author from config, empty
-    // ack list, and no signature (plan never signs).
     let new_cm = after
         .comments()
         .into_iter()
@@ -2368,7 +2247,6 @@ fn project_comment_appends_without_mutating_disk() {
     assert!(new_cm.ack.is_empty());
     assert!(new_cm.signature.is_none());
 
-    // Disk untouched.
     let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(
         before_bytes, after_disk,
@@ -2420,12 +2298,10 @@ fn project_comment_reply_auto_acks_parent() {
         projections::project_comment(&system, Path::new("/docs/test.md"), &config, &params)
             .unwrap();
 
-    // Parent (`abc`) now carries an ack from the acting identity.
     let parent = after.find_comment("abc").unwrap();
     assert_eq!(parent.ack.len(), 1);
     assert_eq!(parent.ack[0].author, "eduardo");
 
-    // Reply carries reply_to + inherited thread.
     let reply = after
         .comments()
         .into_iter()
@@ -2463,7 +2339,6 @@ fn project_comment_attachments_are_not_copied() {
         .unwrap();
     assert_eq!(new_cm.attachments, vec![String::from("assets/photo.png")]);
 
-    // Assets dir must not exist on disk (plan is pure).
     assert!(
         !system.exists(Path::new("/docs/assets")).unwrap_or(false),
         "project_comment must not create the assets directory"
@@ -2478,8 +2353,6 @@ fn project_comment_attachments_are_not_copied() {
 
 #[test]
 fn project_edit_recomputes_checksum_and_clears_ack() {
-    // Start from a doc where `abc` already has an ack so we can observe
-    // edit's cascading clear.
     let seeded = "---\ntitle: Test\nauthor: eduardo\n---\n\n# Body\n\n```remargin\n---\nid: abc\nauthor: eduardo\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\nack:\n  - alice@2026-04-06T13:00:00-04:00\n---\nFirst comment.\n```\n";
     let system = system_with_doc(seeded);
     let config = open_config();
@@ -2541,7 +2414,6 @@ fn project_edit_cascades_ack_clear_to_descendants() {
     let system = system_with_doc(&seeded);
     let config = open_config();
 
-    // Sanity: root and child1 both start with an ack.
     let parsed_before = parser::parse(&seeded).unwrap();
     assert!(!parsed_before.find_comment("root").unwrap().ack.is_empty());
     assert!(!parsed_before.find_comment("child1").unwrap().ack.is_empty());
@@ -2555,22 +2427,12 @@ fn project_edit_cascades_ack_clear_to_descendants() {
     )
     .unwrap();
 
-    // Root's content was changed — ack cleared.
     assert!(after.find_comment("root").unwrap().ack.is_empty());
-    // child1 is a descendant of root — ack cleared via the cascade.
     assert!(after.find_comment("child1").unwrap().ack.is_empty());
 }
 
-// --------------------------------------------------------------------
-// project_batch / project_purge / project_sandbox_*
-//: composite + destructive ops that sit on top of the
-// lightweight projections.
-// --------------------------------------------------------------------
-
-/// Seed a two-comment document by creating each comment via the real
-/// `create_comment` helper so checksums and frontmatter match what
-/// `verify` expects (same pattern as [`seed_with_comment`] below,
-/// extended to produce a second comment).
+/// Seed a two-comment document through the real `create_comment`, so checksums and frontmatter
+/// match what `verify` expects.
 fn seed_two_comments() -> (MemorySystem, ResolvedConfig, String, String) {
     let system = system_with_doc(MINIMAL_DOC);
     let config = open_config();
@@ -2621,11 +2483,9 @@ fn project_batch_applies_sub_ops_in_order_without_mutating_disk() {
     let (before, after) =
         projections::project_batch(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
 
-    // Sanity on the before/after pair.
     assert_eq!(before.comments().len(), 1);
     assert_eq!(after.comments().len(), 3);
 
-    // Disk must be untouched.
     let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert_eq!(before_bytes, after_bytes, "plan batch must not write disk");
 }
@@ -2823,21 +2683,14 @@ fn project_sandbox_add_projects_frontmatter_entry() {
     );
 }
 
-/// `project_sandbox_add` now projects a timestamp
-/// refresh when an entry already exists (only a no-op when the
-/// existing ts is identical to `now` — vanishingly unlikely in
-/// practice, since `Utc::now()` advances every call). The roster
-/// stays one-entry-per-identity.
+/// An existing entry projects a timestamp refresh; the roster stays one entry per identity.
 #[test]
 fn project_sandbox_add_refreshes_existing_entry() {
     let (system, config, _first) = seed_with_comment();
 
-    // First projection — not idempotent against the on-disk doc yet.
     let (_b1, _a1) =
         projections::project_sandbox_add(&system, Path::new("/docs/test.md"), &config).unwrap();
 
-    // Actually stage the sandbox on disk so the second projection sees
-    // an existing entry.
     sandbox_ops::add_to_files(
         &system,
         &[PathBuf::from("/docs/test.md")],
@@ -2856,7 +2709,6 @@ fn project_sandbox_add_refreshes_existing_entry() {
         after.to_markdown().unwrap(),
         "second sandbox-add must project a refresh when an entry already exists"
     );
-    // Roster stays at exactly one eduardo entry.
     assert_eq!(after.to_markdown().unwrap().matches("eduardo@").count(), 1);
 }
 
@@ -2904,14 +2756,8 @@ fn project_sandbox_add_rejects_non_markdown_path() {
     );
 }
 
-// ---- project_sign ---------------------------------------------------------
-// Exercises the `plan sign` projection added Unlike the
-// other `project_*` helpers, project_sign deliberately loads the signing
-// key because its whole purpose is the signature — a projection that
-// skipped key loading would produce misleading `noop: true` plans.
-
-/// Two-comment document: eduardo's note + alice's note, both unsigned,
-/// checksums pre-computed so the verify gate stays neutral.
+/// Two unsigned comments, one by the caller and one by alice, with checksums computed so the
+/// verify gate stays neutral.
 fn two_author_doc_for_sign() -> String {
     use crate::crypto;
     let eduardo_content = "eduardo's note";
@@ -2964,7 +2810,6 @@ fn project_sign_all_mine_signs_only_own_comments() {
     )
     .unwrap();
 
-    // Before: neither is signed.
     let before_ed = before
         .segments
         .iter()
@@ -2975,7 +2820,6 @@ fn project_sign_all_mine_signs_only_own_comments() {
         .unwrap();
     assert!(before_ed.signature.is_none());
 
-    // After: eduardo's comment is signed, alice's is untouched.
     let after_ed = after
         .segments
         .iter()
@@ -3089,9 +2933,6 @@ fn project_sign_missing_key_bails() {
 
 #[test]
 fn project_sign_already_signed_stays_preserved() {
-    // Build a doc that already has a signed comment by running
-    // project_sign once, then feed its output back into project_sign to
-    // check that --all-mine leaves the signature untouched.
     let system1 = sign_system(&two_author_doc_for_sign());
     let config = sign_config();
     let (_, pre_signed) = projections::project_sign(
@@ -3112,7 +2953,6 @@ fn project_sign_already_signed_stays_preserved() {
     )
     .unwrap();
 
-    // Signatures should be byte-identical on the second projection.
     let first_sig = pre_signed
         .segments
         .iter()
@@ -3134,19 +2974,6 @@ fn project_sign_already_signed_stays_preserved() {
         "already-signed comment must keep its signature under re-sign"
     );
 }
-
-// ---------------------------------------------------------------------
-// Writer ban: every mutating operation must refuse to touch
-// `.remargin.yaml` / `.remargin-registry.yaml` — the canonical config
-// and participant registry files. Each subcommand is exercised here
-// against both forbidden basenames; the resulting error message must
-// include "refusing to modify" and the basename, and the file contents
-// must stay byte-identical on refusal.
-// ---------------------------------------------------------------------
-
-// The authoritative basename list lives at [`crate::writer::FORBIDDEN_TARGETS`].
-// Tests below iterate over that same slice so adding a new forbidden
-// file in one place automatically extends coverage here.
 
 fn assert_forbidden_ops_error(err: &anyhow::Error, basename: &str) {
     let msg = format!("{err:#}");
@@ -3354,20 +3181,6 @@ fn read_file(system: &MemorySystem, path: &Path) -> Vec<u8> {
     buf
 }
 
-// ---------------------------------------------------------------------
-// Layer 1 op-guard wiring.
-//
-// `purge` already has its own restrict / deny_ops integration tests
-// in operations/purge/tests.rs; the rest of the mutating ops are
-// covered here. Each op gets at minimum:
-// - a restrict-blocks test (mutating-only: `restrict: ['*']`)
-// - a deny_ops-blocks test (`deny_ops: [{path: ., ops: [<op>]}]`)
-// Where the op signature makes one of those obvious to add but not
-// trivial to spell, the test is omitted in favor of the broader
-// scenario-15 sweep below (`all_mutating_ops_refused_under_wildcard`)
-// which exercises every wired op against the same wildcard restrict.
-// ---------------------------------------------------------------------
-
 fn doc_with_one_comment_for_guard() -> &'static str {
     "\
 ---
@@ -3530,7 +3343,6 @@ fn delete_refused_when_target_under_restrict() {
 
 #[test]
 fn delete_refused_when_deny_ops_lists_delete_and_delete_own() {
-    // Denying both ops blocks even own-comment deletion.
     let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete, delete-own]\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
     let config = open_config();
@@ -3540,10 +3352,9 @@ fn delete_refused_when_deny_ops_lists_delete_and_delete_own() {
 
 #[test]
 fn delete_own_fallback_allows_own_comment_when_delete_denied() {
-    // deny_ops: [delete] alone does not block own-comment deletion.
     let yaml = "permissions:\n  deny_ops:\n    - path: test.md\n      ops: [delete]\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
-    let config = open_config(); // identity = "eduardo", comment author = "eduardo"
+    let config = open_config();
     let result = delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]);
     assert!(
         result.is_ok(),
@@ -3643,9 +3454,7 @@ fn batch_refused_when_deny_ops_lists_batch() {
     assert_deny_ops_refusal(&err);
 }
 
-/// Scenario 18: a restricted target rejects the entire batch atomically
-/// before any sub-op runs. The fixture starts with no comments; if the
-/// batch had any side effect the comments list would not be empty.
+/// A restricted target rejects the whole batch before any sub-op runs.
 #[test]
 fn batch_atomic_refusal_leaves_doc_untouched() {
     use crate::operations::batch::{BatchCommentOp, batch_comment};
@@ -3708,9 +3517,6 @@ fn sandbox_add_refused_when_target_under_restrict() {
     let config = open_config();
     let path = PathBuf::from("/docs/test.md");
     let result = sandbox_ops::add_to_files(&system, from_ref(&path), "eduardo", &config).unwrap();
-    // Per-file failure surface: the op records a per-path failure
-    // rather than bailing the whole call. That keeps the bulk
-    // surface tolerant of partial blocks.
     assert_eq!(result.changed.len(), 0);
     assert_eq!(result.failed.len(), 1);
     assert!(
@@ -3865,24 +3671,15 @@ fn write_refused_when_deny_ops_lists_write() {
     assert_deny_ops_refusal(&err);
 }
 
-// Recipient registry gate — create_comment.
-
-/// Scenario 16: read-side ops bypass `restrict`. Comments / verify /
-/// query / get / metadata / lint / search / ls all run unaffected when
-/// only `restrict` (no `deny_ops`) is declared. We exercise the simplest
-/// representative — `comments` (the per-file lister) — to pin the
-/// behaviour. The `op_guard` helper itself has direct unit-test coverage
-/// for every read op.
+/// Read-side ops bypass `restrict`; `comments` stands in for all of them here.
 #[test]
 fn read_ops_unaffected_by_restrict() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
 
-    // Reading the file directly should still work (no mutation, no guard).
     let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
     assert!(content.contains("# Test"));
 
-    // The parser is a pure read; it must not be guarded either.
     let parsed = parser::parse(&content).unwrap();
     assert!(!parsed.comments().is_empty());
 }
@@ -3903,9 +3700,7 @@ fn strict_recipient_system(doc: &str) -> MemorySystem {
         .unwrap()
 }
 
-/// `ResolvedConfig` for a caller with identity `eduardo-burgos` in an
-/// open-mode context. `escalate_for_doc` will swap in the strict realm's
-/// mode + registry from disk.
+/// An open-mode caller; `escalate_for_doc` swaps in the strict realm's mode and registry.
 fn caller_config_for_recipient_tests() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -3921,7 +3716,6 @@ fn caller_config_for_recipient_tests() -> ResolvedConfig {
     }
 }
 
-/// Scenario 1: known active recipient → comment created.
 #[test]
 fn recipient_gate_active_recipient_allowed_in_registered() {
     let system = strict_recipient_system(MINIMAL_DOC);
@@ -3945,7 +3739,6 @@ fn recipient_gate_active_recipient_allowed_in_registered() {
     );
 }
 
-/// Scenario 2: unknown recipient (`eduardo_burgos` — underscore, not in registry) → rejected.
 #[test]
 fn recipient_gate_unknown_recipient_rejected_in_registered() {
     let system = strict_recipient_system(MINIMAL_DOC);
@@ -3975,7 +3768,6 @@ fn recipient_gate_unknown_recipient_rejected_in_registered() {
     );
 }
 
-/// Scenario 3: revoked recipient (`bob`) → rejected.
 #[test]
 fn recipient_gate_revoked_recipient_rejected_in_registered() {
     let system = strict_recipient_system(MINIMAL_DOC);
@@ -4001,18 +3793,13 @@ fn recipient_gate_revoked_recipient_rejected_in_registered() {
     );
 }
 
-/// Scenario 4: scenario 2 was registered mode; add a variant exercising
-/// the error text to confirm it names the recipient in all cases.
-/// (`STRICT_REALM_YAML` now uses `registered` — this test verifies the
-/// same path with an explicit `registered`-only realm yaml.)
+/// The refusal names the recipient.
 #[test]
 fn recipient_gate_unknown_rejected_names_recipient() {
     let system = strict_recipient_system(MINIMAL_DOC);
     let config = caller_config_for_recipient_tests();
     let position = InsertPosition::Append;
 
-    // `bob` is revoked, so this tests both "not-in-registry" (absent) and
-    // "revoked" branches share the same error message surface.
     let err = create_comment(
         &system,
         Path::new("/docs/test.md"),
@@ -4036,10 +3823,8 @@ fn recipient_gate_unknown_rejected_names_recipient() {
     );
 }
 
-/// Scenario 5: open mode — any to: value is accepted.
 #[test]
 fn recipient_gate_open_mode_any_to_accepted() {
-    // Open-mode system: no .remargin.yaml, no registry.
     let system = system_with_doc(MINIMAL_DOC);
     let config = open_config();
     let position = InsertPosition::Append;
@@ -4061,7 +3846,6 @@ fn recipient_gate_open_mode_any_to_accepted() {
     );
 }
 
-/// Scenario 6: broadcast (empty to:) is accepted in registered.
 #[test]
 fn recipient_gate_broadcast_accepted_in_registered() {
     let system = strict_recipient_system(MINIMAL_DOC);
@@ -4085,7 +3869,6 @@ fn recipient_gate_broadcast_accepted_in_registered() {
     );
 }
 
-/// Scenario 7: mixed good+bad recipients → rejected.
 #[test]
 fn recipient_gate_mixed_good_bad_rejected_in_registered() {
     let system = strict_recipient_system(MINIMAL_DOC);
@@ -4111,10 +3894,8 @@ fn recipient_gate_mixed_good_bad_rejected_in_registered() {
     );
 }
 
-/// Scenario 8: reply to a known active parent author → prepended to: validated and accepted.
 #[test]
 fn recipient_gate_reply_to_active_parent_allowed() {
-    // Seed a doc where `alice` (active) wrote a comment.
     let doc = "\
 ---
 title: Test
@@ -4153,10 +3934,8 @@ hello
     );
 }
 
-/// Scenario 9: reply whose prepended parent author is revoked → rejected.
 #[test]
 fn recipient_gate_reply_to_revoked_parent_rejected() {
-    // Seed a doc where `bob` (revoked) wrote a comment.
     let doc = "\
 ---
 title: Test
@@ -4509,13 +4288,6 @@ fn no_config_state_turns_the_edit_refusal_off() {
         );
     }
 }
-
-// ---------------------------------------------------------------------
-// The same gate on the projection side. A preview that predicts success
-// for a body the write refuses is wrong output, so each projection is
-// asserted against the refusal its own mutating sibling produces —
-// message included, since the message is what the caller acts on.
-// ---------------------------------------------------------------------
 
 #[test]
 fn agent_plan_of_a_hard_wrapped_comment_is_refused_with_the_live_message() {

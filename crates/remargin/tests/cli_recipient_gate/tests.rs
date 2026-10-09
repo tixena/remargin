@@ -25,10 +25,8 @@ participants:
     pubkeys: []
 ";
 
-/// A minimal doc body.
 const BODY: &str = "---\ntitle: Strict realm\n---\n\n# Title\n\nBody.\n";
 
-/// A doc with a comment addressed to `eduardo_burgos` (unknown).
 const DOC_UNKNOWN_RECIPIENT: &str = "\
 ---
 title: Test
@@ -47,7 +45,6 @@ hello
 ```
 ";
 
-/// A doc with a comment addressed to `alice` (active).
 const DOC_ACTIVE_RECIPIENT: &str = "\
 ---
 title: Test
@@ -66,7 +63,6 @@ hello
 ```
 ";
 
-/// A doc with a comment addressed to any recipient in open mode.
 const DOC_OPEN_MODE_RECIPIENT: &str = "\
 ---
 title: Test
@@ -110,7 +106,6 @@ fn recipients_array(value: &Value) -> &Vec<Value> {
     value.get("recipients").and_then(Value::as_array).unwrap()
 }
 
-/// Run `remargin` with `args` from `cwd`. Shorthand for tests.
 fn run(cwd: &Path, args: &[&str]) -> Output {
     Command::cargo_bin("remargin")
         .unwrap()
@@ -120,9 +115,6 @@ fn run(cwd: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-// -------- Scenario 25 --------
-
-/// Scenario 25: `remargin comment --to <unknown>` in a registered realm exits non-zero.
 #[test]
 fn cli_comment_to_unknown_recipient_rejected_in_registered_realm() {
     let tmp = TempDir::new().unwrap();
@@ -161,7 +153,6 @@ fn cli_comment_to_unknown_recipient_rejected_in_registered_realm() {
     );
 }
 
-/// `remargin comment --to <active>` in a registered realm succeeds.
 #[test]
 fn cli_comment_to_active_recipient_allowed_in_registered_realm() {
     let tmp = TempDir::new().unwrap();
@@ -194,10 +185,7 @@ fn cli_comment_to_active_recipient_allowed_in_registered_realm() {
     );
 }
 
-// -------- Scenario 26 --------
-
-/// Scenario 26: `remargin lint --json` on a doc with an unknown recipient
-/// in a registered realm → `ok:false`, non-empty `recipients` array.
+/// The report carries `ok:false` and a non-empty `recipients` array.
 #[test]
 fn cli_lint_json_reports_unknown_recipient_finding() {
     let tmp = TempDir::new().unwrap();

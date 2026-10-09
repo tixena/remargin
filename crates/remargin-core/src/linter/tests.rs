@@ -87,7 +87,6 @@ fn lint_messages(content: &str) -> Vec<String> {
         .collect()
 }
 
-/// Lint content and return (line, message) pairs.
 fn lint_pairs(content: &str) -> Vec<(usize, String)> {
     lint(content)
         .unwrap()
@@ -141,7 +140,7 @@ def hello():
 ";
     let errors = lint_pairs(doc);
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].0, 3); // line 3
+    assert_eq!(errors[0].0, 3);
     assert!(errors[0].1.contains("unclosed fenced code block"));
 }
 
@@ -191,21 +190,17 @@ Missing the id field.
 
 #[test]
 fn fence_depth_mismatch() {
-    // Opened with 4 backticks, "closed" with 3 -- the 3-backtick line
-    // does not close the 4-backtick block.
     let doc = "\
 ````python
 some code
 ```
 ";
     let errors = lint_pairs(doc);
-    // Two errors: the 4-backtick block is unclosed, and the 3-backtick
-    // line is also detected as an unclosed opener.
     assert!(
         !errors.is_empty(),
         "expected at least 1 error, got: {errors:?}"
     );
-    assert_eq!(errors[0].0, 1); // line 1
+    assert_eq!(errors[0].0, 1);
     assert!(errors[0].1.contains("unclosed fenced code block"));
     assert!(errors[0].1.contains("4 backticks"));
 }
@@ -242,7 +237,6 @@ Missing id, type, ts, checksum.
 unclosed four-backtick block
 ";
     let errors = lint(doc).unwrap();
-    // Should have: invalid frontmatter + unclosed 4-backtick fence + missing remargin fields
     assert!(
         errors.len() >= 3,
         "expected at least 3 errors, got {}: {errors:?}",
@@ -354,15 +348,12 @@ Content.
 ```
 ";
     let errors = lint_messages(doc);
-    // Missing: author, type, ts, checksum
     assert_eq!(errors.len(), 4);
     assert!(errors.iter().any(|e| e.contains("author")));
     assert!(errors.iter().any(|e| e.contains("type")));
     assert!(errors.iter().any(|e| e.contains("ts")));
     assert!(errors.iter().any(|e| e.contains("checksum")));
 }
-
-// Recipient registry lint via `lint_doc`.
 
 #[test]
 fn error_line_numbers_correct() {
@@ -407,7 +398,6 @@ fn build_lint_system(doc_content: &str, realm_yaml: &str) -> MemorySystem {
         .unwrap()
 }
 
-/// Scenario 12: strict realm, `to: eduardo_burgos` (unknown) → recipient finding.
 #[test]
 fn lint_doc_strict_unknown_recipient_finding() {
     let system = build_lint_system(DOC_WITH_UNKNOWN_RECIPIENT, "mode: strict\n");
@@ -432,7 +422,6 @@ fn lint_doc_strict_unknown_recipient_finding() {
     );
 }
 
-/// Scenario 13: open mode — same doc has no recipient findings.
 #[test]
 fn lint_doc_open_mode_no_recipient_findings() {
     let system = MemorySystem::new()
@@ -448,7 +437,6 @@ fn lint_doc_open_mode_no_recipient_findings() {
     );
 }
 
-/// Scenario 14: all recipients active → no recipient findings.
 #[test]
 fn lint_doc_all_recipients_active_no_findings() {
     let system = build_lint_system(DOC_WITH_ACTIVE_RECIPIENT, "mode: strict\n");
@@ -459,7 +447,6 @@ fn lint_doc_all_recipients_active_no_findings() {
     );
 }
 
-/// Scenario 15: revoked recipient in registered mode → recipient finding.
 #[test]
 fn lint_doc_registered_mode_revoked_recipient_finding() {
     let system = build_lint_system(DOC_WITH_REVOKED_RECIPIENT, "mode: registered\n");
@@ -471,7 +458,6 @@ fn lint_doc_registered_mode_revoked_recipient_finding() {
     assert!(!report.is_clean());
 }
 
-/// Scenario 16: no registry present in registered mode → silently skipped.
 #[test]
 fn lint_doc_missing_registry_skipped() {
     let system = MemorySystem::new()
@@ -482,20 +468,16 @@ fn lint_doc_missing_registry_skipped() {
         .unwrap()
         .with_file(Path::new("/vault/.remargin.yaml"), b"mode: registered\n")
         .unwrap();
-    // No registry file — load_registry returns None.
     let report = lint_doc(&system, Path::new("/vault/doc.md"), &alice_config()).unwrap();
     assert!(
         report.recipients.is_empty(),
         "missing registry should produce no recipient findings"
     );
-    // Structural lint is unaffected.
     assert_eq!(report.errors, [] as [LintErrorView; 0]);
 }
 
-/// Scenario 17: `lint(content)` is unaffected — pure structural check only.
 #[test]
 fn lint_content_pure_no_recipient_checking() {
-    // Even with an unknown recipient embedded, `lint()` sees only structure.
     let errors = lint(DOC_WITH_UNKNOWN_RECIPIENT).unwrap();
     assert!(
         errors.is_empty(),
@@ -503,7 +485,6 @@ fn lint_content_pure_no_recipient_checking() {
     );
 }
 
-/// JSON serialization includes `recipients` field.
 #[test]
 fn lint_report_to_json_includes_recipients_field() {
     let system = build_lint_system(DOC_WITH_UNKNOWN_RECIPIENT, "mode: registered\n");
@@ -525,7 +506,6 @@ fn lint_report_to_json_includes_recipients_field() {
     );
 }
 
-/// `format_text` includes recipient findings.
 #[test]
 fn lint_report_format_text_includes_recipients() {
     let system = build_lint_system(DOC_WITH_UNKNOWN_RECIPIENT, "mode: registered\n");

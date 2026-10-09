@@ -1,8 +1,10 @@
+/** An Obsidian-native icon rendered through `setIcon`. */
+
 import { setIcon } from "obsidian";
 import { useEffect, useRef } from "react";
 
+/** Props for {@link ObsidianIcon}. */
 interface ObsidianIconProps {
-  /** Obsidian/Lucide icon name, e.g. "smile-plus", "reply", "trash-2". */
   icon: string;
   size?: number;
   className?: string;

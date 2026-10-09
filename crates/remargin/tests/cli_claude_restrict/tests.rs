@@ -1,3 +1,5 @@
+//! `claude restrict` runs against temp realms, read back from the files it writes.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,9 +45,7 @@ fn user_settings_arg(realm: &TempDir) -> PathBuf {
     realm.path().join("hermetic-user-settings.json")
 }
 
-/// End-to-end restrict + Layer 1 enforcement post-polarity-flip:
-/// after `remargin claude restrict src/secret`, a write OUTSIDE that
-/// allow-list is refused by `op_guard`.
+/// After `claude restrict src/secret`, a write outside that allow-list is refused by `op_guard`.
 #[test]
 fn restrict_then_write_outside_allow_list_is_refused() {
     let realm = realm_with_claude();
@@ -87,10 +87,7 @@ fn restrict_then_write_outside_allow_list_is_refused() {
     );
 }
 
-/// A hook-only restrict writes only the `.remargin.yaml` entry: no
-/// projected deny rules land in either settings file, and no sidecar or
-/// gitignore line is created (there is nothing to track). The hook is
-/// the single source of truth for native-tool + Bash enforcement.
+/// Restrict writes only the `.remargin.yaml` entry: no settings file, sidecar or gitignore line.
 #[test]
 fn restrict_writes_only_yaml_no_settings_sidecar_or_gitignore() {
     let realm = realm_with_claude();
@@ -109,14 +106,12 @@ fn restrict_writes_only_yaml_no_settings_sidecar_or_gitignore() {
     );
     assert_status(&out, 0);
 
-    // The .remargin.yaml entry is the only artifact.
     let yaml = fs::read_to_string(realm.path().join(".remargin.yaml")).unwrap();
     assert!(
         yaml.contains("src/secret"),
         "yaml should carry the entry: {yaml}"
     );
 
-    // No projected settings files.
     assert!(
         !realm.path().join(".claude/settings.local.json").exists(),
         "no project-scope settings should be written"
@@ -126,7 +121,6 @@ fn restrict_writes_only_yaml_no_settings_sidecar_or_gitignore() {
         "no user-scope settings should be written"
     );
 
-    // No sidecar, no gitignore line — nothing to track.
     assert!(
         !realm
             .path()
@@ -140,13 +134,7 @@ fn restrict_writes_only_yaml_no_settings_sidecar_or_gitignore() {
     );
 }
 
-/// Wildcard `restrict '*'` allow-lists the entire realm — writes
-/// targeting paths outside the realm are gated by the MCP sandbox /
-/// CLI parent-walk model, not `op_guard`'s allow-list. The
-/// per-target parent walk doesn't reach the realm's restrict from
-/// outside, so this test pins the outside-the-allow-list refusal
-/// from a within-realm angle: write at a sub-target that the
-/// wildcard covers but a NARROWER inner restrict excludes.
+/// Wildcard `restrict '*'` allow-lists the whole realm, so a write inside it passes `op_guard`.
 #[test]
 fn wildcard_restrict_writes_inside_realm_succeed() {
     let realm = realm_with_claude();
@@ -165,11 +153,8 @@ fn wildcard_restrict_writes_inside_realm_succeed() {
     );
     assert_status(&restrict, 0);
 
-    // The write itself runs through op_guard. The wildcard
-    // sanctions every path under the realm, so op_guard does not
-    // refuse — the only error here is the unrelated `--raw` /
-    // markdown collision, which proves we passed the allow-list
-    // check.
+    // The only error is the unrelated `--raw` / markdown collision, which proves the allow-list
+    // check passed.
     let write = run_in(
         realm.path(),
         &[
@@ -190,8 +175,7 @@ fn wildcard_restrict_writes_inside_realm_succeed() {
     );
 }
 
-/// Scenario 19: --json output parses to the documented
-/// `RestrictOutcome` shape.
+/// `--json` output parses to the `RestrictOutcome` shape.
 #[test]
 fn restrict_json_output_round_trips() {
     let realm = realm_with_claude();
@@ -214,7 +198,6 @@ fn restrict_json_output_round_trips() {
     let value: Value = serde_json::from_str(stdout).unwrap();
     assert!(value.get("absolute_path").is_some());
     assert!(value.get("anchor").is_some());
-    // Hook-only restrict touches no settings files and applies no rules.
     assert!(
         value
             .get("claude_files_touched")
@@ -230,10 +213,7 @@ fn restrict_json_output_round_trips() {
     assert_eq!(value["yaml_was_created"], json!(true));
 }
 
-/// `restrict` is intentionally absent from the MCP
-/// surface. `tools/list` must not advertise it, and dispatching it
-/// must return a CLI-pointing tool error. Replaces the previous
-/// MCP-parity test (`mcp_restrict_matches_cli_json`).
+/// `tools/list` does not advertise it, and calling `claude_restrict` returns a CLI-pointing error.
 #[test]
 fn restrict_absent_from_mcp_surface() {
     let realm = realm_with_claude();
@@ -242,7 +222,6 @@ fn restrict_absent_from_mcp_surface() {
     let base = system.canonicalize(realm.path()).unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
-    // tools/list does not advertise `restrict`.
     let list_request = json!({
         "jsonrpc": "2.0",
         "id": 1_i32,
@@ -261,8 +240,6 @@ fn restrict_absent_from_mcp_surface() {
         "claude_restrict must not appear in tools/list, got: {names:?}"
     );
 
-    // tools/call with name=claude_restrict returns a CLI-pointing tool
-    // error.
     let call_request = json!({
         "jsonrpc": "2.0",
         "id": 2_i32,
@@ -292,10 +269,8 @@ fn restrict_absent_from_mcp_surface() {
     assert!(text.contains("remargin claude restrict"), "got: {text}");
 }
 
-/// helper that runs `claude restrict src/secret` with the
-/// given `--also-deny-bash` argv and returns the resulting
-/// `permissions.trusted_roots[0].also_deny_bash` list parsed from
-/// `.remargin.yaml`.
+/// Runs `claude restrict src/secret` with the given `--also-deny-bash` argv and returns the
+/// `permissions.trusted_roots[0].also_deny_bash` list parsed back from `.remargin.yaml`.
 fn also_deny_bash_for(extra_args: &[&str]) -> Vec<String> {
     let realm = realm_with_claude();
     fs::create_dir_all(realm.path().join("src/secret")).unwrap();
@@ -319,24 +294,21 @@ fn also_deny_bash_for(extra_args: &[&str]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// scenario 1: repeated `--also-deny-bash` flags emit
-/// each token (regression check).
+/// Repeated `--also-deny-bash` flags emit each token.
 #[test]
 fn also_deny_bash_repeated_flags() {
     let tokens = also_deny_bash_for(&["--also-deny-bash", "curl", "--also-deny-bash", "wget"]);
     assert_eq!(tokens, vec!["curl".to_owned(), "wget".to_owned()]);
 }
 
-/// scenario 2: comma-separated values are split
-/// equivalently to repeated flags.
+/// Comma-separated values split the same way repeated flags do.
 #[test]
 fn also_deny_bash_comma_separated() {
     let tokens = also_deny_bash_for(&["--also-deny-bash", "curl,wget"]);
     assert_eq!(tokens, vec!["curl".to_owned(), "wget".to_owned()]);
 }
 
-/// scenario 3: mixing comma-separated values and
-/// repeated flags concatenates in argv order.
+/// Mixed comma-separated values and repeated flags concatenate in argv order.
 #[test]
 fn also_deny_bash_mixed_csv_and_repeated() {
     let tokens = also_deny_bash_for(&["--also-deny-bash", "curl,wget", "--also-deny-bash", "sed"]);
@@ -346,9 +318,7 @@ fn also_deny_bash_mixed_csv_and_repeated() {
     );
 }
 
-/// scenario 4: when the flag is absent the yaml
-/// has no `also_deny_bash` key (or an empty list, depending on
-/// serializer; check both forms).
+/// With the flag absent the yaml has no `also_deny_bash` key, or an empty list.
 #[test]
 fn also_deny_bash_absent_omits_or_empties_field() {
     let tokens = also_deny_bash_for(&[]);
@@ -358,17 +328,13 @@ fn also_deny_bash_absent_omits_or_empties_field() {
     );
 }
 
-/// scenario 5: a single token still parses cleanly
-/// (no delimiter triggers).
 #[test]
 fn also_deny_bash_single_value() {
     let tokens = also_deny_bash_for(&["--also-deny-bash", "curl"]);
     assert_eq!(tokens, vec!["curl".to_owned()]);
 }
 
-/// The `cd`/`pushd` bypass class is closed by the `PreToolUse` hook, not
-/// by projected denies: `restrict` writes no `Bash(cd ...)` /
-/// `Bash(pushd ...)` rules — it writes no settings files at all.
+/// No `cd` / `pushd` deny rules are projected: the `PreToolUse` hook closes that bypass.
 #[test]
 fn cd_pushd_denies_not_projected() {
     let realm = realm_with_claude();
@@ -387,8 +353,6 @@ fn cd_pushd_denies_not_projected() {
     );
     assert_status(&out, 0);
 
-    // No project-scope or user-scope settings file is written, so no
-    // cd/pushd (or any other) deny rule is projected.
     assert!(
         !realm.path().join(".claude/settings.local.json").exists(),
         "no project-scope settings should be written"
@@ -399,8 +363,7 @@ fn cd_pushd_denies_not_projected() {
     );
 }
 
-/// restrict then unprotect on a hook-only realm leaves no settings
-/// artifacts — nothing was projected, so there is nothing to scrub.
+/// Restrict then unrestrict leaves no settings artifacts: nothing was projected.
 #[test]
 fn restrict_unprotect_round_trip_leaves_no_settings() {
     let realm = realm_with_claude();
@@ -441,8 +404,7 @@ fn restrict_unprotect_round_trip_leaves_no_settings() {
     );
 }
 
-/// `plan restrict` projects no settings changes now — the hook covers
-/// the cd/pushd bypass class, so `settings_files` is empty.
+/// `plan restrict` projects no settings changes, so `settings_files` is empty.
 #[test]
 fn plan_restrict_projects_no_settings() {
     let realm = realm_with_claude();
@@ -470,8 +432,7 @@ fn plan_restrict_projects_no_settings() {
     );
 }
 
-/// Idempotency: re-running CLI restrict produces the same final state.
-/// No settings file is created; the `.remargin.yaml` stays byte-stable.
+/// Re-running restrict leaves `.remargin.yaml` byte-stable and creates no settings file.
 #[test]
 fn cli_restrict_is_idempotent() {
     let realm = realm_with_claude();

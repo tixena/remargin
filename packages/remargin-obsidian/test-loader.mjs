@@ -1,34 +1,18 @@
+/**
+ * Node ESM loader for the `.test.ts` files: rewrites the `@/` path alias, resolves
+ * extensionless specifiers, transpiles `.tsx` and the `.ts` syntax node's type-stripper
+ * rejects through esbuild, stubs the `obsidian` module and empties CSS imports.
+ */
+
 import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import esbuild from "esbuild";
-
-/**
- * Node ESM loader used by `.test.ts` files that need to import `.tsx`
- * components (component tests).
- *
- * Handles four concerns node's built-in loader does not:
- *
- *   1. Rewrites the `@/` tsconfig path alias to `./src/`.
- *   2. Resolves extensionless specifiers by probing `.ts`, `.tsx`,
- *      `/index.ts`, and `/index.tsx`.
- *   3. Transpiles `.tsx` sources via esbuild (JSX + types) so node's
- *      experimental type-stripper never sees JSX.
- *   4. Stubs out the `obsidian` module — the npm package only ships
- *      type declarations, so any component that imports from it would
- *      crash at test time. The stub exposes the surface area component
- *      code touches today (`setIcon`, `MarkdownRenderer`, etc.) as
- *      no-ops, which is the canonical pattern the T36 ticket cites for
- *      headless verification.
- */
 
 const OBSIDIAN_STUB_URL = new URL("./test-obsidian-stub.mjs", import.meta.url).href;
 async function fileExists(url) {
   try {
     const info = await stat(fileURLToPath(url));
-    // Reject directories — `./backend` resolves to a directory under
-    // src/, but only the `/index.ts` candidate should win. Accepting
-    // the bare directory short-circuits the extension probe and yields
-    // ERR_UNSUPPORTED_DIR_IMPORT downstream.
+    // A directory must lose to its `/index.ts`, or node raises ERR_UNSUPPORTED_DIR_IMPORT.
     return info.isFile();
   } catch {
     return false;
@@ -45,9 +29,7 @@ async function resolveWithExtensions(url) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
-  // Intercept the `obsidian` module: redirect every import to the local
-  // stub so component code can import named exports without the test
-  // process exploding when the real package's empty `main` is hit.
+  // The real `obsidian` package has an empty `main`; every import goes to the local stub.
   if (specifier === "obsidian") {
     return nextResolve(OBSIDIAN_STUB_URL, context);
   }
@@ -68,10 +50,7 @@ export async function resolve(specifier, context, nextResolve) {
 }
 
 export async function load(url, context, nextLoad) {
-  // CSS imports are bundle-only — esbuild handles them at production
-  // time. Tests just need the import to resolve to an empty module so
-  // `main.ts`'s side-effect import (`./styles/globals.css`) does not
-  // crash the loader.
+  // CSS is bundle-only, so tests resolve it to an empty module.
   if (url.endsWith(".css")) {
     return { format: "module", shortCircuit: true, source: "export default '';" };
   }
@@ -85,11 +64,8 @@ export async function load(url, context, nextLoad) {
     });
     return { format: "module", shortCircuit: true, source: code };
   }
-  // Selectively transpile `.ts` files that use TypeScript syntax
-  // node's strip-only loader rejects:
-  //   - Parameter-property constructors (`constructor(private foo: T)`)
-  //   - `const enum` declarations
-  // Cheapest signal short of parsing: regex match on either pattern.
+  // Parameter-property constructors and `const enum` are syntax node's strip-only loader
+  // rejects; a regex match on either sends the file through esbuild.
   if (url.endsWith(".ts") && url.startsWith("file:")) {
     const source = await readFile(new URL(url), "utf8");
     const hasParamProps = /constructor\s*\([^)]*(private|public|protected|readonly)\b/.test(source);

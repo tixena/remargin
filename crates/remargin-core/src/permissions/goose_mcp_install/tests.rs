@@ -1,6 +1,5 @@
-//! Unit tests for `permissions::goose_mcp_install` — QA scenarios 1-4
-//! (install into an empty config, install beside unrelated extensions,
-//! uninstall, and the `test` verdicts).
+//! Unit tests for `permissions::goose_mcp_install`: install into an empty config, install
+//! beside unrelated extensions, uninstall, and the `test` verdicts.
 //!
 //! The fixtures are the entry shape read off a live goose 1.45.0 config,
 //! and every "broken" case is a failure mode observed on that goose: a
@@ -21,9 +20,7 @@ use super::{
 
 const EXE: &str = "/opt/bin/remargin";
 
-/// A config as a user keeps it: comments on their own lines and trailing
-/// ones, blank lines grouping the sections, and both quoting styles. Every
-/// byte of it outside remargin's entry belongs to the user.
+/// A hand-kept config: own-line and trailing comments, blank-line grouping, both quoting styles.
 const COMMENTED_CONFIG: &[&str] = &[
     "# goose config -- hand maintained",
     "GOOSE_TELEMETRY_ENABLED: false",
@@ -45,8 +42,7 @@ const COMMENTED_CONFIG: &[&str] = &[
     "notes: see the wiki",
 ];
 
-/// The same care, around a remargin entry that has drifted: an old `cmd`,
-/// a comment of its own, and a sibling declared after it.
+/// A remargin entry that has drifted: an old `cmd`, a comment of its own, a sibling after it.
 const DRIFTED_CONFIG: &[&str] = &[
     "# goose config -- hand maintained",
     "active_provider: ollama",
@@ -66,7 +62,6 @@ const DRIFTED_CONFIG: &[&str] = &[
     "GOOSE_TELEMETRY_ENABLED: false",
 ];
 
-/// A config where remargin is the only extension declared.
 const SOLE_ENTRY_CONFIG: &[&str] = &[
     "# goose config -- hand maintained",
     "active_provider: ollama",
@@ -84,9 +79,7 @@ const SOLE_ENTRY_CONFIG: &[&str] = &[
     "GOOSE_TELEMETRY_ENABLED: false",
 ];
 
-/// [`SOLE_ENTRY_CONFIG`] after an uninstall: the entry's lines are gone
-/// and `extensions` says so as an empty mapping, not as a bare key that
-/// would parse as null.
+/// [`SOLE_ENTRY_CONFIG`] after an uninstall: `extensions` is an empty mapping, not a bare key.
 const SOLE_ENTRY_UNINSTALLED: &[&str] = &[
     "# goose config -- hand maintained",
     "active_provider: ollama",
@@ -207,8 +200,6 @@ fn user_config_file_falls_back_to_dot_config() {
     assert_eq!(user_config_file(&mock(), &home()), config_path());
 }
 
-/// `XDG_CONFIG_HOME` relocates goose's config, so the installer follows it
-/// rather than assuming `~/.config`.
 #[test]
 fn user_config_file_follows_xdg_config_home() {
     let system = mock().with_env("XDG_CONFIG_HOME", "/xdg").unwrap();
@@ -218,8 +209,7 @@ fn user_config_file_follows_xdg_config_home() {
     );
 }
 
-/// An empty `XDG_CONFIG_HOME` is not a config home; treating it as one
-/// would point the installer at `/goose/config.yaml`.
+/// Treating an empty `XDG_CONFIG_HOME` as a config home would point at `/goose/config.yaml`.
 #[test]
 fn user_config_file_ignores_an_empty_xdg_config_home() {
     let system = mock().with_env("XDG_CONFIG_HOME", "").unwrap();
@@ -233,8 +223,6 @@ fn local_config_file_lands_under_the_project_goose_dir() {
         PathBuf::from("/w/repo/.goose/config.yaml"),
     );
 }
-
-// ---- 1. install into an empty config -----------------------------------
 
 #[test]
 fn install_writes_the_entry_when_no_config_exists() {
@@ -251,8 +239,7 @@ fn install_writes_the_entry_when_no_config_exists() {
     assert_eq!(field(&entry, "timeout"), Value::from(300_u64));
 }
 
-/// goose builds tool names from `name`, not from the entry's key, so this
-/// field is what makes the guard's `remargin__` allow-prefix match.
+/// goose builds tool names from `name`, not from the entry's key.
 #[test]
 fn generated_entry_pins_the_name_the_tool_prefix_comes_from() {
     let system = mock();
@@ -263,9 +250,7 @@ fn generated_entry_pins_the_name_the_tool_prefix_comes_from() {
     );
 }
 
-/// goose warns and continues when it cannot spawn an extension, so a
-/// `PATH` miss would be a session that hits the guard with none of the
-/// tools its deny message names.
+/// goose warns and continues when it cannot spawn an extension, so the path must be absolute.
 #[test]
 fn generated_entry_names_the_binary_by_absolute_path() {
     let system = mock();
@@ -286,9 +271,6 @@ fn install_is_idempotent() {
     );
 }
 
-/// A second install over an already-canonical entry must not touch the
-/// file: goose's config is hand-maintained, and a rewrite would churn it
-/// on every run.
 #[test]
 fn reinstalling_leaves_the_file_byte_identical() {
     let system = mock();
@@ -311,11 +293,7 @@ fn install_rewrites_a_drifted_entry_in_place() {
     assert_eq!(field(&entry_of(&system), "cmd"), Value::from(EXE));
 }
 
-// ---- 2. install beside unrelated config --------------------------------
-
-/// goose reads its provider, its model, and every other extension from
-/// this same file. An install that dropped any of it would cost the user
-/// their whole goose setup, not just their remargin tools.
+/// goose reads its provider, its model and every other extension from this same file.
 #[test]
 fn install_preserves_sibling_extensions_and_unrelated_keys() {
     let system = seed(
@@ -349,9 +327,7 @@ fn install_preserves_sibling_extensions_and_unrelated_keys() {
     assert!(extensions.get(Value::from(EXTENSION_KEY)).is_some());
 }
 
-/// A config that does not parse is the one state that costs the user every
-/// goose session, so install refuses it rather than rewriting from
-/// scratch — the opposite of the guard plugin, which remargin owns whole.
+/// An unparseable config is refused, not rewritten: a rewrite would cost the whole goose setup.
 #[test]
 fn install_refuses_to_overwrite_an_unparseable_config() {
     let system = seed(mock(), "extensions: [ this is not\n");
@@ -367,8 +343,7 @@ fn install_refuses_to_overwrite_an_unparseable_config() {
     );
 }
 
-/// goose leaves an empty `config.yaml` behind before its first
-/// `configure`, and an empty YAML document parses as null.
+/// goose leaves an empty `config.yaml` before its first `configure`; it parses as null.
 #[test]
 fn install_treats_an_empty_config_as_an_absence_to_fill() {
     let system = seed(mock(), "");
@@ -378,8 +353,6 @@ fn install_treats_an_empty_config_as_an_absence_to_fill() {
         Some(&Value::from(EXTENSION_NAME)),
     );
 }
-
-// ---- 3. uninstall ------------------------------------------------------
 
 #[test]
 fn uninstall_removes_only_remargins_entry() {
@@ -438,8 +411,6 @@ fn uninstall_refuses_to_rewrite_an_unparseable_config() {
     );
 }
 
-// ---- 4. test verdicts --------------------------------------------------
-
 #[test]
 fn test_reports_installed_when_wired() {
     let system = mock();
@@ -466,9 +437,7 @@ fn test_reports_not_installed_when_absent() {
     );
 }
 
-/// The failure mode observed on a live goose: the entry is there, the
-/// binary is not, goose prints a warning and starts a session carrying
-/// zero remargin tools. The guard still blocks and still names them.
+/// goose prints a warning and starts a session with no remargin tools.
 #[test]
 fn test_reports_broken_when_the_binary_is_gone() {
     let system = MemorySystem::new()
@@ -483,8 +452,6 @@ fn test_reports_broken_when_the_binary_is_gone() {
     );
 }
 
-/// Every shape that leaves goose loading no remargin tools, each observed
-/// on a live goose rather than derived from documentation.
 #[test]
 fn test_reports_broken_for_each_dead_end_shape() {
     let cases = [
@@ -523,8 +490,6 @@ fn test_reports_broken_for_each_dead_end_shape() {
     }
 }
 
-/// A config goose cannot parse costs the user every session, so `test`
-/// reports it rather than calling the extension merely absent.
 #[test]
 fn test_reports_broken_for_an_unparseable_config() {
     let system = seed(mock(), "extensions: [ this is not\n");
@@ -535,11 +500,6 @@ fn test_reports_broken_for_an_unparseable_config() {
     );
 }
 
-// ---- 5. a hand-maintained config keeps its bytes -----------------------
-
-/// The one write that first adds the entry is the write that would
-/// reflow the file: comments, blank-line grouping, and quoting styles
-/// are the user's, and a config.yaml is hand-maintained.
 #[test]
 fn install_preserves_every_byte_outside_the_entry() {
     let original = joined(COMMENTED_CONFIG);
@@ -551,9 +511,7 @@ fn install_preserves_every_byte_outside_the_entry() {
     assert_eq!(field(&entry_of(&system), "cmd"), Value::from(EXE));
 }
 
-/// Repairing a drifted entry rewrites that entry's lines and nothing
-/// else: the sibling declared after it, and the comments around the
-/// block, keep their bytes.
+/// The sibling declared after the entry and the comments around the block keep their bytes.
 #[test]
 fn install_repairs_a_drifted_entry_without_reflowing_the_rest() {
     let original = joined(DRIFTED_CONFIG);
@@ -565,8 +523,6 @@ fn install_repairs_a_drifted_entry_without_reflowing_the_rest() {
     assert_eq!(field(&entry_of(&system), "cmd"), Value::from(EXE));
 }
 
-/// A config that declares no `extensions` at all gains one, appended,
-/// with everything the user wrote still above it.
 #[test]
 fn install_appends_to_a_config_that_declares_no_extensions() {
     let original = joined(&[
@@ -598,9 +554,7 @@ fn uninstall_removes_only_the_entrys_lines() {
     );
 }
 
-/// Removing the block's last entry still leaves `extensions` a mapping:
-/// a bare key parses as null, which is a different config than the one
-/// uninstall means to write.
+/// A bare `extensions:` key would parse as null, so the mapping is emptied in place.
 #[test]
 fn uninstall_of_the_last_entry_empties_the_mapping_in_place() {
     let system = seed(mock(), &joined(SOLE_ENTRY_CONFIG));
@@ -618,10 +572,7 @@ fn uninstall_of_the_last_entry_empties_the_mapping_in_place() {
     );
 }
 
-/// Flow style is a shape the line editor does not model, so the write
-/// falls back to re-serializing the document. Formatting is lost there;
-/// the config's content is not, and the outcome says which of the two
-/// happened so the caller can warn.
+/// The line editor does not model flow style, so the write re-serializes and the outcome says so.
 #[test]
 fn install_falls_back_to_reserializing_a_flow_style_extensions_block() {
     let system = seed(

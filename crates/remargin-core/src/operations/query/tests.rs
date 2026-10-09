@@ -92,7 +92,6 @@ fn query_all_with_comments() {
     let filter = QueryFilter::default();
 
     let results = query(&system, Path::new("/project"), &filter, &open_config()).unwrap();
-    // Should find 2 files (pending.md and done.md), not plain.md
     assert_eq!(results.len(), 2);
 }
 
@@ -166,7 +165,6 @@ fn query_by_comment_id_finds_matching_doc() {
 #[test]
 fn query_by_comment_id_returns_only_matching_doc() {
     let system = setup_system();
-    // "def" is the ID in done.md.
     let filter = QueryFilter {
         comment_id: Some(String::from("def")),
         ..QueryFilter::default()
@@ -180,7 +178,6 @@ fn query_by_comment_id_returns_only_matching_doc() {
 #[test]
 fn query_by_comment_id_combined_with_author() {
     let system = setup_system();
-    // Comment "abc" is by "eduardo", so author=eduardo should match.
     let filter = QueryFilter {
         author: Some(String::from("eduardo")),
         comment_id: Some(String::from("abc")),
@@ -190,7 +187,6 @@ fn query_by_comment_id_combined_with_author() {
     let results = query(&system, Path::new("/project"), &filter, &open_config()).unwrap();
     assert_eq!(results.len(), 1);
 
-    // Same comment but author=alice should not match (abc is by eduardo).
     let filter_mismatch = QueryFilter {
         author: Some(String::from("alice")),
         comment_id: Some(String::from("abc")),
@@ -210,7 +206,6 @@ fn query_by_comment_id_combined_with_author() {
 #[test]
 fn query_by_comment_id_combined_with_pending() {
     let system = setup_system();
-    // Comment "abc" is pending, so pending=true should match.
     let filter = QueryFilter {
         comment_id: Some(String::from("abc")),
         pending: true,
@@ -220,7 +215,6 @@ fn query_by_comment_id_combined_with_pending() {
     let results = query(&system, Path::new("/project"), &filter, &open_config()).unwrap();
     assert_eq!(results.len(), 1);
 
-    // Comment "def" is acked, so pending=true should not match.
     let filter_acked = QueryFilter {
         comment_id: Some(String::from("def")),
         pending: true,
@@ -278,7 +272,6 @@ fn resolve_comment_id_not_found() {
 
 #[test]
 fn resolve_comment_id_ambiguous() {
-    // Create two documents with the same comment ID.
     let system = MemorySystem::new()
         .with_dir(Path::new("/multi"))
         .unwrap()
@@ -294,19 +287,12 @@ fn resolve_comment_id_ambiguous() {
 #[test]
 fn resolve_comment_id_scopes_to_subdir() {
     let system = setup_system();
-    // Searching in /project/docs should find pending.md's comment.
     let matches = resolve_comment_id(&system, Path::new("/project/docs"), "abc").unwrap();
     assert_eq!(matches.len(), 1);
 
-    // Searching at root, there is no abc outside of /project/docs.
-    // (plain.md has no comments at all).
     let matches_root = resolve_comment_id(&system, Path::new("/project"), "abc").unwrap();
     assert_eq!(matches_root.len(), 1);
 }
-
-// ===========================================================================
-// Expanded query tests
-// ===========================================================================
 
 /// Document with 3 comments: 2 pending (by different authors, to different recipients),
 /// 1 acked.
@@ -356,7 +342,6 @@ Third comment, already acked.
 "
 }
 
-/// Second document for multi-file tests.
 fn doc_expanded_other() -> &'static str {
     "\
 ---
@@ -396,7 +381,6 @@ fn query_expanded_returns_comments() {
     };
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // review.md has 3 comments, other.md has 1 comment.
     let review = results
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
@@ -426,7 +410,6 @@ fn query_expanded_pending_filters_comments() {
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
-    // c1 and c2 are pending, c3 is acked.
     assert_eq!(review.comments.as_ref().unwrap().len(), 2);
     assert!(
         review
@@ -461,7 +444,6 @@ fn query_expanded_pending_for_filters_comments() {
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
-    // Only c2 is pending and addressed to alice.
     assert_eq!(review.comments.as_ref().unwrap().len(), 1);
     assert_eq!(review.comments.as_ref().unwrap()[0].id, "c2");
     assert!(
@@ -483,7 +465,6 @@ fn query_expanded_author_filters_comments() {
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
     assert_eq!(results.len(), 1);
     let review = &results[0];
-    // Only c2 is by bob.
     assert_eq!(review.comments.as_ref().unwrap().len(), 1);
     assert_eq!(review.comments.as_ref().unwrap()[0].id, "c2");
     assert_eq!(review.comments.as_ref().unwrap()[0].author, "bob");
@@ -504,7 +485,6 @@ fn query_expanded_since_filters_comments() {
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
-    // Only c3 (14:00) is after 13:00. c1 (10:00) and c2 (12:00) are before.
     assert_eq!(review.comments.as_ref().unwrap().len(), 1);
     assert_eq!(review.comments.as_ref().unwrap()[0].id, "c3");
 }
@@ -524,7 +504,6 @@ fn query_expanded_combined_filters() {
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("review.md"))
         .unwrap();
-    // Only c1 is pending AND by alice (c3 is by alice but acked, c2 is pending but by bob).
     assert_eq!(review.comments.as_ref().unwrap().len(), 1);
     assert_eq!(review.comments.as_ref().unwrap()[0].id, "c1");
 }
@@ -539,12 +518,10 @@ fn query_expanded_multiple_files() {
     };
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // Both files have pending comments.
     assert_eq!(results.len(), 2);
     for r in &results {
         assert!(r.comments.as_ref().is_some_and(|v| !v.is_empty()));
     }
-    // other.md has 1 pending comment from carol.
     let other = results
         .iter()
         .find(|r| r.path.to_str().unwrap().contains("other.md"))
@@ -562,7 +539,6 @@ fn query_summary_has_empty_comments() {
     };
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // summary=true suppresses comment data.
     for r in &results {
         assert!(r.comments.as_ref().is_none_or(Vec::is_empty));
     }
@@ -571,7 +547,6 @@ fn query_summary_has_empty_comments() {
 #[test]
 fn query_expanded_no_matching_comments() {
     let system = setup_expanded_system();
-    // Filter for author "nobody" -- no comments match.
     let filter = QueryFilter {
         author: Some(String::from("nobody")),
         expanded: true,
@@ -579,8 +554,6 @@ fn query_expanded_no_matching_comments() {
     };
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // File-level filter already excludes the file, and with expanded the
-    // per-comment filter also finds nothing, so result is empty.
     assert!(results.is_empty());
 }
 
@@ -615,9 +588,7 @@ fn query_expanded_comment_fields_complete() {
     assert!(cm.signature.is_none());
 }
 
-/// A compact row mixes a serde-serialized `ts` with a hand-formatted ack
-/// string. Both must spell a zero offset the same way — `Z` — even when the
-/// file on disk still carries the legacy `+00:00` form.
+/// The serde-serialized `ts` and the hand-formatted ack both spell a zero offset as `Z`.
 #[test]
 fn compact_row_ts_and_ack_agree_on_the_z_spelling() {
     let doc = "\
@@ -656,10 +627,6 @@ Please review.
     assert_eq!(row[4], serde_json::json!("2026-04-06T12:00:00Z"));
     assert_eq!(row[8], serde_json::json!(["bob@2026-04-06T13:00:00Z"]));
 }
-
-// ===========================================================================
-// Pending count bug-fix tests
-// ===========================================================================
 
 /// Document with a broadcast comment (no `to` field) plus a directed comment.
 fn doc_broadcast_and_directed() -> &'static str {
@@ -763,11 +730,6 @@ fn setup_pending_system() -> MemorySystem {
 
 #[test]
 fn broadcast_counts_as_pending_after_rem_4j91() {
-    // Regression for. Before the fix, broadcast comments
-    // (empty `to`) were silently excluded from `--pending`. Now they
-    // count as pending when unacked: mixed.md has one broadcast
-    // (bcast, no acks) AND one directed pending (dir1), so
-    // pending_count should be 2.
     let system = setup_pending_system();
     let filter = QueryFilter {
         pending: true,
@@ -794,9 +756,6 @@ fn to_with_no_ack_is_pending() {
         .find(|r| r.path.to_str().unwrap().contains("mixed.md"))
         .unwrap();
 
-    // bcast (broadcast, no acks) + dir1 (directed, no ack
-    // from eduardo) → 2 pending. pending_for only lists directed
-    // recipients; the broadcast has no named recipients.
     assert_eq!(mixed.pending_count, 2);
     assert!(
         mixed
@@ -815,7 +774,6 @@ fn to_fully_acked_not_pending() {
     };
 
     let results = query(&system, Path::new("/pend"), &filter, &open_config()).unwrap();
-    // full.md has a fully-acked comment so it should NOT appear.
     assert!(
         !results
             .iter()
@@ -872,7 +830,6 @@ fn pending_for_excludes_fully_acked() {
         .find(|r| r.path.to_str().unwrap().contains("partial.md"))
         .unwrap();
 
-    // bob acked, carol did not. pending_for should contain carol but not bob.
     assert!(
         partial
             .pending_for
@@ -891,9 +848,6 @@ fn pending_for_excludes_fully_acked() {
 
 #[test]
 fn unacked_broadcast_counts_as_pending() {
-    // a fresh broadcast comment (empty `to`, no acks)
-    // must surface under `--pending`. Before the fix the broadcast
-    // was silently excluded.
     let broadcast_only = "\
 ---
 title: Broadcast Only
@@ -919,12 +873,9 @@ No to field at all.
     let filter = QueryFilter::default();
     let results = query(&system, Path::new("/bonly"), &filter, &open_config()).unwrap();
     assert_eq!(results.len(), 1);
-    // pending_count reflects broadcast-is-pending semantics; pending_for
-    // is still empty because broadcasts have no named recipients.
     assert_eq!(results[0].pending_count, 1);
     assert!(results[0].pending_for.as_ref().is_none_or(Vec::is_empty));
 
-    // With --pending filter, the document now surfaces.
     let pending_filter = QueryFilter {
         pending: true,
         ..QueryFilter::default()
@@ -945,8 +896,6 @@ No to field at all.
 
 #[test]
 fn acked_broadcast_not_pending() {
-    // A broadcast with any ack closes the conversation from the
-    // broad `--pending` perspective.
     let acked_broadcast = "\
 ---
 title: Acked Broadcast
@@ -992,7 +941,6 @@ Broadcast, already closed by an ack.
 fn pending_for_partially_acked() {
     let system = setup_pending_system();
 
-    // carol has not acked -- should find partial.md
     let filter_carol = QueryFilter {
         pending_for: Some(String::from("carol")),
         ..QueryFilter::default()
@@ -1005,7 +953,6 @@ fn pending_for_partially_acked() {
         "partial.md should appear for pending_for=carol"
     );
 
-    // bob already acked -- should NOT find partial.md
     let filter_bob = QueryFilter {
         pending_for: Some(String::from("bob")),
         ..QueryFilter::default()
@@ -1038,18 +985,12 @@ fn expanded_pending_for_partial_ack() {
     assert_eq!(partial.comments.as_ref().unwrap()[0].id, "pa1");
 }
 
-// ===========================================================================
-// Default expanded + file path tests
-// ===========================================================================
-
 #[test]
 fn query_default_includes_comments() {
     let system = setup_expanded_system();
-    // Default filter: no explicit expanded=true, no summary.
     let filter = QueryFilter::default();
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // Comments should be included by default (not empty).
     for r in &results {
         assert!(
             r.comments.as_ref().is_some_and(|v| !v.is_empty()),
@@ -1088,7 +1029,6 @@ fn query_summary_only() {
     };
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // summary should still return results (with counts).
     assert!(!results.is_empty());
     for r in &results {
         assert!(
@@ -1187,12 +1127,9 @@ fn query_result_json_shape_matches_schema() {
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
     let first = results.first().unwrap();
 
-    // Serialize the whole result via serde (this is what the CLI's
-    // `--json query` output relies on ).
     let value = serde_json::to_value(first).unwrap();
     let obj = value.as_object().unwrap();
 
-    // Required QueryResult keys.
     for key in [
         "comment_count",
         "comments",
@@ -1207,13 +1144,10 @@ fn query_result_json_shape_matches_schema() {
         );
     }
 
-    // `path` must be a plain string (PathBuf), not some JSON object.
     assert!(obj["path"].is_string());
 
-    // `pending_for` must always be present as an array, even when empty.
     assert!(obj["pending_for"].is_array());
 
-    // Drill into the first embedded ExpandedComment.
     let comments = obj["comments"].as_array().unwrap();
     let comment = comments.first().unwrap().as_object().unwrap();
 
@@ -1237,7 +1171,6 @@ fn query_result_json_shape_matches_schema() {
         );
     }
 
-    // Schema uses `author_type` with lowercase enum values, not `type`.
     assert!(
         !comment.contains_key("type"),
         "legacy `type` key must not appear in serialized ExpandedComment"
@@ -1248,16 +1181,11 @@ fn query_result_json_shape_matches_schema() {
         "author_type must be lowercase, got {author_type:?}"
     );
 
-    // `file` must render as a string path (what Zod `z.string()` expects),
-    // not as a `{ path: ... }` object or similar.
     assert!(comment["file"].is_string());
 }
 
 #[test]
 fn expanded_comment_skips_none_options_in_json() {
-    // Feed a file with a minimal comment (no reply_to/thread/signature)
-    // and make sure those fields are omitted from the JSON so the Zod
-    // `strictObject` schema treats them as `undefined`.
     let system = MemorySystem::new()
         .with_dir(Path::new("/mini"))
         .unwrap()
@@ -1295,16 +1223,11 @@ Minimal.
         );
     }
 
-    // But required collections must still be present (as empty).
     assert_eq!(comment["ack"], serde_json::json!([]));
     assert_eq!(comment["attachments"], serde_json::json!([]));
     assert_eq!(comment["to"], serde_json::json!([]));
     assert_eq!(comment["reactions"], serde_json::json!({}));
 }
-
-// ===========================================================================
-// content_regex tests
-// ===========================================================================
 
 #[test]
 fn content_regex_filters_comments() {
@@ -1314,11 +1237,6 @@ fn content_regex_filters_comments() {
         .unwrap();
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // Only comments whose body contains "alice": c1 and c3 in review.md
-    // ("First comment from alice." and "Third comment, already acked." - the
-    // latter does not contain alice). Actually only c1 mentions alice by name;
-    // d1 says "Comment from carol." — no alice. c2 says "Second comment from
-    // bob." — no alice.
     let all_comments: Vec<&str> = results
         .iter()
         .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
@@ -1329,9 +1247,6 @@ fn content_regex_filters_comments() {
 #[test]
 fn content_regex_composes_with_pending() {
     let system = setup_expanded_system();
-    // Match the word "comment" (case-sensitive) across every doc, but only
-    // include pending comments. c3 contains "comment" (via "Third comment")
-    // but is acked, so it must be excluded.
     let filter = QueryFilter {
         pending: true,
         ..QueryFilter::default()
@@ -1344,8 +1259,6 @@ fn content_regex_composes_with_pending() {
         .iter()
         .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
-    // c1, c2 (pending + contain "comment"), d1 (pending + contains "Comment"
-    // capitalised — case-sensitive so excluded). Only c1, c2.
     assert!(ids.contains(&"c1"));
     assert!(ids.contains(&"c2"));
     assert!(!ids.contains(&"c3"), "acked comment must be excluded");
@@ -1354,11 +1267,8 @@ fn content_regex_composes_with_pending() {
 
 #[test]
 fn content_regex_ignore_case_matches_diacritic_class() {
-    // Simulate the plugin's diacritic-regex output: a character class pattern
-    // that leaves consonants as lowercase literals. Paired with ignore_case
-    // we should match "Cafe" and "cafe-with-accent" and "CAFE-with-accent".
-    // Body text uses `\u{c9}` (capital E-acute) so we avoid non-ASCII literals
-    // per the repo's strict clippy config.
+    // `\u{c9}` (capital E-acute) is spelled as an escape: the lint config forbids non-ASCII
+    // literals.
     let doc = "\
 ---
 title: Cafe Doc
@@ -1394,9 +1304,6 @@ Nothing match-worthy here.
         .with_file(Path::new("/d/x.md"), doc.as_bytes())
         .unwrap();
 
-    // Diacritic-class style pattern: consonants are lowercase literals,
-    // vowels are character classes covering common accents. `ignore_case`
-    // flips the lowercase consonants to match 'C' and 'F' too.
     let pattern = "c[aA\u{e0}\u{c0}\u{e1}\u{c1}\u{e2}\u{c2}\u{e3}\u{c3}\u{e4}\u{c4}]f[eE\u{e8}\u{c8}\u{e9}\u{c9}\u{ea}\u{ca}\u{eb}\u{cb}]";
     let filter = QueryFilter::default()
         .with_content_regex(pattern, true)
@@ -1412,7 +1319,6 @@ Nothing match-worthy here.
 
 #[test]
 fn content_regex_invalid_pattern_errors() {
-    // Unclosed character class — regex::RegexBuilder::build() should reject.
     let result = QueryFilter::default().with_content_regex("[unclosed", false);
     assert!(result.is_err(), "invalid regex must return Err, not panic");
 }
@@ -1425,13 +1331,8 @@ fn content_regex_no_match_yields_empty_results() {
         .unwrap();
 
     let results = query(&system, Path::new("/exp"), &filter, &open_config()).unwrap();
-    // When no comments match, the whole file is skipped.
     assert!(results.is_empty());
 }
-
-// ===========================================================================
-// pending_for_me + pending_broadcast tests
-// ===========================================================================
 
 /// Fixture covering the four pending shapes simultaneously:
 /// - `brd_open`: broadcast, no acks (pending under --pending and --pending-broadcast for anyone).
@@ -1534,14 +1435,11 @@ fn pending_for_me_surfaces_only_directed_unacked_by_caller() {
         .flatten()
         .map(|cm| cm.id.as_str())
         .collect();
-    // Only `dir_alice` is directed to alice and still unacked by her.
     assert_eq!(ids, vec!["dir_alice"]);
 }
 
 #[test]
 fn pending_for_me_matches_pending_for() {
-    // --pending-for-me is sugar for --pending-for <caller>; the two
-    // filters must produce identical results when given the same name.
     let system = setup_four_shapes_system();
     let me = String::from("alice");
 
@@ -1588,9 +1486,6 @@ fn pending_broadcast_only_surfaces_unacked_broadcasts() {
         .flatten()
         .map(|cm| cm.id.as_str())
         .collect();
-    // brd_open has zero acks (pending for alice).
-    // brd_mine was acked by alice (NOT pending for alice).
-    // Directed comments never match the broadcast filter.
     assert_eq!(ids, vec!["brd_open"]);
 }
 
@@ -1618,8 +1513,6 @@ fn pending_broadcast_excludes_directed_even_unacked() {
 
 #[test]
 fn pending_for_me_and_pending_broadcast_union() {
-    // Passing both flags yields the union: directed-to-alice unacked
-    // PLUS broadcasts alice hasn't acked.
     let system = setup_four_shapes_system();
     let filter = QueryFilter {
         expanded: true,
@@ -1639,8 +1532,6 @@ fn pending_for_me_and_pending_broadcast_union() {
 
 #[test]
 fn pending_broadcast_respects_callers_ack() {
-    // brd_mine has only alice's ack. From bob's perspective the
-    // broadcast is still unacked, so it surfaces for him.
     let system = setup_four_shapes_system();
     let filter = QueryFilter {
         expanded: true,
@@ -1654,15 +1545,11 @@ fn pending_broadcast_respects_callers_ack() {
         .flat_map(|r| r.comments.iter().flatten().map(|cm| cm.id.as_str()))
         .collect();
     ids.sort_unstable();
-    // Both broadcasts count: brd_open has no acks; brd_mine was only
-    // acked by alice, so bob hasn't closed it personally.
     assert_eq!(ids, vec!["brd_mine", "brd_open"]);
 }
 
 #[test]
 fn pending_union_composes_with_author_filter() {
-    // --pending-for-me plus --author=bob should intersect: only the
-    // directed comment to alice authored by bob surfaces.
     let system = setup_four_shapes_system();
     let filter = QueryFilter {
         author: Some(String::from("bob")),
@@ -1678,8 +1565,6 @@ fn pending_union_composes_with_author_filter() {
         .collect();
     assert_eq!(ids, vec!["dir_alice"]);
 }
-
-// ---------- kind filter ----------
 
 /// Build a document that carries two remargin blocks with distinct
 /// `remargin_kind` lists so the OR-semantics filter can be exercised
@@ -1793,8 +1678,6 @@ fn query_kind_filter_excludes_unmatched_comments() {
         ..QueryFilter::default()
     };
     let results = query(&system, Path::new("/kinds"), &filter, &open_config()).unwrap();
-    // No comment carries a `blocker` kind, so the file-level filter
-    // drops the document entirely (no matching comments to include).
     assert!(results.is_empty());
 }
 
@@ -1975,9 +1858,7 @@ fn query_file_path_relative_is_file_name() {
     }
 }
 
-// Compact projection: comments become 14-column positional rows (no named
-// `file`), acks collapse to the on-disk `author@ts` string, and nullable
-// columns serialize as null.
+/// Rows are 14 positional columns with no `file`; acks collapse to `author@ts`.
 #[test]
 fn compact_row_shape_drops_file_and_compacts_acks() {
     use crate::operations::query::{COMMENT_COLS, to_compact_result};
@@ -1997,7 +1878,6 @@ fn compact_row_shape_drops_file_and_compacts_acks() {
     assert_eq!(results.len(), 1);
 
     let compact = to_compact_result(&results[0], false);
-    // Per-file summary fields stay named.
     assert_eq!(compact["path"].as_str().unwrap(), "review.md");
     assert_eq!(compact["comment_count"].as_u64().unwrap(), 3);
 
@@ -2008,19 +1888,16 @@ fn compact_row_shape_drops_file_and_compacts_acks() {
         assert_eq!(row.as_array().unwrap().len(), COMMENT_COLS.len());
     }
 
-    // c3 (index 2) carries the only ack; it compacts to "author@ts".
     let c3 = rows[2].as_array().unwrap();
     assert_eq!(c3[0].as_str().unwrap(), "c3");
     let ack = c3[8].as_array().unwrap();
     assert_eq!(ack.len(), 1);
     assert_eq!(ack[0].as_str().unwrap(), "bob@2026-04-06T15:00:00-04:00");
-    // Nullable columns (reply_to, edited_at) serialize as null.
     assert!(c3[5].is_null(), "reply_to null: {c3:?}");
     assert!(c3[11].is_null(), "edited_at null: {c3:?}");
 }
 
-// include_integrity widens each row by two columns — checksum + signature
-// landing immediately before the (last) content column.
+/// `checksum` and `signature` land immediately before the last column, `content`.
 #[test]
 fn compact_row_include_integrity_adds_columns() {
     use crate::operations::query::{COMMENT_COLS, COMMENT_COLS_INTEGRITY, to_compact_result};
@@ -2045,10 +1922,8 @@ fn compact_row_include_integrity_adds_columns() {
     let integrity_row = integrity["comments"][0].as_array().unwrap();
     assert_eq!(base_row.len(), COMMENT_COLS.len());
     assert_eq!(integrity_row.len(), COMMENT_COLS_INTEGRITY.len());
-    // checksum from disk; signature null (the fixture comments are unsigned).
     assert_eq!(integrity_row[13].as_str().unwrap(), "sha256:c1c1");
     assert!(integrity_row[14].is_null(), "unsigned signature null");
-    // content stays last in both arities.
     assert_eq!(
         integrity_row[15],
         base_row[COMMENT_COLS.len() - 1],
@@ -2056,9 +1931,7 @@ fn compact_row_include_integrity_adds_columns() {
     );
 }
 
-// Codegen contract: the compact row alias renders its Option tuple columns
-// as nullable in TS and Zod, and the compact payload carries the row by
-// reference (relies on the pinned tixschema nullable-in-tuple support).
+/// The row alias renders its `Option` tuple columns as nullable in TypeScript and Zod.
 #[test]
 fn compact_comment_row_schema_renders_nullable_columns() {
     use crate::operations::query::{compact_comment_row_schema, compact_query_result_schema};
@@ -2086,8 +1959,7 @@ fn compact_comment_row_schema_renders_nullable_columns() {
     );
 }
 
-// Envelope contract: `base_path` is the join root for every result path,
-// so a file argument must render its parent directory.
+/// `base_path` is the join root for result paths: a file argument renders its parent directory.
 #[test]
 fn display_base_path_file_renders_parent_directory() {
     use crate::operations::query::display_base_path;
@@ -2110,8 +1982,7 @@ fn display_base_path_directory_renders_argument() {
     assert_eq!(display_base_path("", false), "./");
 }
 
-// Scope contract: the summary counts stay file-wide under a comment-level
-// filter; only `comments` and `matched_count` narrow to the matches.
+/// Summary counts stay file-wide; only `comments` and `matched_count` narrow to the matches.
 #[test]
 fn matched_count_reports_the_filtered_subset() {
     let system = setup_expanded_system();
@@ -2376,8 +2247,6 @@ fn pending_broadcast_excludes_callers_own_broadcast() {
         .flatten()
         .map(|cm| cm.id.as_str())
         .collect();
-    // Writing a broadcast is not owing one: alice's own stays out,
-    // bob's unacked one is hers to see.
     assert_eq!(ids, vec!["brd_by_bob"]);
 }
 

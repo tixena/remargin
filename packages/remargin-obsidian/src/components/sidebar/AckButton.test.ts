@@ -1,3 +1,5 @@
+/** Static-markup tests for the ack button's label, arrow and color. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -10,7 +12,6 @@ import type RemarginPlugin from "../../main.ts";
 import { DEFAULT_SETTINGS } from "../../types.ts";
 import { AckButton } from "./AckButton.tsx";
 
-// Minimal plugin + backend stand-ins, mirroring AckToggle.test.ts.
 const pluginStub = { settings: DEFAULT_SETTINGS } as unknown as RemarginPlugin;
 const backendStub = {
   registryShow: (): Promise<Participant[]> => Promise.resolve([]),
@@ -68,8 +69,7 @@ describe("AckButton", () => {
     assert.ok(html.includes('title="No acknowledgments yet"'), `got: ${html}`);
   });
 
-  // Ack-visual precedence parity with AckToggle: the button must share
-  // the same arrow/color rules so clicking it doesn't flip the visual.
+  // The button shares AckToggle's arrow and color rules, so clicking it does not flip the visual.
   it("renders green double arrow when directed to no one and an outsider acked (rule 1)", () => {
     const html = render({ ack: ["alice"], me: "eduardo", toTargets: [] });
     assert.ok(html.includes("text-green-500"), `expected green tone, got: ${html}`);

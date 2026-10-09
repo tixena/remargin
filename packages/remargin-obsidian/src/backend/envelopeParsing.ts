@@ -1,9 +1,6 @@
-import { z } from "zod/v4";
+/** Parsers for the CLI's `--json` responses. */
 
-// Output-parsing for the CLI `--json` responses, extracted from
-// `RemarginBackend` so it can be unit-tested directly: the backend class uses a
-// parameter-property constructor that the test runner's strip-only loader
-// cannot parse, so anything a test needs to import lives here instead.
+import { z } from "zod/v4";
 
 /**
  * Parse CLI stdout against a Zod schema and surface a readable error on

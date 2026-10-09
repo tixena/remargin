@@ -1,8 +1,9 @@
+//! Source scan for the overlay-model symbols and for the word `override` in identity code.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The tokens that MUST NOT reappear anywhere under `crates/`. These
-/// are the exact System B names the refactor deleted.
+/// Must not reappear anywhere under `crates/`.
 const BANNED_TOKENS_ANYWHERE: &[&str] = &[
     "CliOverrides",
     "OverrideScratch",
@@ -11,10 +12,8 @@ const BANNED_TOKENS_ANYWHERE: &[&str] = &[
     "with_identity_overrides",
 ];
 
-/// Paths (relative to repo root) whose content must not contain the
-/// bare word `override` (case-insensitive). Restricted to identity
-/// resolution code; obsidian vault-path and query expansion are
-/// unrelated uses and are not included.
+/// Relative to the repo root; these must not contain the word `override`, in any case. Only
+/// identity-resolution code is listed.
 const IDENTITY_FILES: &[&str] = &[
     "crates/remargin-core/src/config.rs",
     "crates/remargin-core/src/config/identity.rs",
@@ -24,9 +23,7 @@ const IDENTITY_FILES: &[&str] = &[
     "crates/remargin/src/main.rs",
 ];
 
-/// Exact substrings that pre-date the refactor and describe
-/// unrelated precedence in natural language. Empty today; extend
-/// with explicit reasons if new ones arise.
+/// `(file, substring, reason)` exemptions; empty.
 const ALLOWLIST: &[(&str, &str, &str)] = &[];
 
 fn repo_root() -> PathBuf {
@@ -67,9 +64,7 @@ fn walk_rust_files_inner(dir: &Path, out: &mut Vec<PathBuf>) {
             walk_rust_files_inner(&path, out);
         } else {
             let is_rs = path.extension().and_then(|s| s.to_str()) == Some("rs");
-            // This guard file names the banned symbols and `override` by
-            // design; skip itself so the assertion is about every OTHER
-            // .rs file in the tree.
+            // This guard names the banned symbols and `override` by design, so it skips itself.
             let is_self = name == "no_override_in_identity.rs"
                 || path.ends_with("no_override_in_identity/tests.rs");
             if is_rs && !is_self {

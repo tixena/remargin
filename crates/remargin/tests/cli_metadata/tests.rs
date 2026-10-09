@@ -1,3 +1,5 @@
+//! `remargin metadata` in text and `--json` modes.
+
 use core::str;
 use std::fs;
 

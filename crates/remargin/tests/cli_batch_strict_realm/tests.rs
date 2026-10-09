@@ -1,3 +1,5 @@
+//! One batch from an open-mode caller into a strict-mode realm, checked for unsigned comments.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,7 +37,6 @@ const TEST_PUBLIC_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+ww
 fn build_cross_mode_layout() -> (TempDir, PathBuf, PathBuf, PathBuf) {
     let tmp = TempDir::new().unwrap();
 
-    // Shared registry at tempdir root so both realms see the same active set.
     let registry = format!(
         "participants:\n  alice:\n    type: human\n    status: active\n    pubkeys:\n      - {TEST_PUBLIC_KEY}\n"
     );
@@ -44,9 +45,6 @@ fn build_cross_mode_layout() -> (TempDir, PathBuf, PathBuf, PathBuf) {
     let outer = tmp.path().join("outer");
     fs::create_dir_all(&outer).unwrap();
     fs::write(outer.join("alice_key"), TEST_PRIVATE_KEY).unwrap();
-    // Outer caller is in open mode. Identity is irrelevant here because
-    // the test passes --identity/--type/--key explicitly — this yaml is
-    // what `resolve_mode` will walk up to.
     fs::write(
         outer.join(".remargin.yaml"),
         "identity: alice\ntype: human\nmode: open\nkey: ./alice_key\n",
@@ -57,8 +55,6 @@ fn build_cross_mode_layout() -> (TempDir, PathBuf, PathBuf, PathBuf) {
     fs::create_dir_all(&notes).unwrap();
     let notes_key = notes.join("alice_key");
     fs::write(&notes_key, TEST_PRIVATE_KEY).unwrap();
-    // Notes realm is strict. This is the realm's own declared mode —
-    // the doc inside this directory expects all comments to be signed.
     fs::write(
         notes.join(".remargin.yaml"),
         "identity: alice\ntype: human\nmode: strict\nkey: ./alice_key\n",
@@ -79,11 +75,7 @@ fn body(path: &Path) -> String {
     fs::read_to_string(path).unwrap()
 }
 
-/// Failing test (rem-?): caller in open mode batches into a strict-mode
-/// realm. Either the batch must escalate to strict (sign every new
-/// comment with the resolvable key) OR refuse outright. Writing
-/// unsigned comments into a strict-mode realm's doc is wrong because
-/// every subsequent `remargin verify` from inside that realm will fail.
+/// A batch from an open-mode caller into a strict-mode realm signs every new comment or refuses.
 #[test]
 fn batch_into_strict_realm_from_open_caller_does_not_leave_unsigned_comments() {
     let (_tmp, outer, doc, key) = build_cross_mode_layout();
@@ -96,9 +88,6 @@ fn batch_into_strict_realm_from_open_caller_does_not_leave_unsigned_comments() {
     ])
     .to_string();
 
-    // Caller is in `outer` (open mode). They explicitly declare an
-    // identity that is registered in the shared registry, and pass a
-    // resolvable key path. The doc target lives in a strict-mode realm.
     let out = Command::cargo_bin("remargin")
         .unwrap()
         .current_dir(&outer)
@@ -124,8 +113,6 @@ fn batch_into_strict_realm_from_open_caller_does_not_leave_unsigned_comments() {
     let doc_parsed = parse_doc(&after).unwrap();
 
     if out.status.success() {
-        // Acceptable fix path #1: batch escalated to strict mode and
-        // signed every new comment. Assert signatures are present.
         for cm in doc_parsed.comments() {
             assert!(
                 cm.signature.is_some(),
@@ -138,8 +125,6 @@ fn batch_into_strict_realm_from_open_caller_does_not_leave_unsigned_comments() {
             );
         }
     } else {
-        // Acceptable fix path #2: batch refused with an error that
-        // names the cross-mode hazard. The doc must remain untouched.
         assert!(
             doc_parsed.comments().is_empty(),
             "BUG: batch refused but already wrote partial state. \

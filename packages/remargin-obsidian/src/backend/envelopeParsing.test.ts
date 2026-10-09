@@ -1,3 +1,5 @@
+/** Runs captured CLI `--json` output through the envelope parsers. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
@@ -13,11 +15,7 @@ import {
 import { parseVerifyFailure } from "@/lib/verifyFailure";
 import { parsePayloadArray } from "./envelopeParsing";
 
-// Every fixture below is REAL `remargin <cmd> --json` stdout captured from the
-// CLI (not hand-authored), so each test proves the generated/checked schema
-// accepts exactly what the binary emits — envelope metadata included. This is
-// the regression guard for the `el`/`sl` (element graft) and `base_path`
-// (envelope metadata) classes of "output did not match schema" failures.
+// Every fixture is real `remargin <cmd> --json` stdout captured from the CLI, not hand-authored.
 
 const COMMENTS = `{
   "comments": [
@@ -68,9 +66,7 @@ const SANDBOX_REMOVE = `{
   "elapsed_ms": 2, "failed": [], "removed": ["doc.md"], "skipped": []
 }`;
 
-// Modeled on the documented registry shape (`registry_participant_json` in the
-// CLI) — a registry must exist to capture it live, but the loose schema is what
-// the plugin uses and this is the exact key set it produces.
+// Modeled on the documented registry shape: capturing it live needs a registry to exist.
 const REGISTRY = `{
   "elapsed_ms": 1,
   "participants": [
@@ -161,9 +157,7 @@ describe("envelopeParsing — real CLI output parses", () => {
 });
 
 describe("envelopeParsing — element strictness still bites", () => {
-  // An un-modeled key inside an element must fail — this is exactly the guard
-  // that the original `el`/`sl` graft tripped, and the reason base_path had to
-  // be tolerated at the envelope level rather than by loosening elements.
+  // Element strictness is the guard: envelope metadata is tolerated, an unknown element key is not.
   it("rejects an unknown key inside a comment element", () => {
     const bad = `{ "comments": [
       { "ack": [], "attachments": [], "author": "t", "author_type": "human",

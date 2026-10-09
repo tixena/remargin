@@ -68,16 +68,13 @@ pub const PLAN_OP_FIELDS: &[&str] = &[
 #[non_exhaustive]
 pub struct ProjectBatchOp {
     pub after_comment: Option<String>,
-    /// Heading-anchored insertion. Mutually exclusive with
-    /// `after_comment` and `after_line`.
+    /// Mutually exclusive with `after_comment` and `after_line`.
     pub after_heading: Option<String>,
     pub after_line: Option<usize>,
-    /// File names (not paths) to record on the projected comment. Plan
-    /// never copies bytes — the caller supplies the basenames it expects
-    /// to land in the assets directory.
+    /// File names, not paths: plan never copies bytes.
     pub attachment_filenames: Vec<String>,
-    /// `Some(true)` always acks, `Some(false)` never acks, `None` (default)
-    /// acks iff parent.author != caller (don't ack your own replies).
+    /// `Some(true)` always acks, `Some(false)` never does, and `None` acks only when the parent's
+    /// author is not the caller.
     pub auto_ack: Option<bool>,
     pub content: String,
     pub remargin_kind: Vec<String>,
@@ -124,8 +121,6 @@ impl ProjectBatchOp {
             .and_then(serde_json::Value::as_u64)
             .and_then(|n| usize::try_from(n).ok());
 
-        // at most one position anchor per op (matches
-        // [`crate::operations::batch::BatchCommentOp::from_json_object`]).
         let anchor_count = usize::from(after_comment.is_some())
             + usize::from(after_heading.is_some())
             + usize::from(after_line.is_some());
@@ -197,25 +192,16 @@ impl ProjectBatchOp {
 /// becomes `attachment_filenames` — plan never copies bytes).
 #[non_exhaustive]
 pub struct ProjectCommentParams<'params> {
-    /// File names (not paths) to record in the comment's `attachments`
-    /// list. `plan` projects what the `attachments` array would look like
-    /// without actually copying any bytes; the caller passes the basenames
-    /// they expect to land in the assets directory.
+    /// File names, not paths: plan never copies bytes.
     pub attachment_filenames: &'params [&'params str],
-    /// Acknowledge the parent comment. `Some(true)` always acks, `Some(false)`
-    /// never acks, `None` (default) acks iff parent.author != caller.
-    /// `Some(true)` requires `reply_to`.
+    /// `Some(true)` always acks and requires `reply_to`, `Some(false)` never acks, and `None` acks
+    /// only when the parent's author is not the caller.
     pub auto_ack: Option<bool>,
     pub content: &'params str,
     pub position: &'params InsertPosition,
-    /// Optional classification tags. Validated before the
-    /// projection runs so a malformed tag cannot produce a misleading
-    /// preview.
     pub remargin_kind: &'params [String],
     pub reply_to: Option<&'params str>,
-    /// Atomically project a sandbox entry for the acting identity. Real
-    /// op would stage the file; the projection just rewrites the
-    /// frontmatter so callers can see the resulting sandbox list.
+    /// Project a sandbox entry for the acting identity into the frontmatter.
     pub sandbox: bool,
     pub to: &'params [String],
 }
@@ -311,7 +297,6 @@ pub fn project_ack(
         if remove {
             cm.ack.retain(|a| a.author != identity);
         } else if cm.ack.iter().any(|a| a.author == identity) {
-            // Idempotent: identity already acked; nothing to push.
         } else {
             cm.ack.push(Acknowledgment {
                 author: String::from(identity),
@@ -517,11 +502,7 @@ pub fn project_comment(
     let existing_ids = after.comment_ids();
     let new_id = id::generate(&existing_ids);
 
-    // thread remargin_kind through the plan projection so
-    // the preview matches the real-op output exactly. Validated before
-    // any side-effect work, same as `create_comment`. Empty slice
-    // becomes `None` so the projected YAML matches what `create_comment`
-    // would actually write.
+    // An empty slice becomes `None`, so the projected YAML matches what `create_comment` writes.
     validate_kinds(params.remargin_kind).context("invalid kind")?;
     let remargin_kind: Option<Vec<String>> = if params.remargin_kind.is_empty() {
         None
@@ -534,15 +515,12 @@ pub fn project_comment(
         .reply_to
         .map(|parent_id| resolve_thread(&after, parent_id));
 
-    // Plan never copies attachments; just record the expected
-    // `<assets_dir>/<filename>` strings.
     let resolved_attachments: Vec<String> = params
         .attachment_filenames
         .iter()
         .map(|fname| format!("{}/{fname}", config.assets_dir))
         .collect();
 
-    // Same reply-invariant `to:` composition as the real op.
     let effective_to: Vec<String> = {
         let parent_author = params
             .reply_to
@@ -701,14 +679,11 @@ pub fn project_edit(
     comment_style::gate_edit(&cm.content, new_content, &editor_type)?;
 
     cm.content = String::from(new_content);
-    // Preserve existing remargin_kind on edit, matching `edit_comment`.
-    // `kinds()` returns `&[]` when the field is absent so the
-    // pre-kind back-compat checksum branch still fires.
+    // `kinds()` returns `&[]` when the field is absent, which keeps the no-kinds checksum.
     cm.checksum = compute_checksum(new_content, cm.kinds());
     cm.ack.clear();
-    // Mutating `edit_comment` also wipes the signature when content
-    // changes (verify would fail otherwise); mirror that here so the
-    // projection's post-verify view matches what the real op would see.
+    // `edit_comment` wipes the signature when content changes; mirror it so the projected verify
+    // matches.
     cm.signature = None;
 
     let descendants = collect_descendants(&after, comment_id);
@@ -748,9 +723,7 @@ pub fn project_purge(
 
     clean_remargin_frontmatter(&mut after);
 
-    // `purge` strips all comments and removes `remargin_*` frontmatter
-    // keys; we *don't* call `ensure_frontmatter` here because that would
-    // re-inject the `remargin_version` key we just removed.
+    // No `ensure_frontmatter` here: it would re-inject keys the purge just removed.
     Ok((before, after))
 }
 
@@ -831,9 +804,7 @@ pub fn project_sign(
         .as_deref()
         .context("identity is required to sign comments")?;
 
-    // Match `sign_comments` exactly: sign has no reason to exist without
-    // a key, so resolve from `key_path` directly and bail when unset
-    // regardless of mode.
+    // Sign has nothing to do without a key, so bail when `key_path` is unset, whatever the mode.
     let key_path = match &config.key_path {
         Some(configured) => configured.clone(),
         None => bail!(
@@ -846,12 +817,8 @@ pub fn project_sign(
 
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    // Validate `--ids` up front (forgery guard + unknown-id rejection)
-    // before touching any comment. The returned skip list is discarded
-    // here — plan surfaces already-signed ids via `comments.preserved`.
-    // The plan projection treats already-signed ids under `--ids` as
-    // skipped regardless of the actual op's `--repair-checksum` flag:
-    // this projection does not yet surface a "would re-sign" signal.
+    // Validate `--ids` before touching any comment. Already-signed ids are skipped here whatever
+    // `--repair-checksum` says, and surface under `comments.preserved`.
     let (targets, _skipped) = sign::classify_candidates(&after, identity, selection, false)?;
     let target_ids: HashSet<String> = targets.iter().map(|(id, _)| id.clone()).collect();
 
@@ -873,9 +840,8 @@ pub fn project_sign(
 /// Projection sibling of [`crate::operations::sandbox::add_to_files`]
 /// operating on a single document.
 ///
-/// Adds the caller's identity + now timestamp to the `sandbox:`
-/// frontmatter list if absent. Idempotent: an existing entry for the
-/// caller leaves the file unchanged (projection returns a noop plan).
+/// Adds the caller's identity with the current timestamp to the `sandbox:`
+/// frontmatter list, or refreshes the timestamp of the caller's existing entry.
 ///
 /// Non-markdown paths fail with `not a markdown file` — same as the real
 /// op. The projection operates on a single file because `plan` is a

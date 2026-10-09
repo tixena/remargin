@@ -4,8 +4,8 @@
 //!
 //! ```yaml
 //! participants:
-//!   eduardo-burgos:
-//!     display_name: "Eduardo Burgos Minier"
+//!   alice:
+//!     display_name: "Alice Example"
 //!     type: human
 //!     status: active
 //!     pubkeys:
@@ -53,8 +53,7 @@ pub struct RegistryParticipant {
     pub added: Option<String>,
     #[serde(rename = "type")]
     pub author_type: String,
-    /// Human-friendly name for UI rendering. When `None`, consumers
-    /// fall back to the participant id (the map key).
+    /// `None` makes consumers fall back to the participant id.
     #[serde(default)]
     pub display_name: Option<String>,
     /// Supports key rotation: multiple pubkeys can be listed simultaneously.
@@ -125,7 +124,7 @@ const fn default_status() -> RegistryParticipantStatus {
 ///
 /// When a display name is set the prefix is `"Display Name" (id)`;
 /// otherwise it is the bare id. Example output:
-/// `"Eduardo Burgos" (eduardo-burgos) (human) [active] 2 key(s)`.
+/// `"Alice Example" (alice) (human) [active] 2 key(s)`.
 #[must_use]
 pub fn render_registry_participant(name: &str, participant: &RegistryParticipant) -> String {
     let status = match participant.status {

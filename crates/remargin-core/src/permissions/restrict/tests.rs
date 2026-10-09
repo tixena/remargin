@@ -49,7 +49,6 @@ fn read_yaml(system: &MemorySystem, path: &Path) -> Value {
     serde_yaml::from_str(&body).unwrap()
 }
 
-/// Scenario 1: cwd is the anchor (it has its own `.claude/`).
 #[test]
 fn anchor_discovery_when_cwd_is_anchor() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -57,7 +56,6 @@ fn anchor_discovery_when_cwd_is_anchor() {
     assert_eq!(found, anchor);
 }
 
-/// Scenario 2: anchor is several directories up from cwd.
 #[test]
 fn anchor_discovery_walks_up_to_nearest_claude_dir() {
     let (system, _anchor) = realm_with_claude(&[]);
@@ -67,7 +65,6 @@ fn anchor_discovery_walks_up_to_nearest_claude_dir() {
     assert_eq!(found, PathBuf::from("/r"));
 }
 
-/// Scenario 3: no `.claude/` ancestor → clear error.
 #[test]
 fn anchor_discovery_errors_when_no_claude_ancestor() {
     let system = MemorySystem::new().with_dir(Path::new("/r")).unwrap();
@@ -79,7 +76,6 @@ fn anchor_discovery_errors_when_no_claude_ancestor() {
     );
 }
 
-/// Scenario 4: wildcard path stored verbatim in `.remargin.yaml`.
 #[test]
 fn wildcard_path_stored_in_yaml() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -90,7 +86,6 @@ fn wildcard_path_stored_in_yaml() {
     assert_eq!(entry["path"], Value::String(String::from("*")));
 }
 
-/// Scenario 5: subpath that resolves outside the anchor is rejected.
 #[test]
 fn subpath_outside_anchor_is_rejected() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -108,7 +103,6 @@ fn subpath_outside_anchor_is_rejected() {
     );
 }
 
-/// Scenario 6: missing `.remargin.yaml` is created with the entry.
 #[test]
 fn creates_remargin_yaml_when_absent() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -126,8 +120,7 @@ fn creates_remargin_yaml_when_absent() {
     assert_eq!(entry["path"], Value::String(String::from("src/secret")));
 }
 
-/// Scenario 7: existing `.remargin.yaml` with an identity block gains
-/// the `permissions.trusted_roots` array without losing the identity.
+/// The identity block survives the new `permissions.trusted_roots` array.
 #[test]
 fn appends_to_existing_remargin_yaml() {
     let prior = "identity: alice\ntype: human\n";
@@ -151,8 +144,6 @@ fn appends_to_existing_remargin_yaml() {
     );
 }
 
-/// Scenario 8: re-running `restrict` for the same path is a no-op
-/// (no duplicate entry in the YAML).
 #[test]
 fn duplicate_path_does_not_create_second_entry() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -176,29 +167,22 @@ fn duplicate_path_does_not_create_second_entry() {
     assert_eq!(restricts.len(), 1, "{value:#?}");
 }
 
-/// Scenario 9: a hook-only restrict writes no Claude settings file and
-/// no sidecar entry; re-running stays clean (still nothing projected).
-/// The hook is the single source of truth, so there is nothing to
-/// backfill into the settings files.
+/// The hook is the single source of truth, so nothing is written to settings or the sidecar.
 #[test]
 fn rerun_writes_no_settings_or_sidecar() {
     let (system, anchor) = realm_with_claude(&[]);
     let files = settings_files(&anchor);
     restrict(&system, &anchor, &args("src/secret"), &files).unwrap();
 
-    // No project-scope settings file was created, and no sidecar entry.
     let _: io::Error = system.read_to_string(&files[0]).unwrap_err();
     assert!(sidecar::load(&system, &anchor).unwrap().entries.is_empty());
 
-    // Re-running is a clean no-op on the settings/sidecar side.
     restrict(&system, &anchor, &args("src/secret"), &files).unwrap();
     let _: io::Error = system.read_to_string(&files[0]).unwrap_err();
     assert!(sidecar::load(&system, &anchor).unwrap().entries.is_empty());
 }
 
-/// Scenario 10: `also_deny_bash` lands on the `.remargin.yaml` entry but
-/// projects no Bash deny rules — the hook denies every command touching a
-/// managed path regardless of verb, so `rules_applied` stays empty.
+/// The hook denies whatever the verb, so `also_deny_bash` projects no Bash deny rules.
 #[test]
 fn also_deny_bash_lands_on_yaml_entry_but_projects_no_rules() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -218,10 +202,6 @@ fn also_deny_bash_lands_on_yaml_entry_but_projects_no_rules() {
     );
 }
 
-/// Scenario 11: `cli_allowed=true` lands on the YAML entry.
-/// `Bash(remargin *)` is never projected regardless of `cli_allowed`;
-/// CLI denial is enforced by the `PreToolUse` hook via the folder-level
-/// `cli_allowed` field in `.remargin.yaml`.
 #[test]
 fn cli_allowed_true_persists_in_yaml_no_remargin_cli_deny_projected() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -233,7 +213,6 @@ fn cli_allowed_true_persists_in_yaml_no_remargin_cli_deny_projected() {
     let entry = &value["permissions"]["trusted_roots"][0];
     assert_eq!(entry["cli_allowed"], Value::Bool(true));
 
-    // `Bash(remargin *)` is never projected (hook-enforced).
     assert!(
         !outcome
             .rules_applied
@@ -242,9 +221,6 @@ fn cli_allowed_true_persists_in_yaml_no_remargin_cli_deny_projected() {
     );
 }
 
-/// Scenario 12: a hook-only restrict touches no settings files, applies
-/// no rules, and writes no sidecar entry — only the `.remargin.yaml`
-/// entry activates enforcement.
 #[test]
 fn outcome_reports_no_settings_or_sidecar() {
     let (system, anchor) = realm_with_claude(&[]);
@@ -255,21 +231,14 @@ fn outcome_reports_no_settings_or_sidecar() {
     assert_eq!(outcome.claude_files_touched, [] as [PathBuf; 0]);
     assert_eq!(outcome.rules_applied, [] as [String; 0]);
 
-    // No sidecar entry is written when nothing is projected.
     let sc = sidecar::load(&system, &anchor).unwrap();
     assert!(sc.entries.is_empty());
 }
 
-/// Scenario 13: the dedicated `write_remargin_yaml` helper is the
-/// only path used; the public write / edit ops still refuse
-/// `.remargin.yaml`. We pin this by checking that the file landed
-/// (the bypass works) AND the helper is not re-exported beyond the
-/// permissions namespace (no other module can invoke it).
+/// The file lands through the sanctioned helper, which only the permissions namespace exports.
 #[test]
 fn write_remargin_yaml_bypass_is_scoped_to_this_module() {
     let (system, anchor) = realm_with_claude(&[]);
-    // Public path: restrict() succeeds → write_remargin_yaml ran
-    // through the sanctioned helper.
     restrict(
         &system,
         &anchor,
@@ -284,10 +253,6 @@ fn write_remargin_yaml_bypass_is_scoped_to_this_module() {
         ".remargin.yaml must exist after restrict"
     );
 
-    // `write_remargin_yaml` is only re-exported via
-    // `crate::permissions::restrict::write_remargin_yaml`. A future
-    // change that re-exports it from the crate root or another
-    // module must update this test deliberately.
     let body = "permissions:\n  trusted_roots: []\n";
     write_remargin_yaml(&system, &anchor, body).unwrap();
     assert_eq!(

@@ -1,3 +1,6 @@
+//! Tests for reactions: both wire shapes, the timestamp backfill, add and remove, and
+//! serialization.
+
 use super::{
     Acknowledgment, ReactionEntry, Reactions, ReactionsExt, deserialize_with_legacy,
     format_reaction_entry_block, legacy_sentinel_ts, quote_emoji_key,

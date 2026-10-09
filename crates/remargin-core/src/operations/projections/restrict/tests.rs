@@ -95,8 +95,6 @@ fn anchor_at_cwd_with_empty_state_projects_yaml_only() {
         diff.remargin_yaml.entry_action,
         EntryAction::Added
     ));
-    // The hook is the single source of truth: `restrict` writes no
-    // settings rules and no sidecar entry, so the plan projects neither.
     assert!(
         diff.settings_files.is_empty(),
         "expected no settings files touched: {:?}",
@@ -179,8 +177,6 @@ fn wildcard_resolves_to_anchor_and_projects_no_rules() {
     let projection = project_restrict(&system, &realm, &args, &[project, user]).unwrap();
     let diff = diff_or_fail(projection);
     assert_eq!(diff.absolute_path, realm);
-    // Wildcard restrict projects no settings rules — the hook covers every
-    // path under the realm root.
     assert!(
         diff.settings_files.is_empty(),
         "expected no settings rules under the wildcard projection, got {:?}",
@@ -235,12 +231,7 @@ fn yaml_entry_change_surfaces_conflict_with_previous() {
     );
 }
 
-/// With the projection retired, an existing allow that would once have
-/// overlapped a projected deny surfaces no `AllowDenyOverlap` conflict —
-/// there is no deny projected to overlap. Covers the exact-match case
-/// that used to fire; the overlap classifier's own logic (legacy-slash
-/// canonicalization, subtree shadow) stays unit-tested in
-/// `claude_sync::rule_shape`.
+/// With nothing projected into the settings files, an existing allow has no deny to overlap.
 #[test]
 fn overlapping_allow_surfaces_no_conflict_now_projection_retired() {
     let (system, realm, project, user) = fresh_realm();
@@ -272,18 +263,11 @@ fn overlapping_allow_surfaces_no_conflict_now_projection_retired() {
     );
 }
 
-/// scenario 19 negative: an existing `Edit` allow does not
-/// produce an overlap against the projected `Read` denies — tools are
-/// kept distinct in the comparison key.
+/// Tools are kept distinct in the comparison key.
 #[test]
 fn allow_deny_overlap_cross_tool_does_not_fire() {
     let (system, realm, project, user) = fresh_realm();
     let secret_glob = format!("{}/src/secret/**", realm.display());
-    // Seed an `Edit` allow only — none of the projection's `Edit`
-    // denies should match the realm allow body, but we want to
-    // confirm that even when the path matches, a different *tool*
-    // never produces an overlap. Use `WebFetch` (an unsupported tool)
-    // so we are sure no editor-tool deny would match.
     let body = serde_json::json!({
         "permissions": {
             "allow": [format!("WebFetch(//{secret_glob})")],
@@ -309,9 +293,7 @@ fn allow_deny_overlap_cross_tool_does_not_fire() {
     );
 }
 
-/// scenario 20: component-confusion guard — an allow on
-/// `/realm-extra/**` does NOT overlap a restrict that targets
-/// `/realm`.
+/// An allow on `/realm-extra/**` does not overlap a restrict that targets `/realm`.
 #[test]
 fn allow_deny_overlap_rejects_component_confusion() {
     let (system, realm, project, user) = fresh_realm();

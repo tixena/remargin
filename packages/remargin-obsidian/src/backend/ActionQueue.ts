@@ -1,5 +1,8 @@
+/** Per-file action queue for CLI mutations made from the editor. */
+
 import { type App, TFile } from "obsidian";
 
+/** One queued mutation. */
 type Action = () => Promise<void>;
 
 /**

@@ -67,7 +67,6 @@ fn opts(pattern: &str, replacement: &str) -> ReplaceOptions {
     ReplaceOptions::new(String::from(pattern), String::from(replacement))
 }
 
-// Scenario 1: literal body replace.
 #[test]
 fn literal_body_replace() {
     let system = system_with("/project/doc.md", "# Title\n\nThe foo system.\n");
@@ -87,8 +86,7 @@ fn literal_body_replace() {
     assert!(read(&system, "/project/doc.md").contains("The bar system."));
 }
 
-// Scenario 2: body match while the same pattern also lives in a comment.
-// The comment block must be byte-identical afterwards.
+/// The comment block must be byte-identical afterwards.
 #[test]
 fn comment_also_contains_pattern() {
     let comment = remargin_block("c1", "Remember to handle foo here.");
@@ -104,12 +102,10 @@ fn comment_also_contains_pattern() {
     )
     .unwrap();
 
-    // Exactly the one body occurrence is replaced.
     assert_eq!(report.total_replacements, 1);
     let after = read(&system, "/project/doc.md");
     assert!(after.contains("The bar system."));
 
-    // The comment block survives byte-for-byte (content AND checksum).
     assert!(
         after.contains(&comment),
         "comment block must be byte-identical; got:\n{after}"
@@ -127,7 +123,6 @@ fn comment_also_contains_pattern() {
     );
 }
 
-// Scenario 3: a pattern that occurs ONLY inside a comment is a no-op.
 #[test]
 fn comment_only_match_is_noop() {
     let comment = remargin_block("c1", "The foo lives only here.");
@@ -147,11 +142,9 @@ fn comment_only_match_is_noop() {
     assert_eq!(report.total_replacements, 0);
     assert_eq!(report.files_changed, 0);
     assert!(!report.files[0].changed);
-    // File untouched, byte-for-byte.
     assert_eq!(read(&system, "/project/doc.md"), before);
 }
 
-// Scenario 4: regex capture-group expansion.
 #[test]
 fn regex_capture_group() {
     let system = system_with("/project/doc.md", "build id=42 here\n");
@@ -169,8 +162,7 @@ fn regex_capture_group() {
     assert!(read(&system, "/project/doc.md").contains("id=[42]"));
 }
 
-// Scenario 5: literal replacement containing `$` is inserted verbatim
-// (NoExpand), not interpreted as a capture reference.
+/// A `$` in a literal replacement is inserted verbatim, not read as a capture reference.
 #[test]
 fn literal_replacement_with_dollar() {
     let system = system_with("/project/doc.md", "the price tag\n");
@@ -187,7 +179,6 @@ fn literal_replacement_with_dollar() {
     assert!(read(&system, "/project/doc.md").contains("the $5 tag"));
 }
 
-// Scenario 6: case-insensitive matching.
 #[test]
 fn case_insensitive() {
     let system = system_with("/project/doc.md", "Foo and foo\n");
@@ -205,7 +196,6 @@ fn case_insensitive() {
     assert!(read(&system, "/project/doc.md").contains("bar and bar"));
 }
 
-// Scenario 7: folder walk touches every .md, skips non-markdown.
 #[test]
 fn folder_walk_skips_non_markdown() {
     let system = MemorySystem::new()
@@ -235,11 +225,9 @@ fn folder_walk_skips_non_markdown() {
     assert_eq!(report.total_replacements, 2);
     assert!(read(&system, "/project/d/a.md").contains("bar a"));
     assert!(read(&system, "/project/d/sub/b.md").contains("bar b"));
-    // Non-markdown left untouched (no frontmatter injected either).
     assert_eq!(read(&system, "/project/d/c.png"), "foo png\n");
 }
 
-// Scenario 8: dry-run reports counts but writes nothing.
 #[test]
 fn dry_run_writes_nothing() {
     let system = system_with("/project/doc.md", "foo foo foo\n");
@@ -259,11 +247,9 @@ fn dry_run_writes_nothing() {
     assert_eq!(report.total_replacements, 3);
     assert_eq!(report.files_changed, 1);
     assert!(report.files[0].changed);
-    // Disk unchanged.
     assert_eq!(read(&system, "/project/doc.md"), before);
 }
 
-// Scenario 9: no matches anywhere is a clean no-op.
 #[test]
 fn no_matches() {
     let system = system_with("/project/doc.md", "nothing here\n");
@@ -281,17 +267,12 @@ fn no_matches() {
     assert!(!report.files[0].changed);
 }
 
-// Scenario 10: subset-gate backstop — a replacement that injects a
-// remargin fence into the body re-parses as a new comment and is
-// refused before any byte is written.
+/// An injected remargin fence re-parses as a new comment and is refused before any write.
 #[test]
 fn injecting_comment_fence_is_refused() {
     let system = system_with("/project/doc.md", "MARK\nbody\n");
     let before = read(&system, "/project/doc.md");
 
-    // Replacing MARK with a full remargin comment block makes the body
-    // re-parse with a comment that was not present before — the
-    // preservation check rejects the "unexpected comment".
     let injected = remargin_block("evil", "injected");
     let report = replace(
         &system,
@@ -302,15 +283,12 @@ fn injecting_comment_fence_is_refused() {
     )
     .unwrap();
 
-    // Single-file mode still returns Ok with the failure recorded.
     assert_eq!(report.files_failed, 1);
     assert_eq!(report.files_changed, 0);
     assert!(report.files[0].error.is_some());
-    // Disk unchanged.
     assert_eq!(read(&system, "/project/doc.md"), before);
 }
 
-// Scenario 11: deny_ops governs replace independently.
 #[test]
 fn deny_ops_governs_replace() {
     let system = MemorySystem::new()
@@ -346,8 +324,6 @@ fn deny_ops_governs_replace() {
     );
 }
 
-// Scenario 12: trusted_roots governs replace — a target outside the
-// allow-list is refused.
 #[test]
 fn trusted_roots_governs_replace() {
     let system = MemorySystem::new()
@@ -393,8 +369,7 @@ fn trusted_roots_governs_replace() {
     );
 }
 
-// Scenario 13: one bad file in a folder is skipped and recorded; the
-// rest are changed and the op returns Ok.
+/// The bad file is recorded, the rest are changed, and the op returns Ok.
 #[test]
 fn one_bad_file_in_folder_continues() {
     let injected = remargin_block("evil", "injected");
@@ -408,16 +383,6 @@ fn one_bad_file_in_folder_continues() {
         .with_file(Path::new("/project/d/bad.md"), b"MARK bad\n")
         .unwrap();
 
-    // The replacement injects a comment fence: good.md becomes a clean
-    // body change ("MARK" -> fence text is still just body... no — the
-    // injected fence re-parses as a comment in BOTH files). Use a plain
-    // replacement so good.md succeeds, and a fenced one only via a
-    // second pass would be needed. Instead: make only one file fail by
-    // giving it content the gate refuses. We inject the fence into
-    // both, but good.md has NO "MARK" so it is a no-op (changed=false),
-    // while bad.md fails. To get a genuine change-and-continue, replace
-    // a token present in both but make one file's outcome a gate
-    // refusal: inject the fence keyed off a token only bad.md has.
     let report = replace(
         &system,
         Path::new("/project"),
@@ -427,8 +392,6 @@ fn one_bad_file_in_folder_continues() {
     )
     .unwrap();
 
-    // good.md has no "MARK bad" -> no-op; bad.md injects a fence -> gate
-    // refusal recorded. Op returns Ok with files_failed == 1.
     assert_eq!(report.files_failed, 1);
     let bad = report
         .files
@@ -436,11 +399,9 @@ fn one_bad_file_in_folder_continues() {
         .find(|f| f.path.to_string_lossy().contains("bad.md"))
         .unwrap();
     assert!(bad.error.is_some());
-    // good.md is untouched.
     assert_eq!(read(&system, "/project/d/good.md"), "MARK ok\n");
 }
 
-// Scenario 14: an identical re-run is a no-op everywhere.
 #[test]
 fn idempotent_rerun() {
     let system = system_with("/project/doc.md", "foo and foo\n");
@@ -451,16 +412,12 @@ fn idempotent_rerun() {
     assert_eq!(first.files_changed, 1);
     assert_eq!(first.total_replacements, 2);
 
-    // Second run: the pattern no longer appears, so nothing changes.
     let second = replace(&system, base, target, &opts("foo", "bar"), &open_config()).unwrap();
     assert_eq!(second.files_changed, 0);
     assert_eq!(second.total_replacements, 0);
 }
 
-// Scenario 15: a literal pattern that straddles an ordinary code-fence
-// boundary (prose -> fence) matches and is replaced. The parser emits
-// prose and each ordinary fence as separate adjacent `Body` segments;
-// replace coalesces those runs so the matcher sees contiguous body text.
+/// Prose and ordinary fences are adjacent `Body` segments, coalesced so a match can span them.
 #[test]
 fn replace_matches_pattern_spanning_a_code_fence() {
     let system = system_with("/project/doc.md", "before\n\n```bash\ncmd\n```\nafter\n");
@@ -481,9 +438,7 @@ fn replace_matches_pattern_spanning_a_code_fence() {
     assert!(after.contains("BEFORE\n\n```bash\ncmd\n```"));
 }
 
-// Scenario 16: invariant guard — a pattern that straddles a ```remargin
-// comment block must NOT match, even after ordinary fences are coalesced.
-// Comment segments stay hard boundaries a match can never cross.
+/// A comment block stays a hard boundary that a match can never cross.
 #[test]
 fn replace_still_refuses_to_cross_a_remargin_comment_block() {
     let comment = remargin_block("a1", "hi");
@@ -507,9 +462,6 @@ fn replace_still_refuses_to_cross_a_remargin_comment_block() {
     assert_eq!(read(&system, "/project/doc.md"), before);
 }
 
-// Scenario 17: a replace whose pattern is absent leaves the file
-// byte-identical — guards the coalesce reassembly across interleaved
-// prose and multiple ordinary fences.
 #[test]
 fn absent_pattern_leaves_file_byte_identical() {
     let system = system_with(
@@ -533,7 +485,6 @@ fn absent_pattern_leaves_file_byte_identical() {
     assert_eq!(read(&system, "/project/doc.md"), before);
 }
 
-// An empty pattern is rejected up front.
 #[test]
 fn empty_pattern_rejected() {
     let system = system_with("/project/doc.md", "foo\n");

@@ -4,13 +4,10 @@
 //! comments in markdown documents. It supports comment threading, checksums,
 //! signatures, and cross-document queries.
 
-// The `plan` tool's MCP schema is built from a single `serde_json::json!`
-// macro invocation large enough to require a higher recursion limit. 256
-// keeps headroom for further plan-op additions without restructuring
-// the macro into smaller pieces.
+// The `plan` tool's MCP schema is one `serde_json::json!` invocation, too deep for the default
+// limit.
 #![recursion_limit = "256"]
 
-// Module declarations — uncommented as features are implemented.
 pub mod activity;
 pub mod advice;
 pub mod comment_style;

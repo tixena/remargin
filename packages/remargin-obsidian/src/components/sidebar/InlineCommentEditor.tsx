@@ -1,3 +1,5 @@
+/** The inline composer for a new comment. */
+
 import type { EditorView } from "@codemirror/view";
 import { Send, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,32 +12,21 @@ function noop(): void {
   /* intentionally empty */
 }
 
+/** Props for {@link InlineCommentEditor}. */
 interface InlineCommentEditorProps {
-  /** Vault-relative path of the file the new comment targets. */
   file: string;
-  /**
-   * 1-indexed line number where the comment should be inserted. Callers are
-   * expected to have already run `snapAfterCommentBlock` so this is always a
-   * legal insert point for `remargin comment --after-line`.
-   */
+  /** 1-indexed, and already snapped by `snapAfterCommentBlock` to a legal insert point. */
   afterLine: number;
-  /** Called when the user cancels or after a successful submit. */
   onClose: () => void;
-  /**
-   * Invoked after the CLI returns successfully. Receives the 1-indexed line
-   * the new comment was inserted at, so the caller can scroll the editor to
-   * it and fire a sidepanel refresh.
-   */
+  /** Receives the 1-indexed line the new comment was inserted at. */
   onSubmitted: (insertedLine: number) => void;
 }
 
 /**
- * Inline composer for the sidebar `+` button flow.
- *
- * Mounted inside the file-named section of the sidebar (NOT as a modal --- the
- * "no dialogs pls" rule from prior design feedback). The single Submit action
- * issues `remargin comment --after-line <N> --sandbox` so the comment and the
- * sandbox entry are written in one atomic CLI call.
+ * Inline composer for the sidebar `+` button flow, mounted inside the file-named section of
+ * the sidebar, not as a modal. The single Submit action issues
+ * `remargin comment --after-line <N> --sandbox` so the comment and the sandbox entry are
+ * written in one atomic CLI call.
  */
 export function InlineCommentEditor({
   file,
@@ -73,8 +64,7 @@ export function InlineCommentEditor({
     }
   }, [backend, file, afterLine, submitting, onSubmitted, to]);
 
-  // Keep refs in sync so the CM6 keymap closures always call the
-  // latest versions of handleSubmit/onClose.
+  // Refs, so the CM6 keymap closures always call the latest handleSubmit / onClose.
   submitRef.current = () => void handleSubmit();
   closeRef.current = onClose;
 
@@ -87,10 +77,7 @@ export function InlineCommentEditor({
         onCancel: () => closeRef.current(),
         onDocLength: (len) => setHasContent(len > 0),
       });
-      // Bring the composer into view and focus the editor so the user can
-      // start typing immediately. Without this the user often doesn't
-      // notice anything happened, because the composer renders at the
-      // bottom of a long sidebar below the fold.
+      // The composer can render below the fold of a long sidebar, so it is scrolled to and focused.
       containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       viewRef.current.focus();
     }

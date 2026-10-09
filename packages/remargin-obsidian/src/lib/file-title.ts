@@ -1,3 +1,5 @@
+/** Title extraction for a markdown document. */
+
 /**
  * Extract a human-readable title from a markdown document.
  *
@@ -30,7 +32,6 @@ function stripFrontmatter(contents: string): string {
   const closing = rest.indexOf("\n---");
   if (closing < 0) return contents;
   const afterClosing = closing + "\n---".length;
-  // Advance past the newline that follows the closing fence, if any.
   const nextNewline = rest.indexOf("\n", afterClosing);
   return nextNewline >= 0 ? rest.slice(nextNewline + 1) : "";
 }

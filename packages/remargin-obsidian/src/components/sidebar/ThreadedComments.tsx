@@ -1,3 +1,5 @@
+/** The comment thread of the active file. */
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CommentCard } from "@/components/sidebar/CommentCard";
 import { KindFilterBar } from "@/components/sidebar/KindFilterBar";
@@ -9,31 +11,16 @@ import { collectKinds, matchesKindFilter, pruneKindFilter } from "@/lib/kindFilt
 import { buildThreadTree, type ThreadNode } from "@/lib/threadTree";
 import { parseVerifyFailure, type VerifyFailure } from "@/lib/verifyFailure";
 
+/** Props for {@link ThreadedComments}. */
 interface ThreadedCommentsProps {
   file: string;
   onReply?: (commentId: string) => void;
   onGoToLine?: (line: number) => void;
   onMutation?: () => void;
-  /**
-   * Monotonic counter bumped by the shell when any sidebar section
-   * should refetch. We observe it as a prop (rather than being keyed
-   * off it) so the component refetches in place, preserving the scroll
-   * offset of the outer sidebar viewport.
-   */
+  /** Observed as a prop, not a key, so a refetch happens in place and keeps the scroll offset. */
   refreshKey?: number;
-  /**
-   * ID of the comment the user is replying to, if any. When set, the
-   * `replyEditor` node is rendered as a peer row immediately after the
-   * matching comment's card (same visual depth as a reply) instead of at
-   * the top of the thread, so the composer stays next to the comment the
-   * user is actually replying to.
-   */
+  /** Id of the comment being replied to; the reply editor renders right after its card. */
   replyTarget?: string | null;
-  /**
-   * The inline reply composer to render below the targeted comment. Owned
-   * by the sidebar (which also owns `replyTarget`), passed down so the
-   * thread can slot it in at the right place.
-   */
   replyEditor?: React.ReactNode;
 }
 
@@ -59,17 +46,12 @@ export function ThreadedComments({
   const backend = useBackend();
   const [comments, setComments] = useState<Comment[]>([]);
   const [kindFilter, setKindFilter] = useState<string[]>([]);
-  // `loading` is true only until the very first fetch for a given file
-  // resolves. Subsequent refetches (from refreshKey bumps, reactions,
-  // acks, or reply submits) do NOT flip this back to true — that would
-  // collapse the rendered list to a "Loading..." placeholder and the
-  // outer sidebar viewport would snap to scrollTop=0.
+  // True only until the first fetch for a file resolves: flipping it on a refetch would collapse
+  // the list to the placeholder and snap the sidebar viewport to the top.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<string | null>(null);
-  // Scroll offset to reinstate once a refetched list commits, so a reply
-  // doesn't jump the list to the top. A fresh object per refetch, so the
-  // layout effect below still fires when the offset repeats.
+  // A fresh object per refetch, so the layout effect still fires when the offset repeats.
   const [scrollRestore, setScrollRestore] = useState<{ top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLElement | null>(null);
@@ -83,12 +65,9 @@ export function ThreadedComments({
     return found;
   }, []);
 
-  // Token of the newest fetch issued. Every run tags itself and re-checks
-  // the tag before touching state, so a slow response that a newer fetch
-  // has already superseded is dropped instead of overwriting it.
+  // Token of the newest fetch: a slow response that a newer fetch superseded is dropped.
   const newestFetch = useRef<string | null>(null);
-  // File the rendered list belongs to. A mismatch means the user switched
-  // files and what is on screen no longer describes `file`.
+  // The file the rendered list belongs to; a mismatch means the user switched files.
   const renderedFile = useRef<string | null>(null);
 
   const refresh = useCallback(
@@ -97,14 +76,10 @@ export function ThreadedComments({
       newestFetch.current = token;
       if (renderedFile.current !== file) {
         renderedFile.current = file;
-        // Switching files is the one case where we do want the
-        // placeholder back: the previous file's list means nothing here.
+        // Switching files is the one case where the placeholder comes back.
         setLoading(true);
         setComments([]);
       }
-      // Snapshot the current scroll offset so it can be reinstated once
-      // the new comment list commits. Only matters for in-place
-      // refetches — on first mount there's nothing to preserve.
       const snapshot = findScrollViewport()?.scrollTop ?? null;
       try {
         const result = await backend.comments(file);
@@ -117,8 +92,6 @@ export function ThreadedComments({
         setComments([]);
         setError(errorMessage(err));
       } finally {
-        // A superseded run leaves the commit to the fetch that replaced
-        // it, so the list never flashes stale rows in between.
         if (newestFetch.current === token) {
           setLoading(false);
           if (snapshot !== null) setScrollRestore({ top: snapshot });
@@ -132,9 +105,7 @@ export function ThreadedComments({
     refresh(refreshKey ?? 0);
   }, [refresh, refreshKey]);
 
-  // Reinstate the viewport's scrollTop synchronously after the refetched
-  // list commits, so the user doesn't see the scroll jump. Pairs with the
-  // snapshot taken inside `refresh()`.
+  // Synchronous, so the user never sees the scroll jump.
   useLayoutEffect(() => {
     if (scrollRestore === null) return;
     const viewport = findScrollViewport();
@@ -143,8 +114,6 @@ export function ThreadedComments({
     }
   }, [scrollRestore, findScrollViewport]);
 
-  // Resolve the current identity once per mount so reaction pills can
-  // distinguish "mine" from others' without threading it in from the shell.
   useEffect(() => {
     let cancelled = false;
     backend
@@ -162,16 +131,12 @@ export function ThreadedComments({
 
   const availableKinds = useMemo(() => collectKinds(comments), [comments]);
 
-  // Drop any selected kinds that are no longer present in the visible set.
   useEffect(() => {
     setKindFilter((prev) => pruneKindFilter(prev, availableKinds));
   }, [availableKinds]);
 
-  // Apply the kind filter client-side. Filtering at the comment level
-  // (not thread level) matches the CLI semantics and lets a reply that
-  // carries the filtered kind stay visible even when its parent does
-  // not. Orphans naturally float up to root via `buildThreadTree`
-  // because it treats a missing `reply_to` parent as "no parent".
+  // The kind filter works per comment, not per thread, as the CLI does: a matching reply stays
+  // visible without its parent, floated to root by `buildThreadTree`.
   const visibleComments = useMemo(() => {
     if (kindFilter.length === 0) return comments;
     return comments.filter((c) => matchesKindFilter(c.remargin_kind ?? [], kindFilter));
@@ -183,8 +148,7 @@ export function ThreadedComments({
     async (id: string, remove: boolean) => {
       try {
         await backend.ack(file, [id], remove);
-        // Stage the file in the user's sandbox so the interaction is
-        // visible in the next Submit-to-Claude cycle.
+        // Staged in the sandbox so the interaction is visible in the next Submit cycle.
         try {
           await backend.sandboxAdd([file]);
         } catch {
@@ -325,6 +289,7 @@ function ErrorPanel({ raw }: { raw: string }) {
   );
 }
 
+/** Props for {@link CommentThread}. */
 interface CommentThreadProps {
   node: ThreadNode;
   file: string;
@@ -335,12 +300,7 @@ interface CommentThreadProps {
   onReply?: (id: string) => void;
   onReact: (id: string, emoji: string, remove: boolean) => void;
   onGoToLine?: (line: number) => void;
-  /**
-   * ID of the comment whose card should have the inline reply editor
-   * rendered directly beneath it (nested one level deeper, matching the
-   * depth a real reply would render at). Compared against this node's id
-   * during traversal — only one match fires.
-   */
+  /** Id of the comment whose card gets the inline reply editor beneath it, one level deeper. */
   replyTarget: string | null;
   replyEditor?: React.ReactNode;
 }
@@ -404,8 +364,7 @@ function InlineReplySlot({ depth, children }: { depth: number; children: React.R
   useEffect(() => {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
-  // Match CommentCard's depth-based left padding (10px base + 16px per
-  // level) so the composer aligns with comment cards at the same depth.
+  // CommentCard's depth padding: 10px base plus 16px per level.
   const style = { paddingLeft: `${10 + depth * 16}px` };
   return (
     <div ref={ref} style={style}>

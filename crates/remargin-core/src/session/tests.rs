@@ -66,7 +66,6 @@ fn six_identities_over_demo_shaped_tree() {
     assert_eq!(sessions[0].folder.as_path(), Path::new("/demo"));
     assert_eq!(sessions[4].folder.as_path(), Path::new("/demo/finance"));
     assert!(sessions[4].session.is_some());
-    // Every other realm has no session: block of its own.
     assert!(sessions[1].session.is_none());
 }
 
@@ -76,7 +75,6 @@ fn each_session_carries_its_resolved_system_prompt() {
 
     let sessions = discover_sessions(&system, Path::new("/demo")).unwrap();
 
-    // The root declares the prompt; children inherit it via the walk-up.
     assert_eq!(sessions[0].system_prompt.name, "root");
     assert_eq!(sessions[0].system_prompt.prompt, "root body");
     assert_eq!(sessions[3].system_prompt.prompt, "root body");
@@ -166,7 +164,6 @@ fn root_identity_inherited_from_ancestor_uses_cwd_as_folder() {
     assert_eq!(sessions[0].identity, "vault_agent");
     assert_eq!(sessions[0].folder.as_path(), Path::new("/vault/proj"));
     assert_eq!(sessions[0].scope_root.as_path(), Path::new("/vault/proj"));
-    // The session: block travels with the identity's declaring config.
     assert!(sessions[0].session.is_some());
 }
 
@@ -186,8 +183,6 @@ fn dot_directories_are_skipped() {
     let ids: Vec<&str> = sessions.iter().map(|s| s.identity.as_str()).collect();
     assert_eq!(ids, ["root"]);
 }
-
-// --- Launch-spec builder (task 84) ---------------------------------------
 
 /// Tree with two launchable realms: `finance` carries a full `session:`
 /// block (loop + goal + claude + budget) and its own system prompt; `ops`
@@ -341,8 +336,6 @@ fn build_launch_spec_infers_claude_backend_from_declared_block() {
 
 #[test]
 fn build_launch_spec_infers_claude_backend_without_declared_block() {
-    // `ops` carries a `session:` block but no `claude:` params block: a
-    // declared block and no block at all both infer the claude backend.
     let system = launch_demo_tree();
     let spec = build_launch_spec(&discovered(&system, "ops")).unwrap();
 
@@ -361,8 +354,6 @@ fn mcp_server_spec_scopes_to_cwd_and_identity() {
     assert_eq!(spec.mcp.identity, "finance");
     assert_eq!(spec.mcp.argv, ["remargin", "mcp"]);
 }
-
-// --- Claude backend (task 85) --------------------------------------------
 
 /// The argv value immediately following `flag`, if present.
 fn flag_value<'argv>(argv: &'argv [String], flag: &str) -> Option<&'argv str> {
@@ -389,9 +380,7 @@ fn claude_launch_command_uses_task81_invocation() {
     assert_eq!(flag_value(&argv, "--effort"), Some("high"));
     assert_eq!(flag_value(&argv, "-n"), Some("finance"));
     assert_eq!(flag_value(&argv, "--permission-mode"), Some("auto"));
-    // Interactive launch only -- never headless `claude -p`/`--print`.
     assert!(!argv.iter().any(|arg| arg == "-p" || arg == "--print"));
-    // Budget has no interactive claude flag; none is invented.
     assert!(
         !argv
             .iter()
@@ -479,8 +468,6 @@ fn resolve_backend_known_and_unknown() {
     assert!(err.contains("claude"), "lists known backends: {err}");
 }
 
-// --- Manifest fleet resolution (task 93) ---------------------------------
-
 /// Workspace whose `.remargin.yaml` carries only a `sessions:` block (no
 /// identity of its own, so downward discovery from `/ws` is empty) plus two
 /// out-of-tree agent folders that entries point at by absolute path.
@@ -515,7 +502,6 @@ fn resolve_fleet_without_manifest_matches_discovery() {
             .collect::<Vec<_>>()
     };
     assert_eq!(project(&via_fleet), project(&via_discovery));
-    // The finance realm's session: block still rides along untouched.
     assert!(via_fleet[4].session.is_some());
 }
 
@@ -611,8 +597,6 @@ fn relative_and_tilde_paths_resolve_against_manifest_dir() {
         .with_dir(Path::new("/ws/deep/sub"))
         .unwrap();
 
-    // Launch from a subfolder: paths must anchor on the manifest dir (/ws),
-    // never on cwd.
     let fleet = resolve_fleet(&system, Path::new("/ws/deep/sub"), None).unwrap();
 
     assert_eq!(identities(&fleet), ["product", "r_id"]);
@@ -669,8 +653,6 @@ fn entry_config_without_identity_is_hard_error() {
 
 #[test]
 fn bad_entry_yields_no_partial_fleet() {
-    // A good entry precedes a broken one; the whole resolution must fail
-    // rather than return the good half.
     let system = manifest_workspace(
         "sessions:\n  mixed:\n    agents:\n      \
          - path: /agents/a\n      - path: /agents/ghost\n",
@@ -686,8 +668,6 @@ fn bad_entry_yields_no_partial_fleet() {
 
 #[test]
 fn entry_overrides_win_per_field() {
-    // Target declares goal + loop + claude; entry overrides goal and adds a
-    // budget. Each field replaces as a whole value, entry wins.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/ws/.remargin.yaml"),
@@ -717,7 +697,6 @@ fn entry_overrides_win_per_field() {
 
 #[test]
 fn union_dedups_by_identity_and_folder_entry_wins() {
-    // The entry points at a folder discovery also finds, overriding its loop.
     let system = MemorySystem::new()
         .with_file(
             Path::new("/ws/.remargin.yaml"),

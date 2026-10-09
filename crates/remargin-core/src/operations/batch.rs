@@ -54,9 +54,8 @@ pub const OP_FIELDS: &[&str] = &[
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct BatchOutcome {
-    /// IDs of the created comments, in operation order.
+    /// In operation order.
     pub ids: Vec<String>,
-    /// Warn-tier style notes, each naming the operation it came from.
     pub warnings: Vec<OpAdvice>,
 }
 
@@ -64,30 +63,22 @@ pub struct BatchOutcome {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct BatchCommentOp {
-    /// ID of a comment this should appear after (position).
     pub after_comment: Option<String>,
-    /// Heading-anchored insertion point. `>`-separated path
-    /// of prefix segments resolved against ATX headings at write time.
-    /// Mutually exclusive with `after_comment` and `after_line`.
+    /// A `>`-separated path of heading prefixes; mutually exclusive with `after_comment` and
+    /// `after_line`.
     pub after_heading: Option<String>,
-    /// Line number to insert after (1-indexed position).
+    /// 1-indexed.
     pub after_line: Option<usize>,
-    /// Attachment file paths.
     pub attachments: Vec<PathBuf>,
-    /// Acknowledge the parent comment when replying. `Some(true)` always acks,
-    /// `Some(false)` never acks, `None` (default) acks iff the parent's author
-    /// differs from the caller.
+    /// `Some(true)` always acks the parent, `Some(false)` never does, and `None` acks only when the
+    /// parent's author is not the caller.
     pub auto_ack: Option<bool>,
-    /// Comment body text.
     pub content: String,
-    /// Classification tags, validated before anything is written.
     pub remargin_kind: Vec<String>,
-    /// ID of the comment this replies to.
     pub reply_to: Option<String>,
-    /// Stage the file in the caller's sandbox in the same write. The file is
-    /// staged once when any op sets it.
+    /// Stage the file in the caller's sandbox in the same write; the file is staged once when any
+    /// op sets it.
     pub sandbox: bool,
-    /// Addressees of the comment.
     pub to: Vec<String>,
 }
 
@@ -129,9 +120,7 @@ impl BatchCommentOp {
             .and_then(Value::as_u64)
             .and_then(|n| usize::try_from(n).ok());
 
-        // at most one position anchor per op. The three
-        // fields share storage at write time; passing more than one
-        // is a hard error before any byte hits disk.
+        // At most one position anchor per op: the three fields share storage at write time.
         let anchor_count = usize::from(after_comment.is_some())
             + usize::from(after_heading.is_some())
             + usize::from(after_line.is_some());
@@ -177,7 +166,6 @@ impl BatchCommentOp {
         })
     }
 
-    /// Create a new batch operation with the given content.
     #[must_use]
     pub const fn new(content: String) -> Self {
         Self {
@@ -205,12 +193,8 @@ impl BatchCommentOp {
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The author is not allowed to post
-/// - Any operation's `remargin_kind` fails validation
-/// - Any attachment does not exist
-/// - A reply-to reference cannot be resolved
-/// - Writing fails
+/// Returns an error if the author may not post, a kind fails validation, an attachment is
+/// missing, a reply-to reference cannot be resolved, or writing fails.
 pub fn batch_comment(
     system: &dyn System,
     path: &Path,
@@ -218,9 +202,7 @@ pub fn batch_comment(
     operations: &[BatchCommentOp],
 ) -> Result<BatchOutcome> {
     writer::ensure_not_forbidden_target(path)?;
-    // All sub-ops mutate the same `path`, so one guard call covers
-    // every sub-op (atomic refusal). If the path becomes restricted,
-    // the entire batch is rejected before any I/O.
+    // Every sub-op mutates the same `path`, so one guard call refuses the whole batch.
     pre_mutate_check_for_caller(system, "batch", path, &config.caller_info())?;
 
     // Realm-mode floor: doc's realm wins if stricter than caller-mode.
@@ -232,8 +214,7 @@ pub fn batch_comment(
         .as_deref()
         .context("identity is required to create comments")?;
 
-    // Registry + strict-mode key presence are validated at resolve time
-    //; this just fetches the signing key when the op needs one.
+    // Registry membership and key presence were validated at resolve time.
     let signing_key = cfg.resolve_signing_key(identity);
 
     let author_type = cfg.author_type.clone().unwrap_or(AuthorType::Human);
@@ -248,9 +229,8 @@ pub fn batch_comment(
 
     let mut outcome = BatchOutcome::default();
 
-    // Track line shifts from previous AfterLine insertions so subsequent
-    // AfterLine targets can be adjusted. Each entry is (original_target_line,
-    // number_of_lines_added_by_that_insertion).
+    // Each entry is (original target line, lines added), so later `AfterLine` targets can be
+    // shifted past earlier insertions.
     let mut line_shifts: Vec<(usize, usize)> = Vec::new();
 
     for (idx, op) in operations.iter().enumerate() {
@@ -259,18 +239,13 @@ pub fn batch_comment(
 
         let checksum = compute_checksum(&op.content, &op.remargin_kind);
 
-        // Resolve reply-to (may reference an earlier comment in this batch).
         let reply_to = op.reply_to.as_deref();
 
-        // Resolve thread from reply_to.
         let thread = reply_to.map(|parent_id| resolve_thread(&doc, parent_id));
 
-        // Copy attachments.
         let resolved_attachments = copy_attachments(system, path, cfg, &op.attachments)
             .with_context(|| format!("batch operation {idx}: copying attachments"))?;
 
-        // Auto-populate `to` from the parent comment's author when replying
-        // without an explicit recipient list.
         let effective_to: Vec<String> = if op.to.is_empty() {
             reply_to
                 .and_then(|pid| doc.find_comment(pid))
@@ -279,8 +254,6 @@ pub fn batch_comment(
             op.to.clone()
         };
 
-        // Recipient registry gate: mirrors create_comment — each recipient
-        // must be an active participant in registered/strict mode.
         for recipient in &effective_to {
             cfg.can_address(recipient)
                 .with_context(|| format!("batch operation {idx}: to: {recipient:?}"))?;
@@ -314,8 +287,6 @@ pub fn batch_comment(
             comment.signature = Some(sig);
         }
 
-        // Determine insertion position, adjusting AfterLine targets for
-        // lines added by previous insertions in this batch.
         let position = resolve_position_adjusted(op, &line_shifts);
 
         let lines_before = doc.to_markdown()?.matches('\n').count();
@@ -323,7 +294,6 @@ pub fn batch_comment(
         writer::insert_comment(&mut doc, comment, &position)
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
 
-        // Auto-ack the parent (if any) and track any induced line shift.
         if let Some(parent_id) = op.reply_to.as_deref() {
             apply_batch_auto_ack(
                 &mut doc,
@@ -336,16 +306,14 @@ pub fn batch_comment(
             )?;
         }
 
-        // Record the line shift if this was an AfterLine insertion.
         if let Some(original_target) = op.after_line {
             let lines_after = doc.to_markdown()?.matches('\n').count();
             let lines_added = lines_after.saturating_sub(lines_before);
             line_shifts.push((original_target, lines_added));
         }
 
-        // The warn tier the single-comment path reports, scoped to the op
-        // that earned it: with several bodies in one call, a line number
-        // alone does not say which one to go fix.
+        // Notes are scoped to the op that earned them: with several bodies in one call a line number
+        // alone does not say which one to fix.
         outcome.warnings.extend(
             comment_style::notes(&op.content)
                 .into_iter()
@@ -413,8 +381,6 @@ pub(crate) fn refuse_unknown_fields(
     )
 }
 
-/// Write the batch result with preservation check + post-mutation verify gate.
-///
 /// Auto-ack resolution + line-shift tracking for a single batch sub-op.
 /// `auto_ack`: Some(true)=always, Some(false)=never, None=ack iff
 /// parent.author != caller. Records the parent's line + ack-induced
@@ -460,8 +426,8 @@ fn apply_batch_auto_ack(
     Ok(())
 }
 
-/// Per the "verify runs once after all ops complete in-memory" rule in
-/// — batch is atomic end-to-end.
+/// Write the batch result through the preservation check and the post-mutation verify gate.
+/// Verify runs once, after every op has been applied in memory.
 fn write_batch_result(
     system: &dyn System,
     path: &Path,

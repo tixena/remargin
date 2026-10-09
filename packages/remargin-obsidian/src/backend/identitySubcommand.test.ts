@@ -1,13 +1,11 @@
+/** Tests that `remargin identity` receives the identity flags. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { assembleExecArgs } from "./assembleExecArgs.ts";
 import { acceptsIdentity } from "./identityFreeSubcommands.ts";
 
-/**
- * Pins `remargin identity` as identity-accepting so the plugin's
- * read-path for `me` resolves under the same flags the write-path
- * uses. Drift here flips the ack UI branch in the threaded view.
- */
+// The read path for `me` must resolve under the same flags the write path uses.
 describe("identity subcommand is identity-accepting", () => {
   it("the exec gate forwards identity for 'identity'", () => {
     assert.ok(
@@ -46,11 +44,7 @@ describe("identity subcommand is identity-accepting", () => {
       identityAccepted: true,
       skipIdentity: false,
     });
-    // Settings-driven identity flags land in the per-subcommand slot;
-    // the caller's extra --type follows in the trailing args slot.
-    // The CLI's clap layer will reject the combination because
-    // --config conflicts with --type, which is exactly the belt-and-
-    // braces the three-branch resolver relies on.
+    // Settings-driven flags fill the per-subcommand slot; the caller's `--type` trails them.
     assert.deepStrictEqual(out, [
       "identity",
       "--config",

@@ -17,16 +17,14 @@ use serde::Serialize;
 use crate::config::permissions::resolve::lint_permissions_in_parents;
 use crate::config::{Mode, ResolvedConfig, load_registry, resolve_mode};
 
-/// Required fields in every remargin block's YAML header.
 const REQUIRED_REMARGIN_FIELDS: &[&str] = &["id", "author", "type", "ts", "checksum"];
 
 /// A single lint error with its line number and message.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct LintError {
-    /// 1-indexed line number where the error was detected.
+    /// 1-indexed.
     pub line: usize,
-    /// Human-readable description of the structural issue.
     pub message: String,
 }
 
@@ -36,9 +34,8 @@ pub struct LintError {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LintErrorView {
-    /// 1-indexed line number where the error was detected.
+    /// 1-indexed.
     pub line: usize,
-    /// Human-readable description of the structural issue.
     pub message: String,
 }
 
@@ -51,17 +48,13 @@ pub struct LintErrorView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LintReport {
-    /// Structural lint errors over the doc body.
     pub errors: Vec<LintErrorView>,
 
-    /// Permissions-config errors (e.g. unknown op names in
-    /// `permissions.deny_ops.ops`) discovered in any `.remargin.yaml`
-    /// on the parent walk from the doc's directory.
+    /// Found in any `.remargin.yaml` on the parent walk from the doc's directory.
     pub permissions: Vec<PermissionsLintErrorView>,
 
-    /// Recipient registry violations found in registered/strict mode:
-    /// any `to:` entry that names a participant who is absent or revoked.
-    /// Empty in open mode and when no registry is present.
+    /// `to:` entries naming an absent or revoked participant; empty in open mode or with no
+    /// registry.
     pub recipients: Vec<LintErrorView>,
 }
 
@@ -69,15 +62,11 @@ pub struct LintReport {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PermissionsLintErrorView {
-    /// 1-indexed column where the offending value starts; `None`
-    /// when `serde_yaml` did not surface a location.
+    /// 1-indexed; `None` when `serde_yaml` gave no location.
     pub column: Option<usize>,
-    /// 1-indexed line where the offending value starts; `None` when
-    /// `serde_yaml` did not surface a location.
+    /// 1-indexed; `None` when `serde_yaml` gave no location.
     pub line: Option<usize>,
-    /// User-facing diagnostic.
     pub message: String,
-    /// Absolute path of the `.remargin.yaml` that failed to parse.
     pub source_file: PathBuf,
 }
 
@@ -164,10 +153,8 @@ pub fn lint_doc(
 ) -> Result<LintReport> {
     use crate::parser;
 
-    // A realm whose `.remargin.yaml` does not parse is exactly what the
-    // permissions pass below reports; letting that resolution failure
-    // propagate here would mask the finding. A realm that does resolve
-    // and refuses the caller still denies the read.
+    // A realm that fails to resolve is what the permissions pass below reports, so that failure
+    // must not propagate here. A realm that resolves and refuses the caller still denies the read.
     if config
         .read_gate()
         .admits(system, doc_path)
@@ -185,12 +172,8 @@ pub fn lint_doc(
         .map_or_else(|| doc_path.to_path_buf(), Path::to_path_buf);
     let permissions = lint_permissions_in_parents(system, &walk_anchor)?;
 
-    // Recipient registry lint: only in registered/strict mode when a
-    // registry is available. open mode is unchecked; missing registry
-    // is silently skipped (no findings, structural lint unaffected).
-    // Config errors (e.g. unknown op names) are also silently skipped
-    // so this pass does not mask the permissions lint findings that
-    // already surface those errors via `lint_permissions_in_parents`.
+    // Only in registered/strict mode with a registry. Config errors are skipped here: the
+    // permissions pass already reports them.
     let mut recipient_findings: Vec<LintErrorView> = Vec::new();
     if let Ok(resolved_mode) = resolve_mode(system, &walk_anchor)
         && matches!(resolved_mode.mode, Mode::Registered | Mode::Strict)
@@ -263,10 +246,9 @@ fn check_unclosed_fences(content: &str, errors: &mut Vec<LintError>) {
         let backtick_count = count_leading_backticks(trimmed);
 
         if backtick_count >= 3 && is_fence_opener(trimmed, backtick_count) {
-            let opener_line = idx + 1; // 1-indexed
+            let opener_line = idx + 1;
             let opener_depth = backtick_count;
 
-            // Search for a matching closer.
             let mut found_close = false;
             let mut inner_idx = idx + 1;
             while inner_idx < lines.len() {
@@ -309,10 +291,9 @@ fn check_remargin_blocks(content: &str, errors: &mut Vec<LintError>) {
 
         if backtick_count >= 3 && is_fence_opener(trimmed, backtick_count) {
             let tag = trimmed[backtick_count..].trim();
-            let opener_line = idx + 1; // 1-indexed
+            let opener_line = idx + 1;
 
             if tag == "remargin" {
-                // Find the closing fence.
                 let mut close_idx = None;
                 let mut inner_idx = idx + 1;
                 while inner_idx < lines.len() {
@@ -327,7 +308,6 @@ fn check_remargin_blocks(content: &str, errors: &mut Vec<LintError>) {
                 }
 
                 if let Some(close) = close_idx {
-                    // Extract the inner content.
                     let inner_lines = &lines[idx + 1..close];
                     validate_remargin_inner(inner_lines, opener_line, errors);
                     idx = close + 1;
@@ -336,7 +316,6 @@ fn check_remargin_blocks(content: &str, errors: &mut Vec<LintError>) {
                     idx += 1;
                 }
             } else {
-                // Skip non-remargin fenced block.
                 let mut inner_idx = idx + 1;
                 while inner_idx < lines.len() {
                     let inner_trimmed = lines[inner_idx].trim_start();
@@ -369,14 +348,12 @@ fn check_yaml_frontmatter(content: &str, errors: &mut Vec<LintError>) {
         return;
     }
 
-    // Find the opening --- line.
     let lines: Vec<&str> = content.split('\n').collect();
     let first_line_idx = lines
         .iter()
         .position(|line| line.trim() == "---")
         .unwrap_or(0);
 
-    // Search for the closing ---.
     let mut closing_idx = None;
     for (i, line) in lines.iter().enumerate().skip(first_line_idx + 1) {
         if line.trim() == "---" {
@@ -393,24 +370,21 @@ fn check_yaml_frontmatter(content: &str, errors: &mut Vec<LintError>) {
         return;
     };
 
-    // Extract and validate the YAML between the markers.
     let yaml_lines: Vec<&str> = lines[first_line_idx + 1..close_idx].to_vec();
     let yaml_str = yaml_lines.join("\n");
 
     if let Err(err) = serde_yaml::from_str::<serde_yaml::Value>(&yaml_str) {
         errors.push(LintError {
-            line: first_line_idx + 2, // First line of YAML content
+            line: first_line_idx + 2,
             message: format!("invalid YAML in frontmatter: {err}"),
         });
     }
 }
 
-/// Count leading backtick characters in a string.
 fn count_leading_backticks(s: &str) -> usize {
     s.bytes().take_while(|&b| b == b'`').count()
 }
 
-/// Format a list of lint errors for display.
 fn format_errors(errors: &[LintError]) -> String {
     let mut out = String::new();
     for err in errors {
@@ -427,8 +401,6 @@ fn is_fence_closer(trimmed: &str, backtick_count: usize) -> bool {
 
 /// Determine if a line is a fence opener (backticks followed by optional tag).
 fn is_fence_opener(trimmed: &str, backtick_count: usize) -> bool {
-    // A fence opener is backticks optionally followed by a language tag.
-    // It must not contain backticks after the initial sequence.
     let rest = &trimmed[backtick_count..];
     !rest.contains('`')
 }
@@ -438,7 +410,6 @@ fn is_fence_opener(trimmed: &str, backtick_count: usize) -> bool {
 /// The inner content must have a `---` / `---` delimited YAML header with
 /// all required fields.
 fn validate_remargin_inner(inner_lines: &[&str], opener_line: usize, errors: &mut Vec<LintError>) {
-    // Find the first `---` (YAML header start).
     let yaml_start = inner_lines.iter().position(|line| line.trim() == "---");
     let Some(start) = yaml_start else {
         errors.push(LintError {
@@ -448,7 +419,6 @@ fn validate_remargin_inner(inner_lines: &[&str], opener_line: usize, errors: &mu
         return;
     };
 
-    // Find the closing `---`.
     let yaml_end = inner_lines
         .iter()
         .enumerate()
@@ -464,7 +434,6 @@ fn validate_remargin_inner(inner_lines: &[&str], opener_line: usize, errors: &mu
         return;
     };
 
-    // Extract and validate the YAML.
     let yaml_lines: Vec<&str> = inner_lines[start + 1..end].to_vec();
     let yaml_str = yaml_lines.join("\n");
 
@@ -479,7 +448,6 @@ fn validate_remargin_inner(inner_lines: &[&str], opener_line: usize, errors: &mu
         }
     };
 
-    // Check required fields.
     let Some(mapping) = parsed.as_mapping() else {
         errors.push(LintError {
             line: opener_line + start + 2,

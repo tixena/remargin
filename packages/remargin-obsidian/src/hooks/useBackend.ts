@@ -1,3 +1,5 @@
+/** React context and hook for the plugin's backend. */
+
 import { createContext, useContext } from "react";
 import type { RemarginBackend } from "@/backend";
 

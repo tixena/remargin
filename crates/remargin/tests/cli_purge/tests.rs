@@ -1,3 +1,5 @@
+//! `remargin purge --recursive` and its plan projection, run against temp dirs.
+
 use core::str;
 use std::fs;
 use std::path::Path;
@@ -32,9 +34,7 @@ fn doc_with_one_comment() -> &'static str {
     "---\ntitle: Sample\n---\n\n# Sample\n\nBody text.\n\n```remargin\n---\nid: aaa111\nauthor: alice\ntype: human\nts: 2026-04-29T10:00:00+00:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\n---\nFirst comment.\n```\n"
 }
 
-/// `remargin purge --recursive <dir>` purges every `.md` file in
-/// the directory and reports the per-file outcomes in the JSON
-/// payload.
+/// `purge --recursive <dir>` purges every `.md` file and reports per-file outcomes in JSON.
 #[test]
 fn recursive_purge_via_cli() {
     let realm = TempDir::new().unwrap();
@@ -61,7 +61,6 @@ fn recursive_purge_via_cli() {
         [] as [Value; 0]
     );
 
-    // Both files now comment-free on disk.
     for file in ["a.md", "notes/b.md"] {
         let body = fs::read_to_string(realm.path().join(file)).unwrap();
         assert!(
@@ -71,9 +70,7 @@ fn recursive_purge_via_cli() {
     }
 }
 
-/// `remargin purge <dir>` (without `--recursive`) is rejected
-/// with a clear "directory" error so the caller is forced to
-/// opt in to the destructive directory form.
+/// Without `--recursive` a directory is rejected, so the destructive form is always opted into.
 #[test]
 fn dir_target_without_recursive_errors() {
     let realm = TempDir::new().unwrap();
@@ -88,14 +85,11 @@ fn dir_target_without_recursive_errors() {
         "expected directory-without-recursive error, got: {stderr}"
     );
 
-    // File untouched.
     let body = fs::read_to_string(realm.path().join("notes/a.md")).unwrap();
     assert!(body.contains("```remargin"));
 }
 
-/// `remargin purge --recursive <missing>` fails with a clear
-/// non-zero exit so callers can distinguish "empty dir" from
-/// "missing dir".
+/// A missing directory exits non-zero, so callers can tell it from an empty one.
 #[test]
 fn missing_directory_errors() {
     let realm = TempDir::new().unwrap();
@@ -109,8 +103,7 @@ fn missing_directory_errors() {
     );
 }
 
-/// `remargin plan purge --recursive <dir>` reports per-file
-/// projections without writing anything to disk.
+/// `plan purge --recursive <dir>` reports per-file projections without writing to disk.
 #[test]
 fn plan_recursive_purge_emits_purge_dir_diff() {
     let realm = TempDir::new().unwrap();
@@ -137,7 +130,6 @@ fn plan_recursive_purge_emits_purge_dir_diff() {
         assert_eq!(file["comments_removed"], 1_u64);
     }
 
-    // Plan must not have removed comments from disk.
     for file in ["a.md", "b.md"] {
         let body = fs::read_to_string(realm.path().join(file)).unwrap();
         assert!(

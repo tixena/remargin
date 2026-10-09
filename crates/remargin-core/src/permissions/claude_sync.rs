@@ -11,12 +11,10 @@
 //! re-allows override the broader deny.
 //!
 //! The `PreToolUse` hook (pretool.rs) is the single source of truth for
-//! enforcement. `remargin restrict` no longer projects deny rules into
-//! the settings files: [`residual_rules`] is what it writes today, and
-//! the residue audit found nothing the hook cannot cover, so it is
-//! empty. The full shape set [`hook_covered_rules`] produces is retained
-//! only so `remargin doctor` can recognise deny rules an older restrict
-//! left behind and flag them as drift.
+//! enforcement. `remargin restrict` writes only [`residual_rules`] into the
+//! settings files, which is empty: the hook covers every shape. The full shape
+//! set from [`hook_covered_rules`] exists so `remargin doctor` can recognise
+//! deny rules already sitting in a settings file and flag them as drift.
 
 pub mod rule_shape;
 #[cfg(test)]
@@ -32,82 +30,13 @@ use serde_json::{Map, Value};
 use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::permissions::sidecar::{self, SidecarEntry};
 
-/// Editor-side Claude tools touched by the base path-deny and the
-/// dot-folder default-deny. The original four keep their spec order
-/// (Edit / Write / Read / `NotebookEdit`) so existing settings-file
-/// diffs do not churn; `MultiEdit` is appended so the projection covers
-/// the same tools the `PreToolUse` hook gates.
+/// The editor-side tools the path denies cover: the same tools the `PreToolUse` hook gates.
 const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"];
 
-/// Default-deny Bash command tokens for the restricted path.
-///
-/// Every entry expands to `Bash(<token> {glob_root}/**)`, so a token
-/// of `cp *` becomes `Bash(cp * /path/**)` while a bare `tee` becomes
-/// `Bash(tee /path/**)`. The trailing `*` (or its absence) is part of
-/// the token by design — the format string in [`rules_for`] does NOT
-/// inject one.
-///
-/// The list is broad on purpose: most entries below can read, modify,
-/// create, delete, or otherwise mutate a file on disk, which would
-/// defeat the MCP-only contract `restrict` is supposed to enforce.
-/// `cd` / `pushd` are non-mutating but close the
-/// shell-relative bypass — `cd /restricted && rm file` would
-/// otherwise route around every other rule because `rm`'s argv would
-/// no longer carry the restricted path. Users can layer extra denies
-/// on top via `--also-deny-bash`; the purpose of THIS list is to
-/// make the defaults safe-by-default so an agent cannot trivially
-/// bypass the restriction with a forgotten command.
-///
-/// Ordering: original write-side mutators first (preserves
-/// rule-emission order with older settings files), then the new
-/// categories grouped by intent. Within each category, order is
-/// alphabetical-ish for human scanability, not load-bearing.
-///
-/// `sed` appears twice on purpose: legacy `sed -i *` is preserved so
-/// repeat runs do not shuffle rule order or churn the sidecar, and
-/// plain `sed *` is added alongside to cover redirection-based writes
-/// (`sed ... > /restricted/file`) that escape `-i`.
-///
-/// `cd` / `pushd` each appear twice (`cd` and `cd *`) to match both
-/// the bare form (`cd /path/notes`) and the with-flag form
-/// (`cd -P /path/notes`), since the matcher needs the path to land in
-/// the trailing position with no fixed-token prefix.
-///
-/// The same `bare` + `cmd *` doubling applies to the destructive
-/// deletion family (`rm`, `rmdir`, `unlink`) — agents commonly run
-/// `rm /path/foo` with no intervening flag tokens, and the original
-/// `<cmd> *` template alone would only match the with-flag form. The
-/// trigger for was an agent invoking `rmdir <path>` and
-/// having the rule miss; emitting the bare form alongside closes that
-/// gap without weakening any existing rule.
-///
-/// / Windows + PowerShell coverage. Remargin runs on every
-/// platform an agent might shell out from. The original list was
-/// Unix-only, which left an agent on a Windows agent free to bypass
-/// the deny-list with native Windows tools (`del`, `rd`, `move`,
-/// `copy`, …) or PowerShell cmdlets (`Remove-Item`, `Move-Item`,
-/// `Set-Content`, …). The list below adds both shells' file-mutation
-/// surface so the deny-list is platform-independent.
-///
-/// Decisions for the gap audit:
-///
-/// - **Shell redirection (`>` / `>>`)**: NOT included. Redirection is
-///   shell syntax, not a command argv — Claude's matcher operates on
-///   argv-shaped patterns and cannot see the redirection
-///   unambiguously. Unenforceable at this layer.
-/// - **`find ... -delete` / `find ... -exec`**: NOT enumerable as a
-///   single token. `find` itself is added as a coarse mutator (its
-///   `-exec` is an arbitrary-execution surface), but specific flag
-///   shapes inside are out of scope.
-/// - **`xargs`, `eval`, `exec`**: `xargs` is added (delivers args to
-///   another command); `eval` / `exec` are shell builtins that the
-///   matcher cannot meaningfully gate without context, so they fall
-///   under the per-shell deny (`bash *`, `sh *`, …) already covered.
-/// - **`mktemp`**: NOT added. Creates files in a tempdir, not the
-///   restricted root; hostile use would still need a follow-up write
-///   that the existing rules catch.
+/// Each token expands to `Bash(<token> {glob_root}/**)`; a trailing `*`, or its absence, is part
+/// of the token. Several commands appear bare and with `*` so both `cmd <path>` and
+/// `cmd -f <path>` match.
 pub const BASH_MUTATORS: &[&str] = &[
-    // Write-side mutators (original surface).
     "cp *",
     "mv *",
     "tee",
@@ -117,10 +46,7 @@ pub const BASH_MUTATORS: &[&str] = &[
     "truncate *",
     "touch",
     "touch *",
-    // Delete. Both bare and `*` forms: `rm /path/foo`
-    // (no flags) does not match `Bash(rm * /path/**)` because the
-    // middle `*` requires at least one token, mirroring the
-    // `cd` / `pushd` doubling rationale above.
+    // Bare and `*` forms: `rm /path/foo` has no flag token for the middle `*` to match.
     "rm",
     "rm *",
     "rmdir",
@@ -129,19 +55,16 @@ pub const BASH_MUTATORS: &[&str] = &[
     "unlink *",
     "shred",
     "shred *",
-    // Create / link.
     "install *",
     "ln *",
     "mkdir *",
     "mkfifo *",
     "mknod *",
-    // Metadata / permissions.
     "chattr *",
     "chgrp *",
     "chmod *",
     "chown *",
     "setfacl *",
-    // Interactive editors.
     "ed *",
     "emacs *",
     "micro *",
@@ -149,7 +72,6 @@ pub const BASH_MUTATORS: &[&str] = &[
     "nvim *",
     "vi *",
     "vim *",
-    // Scriptable interpreters (can write any file).
     "awk *",
     "lua *",
     "node *",
@@ -158,7 +80,6 @@ pub const BASH_MUTATORS: &[&str] = &[
     "python *",
     "python3 *",
     "ruby *",
-    // Archives.
     "7z *",
     "bunzip2 *",
     "bzip2 *",
@@ -170,53 +91,35 @@ pub const BASH_MUTATORS: &[&str] = &[
     "xz *",
     "zip *",
     "zstd *",
-    // Sync / remote copy.
     "rsync *",
     "scp *",
     "sftp *",
-    // Patch.
     "patch *",
-    // Network downloads.
     "curl *",
     "wget *",
-    // Arg fan-out. `xargs` delivers a path argv to another
-    // command; without gating it an agent could run
-    // `echo /restricted/file | xargs rm` and dodge `Bash(rm *)`.
+    // `echo /restricted/file | xargs rm` would otherwise dodge `Bash(rm *)`.
     "xargs *",
-    // Find. `-delete` / `-exec` are arbitrary-mutation
-    // surfaces; deny the command coarsely so the path tail matches.
     "find *",
-    // Shells (can do anything).
     "bash *",
     "dash *",
     "fish *",
     "ksh *",
     "sh *",
     "zsh *",
-    // VCS / build.
     "cmake *",
     "git *",
     "make *",
-    // Disk / write.
     "csplit *",
     "dd *",
     "script *",
     "sort *",
     "split *",
-    // Directory navigation. Closes the
-    // shell-relative bypass: `cd /restricted && rm file` would
-    // otherwise dodge every Bash deny because `rm`'s argv carries
-    // only `file`. Both bare and with-flag forms emitted.
+    // `cd /restricted && rm file` would otherwise dodge every Bash deny.
     "cd",
     "cd *",
     "pushd",
     "pushd *",
-    // Windows CMD file-mutation surface. Agents on
-    // Windows can route around the Unix-flavored list above unless
-    // these are enumerated explicitly. Both bare and with-flag forms
-    // for the no-arg-but-path invocation, mirroring the rationale on
-    // the Unix delete family. Case-insensitive shells (CMD,
-    // PowerShell) are matched by the lowercased token.
+    // Windows CMD; the lowercased token matches the case-insensitive shells.
     "attrib",
     "attrib *",
     "copy",
@@ -237,10 +140,7 @@ pub const BASH_MUTATORS: &[&str] = &[
     "robocopy *",
     "type *",
     "xcopy *",
-    // PowerShell cmdlet surface. Capitalisation matches
-    // PowerShell's canonical form. Each cmdlet is the WriteKind /
-    // delete equivalent of a Unix mutator above, but the matcher
-    // sees them as distinct tokens.
+    // PowerShell cmdlets, in their canonical capitalisation.
     "Add-Content",
     "Add-Content *",
     "Clear-Content",
@@ -271,11 +171,8 @@ pub const BASH_MUTATORS: &[&str] = &[
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RevertReport {
-    /// Files the revert opened. Useful for the CLI to print "removed
-    /// rules from N file(s)".
     pub touched_files: Vec<PathBuf>,
-    /// Human-readable diagnostics: missing rules, missing files, etc.
-    /// Empty on the clean-revert happy path.
+    /// Missing rules and missing files; empty on a clean revert.
     pub warnings: Vec<String>,
 }
 
@@ -287,18 +184,15 @@ pub struct RevertReport {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RuleSet {
-    /// `permissions.allow` rules. Empty by default;
-    /// populated only with the per-dot-folder editor-tool re-allows
-    /// the caller requested via `allow_dot_folders`.
+    /// Empty unless the caller asked for dot-folder re-allows through `allow_dot_folders`.
     pub allow: Vec<String>,
-    /// `permissions.deny` rules in emit order.
+    /// In emit order.
     pub deny: Vec<String>,
 }
 
 impl RuleSet {
-    /// `true` when the set carries neither allow nor deny rules — the
-    /// restrict path skips the settings/sidecar write entirely in that
-    /// case (see [`residual_rules`]).
+    /// `true` when the set carries neither allow nor deny rules, in which case the restrict path
+    /// skips the settings and sidecar write.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.allow.is_empty() && self.deny.is_empty()
@@ -316,38 +210,24 @@ impl RuleSet {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SettingsFileSim {
-    /// Allow rules (subset of [`RuleSet::allow`]) already present in
-    /// the settings file's `permissions.allow` array.
     pub allow_rules_already_present: Vec<String>,
-    /// Allow rules (subset of [`RuleSet::allow`]) that would be
-    /// appended.
     pub allow_rules_to_add: Vec<String>,
-    /// Deny rules (subset of [`RuleSet::deny`]) already present in
-    /// the settings file's `permissions.deny` array.
     pub deny_rules_already_present: Vec<String>,
-    /// Deny rules (subset of [`RuleSet::deny`]) that would be
-    /// appended.
     pub deny_rules_to_add: Vec<String>,
-    /// Allow rules already in the settings file's `permissions.allow`
-    /// array regardless of whether the projection touches them. Used
-    /// by the conflict detector to surface allow-vs-deny overlap.
+    /// Every allow rule in the file, whether or not the projection touches it; the conflict
+    /// detector reads it.
     pub existing_allow_rules: Vec<String>,
-    /// Deny rules already in the settings file's `permissions.deny`
-    /// array regardless of whether the projection touches them.
+    /// Every deny rule in the file, whether or not the projection touches it.
     pub existing_deny_rules: Vec<String>,
-    /// Settings file path the simulation reports on.
     pub path: PathBuf,
-    /// `true` when the settings file does not exist on disk.
     pub will_be_created: bool,
 }
 
-/// The full deny/allow shape set the `PreToolUse` hook now covers.
+/// The full deny/allow shape set the `PreToolUse` hook covers.
 ///
-/// `remargin restrict` no longer writes these into settings files (see
-/// [`residual_rules`]); this function survives only as the reference
-/// `remargin doctor` compares on-disk deny rules against — any rule
-/// here that shows up in a settings file is drift an older restrict
-/// left behind, now redundant because the hook enforces it.
+/// `remargin restrict` does not write these into settings files. `remargin doctor` compares
+/// on-disk deny rules against this set: a rule found there is drift, redundant because the
+/// hook enforces it.
 ///
 /// Pure: no filesystem access. The caller must pass the realm anchor
 /// (the directory that holds `.claude/`) so wildcard entries can
@@ -386,62 +266,39 @@ pub fn hook_covered_rules(
 
     let mut deny: Vec<String> = Vec::new();
 
-    // `glob_root` is canonical absolute (leading `/`). Format strings
-    // therefore emit `Tool(/path/**)` directly — no extra `//` prefix.
-    // Legacy on-disk rules with the older `//` / `///` prefix still
-    // match for membership purposes via [`canonicalize_rule`].
+    // `glob_root` is canonical absolute, so rules are emitted as `Tool(/path/**)`. On-disk rules
+    // with a `//` or `///` prefix still match through [`canonicalize_rule`].
 
-    // 1. Base read/write tool denies — the editor-side defenses.
     for tool in EDITOR_TOOLS {
         deny.push(format!("{tool}({glob_root}/**)"));
     }
 
-    // 2. Dot-folder default-deny. A single wildcard rule per tool
-    // covers every current and future dot-folder under the
-    // restricted root; specific allows below override.
+    // One wildcard rule per tool covers every dot-folder under the root, present or future.
     for tool in EDITOR_TOOLS {
         deny.push(format!("{tool}({glob_root}/.*/**)"));
     }
 
-    // 3. Bash mutators — keep shell-out paths from dodging the
-    // editor-tool denies.
     for cmd in BASH_MUTATORS {
         deny.push(format!("Bash({cmd} {glob_root}/**)"));
     }
 
-    // 3a. Source-side `mv` coverage. The `mv *`
-    // template above only emits the destination-side pattern
-    // (`Bash(mv * /path/**)`). The remaining shapes — bare
-    // single-arg, source-side, and both-sides — close the
-    // exfiltration / accidental-source-move surface. Agents that
-    // legitimately need to move a tracked file under a restricted
-    // realm route through `mcp__remargin__mv` (which the user
-    // must opt in to allowing dropped the auto-allow);
-    // humans with `cli_allowed: true` fall back to `remargin mv`.
+    // The `mv *` template covers only the destination side; these shapes cover the bare, the
+    // source-side and the both-sides forms.
     deny.push(format!("Bash(mv {glob_root}/**)"));
     deny.push(format!("Bash(mv {glob_root}/** *)"));
     deny.push(format!("Bash(mv {glob_root}/** {glob_root}/**)"));
 
-    // 3b. Source-side `cp` coverage. The `cp *` template above
-    // emits only the destination-side pattern (`Bash(cp * /path/**)`).
-    // The remaining shapes close the source-side exfiltration hole
-    // (`cp <realm>/secret.md /tmp/`). Agents route through
-    // `mcp__remargin__cp`; humans with `cli_allowed: true` use
-    // `remargin cp`.
+    // The `cp *` template covers only the destination side; these shapes cover the source side.
     deny.push(format!("Bash(cp {glob_root}/**)"));
     deny.push(format!("Bash(cp {glob_root}/** *)"));
     deny.push(format!("Bash(cp {glob_root}/** {glob_root}/**)"));
 
-    // 4. Caller-supplied bash extras, e.g. `also_deny_bash: [curl]`.
     for cmd in &entry.also_deny_bash {
         deny.push(format!("Bash({cmd} * {glob_root}/**)"));
     }
 
-    // 5. Allow list. Empty by default — no implicit `mcp__remargin__*`
-    // allow, so users keep per-call oversight of remargin's MCP tools
-    // under a blanket restrict. Per-dot-folder re-allows override the
-    // default-deny ONLY for folders the user explicitly listed in
-    // `allow_dot_folders` (no implicit `.remargin/` carve-out either).
+    // No implicit `mcp__remargin__*` allow and no implicit `.remargin/` carve-out: only the
+    // folders named in `allow_dot_folders` are re-allowed.
     let mut allow: Vec<String> = Vec::new();
     for folder in allow_dot_folders {
         for tool in EDITOR_TOOLS {
@@ -452,32 +309,12 @@ pub fn hook_covered_rules(
     RuleSet { allow, deny }
 }
 
-/// The rules `remargin restrict` actually writes into settings files.
+/// The rules `remargin restrict` writes into settings files: none.
 ///
-/// The `PreToolUse` hook is the single source of truth, so every shape
-/// [`hook_covered_rules`] emits is redundant and no longer projected.
-/// Residue audit — each shape and why the hook already covers it:
-///
-/// - Editor-tool path denies (`Read/Write/Edit/MultiEdit/NotebookEdit
-///   (<root>/**)`): the hook's `Path` branch gates all five tools (plus
-///   `Grep`/`Glob`) on any target under a trusted root.
-/// - Dot-folder default-deny (`<root>/.*/**`): the hook denies every
-///   path under the root regardless of a dot-prefix, honouring
-///   `allow_dot_folders` for the carve-outs — so the paired re-allows
-///   are unneeded too.
-/// - Bash mutators + `also_deny_bash` extras (`Bash(<cmd> <root>/**)`):
-///   the hook resolves every path-shaped word verb-independently, so a
-///   managed path in any argv position is denied — broader than the
-///   enumerated command list, and it also catches redirection and
-///   `cd`-relative bypasses the projection could not.
-/// - mv/cp source- and destination-side shapes: every word (source and
-///   destination alike) is resolved per-word, so `mv <root>/x /tmp`,
-///   `cp /tmp/x <root>/y`, and both-sides forms are all denied.
-///
-/// The audit found no residue, so this is empty. It stays a named seam
-/// (rather than an inline `RuleSet::default()`) so the live `restrict`
-/// path and the `plan restrict` projection share one home, and a future
-/// genuinely-hook-uncoverable rule has an obvious place to land.
+/// The `PreToolUse` hook gates every editor tool on any target under a trusted root, honours
+/// `allow_dot_folders`, and resolves every path-shaped word of a Bash command whatever the verb,
+/// so each shape [`hook_covered_rules`] emits is already enforced. This is a named function so
+/// the live `restrict` path and the `plan restrict` projection share one source.
 #[must_use]
 pub fn residual_rules() -> RuleSet {
     RuleSet::default()

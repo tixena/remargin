@@ -1,3 +1,5 @@
+/** The identity of one inbox fetch. */
+
 import type { InboxFilter } from "@/types";
 
 /**

@@ -1,3 +1,5 @@
+//! `remargin query --json` payload shape and `base_path`, run against temp realms.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,8 +12,6 @@ use tempfile::TempDir;
 
 const CONFIG: &str = "identity: alice\ntype: human\nmode: open\n";
 
-/// Two comments: a directed root (unacked) and a reply carrying
-/// `reply_to` / `thread` and an ack.
 const DOC: &str = "\
 ---
 title: Query
@@ -62,9 +62,7 @@ fn run(cwd: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// Regression: `--json` (no `--compact`) keeps today's verbose, pretty
-/// payload — named-field comment objects carrying checksum, no columnar
-/// header. Compact must not leak in.
+/// `--json` is verbose: named-field comment objects carrying a checksum, no columnar header.
 #[test]
 fn query_verbose_json_unchanged() {
     let (_tmp, cwd) = setup();

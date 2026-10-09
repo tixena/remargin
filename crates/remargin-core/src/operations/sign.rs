@@ -1,14 +1,10 @@
 //! Back-sign missing-signature comments authored by the current
 //! identity.
 //!
-//! Recovery primitive for documents that carry unsigned comments from
-//! prior broken code paths. Signing is a pure additive
-//! operation on a comment: the canonical signed payload is computed
-//! over fields that do not change post-creation (id, author, type, ts,
-//! to, reply-to, thread, attachments, content — see [`crypto`]), so
-//! adding a signature to a pre-existing unsigned comment yields a
-//! comment that verifies byte-identically against the same registry
-//! key.
+//! Signing is a pure additive operation on a comment: the canonical signed payload is computed
+//! over fields that do not change after creation (id, author, type, ts, to, reply-to, thread,
+//! attachments, content), so adding a signature to an unsigned comment yields one that verifies
+//! against the same registry key.
 //!
 //! # Forgery guard
 //!
@@ -61,17 +57,11 @@ pub(crate) type Classification = (Vec<(String, String)>, Vec<SkippedEntry>);
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum SignSelection {
-    /// Sign every comment where `author == resolved_identity` AND
-    /// `signature is None`. Comments already signed, or authored by a
-    /// different participant, are silently excluded from the candidate
-    /// set (not reported as skipped — `--all-mine` is a broad filter,
-    /// not an exhaustive list).
+    /// Every comment the caller authored that has no signature; signed or foreign comments are
+    /// left out silently.
     AllMine,
-    /// Sign the listed comment ids. Every listed id is validated up
-    /// front: ids that do not exist, are not authored by the caller,
-    /// or are already signed produce a per-id diagnosis. Non-owned
-    /// ids produce a hard error (forgery guard); already-signed ids
-    /// produce a skip entry in the result.
+    /// The listed ids, validated up front: a foreign id is a hard error and an already-signed one
+    /// becomes a skip entry.
     Ids(Vec<String>),
 }
 
@@ -80,9 +70,8 @@ pub enum SignSelection {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SignedEntry {
-    /// Comment id.
     pub id: String,
-    /// Timestamp carried by the comment (unchanged by this op).
+    /// Unchanged by this op.
     pub ts: String,
 }
 
@@ -90,10 +79,8 @@ pub struct SignedEntry {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SkippedEntry {
-    /// Comment id.
     pub id: String,
-    /// Why the comment was skipped. Canonical values:
-    /// `"already_signed"`, `"not_mine"`.
+    /// `"already_signed"` or `"not_mine"`.
     pub reason: String,
 }
 
@@ -105,14 +92,10 @@ pub struct SkippedEntry {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct SignResult {
-    /// Comments whose stored checksum was recomputed from current
-    /// content before signing. Populated only when
-    /// [`SignOptions::repair_checksum`] is set and the comment's
-    /// stored checksum disagreed with the freshly computed value.
+    /// Set only under [`SignOptions::repair_checksum`], for comments whose stored checksum was
+    /// stale.
     pub repaired: Vec<RepairedChecksumEntry>,
-    /// Comments the op signed.
     pub signed: Vec<SignedEntry>,
-    /// Comments the op skipped with per-id reason.
     pub skipped: Vec<SkippedEntry>,
 }
 
@@ -150,29 +133,17 @@ impl SignResult {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RepairedChecksumEntry {
-    /// Comment id.
     pub id: String,
-    /// The freshly computed value that replaced the stale checksum.
     pub new_checksum: String,
-    /// The stale value that was stored on disk before the repair.
     pub old_checksum: String,
 }
 
 /// Flags that modify [`sign_comments`] behavior.
-///
-/// Kept in a struct (instead of loose parameters) because this is the
-/// second caller-facing knob beyond [`SignSelection`]; future flags plug
-/// in without churning every call site.
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct SignOptions {
-    /// When `true`, the op recomputes `checksum` from the current
-    /// comment content before attaching the signature. The forgery
-    /// guard still applies — the caller can only repair a comment they
-    /// authored. Intended for the legitimate case where an author
-    /// edited a comment's bytes out-of-band and wants to re-vouch for
-    /// them; by default the op refuses (the verify gate treats a stale
-    /// checksum as tampering).
+    /// Recompute `checksum` from the current content before signing, for an author re-vouching
+    /// for bytes edited out-of-band. The forgery guard still applies.
     pub repair_checksum: bool,
 }
 
@@ -181,26 +152,14 @@ pub struct SignOptions {
 ///
 /// The op is idempotent: running it twice back-to-back writes the
 /// signatures on the first run and reports zero `signed` / every
-/// already-signed id under `skipped` on the second.
-///
-/// Callers who want to preview the outcome without writing should use
-/// `remargin plan sign`; the per-op `--dry-run` flag has been
-/// dropped in favour of the uniform plan projection.
+/// already-signed id under `skipped` on the second. `remargin plan sign` previews the outcome
+/// without writing.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The config has no resolved identity (a signature needs an
-///   author).
-/// - The config has no resolvable signing key. Note: for strict mode
-///   this was already enforced by the resolver; `sign`
-///   additionally refuses to run in open / registered mode when no
-///   key is configured, because its job is to attach one.
-/// - The file cannot be read or parsed.
-/// - An `--ids` entry does not exist in the document.
-/// - An `--ids` entry is authored by someone other than the caller
-///   (forgery guard).
-/// - The post-op document fails the verify gate.
+/// Returns an error if the config has no identity or no signing key (whatever the mode), the
+/// file cannot be read or parsed, an `--ids` entry is missing or authored by someone else, or
+/// the post-op document fails the verify gate.
 pub fn sign_comments(
     system: &dyn System,
     path: &Path,
@@ -216,12 +175,8 @@ pub fn sign_comments(
         .as_deref()
         .context("identity is required to sign comments")?;
 
-    // Sign is stricter than create / edit: those ops route through
-    // `resolve_signing_key`, which returns `None` in open / registered
-    // mode (signing is optional, so a missing key is fine). `sign` has
-    // no reason to exist without a key — its job is to attach one. So
-    // resolve from `key_path` directly, and bail when unset regardless
-    // of mode.
+    // Create and edit treat a missing key as fine outside strict mode; sign exists to attach one,
+    // so it bails when `key_path` is unset whatever the mode.
     let key_path = match &config.key_path {
         Some(configured) => configured.clone(),
         None => bail!(
@@ -234,31 +189,13 @@ pub fn sign_comments(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    // Validate `--ids` up front before touching any comment. Collects
-    // the id → kind decision so the write loop is a pure projection
-    // of the candidate set.
-    //
-    // `--repair-checksum` changes the "already signed" rule under
-    // `--ids`: the caller is explicitly asking the op to re-vouch for
-    // the listed comments, so any stale signature that was already
-    // attached is slated for overwrite instead of being reported as
-    // skipped. The forgery guard still fires first.
+    // Validate `--ids` before touching any comment. Under `--repair-checksum` an already-signed
+    // id is slated for overwrite instead of being skipped; the forgery guard still fires first.
     let (targets, skipped_for_ids) =
         classify_candidates(&doc, identity, selection, options.repair_checksum)?;
 
-    // Sign each target in the parsed document. Because signature_payload
-    // excludes ack / reactions / checksum, and `compute_signature` is a
-    // pure function of the comment's other fields, the order and
-    // grouping of signings is irrelevant.
-    //
-    // When `options.repair_checksum` is set we recompute the checksum
-    // from the current `content` first. The signature payload includes
-    // the same (whitespace-normalized) content, so a comment whose
-    // bytes were edited out-of-band ends up with a coherent pair:
-    // signature attesting to the current content plus a checksum that
-    // matches it. The forgery guard above already limited targets to
-    // the caller's own comments, so the repair is scoped to comments
-    // the caller has authority over.
+    // With `repair_checksum` the checksum is recomputed from the current content first, so the
+    // signature and the checksum attest to the same bytes.
     let target_ids: HashSet<String> = targets.iter().map(|(id, _)| id.clone()).collect();
     let mut signed = Vec::new();
     let mut repaired = Vec::new();
@@ -267,9 +204,6 @@ pub fn sign_comments(
             && target_ids.contains(&cm.id)
         {
             if options.repair_checksum {
-                // Repair uses the comment's current `remargin_kind` so
-                // the re-vouch includes the same payload the signature
-                // will sign over.
                 let fresh = compute_checksum(&cm.content, cm.kinds());
                 if fresh != cm.checksum {
                     repaired.push(RepairedChecksumEntry {
@@ -290,10 +224,7 @@ pub fn sign_comments(
         }
     }
 
-    // Route through the shared verify gate. If for some reason the
-    // signed document still reads as `bad` (e.g. a pre-existing bad
-    // checksum on an unsigned comment we did NOT sign), the gate
-    // trips before any byte reaches disk and the caller can recover.
+    // The shared verify gate trips before any byte reaches disk if the signed document still fails.
     let empty: HashSet<String> = HashSet::new();
     commit_with_verify(system, &doc, config, path, |verified_doc| {
         writer::write_document(system, path, verified_doc, &empty, &empty)
@@ -314,9 +245,8 @@ pub fn sign_comments(
 /// `repair_checksum` changes the already-signed rule for
 /// [`SignSelection::Ids`]: when `true`, an already-signed target is
 /// still slated for processing so the op overwrites both the stale
-/// checksum and the now-stale signature. Callers that leave it `false`
-/// see the historical behavior — already-signed ids become skip
-/// entries. [`SignSelection::AllMine`] is untouched: it is a filter,
+/// checksum and the now-stale signature; when `false` it becomes a skip
+/// entry. [`SignSelection::AllMine`] is untouched: it is a filter,
 /// and a filter that sweeps up every one of the caller's comments
 /// would re-sign every existing valid signature on every run.
 ///

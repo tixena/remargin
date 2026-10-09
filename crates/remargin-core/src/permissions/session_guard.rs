@@ -39,16 +39,13 @@ use serde::Serialize;
 use crate::config;
 use crate::permissions::pretool_install::{self, TestOutcome};
 
-/// The bare command name a `PATH`-relative `PreToolUse` entry resolves
-/// through `PATH`. If this does not resolve, enforcement is off.
+/// The name a `PATH`-relative `PreToolUse` entry resolves; if it does not, enforcement is off.
 const BINARY_NAME: &str = "remargin";
 
-/// The settings file each scope's hook entry lives in, relative to its
-/// scope root — the same file both `install` and `install --local` write.
+/// Relative to its scope root; the file both `install` and `install --local` write.
 const SETTINGS_FILE: &str = ".claude/settings.json";
 
-/// The failure the `PATH` probe reports for an entry that names the binary
-/// by bare name — the only entry `PATH` decides the fate of.
+/// Reported for an entry that names the binary by bare name, the only kind `PATH` decides.
 const PATH_FAILURE: &str = "the `remargin` binary does not resolve on PATH -- a PreToolUse hook \
                             (`remargin claude pretool`) that cannot find `remargin` exits 127, \
                             which Claude Code treats as non-blocking, so every gated tool call \
@@ -69,8 +66,7 @@ pub struct GuardDiagnostic {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GuardDiagnosticInner {
-    /// Injected into Claude's context at session start — the model reads
-    /// this and must not treat managed files as protected.
+    /// Injected into Claude's context at session start.
     #[serde(rename = "additionalContext")]
     pub additional_context: String,
     #[serde(rename = "hookEventName")]
@@ -82,10 +78,9 @@ pub struct GuardDiagnosticInner {
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GuardOutcome {
-    /// Enforcement may be silently disabled. Emit the diagnostic JSON on
-    /// stdout so the failure is surfaced into the session.
+    /// Enforcement may be silently disabled; the diagnostic JSON goes to stdout.
     Fail(GuardDiagnostic),
-    /// Enforcement will be live. Emit nothing; the session proceeds clean.
+    /// Enforcement will be live; emit nothing.
     Ok,
 }
 
@@ -125,9 +120,8 @@ fn hook_failure(system: &dyn System, cwd: &Path) -> Option<String> {
     let files = settings_files(system, cwd);
     let outcomes: Vec<TestOutcome> = files
         .iter()
-        // A probe that cannot answer is not evidence of a live hook, so an
-        // unreadable or unparseable settings file reads as broken and
-        // carries its own cause.
+        // A probe that cannot answer is not evidence of a live hook, so an unreadable settings file
+        // reads as broken and carries its own cause.
         .map(|file| {
             pretool_install::test(system, file).unwrap_or_else(|err| {
                 TestOutcome::Broken(format!(

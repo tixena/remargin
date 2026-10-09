@@ -17,10 +17,7 @@
 //! `write` (markdown + raw). `ack`, `react`,
 //! `sandbox-add`, `sandbox-remove`, `comment`, and `batch` are excluded
 //! because their projections stamp `Utc::now()` into the `after`
-//! document; byte-level parity would require freezing the clock, which
-//! would need a shim both surfaces wire through — out of scope here
-//! and easier to expand once the harness gains value.
-// (Previously expected `clippy::print_stderr`; removed along with eprintln usage.)
+//! document, so byte-level parity would require freezing the clock.
 
 #[cfg(test)]
 #[path = "adapter_parity/tests.rs"]

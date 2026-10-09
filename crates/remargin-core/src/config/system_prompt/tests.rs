@@ -1,3 +1,6 @@
+//! Tests for the system-prompt walk: nearest ancestor, the default fallback, naming and the
+//! runner.
+
 use std::path::Path;
 
 use os_shim::mock::MemorySystem;

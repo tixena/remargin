@@ -1,8 +1,8 @@
-//! Tests for the multiplexer engine (task 86). These exercise the *pure*
+//! Tests for the multiplexer engine. These exercise the *pure*
 //! construction — session names, the exact tmux argv vectors, and the full
 //! trust-dismiss + seed send-keys sequence — plus the parse/attach surface
 //! and the no-supervision invariant. The real-process execution layer is
-//! deliberately never spawned here (see the module docs); only the two
+//! deliberately never spawned here; only the two
 //! pre-spawn guard paths of [`launch_into_multiplexer`] are asserted.
 
 use std::path::{Path, PathBuf};
@@ -16,8 +16,7 @@ use super::{
     parse_workspace_id, session_name, substitute,
 };
 
-/// A realistic `herdr workspace create` response: its `root_pane` carries the
-/// `tab_id` of the default tab identity 0 reuses, alongside the `workspace_id`.
+/// A `herdr workspace create` response; its `root_pane` carries the default tab's `tab_id`.
 const WORKSPACE_CREATE_JSON: &str = r#"{"result":{"root_pane":{"pane_id":"w4:p1","tab_id":"w4:t1","terminal_id":"term_6570da89722875","workspace_id":"w4"},"workspace":{"workspace_id":"w4","label":"remargin-smoke"}}}"#;
 
 fn at(secs: i64) -> DateTime<Utc> {
@@ -92,9 +91,6 @@ fn multiplexer_parse_rejects_unknown_naming_allowed() {
 
 #[test]
 fn attach_hint_is_multiplexer_specific() {
-    // herdr creates a workspace inside the default session, not a session named
-    // for the launch — the hint must attach to `default` and name the workspace
-    // to open, or a copy-paste of `herdr session attach demo-abcd` would fail.
     assert_eq!(
         Multiplexer::Herdr.attach_hint("demo-abcd"),
         "herdr session attach default   # then open workspace demo-abcd"
@@ -202,8 +198,6 @@ fn tmux_seed_lines_type_each_line_then_submit() {
 
     let plan = build_tmux_plan("demo-abcd", &tabs);
 
-    // The full trust-dismiss + seed send-keys sequence, flattened and asserted
-    // command-for-command in order.
     let seed = &plan.tabs[0];
     let mut full: Vec<Vec<String>> = vec![seed.dismiss_trust.clone()];
     full.extend(seed.seed_lines.iter().cloned());
@@ -265,7 +259,6 @@ fn herdr_plan_creates_workspace_then_starts_and_seeds_each_tab() {
 
     let plan = build_herdr_plan("demo-abcd", &tabs);
 
-    // Workspace is created once, rooted at the first tab's cwd.
     assert_eq!(
         plan.create_workspace,
         strs(&[
@@ -281,9 +274,6 @@ fn herdr_plan_creates_workspace_then_starts_and_seeds_each_tab() {
     );
     assert_eq!(plan.tabs.len(), 2);
 
-    // Identity 0 reuses the workspace's default tab: no `tab create`. Its
-    // agent-start reuses the launch_argv verbatim after `--`, with a `<TAB>`
-    // placeholder for the default tab id resolved at run time.
     let first = &plan.tabs[0];
     assert_eq!(first.identity, "root_agent");
     assert!(
@@ -308,8 +298,6 @@ fn herdr_plan_creates_workspace_then_starts_and_seeds_each_tab() {
             "--foo",
         ])
     );
-    // Identity 1 gets its own tab (labeled with the identity, `<WS>` resolved at
-    // run time), and its agent starts in that tab via the `<TAB>` placeholder.
     let second = &plan.tabs[1];
     assert_eq!(
         second.tab_create,
@@ -352,11 +340,8 @@ fn herdr_tab_readiness_is_besteffort_trust_then_required_idle() {
     let plan = build_herdr_plan("demo-abcd", &tabs);
     let tab_plan = &plan.tabs[0];
 
-    // The sole identity reuses the workspace's default tab (no `tab create`).
     assert_eq!(tab_plan.tab_create, [] as [String; 0]);
 
-    // The trust probe is best-effort (a short-timeout output match); its Enter
-    // is only sent when the probe matches; the idle wait is the required gate.
     assert_eq!(
         tab_plan.wait_trust,
         strs(&[
@@ -399,8 +384,6 @@ fn herdr_seed_sends_each_line_by_name_then_submits() {
     )];
     let plan = build_herdr_plan("demo-abcd", &tabs);
 
-    // Addressed by agent name (`agent send root_agent …`), each followed by a
-    // `send-keys <PANE> enter` submit.
     assert_eq!(
         plan.tabs[0].seed,
         vec![
@@ -434,16 +417,12 @@ fn parses_pane_id_from_agent_start_json() {
 
 #[test]
 fn parses_panes_with_their_tabs_from_pane_list_json() {
-    // Two tabs, each with the tab's default pane plus the agent's split pane —
-    // the shape the stray-pane cleanup filters over.
     let json = r#"{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w4:p1","tab_id":"w4:t1"},{"pane_id":"w4:p2","tab_id":"w4:t1"},{"pane_id":"w4:p3","tab_id":"w4:t2"}]}}"#;
     let panes = parse_panes(json).unwrap();
 
     assert_eq!(panes.len(), 3);
     assert_eq!(panes[0].pane_id, "w4:p1");
     assert_eq!(panes[0].tab_id, "w4:t1");
-    // The non-agent pane in tab t1 (p1) is the one the cleanup would close when
-    // the agent landed on p2.
     let strays: Vec<&str> = panes
         .iter()
         .filter(|p| p.tab_id == "w4:t1" && p.pane_id != "w4:p2")
@@ -489,9 +468,7 @@ fn herdr_unavailable_error_names_the_fix() {
     );
 }
 
-/// The no-supervision invariant (discussion decisions 3 & 5): the engine
-/// must write no PID/registry file. Scan the module source and assert it
-/// never references a `.remargin/sessions/` path.
+/// The engine must write no PID or registry file: its source never names `.remargin/sessions/`.
 #[test]
 fn engine_writes_no_session_registry_path() {
     let src = include_str!("multiplexer.rs");

@@ -35,24 +35,18 @@ pub const PLUGIN_NAME: &str = "remargin-guard";
 /// The only goose hook event that can block a tool call.
 pub const HOOK_EVENT: &str = "PreToolUse";
 
-/// Subcommand appended to the absolute binary path in the generated hook
-/// command.
 pub const HOOK_SUBCOMMAND: &str = "goose pretool";
 
 /// The event the fail-open backstop fires on. It cannot block; it reports.
 pub const SESSION_HOOK_EVENT: &str = "SessionStart";
 
-/// Subcommand the `SessionStart` entry dispatches to.
 pub const SESSION_HOOK_SUBCOMMAND: &str = "goose session-guard";
 
-/// Seconds goose waits for the guard before abandoning it. Generous
-/// because abandoning it is a fail-open pass for the tool call.
+/// Generous, because goose abandoning the guard is a fail-open pass for the tool call.
 const HOOK_TIMEOUT_SECS: u32 = 30;
 
-/// Plugin manifest, relative to the plugin directory.
 const PLUGIN_MANIFEST: &str = "plugin.json";
 
-/// Hook manifest, relative to the plugin directory.
 const HOOKS_MANIFEST: &str = "hooks/hooks.json";
 
 const PRETOOL_HOOK: HookSpec = HookSpec {
@@ -65,8 +59,7 @@ const SESSION_HOOK: HookSpec = HookSpec {
     subcommand: SESSION_HOOK_SUBCOMMAND,
 };
 
-/// Every entry this lifecycle owns. A plugin directory declaring none of
-/// them has no reason to exist.
+/// A plugin directory declaring none of these has no reason to exist.
 const MANAGED_HOOKS: [HookSpec; 2] = [PRETOOL_HOOK, SESSION_HOOK];
 
 /// What the plugin manifest says about one managed hook entry.
@@ -77,8 +70,7 @@ enum EntryState {
     BinaryMissing(String),
     /// The plugin directory itself is not there.
     DirAbsent,
-    /// The manifest cannot be read or parsed, so it describes nothing.
-    /// Carries the reason.
+    /// The manifest cannot be read or parsed; carries the reason.
     ManifestUnusable(String),
     /// Declared, and the binary it names exists.
     Wired,
@@ -94,6 +86,7 @@ struct HookSpec {
     subcommand: &'static str,
 }
 
+/// Whether an install changed anything on disk.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InstallOutcome {
@@ -107,16 +100,17 @@ enum ManifestState {
     Usable(Value),
 }
 
+/// Whether a managed hook entry is live.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TestOutcome {
-    /// The plugin directory is present but does not describe a live guard.
-    /// Carries the specific fault so the caller can name it.
+    /// The plugin directory is present but describes no live guard; carries the fault.
     Broken(String),
     Installed,
     NotInstalled,
 }
 
+/// Whether an uninstall found anything to remove.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum UninstallOutcome {
@@ -170,9 +164,8 @@ pub fn install_session_guard(system: &dyn System, dir: &Path) -> Result<InstallO
 pub fn test(system: &dyn System, dir: &Path) -> Result<TestOutcome> {
     let manifest_path = hooks_file(dir);
     Ok(match entry_state(system, dir, PRETOOL_HOOK)? {
-        // A plugin directory that declares no PreToolUse entry is a guard
-        // that does not guard: the directory's presence says the guard was
-        // installed, so the missing entry is drift, not a plain absence.
+        // The directory's presence says the guard was installed, so a missing `PreToolUse` entry is
+        // drift, not a plain absence.
         EntryState::Absent => broken(&format!(
             "{} declares no {HOOK_EVENT} command entry",
             manifest_path.display()
@@ -194,9 +187,8 @@ pub fn test(system: &dyn System, dir: &Path) -> Result<TestOutcome> {
 /// Returns an error when a path existence probe fails.
 pub fn test_session_guard(system: &dyn System, dir: &Path) -> Result<TestOutcome> {
     Ok(match entry_state(system, dir, SESSION_HOOK)? {
-        // The plugin directory is shared with the PreToolUse guard, so a
-        // directory carrying only that entry is the ordinary state of a
-        // pretool-only install — an absence to install, not drift to repair.
+        // The directory is shared with the `PreToolUse` guard, so one carrying only that entry is an
+        // ordinary pretool-only install: an absence, not drift.
         EntryState::Absent | EntryState::DirAbsent => TestOutcome::NotInstalled,
         EntryState::BinaryMissing(binary) => broken(&format!(
             "the hook command in {} points at {binary}, which does not exist",
@@ -344,9 +336,7 @@ fn hooks_file(dir: &Path) -> PathBuf {
 fn install_hook(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<InstallOutcome> {
     let command = hook_command(system, hook)?;
     let plugin_body = render(&plugin_manifest())?;
-    // A manifest remargin cannot read carries nothing worth preserving, so
-    // install rewrites from scratch — the one repair path for a corrupt
-    // plugin.
+    // An unreadable manifest carries nothing worth preserving, so install rewrites from scratch.
     let current = match load_manifest(system, dir) {
         ManifestState::Unusable(_) => Value::Object(Map::new()),
         ManifestState::Usable(value) => value,
@@ -414,9 +404,7 @@ fn uninstall_hook(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<Uni
         return Ok(UninstallOutcome::NotInstalled);
     }
     let ManifestState::Usable(manifest) = load_manifest(system, dir) else {
-        // A manifest remargin cannot read declares no live entry for either
-        // event, so nothing survives its removal; `install` rewrites the
-        // plugin from scratch.
+        // An unreadable manifest declares no live entry, so nothing survives its removal.
         remove_plugin(system, dir)?;
         return Ok(UninstallOutcome::Uninstalled);
     };

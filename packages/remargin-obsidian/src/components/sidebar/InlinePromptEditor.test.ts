@@ -1,3 +1,5 @@
+/** Static-markup tests for the inline prompt editor. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -8,8 +10,7 @@ import {
   type InlinePromptEditorSaveArgs,
 } from "./InlinePromptEditor.tsx";
 
-// renderToStaticMarkup skips useEffect, so the CM6 mount never runs in
-// these tests — the @codemirror import stays cold.
+// renderToStaticMarkup skips useEffect, so the CM6 mount never runs in these tests.
 
 const noopSave = async (_args: InlinePromptEditorSaveArgs): Promise<void> => {
   /* test-only no-op */
@@ -154,9 +155,7 @@ describe("InlinePromptEditor — Delete affordance", () => {
   });
 
   it("does NOT render Delete when creating, even if onDelete is supplied", () => {
-    // Default group flow: source=null AND onDelete set must not show Delete
-    // — only existing prompts can be deleted (matches the source check
-    // inside the editor).
+    // Only an existing prompt can be deleted: `source=null` shows no Delete even with onDelete set.
     const html = render({ source: null, onDelete: noopDelete });
     assert.ok(!html.includes(">Delete<"), `Delete must not show in create mode, got: ${html}`);
   });
@@ -171,9 +170,7 @@ describe("InlinePromptEditor — Delete affordance", () => {
 });
 
 describe("InlinePromptEditor — strict-mode disabled state", () => {
-  // The Save/Create button is the only one styled with `bg-accent text-white`
-  // (the ghost Cancel button uses `hover:bg-accent` which the unprefixed
-  // class match below ignores).
+  // Only Save/Create carries `bg-accent text-white`; the ghost Cancel uses `hover:bg-accent`.
   const SAVE_BUTTON_RE = /<button[^>]*\bbg-accent text-white\b[^>]*>[\s\S]*?<\/button>/;
 
   it("disables the Save button when saveDisabledReason is set", () => {
@@ -213,7 +210,6 @@ describe("InlinePromptEditor — Cancel + close affordances", () => {
 
   it("renders the header X close affordance with title='Cancel'", () => {
     const html = render({});
-    // The header X button uses `title="Cancel"` and lucide-x icon.
     assert.ok(
       /title="Cancel"[^>]*>\s*<svg[^>]*lucide-x/.test(html) || /title="Cancel"/.test(html),
       `expected close X affordance, got: ${html}`

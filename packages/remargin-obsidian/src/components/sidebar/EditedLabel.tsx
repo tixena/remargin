@@ -1,6 +1,9 @@
+/** The "edited" marker on a comment card. */
+
 import { Pencil } from "lucide-react";
 import { formatFullTime, formatRelative } from "@/lib/relative-time";
 
+/** Props for {@link EditedLabel}. */
 interface EditedLabelProps {
   editedAt: Date | string;
 }

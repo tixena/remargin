@@ -1,11 +1,8 @@
 //! `remargin plan claude unrestrict` integration tests.
 //!
-//! Mirrors the `cli_plan_claude_restrict.rs` patterns: real-filesystem
-//! temp dirs, `assert_cmd` invocations, JSON output assertions. Covers
-//! the testing-plan scenarios from the T43 spec: plan-then-act
-//! parity, --json output, MCP / CLI parity, wildcard end-to-end,
-//! drift detection, multi-path independence, and the no-write
-//! invariant.
+//! Real-filesystem temp dirs, `assert_cmd` invocations and JSON output assertions cover the
+//! no-write invariant, plan-then-act parity, the wildcard form end to end, drift detection,
+//! multi-path independence, and a path that was never restricted.
 
 #[cfg(test)]
 #[path = "cli_plan_claude_unrestrict/tests.rs"]

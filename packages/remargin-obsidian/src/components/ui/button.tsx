@@ -1,3 +1,5 @@
+/** Button primitive and its variants. */
+
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
@@ -31,6 +33,7 @@ const buttonVariants = cva(
   }
 );
 
+/** Props for {@link Button}; `asChild` renders the child element in place of a `<button>`. */
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {

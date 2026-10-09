@@ -1,3 +1,5 @@
+/** Plugin settings: their shape, defaults and bounds. */
+
 import type { UpdateCheckState } from "./lib/githubReleases";
 
 /** "flat" renders a single-level list; "tree" groups files by directory. */
@@ -11,13 +13,11 @@ export type ViewMode = "flat" | "tree";
  */
 export type InboxFilter = "for-me" | "from-me" | "unassigned" | "pending" | "all";
 
+/** Everything the plugin persists in its data file. */
 export interface RemarginSettings {
   remarginPath: string;
   claudePath: string;
-  /**
-   * Terminal emulator argv prefix for sandbox Submit, e.g. `ptyxis --`
-   * or `kitty -e`. Empty = auto-detect per OS.
-   */
+  /** Terminal argv prefix for sandbox Submit, e.g. `ptyxis --`; empty means auto-detect per OS. */
   terminalCommand: string;
   workingDirectory: string;
   identityMode: "config" | "manual";
@@ -25,38 +25,21 @@ export interface RemarginSettings {
   authorName: string;
   keyFilePath: string;
   sidebarSide: "left" | "right";
-  /** Per-section view mode, persisted across sessions (UI task 26). */
   sandboxView: ViewMode;
   inboxView: ViewMode;
-  /** Last inbox filter mode picked in the sidebar dropdown. */
   inboxFilter: InboxFilter;
-  /**
-   * User toggle for the GitHub-releases update probe. When `false` the
-   * plugin performs zero network calls and skips the startup Notice
-   * entirely — no silent heartbeat. Default on to match the "check and
-   * tell me" expectation most users have for dev-tool plugins.
-   */
+  /** When false the plugin makes no network calls and shows no startup Notice. */
   checkForUpdates: boolean;
-  /**
-   * Cached result of the last successful (or failed) update probe. Not
-   * surfaced in the settings UI — the Updates section renders this
-   * through the backend's read accessor. `undefined` on first install
-   * and after a reset, which forces the next `onload` to fetch.
-   */
+  /** The last update probe's result; `undefined` forces the next `onload` to fetch. */
   updateCheck?: UpdateCheckState;
   /**
-   * When true, replace remargin fenced blocks in Live Preview and reading
-   * mode with rich, read-only widgets. Editing always still happens in
-   * the sidebar. Default off; opt-in for the first two releases (T37/T38
-   * each gate behind this flag).
+   * When true, remargin fenced blocks render as rich, read-only widgets in Live Preview and
+   * reading mode. Editing always happens in the sidebar. Off by default.
    */
   editorWidgets: boolean;
   /**
-   * Single global font-scale multiplier for rendered comment markdown,
-   * shared by the sidebar and the in-editor widget. Applied as the
-   * `--remargin-md-scale` CSS var; the markdown container's base
-   * font-size is `calc(var(--remargin-md-scale) * 15.6px)` and every child
-   * font rule is `em`-relative, so this one knob scales the whole tree.
+   * One font-scale multiplier for rendered comment markdown in the sidebar and the editor
+   * widgets, applied as the `--remargin-md-scale` CSS var.
    */
   markdownScale: number;
 }

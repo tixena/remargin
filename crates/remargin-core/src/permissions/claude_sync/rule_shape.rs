@@ -1,19 +1,16 @@
 //! Structural decomposition of Claude permission rule strings used by
 //! the `plan restrict` conflict detector.
 //!
-//! The original detector compared rule bodies as raw strings. That
-//! caught only exact-format matches: a hand-edited rule, a legacy
-//! double-slash prefix, or a trailing-slash difference would silently
-//! slip past. This module provides a structural parser so the detector
-//! can compare rules by `(tool, path-glob)` shape and reason about
-//! prefix / recursive-subtree overlap.
+//! Rules are compared by `(tool, path-glob)` shape, so a hand-edited rule, a double-slash prefix
+//! or a trailing-slash difference still matches, and prefix and recursive-subtree overlap can be
+//! reasoned about.
 //!
 //! Lossy by design: round-tripping back to a rule string is not
 //! supported. Callers keep the original rule string for echo-back; this
 //! struct exists for comparisons.
 //!
 //! Out of scope: full glob semantics across `?`, `[a-z]`, brace
-//! expansion. Initial scope is prefix-overlap on the absolute path with
+//! expansion. The scope is prefix-overlap on the absolute path with
 //! `/**` as the recursive-everything sentinel and cross-tool pairs kept
 //! distinct.
 
@@ -26,16 +23,11 @@
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum OverlapKind {
-    /// The existing allow targets a sub-tree that the broader projected
-    /// deny would shadow (e.g. allow `Read(/foo/sub)`, deny
-    /// `Read(/foo/**)`).
+    /// The allow targets a sub-tree the broader deny would shadow: allow `Read(/foo/sub)`, deny
+    /// `Read(/foo/**)`.
     AllowShadowedByBroaderDeny,
-    /// The projected deny targets a sub-tree of an already-broader
-    /// existing allow (e.g. allow `Read(/foo/**)`, deny
-    /// `Read(/foo/sub)`). The deny may not stick under most precedence
-    /// rules.
+    /// The deny targets a sub-tree of a broader allow: allow `Read(/foo/**)`, deny `Read(/foo/sub)`.
     DenyShadowedByBroaderAllow,
-    /// Allow and deny target the exact same path-glob.
     Exact,
 }
 
@@ -48,11 +40,9 @@ pub enum OverlapKind {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct PathGlob {
-    /// Canonical path components. Empty means root-relative; first
-    /// component is the first directory after the leading `/`.
+    /// Empty means root-relative; the first component is the first directory after the leading `/`.
     pub components: Vec<String>,
-    /// `true` when the rule ended in `/**` (recursive subtree). When
-    /// `false`, the rule targets a specific file/directory.
+    /// The rule ended in `/**`.
     pub recursive: bool,
 }
 
@@ -63,26 +53,19 @@ impl PathGlob {
     #[must_use]
     pub fn classify_overlap(&self, other: &Self) -> Option<OverlapKind> {
         if self.components == other.components {
-            // Either both recursive, both non-recursive, or one of
-            // them is recursive over the same path. All of these are
-            // "exact" for overlap-classification purposes — the user
-            // sees identical rule bodies.
+            // The same path on both sides counts as exact, whichever side is recursive.
             return Some(OverlapKind::Exact);
         }
         if other.components.len() < self.components.len()
             && self.components.starts_with(&other.components)
             && other.recursive
         {
-            // The deny is the broader (shorter, recursive) side and
-            // shadows the more-specific allow.
             return Some(OverlapKind::AllowShadowedByBroaderDeny);
         }
         if self.components.len() < other.components.len()
             && other.components.starts_with(&self.components)
             && self.recursive
         {
-            // The allow is the broader (shorter, recursive) side; the
-            // deny is shadowed by the broader allow.
             return Some(OverlapKind::DenyShadowedByBroaderAllow);
         }
         None
@@ -129,8 +112,7 @@ impl PathGlob {
         let stripped = trimmed.strip_suffix("/**");
         let recursive = stripped.is_some() || trimmed == "**";
         let body_after_recursive: &str = stripped.unwrap_or(trimmed);
-        // Strip a single trailing `/` (after `/**` removal). A bare
-        // `/foo/` and `/foo` should compare equal.
+        // `/foo/` and `/foo` compare equal.
         let cleaned = body_after_recursive
             .strip_suffix('/')
             .unwrap_or(body_after_recursive);
@@ -156,35 +138,23 @@ impl PathGlob {
 }
 
 /// Structural decomposition of a Claude permission rule string used by
-/// the conflict detector. See module docs for caveats.
-///
-/// `String`-owned (rather than `&str`-borrowed) so it slots into the
-/// detector without lifetime gymnastics. The cost is one allocation
-/// per parsed rule; the detector runs on tens of rules per file, not
-/// thousands.
+/// the conflict detector.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub enum RuleShape {
-    /// `Bash(<cmd-tokens>… <path-glob>)`. Cmd tokens kept verbatim
-    /// (case-preserving); only the trailing path-glob is normalized.
+    /// `Bash(<cmd-tokens>… <path-glob>)`: the tokens are kept verbatim and only the path glob is
+    /// normalized.
     Bash {
-        /// Whitespace-split tokens preceding the trailing path glob.
         cmd_tokens: Vec<String>,
-        /// Canonicalized path glob (the last whitespace-separated
-        /// token, parsed via [`PathGlob::parse`]).
         path_glob: PathGlob,
     },
-    /// Any rule that does not match the canonical shapes above.
-    /// Treated as opaque (skipped by the detector). Examples:
-    /// `mcp__remargin__*`, `WebFetch(domain:github.com)`,
-    /// `Bash(ls *)` (no path glob).
+    /// Any other shape, skipped by the detector: `mcp__remargin__*`, `WebFetch(domain:github.com)`,
+    /// `Bash(ls *)`.
     Opaque(String),
     /// `Tool(<path-glob>)` for any tool whose body is a single path.
     Tool {
-        /// Canonicalized path glob.
         path_glob: PathGlob,
-        /// Literal tool name (`Read`, `Write`, `Edit`, `MultiEdit`,
-        /// `NotebookEdit`, …). Compared case-sensitively.
+        /// Compared case-sensitively.
         tool: String,
     },
 }
@@ -210,7 +180,6 @@ impl RuleShape {
         if tool == "Bash" {
             return parse_bash(rule, body);
         }
-        // Heuristic: known editor tools whose body is a path glob.
         if matches!(
             tool,
             "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit"

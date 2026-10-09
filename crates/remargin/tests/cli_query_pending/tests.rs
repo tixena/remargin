@@ -1,3 +1,5 @@
+//! `remargin query` pending filters, run against temp vaults.
+
 use core::str;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +11,6 @@ use tempfile::TempDir;
 const ALICE_CONFIG: &str = "identity: alice\ntype: human\nmode: open\n";
 const BOB_CONFIG: &str = "identity: bob\ntype: human\nmode: open\n";
 
-/// Doc with a fresh broadcast comment (no `to`, no acks).
 const BROADCAST_DOC: &str = "\
 ---
 title: Broadcast
@@ -27,8 +28,6 @@ Fresh broadcast, no acks.
 ```
 ";
 
-/// Doc with a directed comment to alice (unacked) AND a broadcast
-/// (unacked).
 const MIXED_DOC: &str = "\
 ---
 title: Mixed
@@ -102,8 +101,6 @@ fn setup_realm(config: &str) -> (TempDir, PathBuf) {
 
 #[test]
 fn pending_flag_includes_broadcast_rem_4j91() {
-    // : --pending silently excluded broadcasts.
-    // After: a fresh broadcast (empty `to`, no acks) must surface.
     let (_tmp, cwd) = setup_realm(ALICE_CONFIG);
     seed(&cwd, "broadcast.md", BROADCAST_DOC);
 
@@ -127,8 +124,6 @@ fn pending_for_me_surfaces_directed_to_caller() {
     assert_eq!(results.len(), 1, "expected one matching file");
     let comments = results[0]["comments"].as_array().unwrap();
     let ids: Vec<&str> = comments.iter().map(|c| c["id"].as_str().unwrap()).collect();
-    // Alice is named in dir_alice.to but NOT dir_bob.to; broadcast
-    // does not count for --pending-for-me.
     assert_eq!(ids, vec!["dir_alice"]);
 }
 
@@ -192,10 +187,7 @@ fn pending_for_me_and_broadcast_compose_as_union() {
 
 #[test]
 fn pending_for_me_errors_without_identity() {
-    // A blank config dir has no identity. --pending-for-me should
-    // return a clear error rather than silently dropping the flag.
     let tmp = TempDir::new().unwrap();
-    // Intentionally no .remargin.yaml.
     seed(tmp.path(), "mixed.md", MIXED_DOC);
 
     let out = Command::cargo_bin("remargin")

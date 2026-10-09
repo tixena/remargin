@@ -37,29 +37,22 @@ use crate::writer::ensure_not_forbidden_target;
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ReplaceOptions {
-    /// Find what would change; write nothing.
     pub dry_run: bool,
-    /// Case-insensitive matching.
     pub ignore_case: bool,
-    /// The find pattern (literal or regex).
     pub pattern: String,
-    /// Treat the pattern as a regex (default: literal). In literal mode
-    /// the replacement is also literal (a `$` is inserted verbatim).
+    /// Default is literal, where the replacement is literal too: a `$` is inserted verbatim.
     pub regex: bool,
-    /// The replacement text. In regex mode, `$1` / `${name}` expand to
-    /// capture groups; in literal mode the text is inserted verbatim.
+    /// In regex mode `$1` and `${name}` expand to capture groups.
     pub replacement: String,
 }
 
 impl ReplaceOptions {
-    /// Enable dry-run (report only; write nothing).
     #[must_use]
     pub const fn dry_run(mut self, yes: bool) -> Self {
         self.dry_run = yes;
         self
     }
 
-    /// Enable case-insensitive matching.
     #[must_use]
     pub const fn ignore_case(mut self, yes: bool) -> Self {
         self.ignore_case = yes;
@@ -79,7 +72,6 @@ impl ReplaceOptions {
         }
     }
 
-    /// Enable regex mode.
     #[must_use]
     pub const fn regex(mut self, yes: bool) -> Self {
         self.regex = yes;
@@ -337,9 +329,7 @@ fn try_replace_one(
         &mut replacements,
     );
 
-    // No body match: the file is untouched (a comment-only match can
-    // never reach the body substitution above), so report a no-op
-    // without invoking the commit tail.
+    // No body match: report a no-op without invoking the commit tail.
     if replacements == 0 {
         return Ok((0, false));
     }
@@ -349,9 +339,7 @@ fn try_replace_one(
         .context("reassembling document after replace")?;
 
     if options.dry_run {
-        // Project the commit without writing: parse + preservation +
-        // frontmatter + subset gate, surfacing a gate refusal as an
-        // error, but never touching disk.
+        // Project the commit without writing; a gate refusal still surfaces as an error.
         let changed = document::project_commit_markdown(system, config, resolved, &new_content)?;
         return Ok((replacements, changed));
     }

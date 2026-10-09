@@ -1,3 +1,5 @@
+/** Tests for the identity probe's gate value. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { identityProbeKey } from "./inboxIdentityProbe.ts";

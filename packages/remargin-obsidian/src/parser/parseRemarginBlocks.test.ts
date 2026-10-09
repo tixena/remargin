@@ -1,11 +1,10 @@
+/** Tests that the block parser reads the on-disk YAML keys the Rust writer emits. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { parseRemarginBlocks } from "./parseRemarginBlocks.ts";
 
-// The Rust writer (`crates/remargin-core/src/writer.rs::serialize_comment`)
-// is the canonical on-disk format. These tests pin the parser to
-// `type:` (NOT `author_type:`) and `reply-to:` (NOT `reply_to:`); drift
-// flattens threads and inverts author badges in the widget.
+// The parser must read `type:` and `reply-to:`: drift flattens threads and flips author badges.
 describe("parseRemarginBlocks — canonical on-disk YAML keys", () => {
   it("reads `type: agent` from YAML and lands it on comment.author_type", () => {
     const doc = [
@@ -63,9 +62,6 @@ describe("parseRemarginBlocks — canonical on-disk YAML keys", () => {
   });
 
   it("YAML keys with hyphens are accepted by the key regex", () => {
-    // Regression: the original regex was `/^(\w+):/` which silently
-    // dropped any line whose key contained a hyphen. `reply-to:` was
-    // ignored entirely and threading came out flat.
     const doc = [
       "```remargin",
       "---",

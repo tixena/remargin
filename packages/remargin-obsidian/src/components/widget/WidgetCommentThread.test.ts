@@ -1,3 +1,5 @@
+/** Tests for the widget thread's root toolbar and bulk collapse. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createElement } from "react";
@@ -79,8 +81,6 @@ describe("WidgetCommentThread isRoot wiring", () => {
       collapseState: new CollapseState(),
       isRoot: true,
     });
-    // Both buttons must show their aria-labels even when collapsed
-    // (the toolbar lives in the header which is always rendered).
     assert.ok(
       html.includes("Expand all replies in this thread"),
       `expected expand button aria-label, got: ${html}`
@@ -117,9 +117,7 @@ describe("WidgetCommentThread isRoot wiring", () => {
   });
 
   it("nested replies inside a root subtree do NOT render the toolbar", () => {
-    // Build root with two replies; expand the root so the recursive
-    // nested calls actually render. Toolbars must appear EXACTLY once
-    // (only on the outer root row), not three times.
+    // The toolbar must appear exactly once, on the outer root row, not on the two nested replies.
     const collapseState = new CollapseState();
     collapseState.setExpanded("root");
     const rootNode: ThreadNode = {
@@ -129,8 +127,7 @@ describe("WidgetCommentThread isRoot wiring", () => {
     const html = renderThread({ root: rootNode, collapseState, isRoot: true });
     const expandMatches = html.match(/Expand all replies in this thread/g) ?? [];
     const collapseMatches = html.match(/Collapse all replies in this thread/g) ?? [];
-    // `aria-label` and `title` both carry the string, so each rendered
-    // button contributes 2 matches. One toolbar = 2 buttons = 4 matches.
+    // `aria-label` and `title` both carry the string: one toolbar is 2 buttons, so 4 matches.
     assert.equal(
       expandMatches.length,
       2,
@@ -143,9 +140,7 @@ describe("WidgetCommentThread isRoot wiring", () => {
     );
   });
 
-  // The toolbar handlers delegate to `setSubtreeCollapsed`; testing
-  // that helper directly asserts the wiring without needing to
-  // intercept React event handlers.
+  // The toolbar handlers delegate to `setSubtreeCollapsed`, so the helper is tested directly.
   it("setSubtreeCollapsed(false) calls setMany with every subtree id and collapsed=false", () => {
     const collapseState = new CollapseState();
     const calls: Array<{ ids: readonly string[]; collapsed: boolean }> = [];
@@ -191,8 +186,7 @@ describe("WidgetCommentThread isRoot wiring", () => {
       true,
       "collapse-all must overwrite previously-expanded descendants"
     );
-    // Once collapse-all ran, has(r1) is true: the auto-expand priming
-    // branch will not re-flip it on next mount (user choice persists).
+    // After collapse-all, `has(r1)` is true, so auto-expand priming will not flip it back.
     assert.equal(collapseState.has("r1"), true);
     assert.equal(collapseState.isCollapsed("root"), true);
     assert.equal(collapseState.isCollapsed("r2"), true);

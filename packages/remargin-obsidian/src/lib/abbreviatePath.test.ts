@@ -1,3 +1,5 @@
+/** Tests for directory path abbreviation. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { abbreviatePath } from "./abbreviatePath.ts";
@@ -30,7 +32,6 @@ describe("abbreviatePath", () => {
   });
 
   it("handles already-short segments", () => {
-    // Segments that are already 1 char should not be abbreviated further
     const result = abbreviatePath("a/b/c/deep", 5);
     assert.strictEqual(result, "a/b/c/d");
   });

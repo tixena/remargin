@@ -3,7 +3,7 @@
 //! These are the orchestration functions that the `dispatch` layer calls:
 //! resolve config → call `remargin-core` op → call the `render` sink-writers.
 //! No grammar parsing happens here; argument structs arrive pre-destructured
-//! from the `handle_*` adapters in `main.rs`.
+//! from the `handle_*` adapters in `dispatch`.
 
 use std::env;
 use std::io::{Read as _, stdin as stdin_handle};
@@ -89,18 +89,14 @@ use remargin_core::session::multiplexer::{
 use remargin_core::session::spec::build_launch_spec;
 use remargin_core::writer::InsertPosition;
 
-/// Status label for the goose lifecycle commands, so a `PreToolUse`
-/// verdict and a `SessionStart` verdict over the same plugin directory are
-/// not read for each other.
+/// Names which entry a goose verdict is about: both are reported over the same plugin directory.
 const GOOSE_PLUGIN_SUBJECT: &str = "goose guard plugin";
 
 const GOOSE_SESSION_SUBJECT: &str = "goose SessionStart guard";
 
 const GOOSE_MCP_SUBJECT: &str = "goose MCP extension";
 
-/// Same distinction for the two Claude entries, which share a settings
-/// file: a `PreToolUse` verdict and a `SessionStart` verdict are not read
-/// for each other.
+/// Names which entry a Claude verdict is about: both live in the same settings file.
 const PRETOOL_SUBJECT: &str = "PreToolUse hook";
 
 const SESSION_GUARD_SUBJECT: &str = "SessionStart guard";
@@ -781,9 +777,8 @@ pub fn cmd_batch(
 
     let outcome = operations::batch::batch_comment(system, &path, config, &batch_ops)?;
 
-    // Advisory only, exactly as `comment` handles it: stderr in text mode
-    // so it never contaminates stdout, the payload in `--json` mode, and
-    // never the exit code — every comment is already on disk by now.
+    // Advisory only: stderr in text mode, the payload in `--json` mode, never the exit code. Every
+    // comment is already on disk.
     let mut result = responses::batch(&outcome.ids);
     if json_mode {
         advice::attach_op_notes(&mut result, &outcome.warnings);
@@ -832,9 +827,8 @@ pub fn cmd_comment(
 
     let new_id = operations::create_comment(system, &path, config, &params)?;
 
-    // Advisory only, exactly as `write` handles it: stderr in text mode so
-    // it never contaminates stdout, the payload in `--json` mode, and never
-    // the exit code — the comment is already on disk by this point.
+    // Advisory only: stderr in text mode, the payload in `--json` mode, never the exit code. The
+    // comment is already on disk.
     let mut result = responses::comment_created(&new_id);
     let notes = comment_style::notes(cp.content);
     if cp.json_mode {
@@ -846,7 +840,6 @@ pub fn cmd_comment(
         }
     }
 
-    // Write to stdout if stdin mode.
     if cp.file == "-" {
         let updated = system.read_to_string(&path)?;
         out_raw(sinks, &updated)?;
@@ -866,9 +859,6 @@ pub fn cmd_comments(
     let path = resolve_doc_path(system, cwd, file)?;
     config.ensure_can_read(system, &path)?;
     let doc = parser::parse_file(system, &path)?;
-    // Apply the shared kind filter from `remargin-core::kind` so this
-    // surface stays in lockstep with `remargin query` — the
-    // design doc explicitly calls out the previous divergence as a bug.
     let comments: Vec<&parser::Comment> = doc
         .comments()
         .into_iter()
@@ -934,9 +924,8 @@ pub fn cmd_edit(
     let path = resolve_doc_path(system, cwd, p.file)?;
     operations::edit_comment(system, &path, config, p.id, p.content, p.remargin_kind)?;
 
-    // Advisory only, exactly as `comment` handles it: stderr in text mode so
-    // it never contaminates stdout, the payload in `--json` mode, and never
-    // the exit code — the edit is already on disk by this point.
+    // Advisory only: stderr in text mode, the payload in `--json` mode, never the exit code. The
+    // edit is already on disk.
     let mut result = responses::comment_edited(p.id);
     let notes = comment_style::notes(p.content);
     if p.json_mode {
@@ -1105,9 +1094,8 @@ pub fn cmd_get_binary(
 ///
 /// A branch-3 walk that cannot match the supplied filters is treated as
 /// "nothing found" rather than an error: the JSON output collapses to
-/// `{ "found": false }`, preserving the historical read-only-diagnostic
-/// contract and letting the Obsidian plugin call this during startup
-/// without having to special-case transient "no config yet" states.
+/// `{ "found": false }`, so the Obsidian plugin can call this during startup
+/// without special-casing a missing config.
 /// Other resolver errors (unknown type strings, strict-mode registry
 /// misses, etc.) still propagate.
 pub fn cmd_identity(
@@ -1184,21 +1172,13 @@ pub fn cmd_identity_create(
     out_raw(sinks, &out_str)
 }
 
-/// Dispatch `remargin permissions <show|check>`.
-///
-/// `show` prints the resolved permissions tree at `cwd`. `check`
-/// canonicalises its target path, asks the inspector whether any
-/// `restrict` or `deny_ops` rule covers it, and exits gitignore-style:
-/// 0 when restricted, 1 when not. Both paths support `--json`.
 /// Wire the CLI `activity` subcommand to the
 /// [`activity::gather_activity`] core.
 ///
-/// Output mode arrives resolved as [`ActivityOutputMode`]: `Json`
-/// (default) emits the verbose `ActivityResult`, `Compact` the columnar
-/// minified shape (`--json --compact`), `Pretty` the human timeline to
-/// stderr. `--pretty` + `--json` is rejected upstream in dispatch.
+/// `Json` (the default) emits the verbose `ActivityResult`; `Pretty` writes the human timeline.
+/// `--pretty` + `--json` is rejected upstream in dispatch.
 ///
-/// Identity is read-only here — the quartet resolves only the
+/// Identity is read-only here — it resolves only the
 /// caller name driving the per-file cutoff. No signing, no key
 /// requirement.
 pub fn cmd_activity(
@@ -1275,13 +1255,17 @@ pub fn cmd_doctor(
     } else {
         render::emit_doctor_text(sinks, &report, output_args.verbose)?;
     }
-    // Exit non-zero when findings are present.
     if !report.is_clean() {
         bail!("doctor found {} finding(s)", report.findings.len());
     }
     Ok(())
 }
 
+/// Dispatch `remargin permissions <show|check>`.
+///
+/// `show` prints the resolved permissions tree at `cwd`. `check` canonicalises its target
+/// path, asks the inspector whether any rule covers it, and exits gitignore-style: 0 when
+/// restricted, 1 when not. Both support `--json`.
 pub fn cmd_permissions(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
@@ -1319,11 +1303,8 @@ pub fn cmd_permissions(
             } else {
                 render::emit_permissions_check_text(sinks, &report, *why)?;
             }
-            // Gitignore-style exit code: 0 when restricted, 1 otherwise.
-            // We have already printed our payload, so signal "miss" with
-            // a sentinel error that `main` recognises as
-            // [`EXIT_NOT_RESTRICTED`] and renders silently (no
-            // "error: ..." prefix).
+            // Gitignore-style: 0 when restricted, 1 otherwise. The payload is already printed, so the
+            // miss travels as a sentinel error that is rendered silently.
             if report.restricted {
                 Ok(())
             } else {
@@ -1698,11 +1679,7 @@ pub fn cmd_metadata(
     print_output(sinks, json_mode, &meta.to_json(false))
 }
 
-/// Route a `plan` subcommand to the correct per-op projection.
-///
-/// Lightweight ops that have not yet been wired surface a deliberate
-/// "not yet landed" error so callers discover the subcommand tree and
-/// failures are loud. `plan write` is fully wired.
+/// Route a `plan` subcommand to its projection and print the report.
 pub fn cmd_plan(
     sinks: &mut IoSinks<'_>,
     system: &dyn System,
@@ -1711,11 +1688,8 @@ pub fn cmd_plan(
     action: &PlanAction,
     json_mode: bool,
 ) -> Result<()> {
-    // `Comment` / `Write` arms need owned buffers that outlive the
-    // `PlanRequest` (it borrows `&str` / `ProjectCommentParams<'_>`).
-    // Stage them here so the borrows survive through `plan_ops::dispatch`.
-    // Initialized to empty defaults; the `Comment` / `Write` helpers
-    // overwrite them in place before the borrow flows out.
+    // The `Comment` and `Write` arms need owned buffers that outlive the `PlanRequest`, which
+    // borrows from them; stage them here.
     let mut comment_body = String::new();
     let mut write_body = String::new();
     let mut attach_refs: Vec<&str> = Vec::new();
@@ -1761,9 +1735,7 @@ pub fn cmd_plan(
     let report = plan_ops::dispatch(system, cwd, config, &request)?;
     let value = serde_json::to_value(&report).context("serializing plan report")?;
 
-    // Config-mutation plans get a structured text block in text mode so
-    // the multi-file projection is readable. JSON mode still emits the
-    // full PlanReport payload.
+    // Config-mutation plans get a structured text block in text mode; JSON keeps the full report.
     if !json_mode {
         if report.config_diff.is_some() {
             return render::emit_plan_restrict_text(sinks, &report);
@@ -2130,11 +2102,6 @@ fn build_plan_write<'cmd>(
     })
 }
 
-/// Render a `plan restrict` [`PlanReport`] as a structured text block.
-/// Mirrors the JSON shape: anchor + `would_commit`/`noop` header, one
-/// section per touched file, then conflicts. Emitted on stdout via
-/// the standard `out` helper so existing pipe-friendly behaviour is
-/// preserved.
 /// Read a JSON file (or stdin when `path == "-"`) into a vector of
 /// [`projections::ProjectBatchOp`] values for `plan batch`.
 fn read_plan_batch_ops(
@@ -3005,8 +2972,8 @@ pub fn cmd_session(
 /// Launch one interactive session per discovered identity into a new named
 /// multiplexer session, print its name and an attach hint, and exit.
 ///
-/// Each identity's spec is built through [`build_launch_spec`] (a missing
-/// `loop`/`goal` surfaces the task-84 error), rendered by the resolved
+/// Each identity's spec is built through [`build_launch_spec`] (which fails on a
+/// missing `goal`), rendered by the resolved
 /// backend into an interactive launch argv plus the `/loop` + `/goal` seed
 /// lines, and carried as a [`Tab`]. remargin only starts the session: it
 /// writes no PID/registry file and never supervises what it launched.
@@ -3065,8 +3032,8 @@ fn render_session_launch(
 /// The resolved backend renders the interactive launch argv (shown as a
 /// runnable `cd <cwd> && <argv>`) plus the `/loop` + `/goal` seed lines to
 /// type into the running session. Each spec is built through
-/// [`build_launch_spec`], so a missing `loop`/`goal` surfaces the task-84
-/// error here rather than printing a broken command. Nothing is launched
+/// [`build_launch_spec`], so a missing `goal` fails
+/// here, before a broken command could be printed. Nothing is launched
 /// and no send-keys happen: `--print` only prints.
 #[cfg(feature = "session")]
 fn render_session_print(sinks: &mut IoSinks<'_>, sessions: &[DiscoveredSession]) -> Result<()> {
@@ -3092,8 +3059,7 @@ fn render_session_print(sinks: &mut IoSinks<'_>, sessions: &[DiscoveredSession])
 }
 
 /// POSIX single-quote a shell word, leaving it bare when it holds only
-/// safe characters. Display-only -- the printed command is for task 86 (or
-/// a human) to run; `--print` spawns nothing.
+/// safe characters. Display-only: `--print` spawns nothing.
 #[cfg(feature = "session")]
 fn shell_quote(word: &str) -> String {
     let safe = !word.is_empty()
@@ -3117,7 +3083,7 @@ fn shell_join(argv: &[String]) -> String {
 }
 
 /// The raw `loop` cadence a session declared, if any. An absent `loop` is
-/// not a launch blocker: the launch builder (task 84) defaults it to `5m`.
+/// not a launch blocker: the launch builder defaults it to `5m`.
 #[cfg(feature = "session")]
 fn session_loop(session: &DiscoveredSession) -> Option<&str> {
     session.session.as_ref()?.loop_interval.as_deref()
@@ -3138,8 +3104,7 @@ fn session_loop_cell(session: &DiscoveredSession) -> String {
 
 /// A session is launchable once its `goal` stop-condition is declared;
 /// `loop` defaults to `5m` when absent, so only a missing `goal` blocks a
-/// launch. The launch builder (task 84) hard-enforces this; dry-run only
-/// flags it.
+/// launch. The launch builder enforces this; dry-run only flags it.
 #[cfg(feature = "session")]
 fn session_launchable(session: &DiscoveredSession) -> bool {
     session_goal(session).is_some()
@@ -3284,9 +3249,7 @@ pub fn cmd_verify(
     config: &ResolvedConfig,
     json_mode: bool,
 ) -> Result<()> {
-    // A directory target sweeps the tree (same walk as `replace`/
-    // `search`); `-` (stdin) and plain files keep today's single-file
-    // path byte-for-byte.
+    // A directory sweeps the tree; `-` (stdin) and plain files take the single-file path.
     if file != "-" {
         let target = cwd.join(expand_cli_path(system, file)?);
         if system.is_dir(&target).unwrap_or(false) {
@@ -3449,12 +3412,8 @@ pub fn cmd_write(
 
     let mut outcome = document::write(system, cwd, target, &body, config, wp.opts)?;
 
-    // Advisory only: printed to stderr so it never contaminates stdout
-    // (piped payloads, `--json` consumers), and never touches the exit
-    // code. The write has already succeeded by this point. Clearing them
-    // afterwards keeps the human-facing text block from repeating on
-    // stdout what stderr just said; `--json` keeps them in the payload,
-    // which is the only channel a JSON consumer reads.
+    // Advisory only: stderr, never the exit code. They are cleared so the text block does not
+    // repeat them on stdout; `--json` keeps them in the payload.
     if !wp.json_mode {
         let notes = advice::format_text(&outcome.warnings);
         if !notes.is_empty() {
@@ -3463,10 +3422,8 @@ pub fn cmd_write(
         outcome.warnings.clear();
     }
 
-    // A no-op prints a one-line human message in text mode instead of
-    // the usual "written: ... / binary: ... / raw: ..." block; JSON mode
-    // still returns a single payload, now with `noop: true` alongside
-    // the existing fields so callers can branch on it.
+    // A no-op prints a one-line message in text mode; JSON returns the usual payload with
+    // `noop: true`.
     if outcome.noop && !wp.json_mode {
         return out(
             sinks,

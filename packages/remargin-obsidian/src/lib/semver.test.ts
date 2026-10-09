@@ -1,3 +1,5 @@
+/** Tests for version parsing and comparison. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { compareVersions, isNewer, parseVersion } from "./semver.ts";

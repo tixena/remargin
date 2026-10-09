@@ -1,3 +1,8 @@
+/**
+ * Tests for the Live Preview comment widget: decoration building, the state field's update
+ * path, the widget itself and the collapse-effect bridge.
+ */
+
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type EditorState, StateEffect, StateField } from "@codemirror/state";
@@ -21,31 +26,20 @@ import {
 } from "./commentWidget.ts";
 
 /**
- * The CM6 `EditorView` machinery requires a real DOM to construct, and
- * the `node --test` harness here doesn't provide one (no happy-dom
- * installed). The host is a `StateField`, so tests only need a minimal
- * `EditorState` shape exposing the two surfaces production code
- * touches: `state.doc.toString()` and `state.field(field, false)`.
- *
- * The `field()` impl is a per-test record keyed on the sentinel field
- * objects exported from the `obsidian` test stub
- * (`editorLivePreviewField`, `editorInfoField`). This is exactly the
- * trade-off the ticket's "Mocks authorized" rule permits.
+ * The minimal `EditorState` shape production code touches: `state.doc.toString()` and
+ * `state.field(field, false)`. A real `EditorView` needs a DOM, which `node --test` does not
+ * provide; `field()` is a per-test record keyed on the sentinel fields of the `obsidian` stub.
  */
 interface MockEditorState {
   doc: { toString(): string };
   field<T>(field: unknown, required: false): T | undefined;
 }
 
+/** Inputs to `makeState`. */
 interface MakeStateOpts {
   doc: string;
-  /**
-   * Value to return for `state.field(editorLivePreviewField, false)`.
-   * `undefined` simulates the field being absent (the `try`/`catch`
-   * fallback returns `false`).
-   */
+  /** `undefined` simulates the live-preview field being absent. */
   livePreview: boolean | undefined;
-  /** Overrides the source-path returned by `editorInfoField`. */
   sourcePath?: string;
 }
 
@@ -65,6 +59,7 @@ function makeState(opts: MakeStateOpts): MockEditorState {
   };
 }
 
+/** The slice of the plugin the widget code touches, recording focus calls. */
 interface MockPlugin {
   settings: { editorWidgets: boolean };
   collapseState: CollapseState;
@@ -119,6 +114,7 @@ const INVALID_BLOCK_NO_ID = [
   "```",
 ].join("\n");
 
+/** A stand-in for the widget's host element. */
 interface MockHost {
   className: string;
   dataset: Record<string, string>;
@@ -164,24 +160,19 @@ function assertNoDecorations(state: MockEditorState, plugin: MockPlugin) {
 }
 
 describe("commentWidget buildDecorations", () => {
-  // AC: build() returns Decoration.none when editorWidgets === false.
   it("test #1: setting off → Decoration.none", () => {
     const plugin = makePlugin(false);
     const state = makeState({ doc: VALID_BLOCK, livePreview: true });
     assertNoDecorations(state, plugin);
   });
 
-  // AC: build() returns Decoration.none when in Source Mode.
   it("test #2: source mode (livePreview field === false) → Decoration.none", () => {
     const plugin = makePlugin(true);
     const state = makeState({ doc: VALID_BLOCK, livePreview: false });
     assertNoDecorations(state, plugin);
   });
 
-  // AC: isLivePreviewState reads editorLivePreviewField. The helper
-  // is module-private; we exercise it transitively through
-  // buildDecorations, which is the only caller in production. The
-  // three sub-tests cover the truth-table the ticket spelled out.
+  // `isLivePreviewState` is module-private, so it is exercised through `buildDecorations`.
   it("test #2a: livePreview field === true → buildDecorations gates open", () => {
     const plugin = makePlugin(true);
     const state = makeState({ doc: VALID_BLOCK, livePreview: true });
@@ -212,8 +203,6 @@ describe("commentWidget buildDecorations", () => {
     assert.equal(decorations.size, 0, "absent field must default to false → 0 decorations");
   });
 
-  // AC: Live Preview + valid block → Decoration.replace with block:true,
-  // inclusive:true.
   it("test #3: live preview + valid block → 1 replace decoration with block/inclusive flags", () => {
     const plugin = makePlugin(true);
     const state = makeState({
@@ -227,7 +216,6 @@ describe("commentWidget buildDecorations", () => {
     );
     assert.equal(decorations.size, 1, "exactly one decoration expected");
 
-    // Walk the produced RangeSet to fish out the spec.
     const collected: Array<{ from: number; to: number; spec: unknown }> = [];
     decorations.between(0, state.doc.toString().length, (from, to, value) => {
       collected.push({ from, to, spec: (value as { spec: unknown }).spec });
@@ -241,13 +229,11 @@ describe("commentWidget buildDecorations", () => {
     assert.ok(spec.widget instanceof RemarginWidget, "widget is a RemarginWidget");
     assert.equal(spec.block, true, "block: true");
     assert.equal(spec.inclusive, true, "inclusive: true");
-    // Range matches the parser's startOffset/endOffset for the single block.
     const parsed = parseRemarginBlocks(VALID_BLOCK)[0];
     assert.equal(collected[0].from, parsed.startOffset);
     assert.equal(collected[0].to, parsed.endOffset);
   });
 
-  // AC: Malformed blocks emit no decoration; valid ones still do.
   it("test #4: 1 valid + 1 malformed → exactly 1 decoration (the valid one)", () => {
     const plugin = makePlugin(true);
     const doc = `${VALID_BLOCK}\n${INVALID_BLOCK_NO_ID}`;
@@ -259,11 +245,7 @@ describe("commentWidget buildDecorations", () => {
     assert.equal(decorations.size, 1);
   });
 
-  // AC: A reply block whose parent is in the same doc gets a HIDDEN
-  // decoration (EmptyWidget) so the raw YAML source doesn't render
-  // below the parent's widget. The parent's widget renders the reply
-  // nested. Regression for the bug where reply blocks rendered as raw
-  // YAML in the editor.
+  // Without the hidden decoration the reply's raw YAML would render below the parent's widget.
   it("test #4b: reply block whose parent is in the doc emits a hidden EmptyWidget decoration", () => {
     const plugin = makePlugin(true);
     const REPLY_TO_C1 = [
@@ -284,8 +266,6 @@ describe("commentWidget buildDecorations", () => {
       state as unknown as EditorState,
       plugin as unknown as RemarginPlugin
     );
-    // Two decorations: the parent's RemarginWidget and the reply's
-    // hidden EmptyWidget that suppresses its raw source range.
     assert.equal(decorations.size, 2, "two decorations: parent RemarginWidget + reply EmptyWidget");
 
     const collected: Array<{ kind: "root" | "hidden"; id?: string }> = [];
@@ -295,7 +275,6 @@ describe("commentWidget buildDecorations", () => {
       if (maybeNode.threadNode) {
         collected.push({ kind: "root", id: maybeNode.threadNode.comment.id });
       } else {
-        // Anything not a RemarginWidget is the hidden EmptyWidget.
         collected.push({ kind: "hidden" });
       }
     });
@@ -306,8 +285,6 @@ describe("commentWidget buildDecorations", () => {
     assert.equal(hidden.length, 1, "exactly one hidden suppression decoration for the reply");
   });
 
-  // AC: An orphan reply (parent missing from doc) gets a decoration as
-  // a degraded root so it stays visible.
   it("test #4c: orphan reply (parent absent) emits a decoration as a degraded root", () => {
     const plugin = makePlugin(true);
     const ORPHAN_REPLY = [
@@ -332,25 +309,11 @@ describe("commentWidget buildDecorations", () => {
 });
 
 describe("commentWidgetPlugin StateField update lifecycle", () => {
-  // Helper: pull the StateFieldSpec out of the StateField the
-  // factory returns. CM6's StateField stores its create/update
-  // callbacks on private `createF` / `updateF` slots; we don't
-  // reach in there. Instead, drive the field through CM6's public
-  // contract — `extension` plugged into a real EditorState — and
-  // observe `state.field(field)` before and after a transaction.
-  //
-  // For unit-test purposes we call create/update via the spec stash
-  // exposed on the StateField instance. CM6 doesn't publicize this,
-  // but the StateField object also IS the field key, so we can use
-  // it both as the lookup key and as the spec carrier through the
-  // simple test shim below.
+  // CM6 keeps a StateField's create/update callbacks on private slots; this helper reads them.
   function specFromField(field: unknown): {
     create: (state: EditorState) => unknown;
     update: (value: unknown, tr: unknown) => unknown;
   } {
-    // The StateField class stores create/update on private slots
-    // named `createF` / `updateF` (visible on the prototype's
-    // closure). Read them off via known property names.
     const f = field as { createF?: unknown; updateF?: unknown };
     return {
       create: f.createF as (state: EditorState) => unknown,
@@ -358,8 +321,7 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
     };
   }
 
-  // AC: update() rebuilds ONLY on docChanged. Viewport / selection
-  // updates do NOT rebuild — they remap the existing decorations.
+  // Viewport and selection updates remap the existing decorations; only a doc change rebuilds.
   it("test #5: docChanged update → buildDecorations called (re-parse)", () => {
     const plugin = makePlugin(true);
     const state = makeState({ doc: VALID_BLOCK, livePreview: true });
@@ -371,10 +333,6 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
     };
     assert.equal(initial.size, 1, "initial create produces 1 decoration");
 
-    // Simulate a docChanged transaction that swaps in a different
-    // valid block. The update path re-runs buildDecorations against
-    // the new state — we observe the rebuild by counting decorations
-    // against the new doc.
     const nextState = makeState({
       doc: `${VALID_BLOCK}\n${VALID_BLOCK_2}`,
       livePreview: true,
@@ -393,14 +351,8 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
     const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
     const spec = specFromField(field);
 
-    // Use a sentinel "previous decorations" object whose only
-    // surface is `.map(changes)`. If production goes through the
-    // remap branch it will call this spy; if it falls into the
-    // rebuild branch it will reach for buildDecorations and IGNORE
-    // the sentinel. Returning a distinct sentinel value from the
-    // spy lets us assert both that .map was called AND that the
-    // production code returned the spy's output verbatim (i.e.
-    // didn't re-parse).
+    // A sentinel whose only surface is `.map(changes)`: the remap branch calls it and returns its
+    // output verbatim, while a rebuild would ignore it.
     let mapCalls = 0;
     const remapSentinel = Symbol("remapped-decorations");
     const previous = {
@@ -413,9 +365,7 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
 
     const tr = {
       docChanged: false,
-      // `state` is unused on the non-docChanged branch; pass a
-      // throw-on-touch sentinel to make any accidental access
-      // crash loudly.
+      // Unused on the non-docChanged branch, so any access throws.
       state: new Proxy(
         {},
         {
@@ -427,8 +377,7 @@ describe("commentWidgetPlugin StateField update lifecycle", () => {
         }
       ) as unknown as EditorState,
       changes: { __sentinel: "changes" },
-      // Real CM6 `Transaction.effects` is always a readonly array;
-      // the update iterates it, so the stub must expose it as iterable.
+      // A real `Transaction.effects` is always a readonly array, and the update iterates it.
       effects: [] as unknown[],
     };
     const next = spec.update(previous, tr);
@@ -448,18 +397,10 @@ describe("RemarginWidget", () => {
     return result;
   }
 
-  /**
-   * Build a `ThreadNode` (no replies) from a parsed block, mirroring
-   * the production path where `buildThreadTree` wraps a comment in a
-   * node before the widget is constructed. Tests can still author the
-   * raw text via `block()`; this helper bridges to the new constructor
-   * without changing the test fixture.
-   */
   function node(text = VALID_BLOCK): ThreadNode {
     return { comment: block(text).comment as Comment, replies: [] };
   }
 
-  // AC: eq() is true when id + collapsed + content all match.
   it("test #7: eq() returns true for same id + same collapsed + same content", () => {
     const plugin = makePlugin(true);
     const a = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "f.md");
@@ -467,18 +408,15 @@ describe("RemarginWidget", () => {
     assert.equal(a.eq(b), true);
   });
 
-  // AC: eq() is false when collapsed state differs (proves toggling
-  // forces a re-render).
   it("test #8: eq() returns false when collapsed state differs", () => {
-    const pluginA = makePlugin(true); // c1 collapsed by default (true)
+    const pluginA = makePlugin(true);
     const pluginB = makePlugin(true);
-    pluginB.collapseState.toggle("c1"); // c1 now expanded
+    pluginB.collapseState.toggle("c1");
     const a = new RemarginWidget(node(), pluginA as unknown as RemarginPlugin, "f.md");
     const b = new RemarginWidget(node(), pluginB as unknown as RemarginPlugin, "f.md");
     assert.equal(a.eq(b), false);
   });
 
-  // AC: eq() is false when content differs for the same id.
   it("test #9: eq() returns false when content differs for same id", () => {
     const plugin = makePlugin(true);
     const original = node();
@@ -491,14 +429,12 @@ describe("RemarginWidget", () => {
     assert.equal(a.eq(b), false);
   });
 
-  // AC: ignoreEvent() returns true.
   it("test #10: ignoreEvent() returns true (does not eat keystrokes)", () => {
     const plugin = makePlugin(true);
     const widget = new RemarginWidget(node(), plugin as unknown as RemarginPlugin, "f.md");
     assert.equal(widget.ignoreEvent(), true);
   });
 
-  // AC: toDOM() mounts a React root via createRoot; destroy() unmounts.
   it("test #11: toDOM mounts a root; destroy unmounts it", () => {
     const plugin = makePlugin(true);
 
@@ -521,9 +457,7 @@ describe("RemarginWidget", () => {
     const dom = widget.toDOM();
     assert.equal(createRootCalls, 1);
     assert.equal(renderCalls, 1, "render must run once on mount");
-    // Host must carry both the structural class AND `remargin-container`
-    // so Tailwind utilities scoped via the `important` selector apply
-    // inside the widget.
+    // `remargin-container` is what scopes the Tailwind utilities inside the widget.
     const classes = (dom as MockHost).className.split(/\s+/);
     assert.ok(
       classes.includes("remargin-widget-host"),
@@ -539,12 +473,9 @@ describe("RemarginWidget", () => {
     assert.equal(unmountCalls, 1, "unmount must run once on destroy");
   });
 
-  // AC: Click on the host fires plugin.focusComment(id, sourcePath).
   it("test #12: widget onClick prop forwards to plugin.focusComment", () => {
     const plugin = makePlugin(true);
 
-    // Render tree: WidgetProviders > WidgetCommentThread.
-    // The thread component carries the `onClick` prop directly.
     let captured: ((id: string, file: string) => void) | undefined;
     __setCreateRootForTests(((_el: unknown) => ({
       render: (element: unknown) => {
@@ -572,10 +503,7 @@ describe("RemarginWidget", () => {
     assert.deepStrictEqual(plugin.__focusCalls, [["c1", "notes/x.md"]]);
   });
 
-  // toDOM must wrap the rendered tree in WidgetProviders, passing
-  // `plugin: this.plugin` and `portalContainer: host`. Without the
-  // wrapper, the React mount throws on first render with
-  // "useBackend must be used within a BackendContext.Provider".
+  // Without the wrapper the mount throws: "useBackend must be used within a BackendContext.Provider".
   it("test #12a: toDOM wraps the rendered tree in WidgetProviders with plugin + host as portal container", () => {
     const plugin = makePlugin(true);
 
@@ -623,8 +551,6 @@ describe("RemarginWidget", () => {
     );
   });
 
-  // AC: Toggling collapse forces the next build() to produce a widget
-  // that eq-differs from the previous one for that id.
   it("test #13: collapse toggle makes the next-built widget !eq the previous", () => {
     const plugin = makePlugin(true);
     const state = makeState({ doc: VALID_BLOCK, livePreview: true });
@@ -658,16 +584,8 @@ describe("RemarginWidget", () => {
 });
 
 describe("commentWidgetPlugin shape", () => {
-  // AC: commentWidgetPlugin returns a StateField extension (NOT a
-  // ViewPlugin). The strongest check is `instanceof StateField` —
-  // CM6 enforces this at runtime, and a ViewPlugin would never
-  // satisfy it (ViewPlugin lives in @codemirror/view and has its
-  // own class). We also assert the `extension` getter is present
-  // (the public surface used to plug the field into EditorState).
-  //
-  // Block decorations are forbidden from ViewPlugin instances by CM6
-  // (RangeError: "Block decorations may not be specified via plugins").
-  // If this test ever fails, the runtime crash returns.
+  // CM6 forbids block decorations from a ViewPlugin ("Block decorations may not be specified via
+  // plugins"), so the extension must be a StateField.
   it("test #14: commentWidgetPlugin returns a CM6 StateField (NOT a ViewPlugin)", () => {
     const plugin = makePlugin(true);
     const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
@@ -681,11 +599,6 @@ describe("commentWidgetPlugin shape", () => {
 });
 
 describe("collapseEffectBridge", () => {
-  /**
-   * Build a minimal `EditorView` stub: production code only touches
-   * `view.dispatch` on this code path. The dispatched transaction
-   * specs are captured for assertion.
-   */
   function makeStubView(): {
     dispatch: (...args: unknown[]) => void;
     __dispatched: unknown[];
@@ -699,21 +612,12 @@ describe("collapseEffectBridge", () => {
     };
   }
 
-  /**
-   * Drive the bridge ViewPlugin through its public CM6 contract
-   * without standing up a real EditorView: `viewPlugin.create(view)`
-   * is the same call CM6's PluginInstance makes internally to
-   * instantiate the wrapped class. Returns the freshly constructed
-   * value so tests can call `destroy()` on it directly.
-   */
+  // `viewPlugin.create(view)` is the call CM6 itself makes to instantiate the wrapped class.
   function instantiateBridge(plugin: unknown, view: unknown): { destroy: () => void } {
     const vp = collapseEffectBridge(plugin as RemarginPlugin);
-    // Public surface from `@codemirror/view`'s `ViewPlugin` runtime.
     return (vp as unknown as { create: (view: unknown) => { destroy: () => void } }).create(view);
   }
 
-  // AC test #15: toggling collapseState dispatches a `collapseEffect`
-  // carrying the toggled id.
   it("test #15: toggle dispatches a collapseEffect carrying the toggled id", () => {
     const plugin = makePlugin(true);
     const view = makeStubView();
@@ -733,7 +637,6 @@ describe("collapseEffectBridge", () => {
     assert.equal(effects[0].value.id, "c-toggled", "effect must carry the toggled id");
   });
 
-  // AC test #17: destroy() unsubscribes — no dispatch after destroy.
   it("test #17: destroy() unsubscribes; subsequent toggles do NOT dispatch", () => {
     const plugin = makePlugin(true);
     const view = makeStubView();
@@ -751,10 +654,6 @@ describe("collapseEffectBridge", () => {
 });
 
 describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
-  // Mirror the helper from the earlier StateField suite. We keep a
-  // local copy rather than hoisting because both suites rely on the
-  // same private-slot dance and a future refactor that breaks one
-  // signal should leave the other intact for triage.
   function specFromField(field: unknown): {
     create: (state: EditorState) => unknown;
     update: (value: unknown, tr: unknown) => unknown;
@@ -766,8 +665,6 @@ describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
     };
   }
 
-  // AC test #16: a transaction with `docChanged: false` but carrying
-  // a `collapseEffect` causes the StateField's `update` to rebuild.
   it("test #16: docChanged=false + collapseEffect → rebuild via buildDecorations", () => {
     const plugin = makePlugin(true);
     const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
@@ -777,11 +674,7 @@ describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
     const initial = spec.create(initialState as unknown as EditorState) as { size: number };
     assert.equal(initial.size, 1, "initial create produces 1 decoration");
 
-    // The post-toggle transaction: doc is unchanged, but a collapse
-    // effect is in flight. The `state` it points at carries TWO valid
-    // blocks, so a true rebuild is observable as `next.size === 2`.
-    // A bug where `update` falls through to `decorations.map(changes)`
-    // would leave size at 1.
+    // The state carries two valid blocks: a true rebuild shows as size 2, a remap leaves it at 1.
     const nextState = makeState({
       doc: `${VALID_BLOCK}\n${VALID_BLOCK_2}`,
       livePreview: true,
@@ -800,9 +693,7 @@ describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
     );
   });
 
-  // Defensive: a non-collapse effect on an otherwise non-docChanged
-  // transaction must NOT rebuild — the same remap-only path test #6
-  // pinned, only with a stray effect added.
+  // A non-collapse effect on a non-docChanged transaction must stay on the remap-only path.
   it("test #16b: docChanged=false + unrelated effect → still remap-only", () => {
     const plugin = makePlugin(true);
     const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);
@@ -818,8 +709,6 @@ describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
       },
     };
 
-    // A different StateEffect type — the `is(collapseEffect)` filter
-    // must reject it.
     const unrelatedEffect = StateEffect.define<number>();
 
     const tr = {
@@ -844,7 +733,6 @@ describe("commentWidgetPlugin StateField rebuild on collapseEffect", () => {
 });
 
 describe("commentWidget defaults", () => {
-  // AC: settings.editorWidgets default remains false.
   it("DEFAULT_SETTINGS.editorWidgets is false", () => {
     assert.equal(DEFAULT_SETTINGS.editorWidgets, false);
   });

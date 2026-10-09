@@ -25,11 +25,6 @@ use crate::permissions::restrict::{
 };
 use crate::permissions::sidecar;
 
-/// Wildcard literal accepted in `restrict.path`. Mirrors
-/// [`crate::permissions::restrict`]'s private constant; the projection
-/// duplicates the literal so the two modules stay self-contained
-/// without exporting a constant whose only consumer is one sibling
-/// file.
 const RESTRICT_WILDCARD: &str = "*";
 
 /// Outcome of [`project_restrict`].
@@ -42,13 +37,12 @@ const RESTRICT_WILDCARD: &str = "*";
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum RestrictProjection {
-    /// Concrete preview the dispatcher attaches to `PlanReport`.
     Diff(Box<ConfigPlanDiff>),
-    /// Hard reject. The dispatcher sets `would_commit = false` and
-    /// surfaces the carried reason verbatim.
     Reject(String),
 }
 
+/// A restrict target resolved two ways: its absolute path, and the form written to
+/// `.remargin.yaml`.
 struct PathResolution {
     absolute_path: PathBuf,
     on_disk_path: String,
@@ -97,9 +91,8 @@ pub fn project_restrict(
         args,
     )?;
 
-    // The live `restrict` path projects only the residue the hook cannot
-    // cover (currently empty), so the plan must mirror that: no settings
-    // files touched, no sidecar entry written.
+    // The live `restrict` projects only what the hook cannot cover, which is nothing today: no
+    // settings file is touched and no sidecar entry is written.
     let rules = residual_rules();
     let settings_sims = if rules.is_empty() {
         Vec::new()
@@ -173,19 +166,11 @@ fn detect_conflicts(
     cwd: &Path,
     anchor: &Path,
 ) {
-    // Allow/deny overlap: structural `(tool, path-glob)` comparison.
-    // Replaces the original exact-string body match which silently
-    // missed format-equivalent rules — a
-    // hand-edited rule, a legacy `//` prefix, a trailing-slash
-    // difference. The structural parser collapses runs of `/`,
-    // resolves `.` / `..`, and treats `/**` as the recursive-subtree
-    // sentinel; cross-tool pairs (`Read` vs `Edit`) are kept distinct;
-    // component-confused paths (`/foo` vs `/foobar`) are correctly
-    // rejected.
+    // Structural `(tool, path-glob)` comparison, so format-equivalent rules match: a `//` prefix,
+    // a trailing slash, `.` and `..`. Different tools and `/foo` vs `/foobar` stay distinct.
     detect_allow_deny_overlap(diff, settings_sims);
 
-    // YAML entry would change with different shape. Skip the
-    // overwrite-with-identical-args case (caught by `would_be_noop`).
+    // An overwrite with identical arguments is skipped: `would_be_noop` catches it.
     if !yaml_sim.would_be_noop
         && let Some(previous) = &yaml_sim.previous_entry
     {
@@ -203,9 +188,8 @@ fn detect_conflicts(
         }
     }
 
-    // Anchor surprise: anchor != cwd. Reported even when cwd is a
-    // descendant of anchor — agents running from a subdirectory may not
-    // realise the realm root sits further up.
+    // Reported even when cwd is a descendant of the anchor: the realm root may sit further up
+    // than the caller thinks.
     if cwd != anchor {
         diff.conflicts.push(ConfigConflict::AnchorIsAncestor {
             anchor: anchor.to_path_buf(),
@@ -286,11 +270,8 @@ fn detect_allow_deny_overlap(
             let deny_shape = RuleShape::parse(projected_deny);
             for existing_allow in &sim.existing_allow_rules {
                 let allow_shape = RuleShape::parse(existing_allow);
-                // The overlap classifier in `rule_shape` is written
-                // from the allow side's perspective, so call it with
-                // `(allow, deny)` order to keep the
-                // `AllowShadowedByBroaderDeny` /
-                // `DenyShadowedByBroaderAllow` semantics correct.
+                // The classifier is written from the allow side's perspective, so the order is
+                // `(allow, deny)`.
                 let Some(kind) = rules_overlap(&allow_shape, &deny_shape) else {
                     continue;
                 };
@@ -323,8 +304,7 @@ fn simulate_sidecar(
     rules: &RuleSet,
 ) -> Result<SidecarDiff> {
     let sidecar_path = sidecar::sidecar_path(anchor);
-    // Empty projection ⇒ `restrict` writes no sidecar entry, so the plan
-    // shows no sidecar change and no file creation.
+    // An empty projection writes no sidecar entry, so the plan shows no sidecar change.
     if rules.is_empty() {
         return Ok(SidecarDiff {
             entry_action: EntryAction::Noop,

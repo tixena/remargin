@@ -1,6 +1,7 @@
+/** Groups sandboxed files by their resolved system prompt. */
+
 import type { ResolvedSystemPrompt } from "@/backend/types";
 
-/** Stable bucket key for the y76 Default group. */
 export const DEFAULT_GROUP_KEY = "__default__";
 
 /**
@@ -13,26 +14,19 @@ export interface StagedGroup {
   files: string[];
 }
 
+/** One group of sandboxed files that resolved to the same system prompt. */
 export interface PromptGroup {
-  /** Stable key for React reconciliation. `null` for the Default group. */
+  /** `null` for the Default group. */
   source: string | null;
-  /** Display label (the resolver's `name`). */
   name: string;
-  /** Owning folder path, derived from `dirname(source)`. `(vault)` for Default. */
+  /** Owning folder, from `dirname(source)`; `(vault)` for Default. */
   scope: string;
-  /** Resolved prompt for this group; forwarded to onSubmit. */
   prompt: ResolvedSystemPrompt;
-  /** All sandboxed files that resolved to this group. */
   files: string[];
-  /** Subset currently staged. */
   staged: string[];
-  /** Subset currently unstaged. */
   unstaged: string[];
-  /** True for the y76 Default fallback. Drives the +Configure affordance. */
   isDefault: boolean;
-  /** True when at least one file in this group failed to resolve. */
   hasError?: boolean;
-  /** First error message from a failed resolve, for tooltip rendering. */
   errorMessage?: string;
 }
 

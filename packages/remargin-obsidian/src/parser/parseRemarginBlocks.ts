@@ -1,3 +1,5 @@
+/** Parses the remargin fenced blocks of a markdown document. */
+
 import type {
   Acknowledgment,
   AuthorType,
@@ -38,6 +40,7 @@ function normalizeReactions(
   return out;
 }
 
+/** One fenced remargin block: where it sits in the text and the comment parsed from it. */
 export interface ParsedBlock {
   startLine: number;
   endLine: number;
@@ -51,6 +54,7 @@ export interface ParsedBlock {
   warning?: string;
 }
 
+/** Where the scanner is: document body, a block's YAML header, or a block's content. */
 const enum State {
   Body,
   YamlHeader,
@@ -64,9 +68,7 @@ const enum State {
 // wire shape onto the in-memory `Comment` (e.g. `type` →
 // `author_type`).
 type YamlFields = Partial<OnDiskComment> & {
-  // The legacy on-disk `ack` shape allowed `{author, ts}` objects;
-  // current writes emit `"author@ts"` strings. Tolerate both during the
-  // YAML scan; the construction pass collapses the variation.
+  /** `{author, ts}` objects and `"author@ts"` strings are both accepted. */
   ack?: Array<string | { author: string; ts: string }>;
   reactions?: Record<string, Array<string | { author: string; ts: string }>>;
 };
@@ -92,9 +94,7 @@ function parseSimpleYaml(lines: string[]): YamlFields {
       currentList = null;
     }
 
-    // `[\w-]+` so YAML keys with hyphens (e.g. `reply-to`) parse. The
-    // Rust writer uses kebab-case for `reply-to`; without the hyphen
-    // here the line is silently dropped and threading breaks.
+    // `[\w-]+` so kebab-case keys such as `reply-to` parse; without the hyphen the line is dropped.
     const match = trimmed.match(/^([\w-]+):\s*(.*)/);
     if (!match) continue;
 
@@ -189,8 +189,7 @@ export function parseRemarginBlocks(text: string): ParsedBlock[] {
             comment: {
               id: yaml.id,
               author: yaml.author,
-              // OnDiskComment renames `author_type` → `type` for the
-              // wire form; map back to the in-memory field here.
+              // The wire form names `author_type` as `type`; map it back.
               author_type: yaml.type as AuthorType | undefined,
               ts: yaml.ts ? new Date(yaml.ts) : undefined,
               edited_at: yaml.edited_at ? new Date(yaml.edited_at) : undefined,

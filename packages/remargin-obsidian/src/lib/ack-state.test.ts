@@ -1,3 +1,5 @@
+/** Tests for the ack state and the ack affordance of a comment card. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { ackAffordanceFor, ackStateFor } from "./ack-state.ts";
@@ -29,15 +31,8 @@ describe("ackStateFor", () => {
   });
 });
 
-/**
- * The ack affordance on a comment card depends on BOTH whether the
- * viewer has acked and whether the viewer is the comment's author. The
- * helper collapses that two-axis decision into a single value the card
- * consumes verbatim.
- */
+// The affordance depends on two axes: whether the viewer acked and whether they are the author.
 describe("ackAffordanceFor", () => {
-  // --- Viewer is the author ------------------------------------------
-
   it("author is me, empty roster → label + Ack kebab", () => {
     assert.deepStrictEqual(ackAffordanceFor("eduardo", [], "eduardo"), {
       kind: "label",
@@ -46,8 +41,6 @@ describe("ackAffordanceFor", () => {
   });
 
   it("author is me, others acked but not me → label + Ack kebab", () => {
-    // Pill stays a label for own-comments (rule 1); kebab offers Ack
-    // because viewer has not acked yet.
     assert.deepStrictEqual(ackAffordanceFor("eduardo", ["alice"], "eduardo"), {
       kind: "label",
       kebab: "ack",
@@ -67,8 +60,6 @@ describe("ackAffordanceFor", () => {
       { kind: "label", kebab: "unack" }
     );
   });
-
-  // --- Viewer is NOT the author --------------------------------------
 
   it("author is someone else, empty roster → interactive button, no kebab item", () => {
     assert.deepStrictEqual(ackAffordanceFor("alice", [], "eduardo"), {
@@ -91,8 +82,6 @@ describe("ackAffordanceFor", () => {
     });
   });
 
-  // --- Edge: me is null/undefined (identity not resolved yet) --------
-
   it("unknown viewer, empty roster → interactive button, no kebab item", () => {
     assert.deepStrictEqual(ackAffordanceFor("alice", [], null), {
       kind: "button",
@@ -105,9 +94,7 @@ describe("ackAffordanceFor", () => {
   });
 
   it("unknown viewer never counts as 'author is me', even when strings coincide", () => {
-    // `me=null` means identity hasn't resolved yet. The author field
-    // happens to be an empty string here (pathological), but the
-    // helper must not treat `null === ""` as authorship.
+    // `me=null` (identity not resolved) must not count as authorship of an empty-string author.
     assert.deepStrictEqual(ackAffordanceFor("", ["alice"], null), {
       kind: "button",
       kebab: "none",

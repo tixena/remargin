@@ -1,7 +1,10 @@
+/** The list / tree view toggle of the section headers. */
+
 import { setIcon } from "obsidian";
 import { useEffect, useRef } from "react";
 import type { ViewMode } from "@/types";
 
+/** Props for {@link ViewToggle}. */
 export interface ViewToggleProps {
   value: ViewMode;
   onChange: (next: ViewMode) => void;

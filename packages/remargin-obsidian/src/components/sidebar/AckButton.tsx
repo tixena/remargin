@@ -1,20 +1,17 @@
+/** The clickable ack control shown on a comment the viewer has not acked. */
+
 import { Check, CheckCheck } from "lucide-react";
 import { useParticipants } from "@/hooks/useParticipants";
 import { ackStateFor } from "@/lib/ack-state";
 import { ackVisualFor } from "@/lib/ack-visual";
 import { cn } from "@/lib/utils";
 
+/** Props for {@link AckButton}. */
 export interface AckButtonProps {
-  /** Authors who have acked this comment. */
   ack: readonly string[];
-  /** Current identity name; used to pick between unacked and others-acked. */
   me?: string | null;
-  /** Adds the viewer's ack. Invoked on click. */
   onAck: () => void;
-  /**
-   * Effective `to:` recipients the card is showing. Drives the arrow +
-   * color precedence (see ackVisualFor).
-   */
+  /** The effective `to:` recipients, which drive the arrow and color precedence. */
   toTargets?: readonly string[];
 }
 
@@ -30,8 +27,6 @@ export interface AckButtonProps {
 export function AckButton({ ack, me, onAck, toTargets = [] }: AckButtonProps) {
   const visual = ackVisualFor(toTargets, ack);
   const Icon = visual.arrow === "double" ? CheckCheck : Check;
-  // `ackStateFor` drives the label text ("unacked" vs "acked") so the
-  // copy stays stable across refactors; the visual variant is orthogonal.
   const state = ackStateFor(ack, me);
   const count = ack.length;
   const { resolveDisplayName } = useParticipants();

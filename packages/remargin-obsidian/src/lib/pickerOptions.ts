@@ -1,3 +1,5 @@
+/** The option list of the recipient picker. */
+
 import type { Participant } from "@/backend";
 
 /**
@@ -5,14 +7,10 @@ import type { Participant } from "@/backend";
  * should show:
  *
  * 1. Drop revoked participants — they can't post, so they can't receive
- *    a new comment either (historical comments from revoked authors
- *    still render their display name, that's a separate concern).
- * 2. Drop participants already in the `selected` list — repeated
- *    recipients are silently deduped by the CLI (task 30) but UX-wise
- *    the picker should never let a user "re-select" an id.
- * 3. Dedup by participant id, keeping the first entry. Defensive against
- *    a future registry shape that lists the same id twice; also keeps
- *    the helper total.
+ *    a new comment either.
+ * 2. Drop participants already in the `selected` list — the CLI dedupes
+ *    repeated recipients, but the picker should never offer a selected id.
+ * 3. Dedup by participant id, keeping the first entry.
  *
  * Input order is preserved so the picker reflects the registry's
  * natural ordering.

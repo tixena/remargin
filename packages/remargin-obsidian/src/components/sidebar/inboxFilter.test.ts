@@ -1,3 +1,5 @@
+/** Tests for the inbox filter options, query mapping and empty-state copy. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {

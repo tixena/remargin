@@ -15,19 +15,15 @@ use os_shim::System;
 #[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ExpandPathError {
-    /// Syntax like `${UNCLOSED`, `${}`, or `%UNCLOSED` — the sigil started
-    /// a variable reference but the reference was not terminated.
+    /// A malformed variable reference such as `${UNCLOSED`, `${}` or `%UNCLOSED`.
     #[error("invalid path syntax: {0}")]
     InvalidSyntax(String),
 
-    /// An environment variable referenced by the path was not set. The
-    /// wrapped string is the variable name (without sigils).
+    /// The wrapped string is the variable name, without sigils.
     #[error("environment variable `{0}` is not set")]
     UndefinedVariable(String),
 
-    /// `~user/...` form is not supported — only `~` for the current user
-    /// works. Users who want another user's home should write out the
-    /// full path.
+    /// Only `~` for the current user is supported; `~user/...` is not.
     #[error(
         "~{0} is not supported (only `~` for the current user works — write out the full path)"
     )]
@@ -36,33 +32,23 @@ pub enum ExpandPathError {
 
 /// Expand `~`, `$VAR`, `${VAR}`, and (on Windows) `%VAR%` in a path.
 ///
-/// Returns the expanded path as a [`PathBuf`]. See the module-level docs
-/// for full semantics.
-///
 /// Pass a [`System`] so mock filesystems can provide controlled env vars
 /// in tests. The real filesystem's implementation reads from the process
 /// environment.
 ///
 /// # Errors
 ///
-/// - [`ExpandPathError::UnsupportedUserTilde`] if the input starts with
-///   `~user` (anything other than `~` alone or `~/`).
-/// - [`ExpandPathError::UndefinedVariable`] if any referenced environment
-///   variable is unset.
-/// - [`ExpandPathError::InvalidSyntax`] for malformed variable references
-///   like `${}` or an unclosed `${UNCLOSED`.
+/// Returns an error for a `~user` form, an unset environment variable, or a malformed variable
+/// reference such as `${}`.
 pub fn expand_path(system: &dyn System, input: &str) -> Result<PathBuf, ExpandPathError> {
     let raw = input;
 
-    // Empty paths pass through unchanged.
     if raw.is_empty() {
         return Ok(PathBuf::new());
     }
 
-    // Step 1: tilde at the absolute start.
     let after_tilde = expand_leading_tilde(system, raw)?;
 
-    // Step 2: env-var substitution across the rest of the string.
     let expanded = expand_env_vars(system, &after_tilde)?;
 
     Ok(PathBuf::from(expanded))
@@ -75,13 +61,11 @@ fn expand_leading_tilde(system: &dyn System, raw: &str) -> Result<String, Expand
         return Ok(raw.to_owned());
     }
 
-    // `~` alone → $HOME.
     if raw.len() == 1 {
         let home = home_dir(system)?;
         return Ok(home);
     }
 
-    // `~/...` or `~\\...` on Windows → $HOME + rest.
     let rest = &raw[1..];
     // Safe unwrap: `raw.len() > 1` above guarantees rest is non-empty.
     let Some(first) = rest.chars().next() else {
@@ -94,9 +78,7 @@ fn expand_leading_tilde(system: &dyn System, raw: &str) -> Result<String, Expand
         return Ok(format!("{home}{rest}"));
     }
 
-    // `~~`, `~user/...`, etc. — anything else after `~` is unsupported.
-    // Strip up to the first separator (or end) so the error message names
-    // the offending user token.
+    // Anything else after `~` is unsupported; the error names the offending user token.
     let end_idx = rest
         .find(|c: char| c == '/' || (cfg!(windows) && c == '\\'))
         .unwrap_or(rest.len());
@@ -158,7 +140,6 @@ fn consume_dollar(
     idx: usize,
     out: &mut String,
 ) -> Result<usize, ExpandPathError> {
-    // `$` at end of string → literal.
     let next_idx = idx + 1;
     if next_idx >= bytes.len() {
         out.push('$');
@@ -167,7 +148,6 @@ fn consume_dollar(
 
     let next = bytes[next_idx];
 
-    // `${...}` form.
     if next == b'{' {
         let body_start = next_idx + 1;
         let Some(rel_close) = bytes[body_start..].iter().position(|b| *b == b'}') else {
@@ -189,13 +169,11 @@ fn consume_dollar(
         return Ok(close_idx + 1);
     }
 
-    // `$VAR` form (bare name).
     let name_end = bytes[next_idx..]
         .iter()
         .position(|b| !is_var_name_byte(*b))
         .map_or(bytes.len(), |rel| next_idx + rel);
     if name_end == next_idx {
-        // `$` not followed by a var character → literal `$`.
         out.push('$');
         return Ok(next_idx);
     }

@@ -50,12 +50,9 @@ use crate::permissions::unprotect::UnprotectArgs;
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanVerifyRow {
-    /// Whether the per-comment content checksum would re-verify.
     pub checksum_ok: bool,
-    /// Comment ID.
     pub id: String,
-    /// Lowercase signature status name (`valid`, `invalid`, `missing`,
-    /// `unknown_author`).
+    /// Lowercase status name: `valid`, `invalid`, `missing` or `unknown_author`.
     pub signature: String,
 }
 
@@ -63,9 +60,8 @@ pub struct PlanVerifyRow {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanVerifyReport {
-    /// Aggregate verdict under the active mode.
     pub ok: bool,
-    /// Per-comment rows in document order.
+    /// In document order.
     pub rows: Vec<PlanVerifyRow>,
 }
 
@@ -91,10 +87,8 @@ impl PlanVerifyReport {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanAnomaly {
-    /// Comment ID the anomaly is attached to.
     pub id: String,
-    /// Stable anomaly kind name (matches
-    /// [`crate::operations::verify::AnomalyKind::as_str`]).
+    /// Stable anomaly kind name, as [`crate::operations::verify::AnomalyKind::as_str`] renders it.
     pub kind: String,
 }
 
@@ -107,16 +101,12 @@ pub struct PlanAnomaly {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanSubsetGate {
-    /// One-line plain-English summary.
     pub headline: String,
-    /// Actionable next-step.
     pub hint: String,
-    /// `Q \ P`: anomalies the projected op would introduce that
-    /// weren't present in the pre-state.
+    /// Anomalies the projected op would introduce that the pre-state did not have.
     pub introduced: Vec<PlanAnomaly>,
-    /// Active mode (after realm escalation) at refusal time.
+    /// The active mode after realm escalation.
     pub mode: String,
-    /// Document the gate is protecting.
     pub path: PathBuf,
 }
 
@@ -159,43 +149,28 @@ impl PlanSubsetGate {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct CommentDiff {
-    /// Newly-created comment ids (present only in `after`).
     pub added: Vec<String>,
-    /// Pre-existing comment ids that would no longer exist in `after`.
     pub destroyed: Vec<String>,
-    /// Pre-existing comment ids whose content checksum changed in `after`.
     pub modified: Vec<String>,
-    /// Pre-existing comment ids that survive with unchanged content.
     pub preserved: Vec<String>,
 }
 
-/// Identity block for a plan report.
-///
-/// Populated by per-op wiring (follow-up issues); the core projection
-/// helper treats it as opaque data the caller owns.
+/// Identity block for a plan report. The core projection helper treats it as opaque data the
+/// caller owns.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanIdentity {
-    /// Author type (`human` / `agent`) as resolved for the active op —
-    /// whichever branch of `identity::resolve_identity` the CLI / MCP
-    /// flags selected.
     pub author_type: Option<String>,
-    /// Author identity as resolved for the active op — whichever branch
-    /// of `identity::resolve_identity` the CLI / MCP flags selected.
     pub name: Option<String>,
-    /// Whether the configured private key would load and sign successfully
-    /// for this op. `false` means the op would still commit under the
-    /// active mode, but without a signature attached.
+    /// `false` means the op would still commit under the active mode, but unsigned.
     pub would_sign: bool,
 }
 
 impl PlanIdentity {
     /// Canonical builder shared by every adapter (CLI + MCP).
     ///
-    /// `would_sign` is `true` when a key path is configured. The key is
-    /// not loaded here — `plan` stays side-effect-free Both
-    /// adapters must use this constructor so plan reports are byte-
-    /// identical across surfaces.
+    /// `would_sign` is `true` when a key path is configured. The key is not loaded here: `plan`
+    /// stays side-effect-free.
     #[must_use]
     pub fn from_config(cfg: &ResolvedConfig) -> Self {
         let author_type = cfg.author_type.as_ref().map(|t| String::from(t.as_str()));
@@ -224,85 +199,44 @@ impl PlanIdentity {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanReport {
-    /// 1-indexed inclusive `[start, end]` line ranges that would be
-    /// modified. Empty when `noop` is `true`.
+    /// 1-indexed inclusive `[start, end]` ranges; empty when `noop` is `true`.
     pub changed_line_ranges: Vec<[usize; 2]>,
-    /// Whole-file sha256 of the projected markdown (`after.to_markdown()?`)
-    /// in the `sha256:<hex>` format used by [`crate::crypto::compute_checksum`].
+    /// Whole-file sha256 of the projected markdown, as `sha256:<hex>`.
     pub checksum_after: String,
-    /// Whole-file sha256 of the source markdown (`before.to_markdown()?`)
-    /// in the `sha256:<hex>` format used by [`crate::crypto::compute_checksum`].
+    /// Whole-file sha256 of the source markdown, as `sha256:<hex>`.
     pub checksum_before: String,
-    /// Partition of comment ids across the projection. See
-    /// [`CommentDiff`].
     pub comments: CommentDiff,
-    /// Config-mutation projection for the `restrict` op.
-    /// `None` for every Markdown op (the document-level fields above
-    /// describe those) AND for `unprotect` (which carries a typed
-    /// reverse projection in [`PlanReport::unprotect_diff`] instead).
+    /// Set only by the `restrict` op.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_diff: Option<ConfigPlanDiff>,
-    /// File-copy projection emitted by the `plan cp` op. `None` for
-    /// every other op. The document-level fields are vacuously empty for
-    /// `cp` — only the src/dst paths and copy kind change.
+    /// Set only by the `cp` op, whose document-level fields stay empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cp_diff: Option<CpDiff>,
-    /// Which identity the plan was computed under. `would_sign` reports
-    /// whether signing would succeed without actually invoking the key.
     pub identity: PlanIdentity,
-    /// File-relocation projection emitted by the `plan mv` op. `None`
-    /// for every other op. The document-level fields (`comments`,
-    /// `changed_line_ranges`, `checksum_*`, `verify_after`) are
-    /// vacuously empty for `mv` — the bytes do not change, only the
-    /// file's location.
+    /// Set only by the `mv` op, whose document-level fields stay empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mv_diff: Option<MvDiff>,
-    /// `true` when the projected content is byte-identical to the source
-    /// content (`checksum_before == checksum_after`).
+    /// `checksum_before == checksum_after`.
     pub noop: bool,
-    /// The mutating op label (`write`, `comment`, `ack`, `batch`, ...).
     pub op: String,
-    /// Recursive-purge projection emitted by `plan purge --recursive`.
-    /// `None` for the single-file purge case AND every other op. The
-    /// document-level fields stay vacuously empty in the recursive
-    /// case — each per-file projection inside this struct carries its
-    /// own counters and refusal reason.
+    /// Set only by a recursive purge, whose document-level fields stay empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub purge_dir_diff: Option<PurgeDirDiff>,
-    /// Human-readable reason when `would_commit` is `false`. `None` when
-    /// the projection would commit cleanly. Specific enough to act on
-    /// (which comment, which invariant).
+    /// `None` when the projection would commit cleanly.
     pub reject_reason: Option<String>,
-    /// Structured subset-gate refusal mirroring
-    /// [`crate::operations::verify::SubsetGateFailure`]. Populated
-    /// alongside `reject_reason` when the projected op would introduce
-    /// new anomalies (`Q ⊄ P`). `None` when the projection is clean or
-    /// when the refusal came from a non-subset-gate source (mv,
-    /// restrict, unprotect, unsupported write).
+    /// Set alongside `reject_reason` when the op would introduce new anomalies; `None` when the
+    /// refusal came from elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subset_gate: Option<PlanSubsetGate>,
-    /// Reverse projection emitted by the `plan unprotect` op. Names
-    /// every file the live `unprotect` would touch (`.remargin.yaml`,
-    /// project + user settings, sidecar) plus every detectable
-    /// drift conflict (manual edits, missing entries). `None` for
-    /// every other op — restrict carries its own forward projection
-    /// in [`PlanReport::config_diff`], document ops use the
-    /// document-level fields.
+    /// Set only by the `unprotect` op.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unprotect_diff: Option<UnprotectConfigDiff>,
-    /// Full post-op verify report computed against the projected
-    /// document under the active mode.
+    /// Computed against the projected document under the active mode.
     pub verify_after: PlanVerifyReport,
-    /// Warn-tier style notes the projected bodies earned, each tagged
-    /// with the sub-op it came from (`0` for the single-body ops). The
-    /// reject tier is already spent by the time a report exists — it
-    /// refuses the projection outright — so this is only ever advice
-    /// about a body that would land, never a failure signal. Empty for
-    /// every op that authors no body.
+    /// Warn-tier notes on the projected bodies, each tagged with its sub-op (`0` for a single-body
+    /// op). Advice only, never a failure signal.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<OpAdvice>,
-    /// Aggregate verdict: `true` when the op would land successfully
-    /// under the current mode and invariants.
     pub would_commit: bool,
 }
 
@@ -318,21 +252,15 @@ pub struct PlanReport {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct ConfigPlanDiff {
-    /// Canonical absolute restricted path. For the wildcard form,
-    /// this is the anchor root.
+    /// Canonical; for the wildcard form this is the anchor root.
     pub absolute_path: PathBuf,
     /// `.claude/`-bearing ancestor that anchors the write.
     pub anchor: PathBuf,
-    /// Detected conflicts. Empty when the projection is clean.
-    /// Conflicts are advisory: `would_commit` stays `true` so the
-    /// caller can apply anyway with full information.
+    /// Advisory: `would_commit` stays `true` when this is non-empty.
     pub conflicts: Vec<ConfigConflict>,
-    /// What would happen to `<anchor>/.remargin.yaml`.
     pub remargin_yaml: RemarginYamlDiff,
-    /// One entry per settings file the synchronizer would touch
-    /// (project-scope first, user-scope second when both are passed).
+    /// Project scope first, user scope second.
     pub settings_files: Vec<SettingsFileDiff>,
-    /// Sidecar projection.
     pub sidecar: SidecarDiff,
 }
 
@@ -341,24 +269,11 @@ pub struct ConfigPlanDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct RemarginYamlDiff {
-    /// What the projection would do to the `permissions.trusted_roots`
-    /// entry list: append, overwrite the existing entry for this
-    /// path, or report a noop because the existing entry already
-    /// matches.
     pub entry_action: EntryAction,
-    /// Resolved on-disk path of the YAML file.
     pub path: PathBuf,
-    /// On-disk entry that would be replaced. `None` when no existing
-    /// entry matches the projected path. Always populated when
-    /// `entry_action == Updated` so the user can see the full delta;
-    /// also populated when `entry_action == Noop` to make the
-    /// "matches existing" case unambiguous.
+    /// The on-disk entry for this path; `None` when none matches.
     pub previous_entry: Option<RestrictEntryProjection>,
-    /// Entry that would be written into
-    /// `permissions.trusted_roots`. `None` only on the noop path when there
-    /// is somehow no projected entry to record.
     pub projected_entry: Option<RestrictEntryProjection>,
-    /// `true` when the YAML file does not exist on disk.
     pub will_be_created: bool,
 }
 
@@ -369,22 +284,11 @@ pub struct RemarginYamlDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SettingsFileDiff {
-    /// Allow rules already in `permissions.allow` — the synchronizer
-    /// would skip these.
     pub allow_rules_already_present: Vec<String>,
-    /// Allow rules the synchronizer would append to
-    /// `permissions.allow`.
     pub allow_rules_to_add: Vec<String>,
-    /// Deny rules already in `permissions.deny` — the synchronizer
-    /// would skip these.
     pub deny_rules_already_present: Vec<String>,
-    /// Deny rules the synchronizer would append to
-    /// `permissions.deny`.
     pub deny_rules_to_add: Vec<String>,
-    /// Resolved on-disk path of the settings file.
     pub path: PathBuf,
-    /// `true` when the file does not currently exist (the synchronizer
-    /// would create it).
     pub will_be_created: bool,
 }
 
@@ -392,13 +296,8 @@ pub struct SettingsFileDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SidecarDiff {
-    /// What the projection would do to the entry under
-    /// `entries[<absolute_path>]`: append, replace the existing entry,
-    /// or noop because the existing entry already matches.
     pub entry_action: EntryAction,
-    /// Resolved on-disk path of the sidecar.
     pub path: PathBuf,
-    /// `true` when the sidecar file does not currently exist.
     pub will_be_created: bool,
 }
 
@@ -412,46 +311,21 @@ pub struct SidecarDiff {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ConfigConflict {
-    /// An existing rule in `permissions.allow` overlaps a rule the
-    /// projection would add to `permissions.deny` in the same settings
-    /// file. The motivating bug for — Claude's settings
-    /// semantics resolve allow-vs-deny in ways the user may not
-    /// expect, so the conflict is surfaced for review before
-    /// committing.
-    ///
-    /// `overlap_kind` distinguishes exact matches from prefix /
-    /// subtree overlap so callers can tailor the message.
+    /// An existing `permissions.allow` rule overlaps a rule the projection would add to
+    /// `permissions.deny` in the same settings file.
     AllowDenyOverlap {
-        /// Existing allow rule string.
         allow_rule: String,
-        /// Relationship between the existing allow and the projected
-        /// deny.
         overlap_kind: OverlapKind,
-        /// Projected deny rule string.
         projected_deny_rule: String,
-        /// Settings file the conflict was detected in.
         settings_file: PathBuf,
     },
-    /// `find_claude_anchor` walked above the caller's `cwd` to find a
-    /// `.claude/`-bearing ancestor. Surfaced because realm boundaries
-    /// have surprised users in the past — the agent thought it was
-    /// restricting `~/.local/realm/secret` but the anchor was actually
-    /// `~/`.
-    AnchorIsAncestor {
-        /// Anchor `find_claude_anchor` resolved to.
-        anchor: PathBuf,
-        /// Caller's `cwd` (canonicalized).
-        cwd: PathBuf,
-    },
-    /// `permissions.trusted_roots` already has an entry for the same path
-    /// but with different `also_deny_bash` / `cli_allowed`. Surfaced
-    /// because the live op silently overwrites.
+    /// `find_claude_anchor` walked above the caller's `cwd`, so the anchor is an ancestor of it.
+    AnchorIsAncestor { anchor: PathBuf, cwd: PathBuf },
+    /// `trusted_roots` already has an entry for the path with different `also_deny_bash` or
+    /// `cli_allowed`; the live op overwrites it silently.
     YamlEntryWouldChange {
-        /// On-disk path of the existing entry.
         path: String,
-        /// Snapshot of the existing entry.
         previous: RestrictEntryProjection,
-        /// Snapshot of the entry the projection would write.
         projected: RestrictEntryProjection,
     },
 }
@@ -462,11 +336,8 @@ pub enum ConfigConflict {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EntryAction {
-    /// New entry would be appended.
     Added,
-    /// Existing entry already matches the projection. No write.
     Noop,
-    /// Existing entry would be replaced.
     Updated,
 }
 
@@ -484,22 +355,15 @@ pub enum EntryAction {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectConfigDiff {
-    /// Canonical absolute path that would be unprotected. For the
-    /// wildcard form, this is the anchor root.
+    /// Canonical; for the wildcard form this is the anchor root.
     pub absolute_path: PathBuf,
     /// `.claude/`-bearing ancestor that anchors the reversal.
     pub anchor: PathBuf,
-    /// Detected drift conflicts. Empty when the projection is clean.
-    /// Conflicts are advisory: `would_commit` stays `true` so the
-    /// caller can apply anyway with full information.
+    /// Advisory: `would_commit` stays `true` when this is non-empty.
     pub conflicts: Vec<UnprotectConflict>,
-    /// What would happen to `<anchor>/.remargin.yaml`.
     pub remargin_yaml: UnprotectYamlDiff,
-    /// One entry per settings file the reversal would touch, sourced
-    /// from the sidecar's `added_to_files` list. Empty when no
-    /// sidecar entry exists for the target path.
+    /// Sourced from the sidecar's `added_to_files`; empty when the sidecar has no entry for the path.
     pub settings_files: Vec<UnprotectSettingsDiff>,
-    /// Sidecar projection.
     pub sidecar: UnprotectSidecarDiff,
 }
 
@@ -509,15 +373,9 @@ pub struct UnprotectConfigDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectYamlDiff {
-    /// What the projection would do to the matching
-    /// `permissions.trusted_roots` entry: remove it, or report no-op
-    /// because no entry currently matches the path.
     pub entry_action: UnprotectEntryAction,
-    /// Resolved on-disk path of the YAML file.
     pub path: PathBuf,
-    /// On-disk entry that would be removed. `None` when no existing
-    /// entry matches the projected path. Always populated when
-    /// `entry_action == WouldBeRemoved`.
+    /// `None` when no existing entry matches the path.
     pub previous_entry: Option<RestrictEntryProjection>,
 }
 
@@ -531,15 +389,10 @@ pub struct UnprotectYamlDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectSettingsDiff {
-    /// Resolved on-disk path of the settings file. Sourced from the
-    /// sidecar's `added_to_files` list.
     pub path: PathBuf,
-    /// Rules the sidecar tracked but that are no longer present in
-    /// the file (manual-edit drift). Each rule here also surfaces as
-    /// a [`UnprotectConflict::RuleAlreadyAbsent`] conflict.
+    /// Tracked by the sidecar but missing from the file; each one also surfaces as a
+    /// [`UnprotectConflict::RuleAlreadyAbsent`].
     pub rules_already_absent: Vec<String>,
-    /// Rules the reversal would scrub from `permissions.allow` /
-    /// `permissions.deny`.
     pub rules_to_remove: Vec<String>,
 }
 
@@ -548,11 +401,7 @@ pub struct UnprotectSettingsDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectSidecarDiff {
-    /// What the projection would do to the entry under
-    /// `entries[<absolute_path>]`: remove it, or report no-op because
-    /// no entry currently exists.
     pub entry_action: UnprotectEntryAction,
-    /// Resolved on-disk path of the sidecar.
     pub path: PathBuf,
 }
 
@@ -562,9 +411,7 @@ pub struct UnprotectSidecarDiff {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum UnprotectEntryAction {
-    /// No matching entry exists; nothing would happen here.
     Absent,
-    /// Existing entry would be removed.
     WouldBeRemoved,
 }
 
@@ -578,31 +425,17 @@ pub enum UnprotectEntryAction {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum UnprotectConflict {
-    /// A rule the sidecar lists for `settings_file` is no longer
-    /// present in that file (the user manually deleted it between
-    /// `restrict` and `unprotect`). Surfaced per-rule per-file.
+    /// A rule the sidecar lists for `settings_file` is missing from that file.
     RuleAlreadyAbsent {
-        /// The rule string the sidecar expected to find.
         rule: String,
-        /// Settings file the rule was supposed to live in.
         settings_file: PathBuf,
     },
-    /// The sidecar has no entry for the target path. The YAML
-    /// removal would still proceed but the Claude settings files
-    /// won't be touched (the reversal cannot guess which rules to
-    /// scrub).
-    SidecarEntryMissing {
-        /// Canonical absolute path the projection looked up in the
-        /// sidecar.
-        path: PathBuf,
-    },
-    /// The YAML file has no `permissions.trusted_roots` entry matching
-    /// the requested path. The sidecar removal would still proceed
-    /// but `.remargin.yaml` won't be touched.
-    YamlEntryMissing {
-        /// Resolved on-disk path of the YAML file.
-        path: PathBuf,
-    },
+    /// The sidecar has no entry for the path: the YAML removal proceeds, the settings files are
+    /// left alone.
+    SidecarEntryMissing { path: PathBuf },
+    /// `trusted_roots` has no entry for the path: the sidecar removal proceeds, the YAML is left
+    /// alone.
+    YamlEntryMissing { path: PathBuf },
 }
 
 /// Recursive-purge projection emitted by `plan purge --recursive`.
@@ -623,13 +456,9 @@ pub enum UnprotectConflict {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PurgeDirDiff {
-    /// Canonical absolute directory path that was projected.
     pub directory: PathBuf,
-    /// Per-file outcomes the live op would produce. Sorted by path
-    /// so the projection is byte-stable across calls.
+    /// Sorted by path.
     pub files: Vec<PurgeDirFileDiff>,
-    /// `true` when no visible `.md` files exist under `directory`.
-    /// The live op succeeds with empty per-file lists in this case.
     pub no_md_files: bool,
 }
 
@@ -637,20 +466,11 @@ pub struct PurgeDirDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PurgeDirFileDiff {
-    /// Number of attachments the live purge would clean up. `0` for
-    /// the refuse / noop branches.
     pub attachments_cleaned: usize,
-    /// Number of comment blocks the live purge would remove. `0` for
-    /// the refuse branch and for files that already have no
-    /// comments.
     pub comments_removed: usize,
-    /// Outcome the live op would produce for this file.
     pub outcome: PurgeDirFileOutcome,
-    /// Absolute path of the file. Adapters should strip their base
-    /// dir for display purposes.
     pub path: PathBuf,
-    /// Refusal reason when `outcome == Refused`. `None` for the
-    /// would-purge / would-noop branches.
+    /// Set only when `outcome` is `Refused`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reject_reason: Option<String>,
 }
@@ -663,14 +483,11 @@ pub struct PurgeDirFileDiff {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PurgeDirFileOutcome {
-    /// `op_guard` / allow-list / forbidden-target refusal. Surfaced
-    /// per-file; does not abort the rest of the projection.
+    /// Refused by `op_guard`, the allow-list or a forbidden target; the rest of the projection
+    /// goes on.
     Refused,
-    /// File has no remargin comments. Live op records this in
-    /// `skipped` and never writes.
+    /// The file has no remargin comments, so the live op never writes it.
     Skipped,
-    /// Live op would write the cleaned file. `comments_removed` and
-    /// `attachments_cleaned` are populated.
     WouldPurge,
 }
 
@@ -689,22 +506,13 @@ pub enum PurgeDirFileOutcome {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvDiff {
-    /// Canonical absolute destination path. Matches
-    /// [`crate::operations::mv::MvOutcome::dst_absolute`].
     pub dst_absolute: PathBuf,
-    /// What's on disk at src and dst, plus whether src is a directory.
-    /// Flattened in JSON.
     #[serde(flatten)]
     pub existence: MvExistence,
-    /// Number of regular files that would move with the directory
-    /// source. `0` for the file-mv case AND for the no-op /
-    /// already-settled branches. Mirrors
-    /// [`crate::operations::mv::MvOutcome::nested_files_moved`].
+    /// `0` for a file move, a no-op or an already-settled re-run.
     pub nested_files_moved: usize,
-    /// Canonical absolute source path. When the source is missing
-    /// this is the lexical join of `base_dir` + the requested path.
+    /// When the source is missing this is the lexical join of `base_dir` and the requested path.
     pub src_absolute: PathBuf,
-    /// Terminal "no work needed" indicators. Flattened in JSON.
     #[serde(flatten)]
     pub state: MvState,
 }
@@ -714,15 +522,8 @@ pub struct MvDiff {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvExistence {
-    /// `true` when the destination currently exists. The live op
-    /// requires `--force` (or the equivalent MCP flag) to overwrite.
     pub dst_exists: bool,
-    /// `true` when the source resolves to a directory. The live op
-    /// renames the directory + every nested file as a unit. Mirrors
-    /// [`crate::operations::mv::MvOutcome::is_directory`].
     pub is_directory: bool,
-    /// `true` when the source path resolves to an existing file or
-    /// directory.
     pub src_exists: bool,
 }
 
@@ -731,11 +532,9 @@ pub struct MvExistence {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvState {
-    /// `true` when the source is missing and the destination already
-    /// exists at the requested path. The live op would settle as a
-    /// `bytes_moved = 0` success.
+    /// The source is missing and the destination already exists: the live op settles with
+    /// `bytes_moved = 0`.
     pub idempotent_already_settled: bool,
-    /// `true` when src and dst resolve to the same canonical path.
     pub noop_same_path: bool,
 }
 
@@ -745,19 +544,12 @@ pub struct MvState {
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct CpDiff {
-    /// Number of comment blocks that would be dropped from a
-    /// comment-bearing source (`BodyOnly` path). `0` for the
-    /// `Verbatim` and `Noop` paths.
+    /// `0` for the `Verbatim` and `Noop` paths.
     pub comments_to_drop: usize,
-    /// Canonical absolute destination path.
     pub dst_absolute: PathBuf,
-    /// `true` when `dst` currently exists. The live op requires
-    /// `--force` to overwrite.
     pub dst_exists: bool,
-    /// Which copy path would run.
     pub kind: String,
-    /// Canonical absolute source path. Missing source returns the
-    /// lexical join of `base_dir` + requested path.
+    /// When the source is missing this is the lexical join of `base_dir` and the requested path.
     pub src_absolute: PathBuf,
 }
 
@@ -771,127 +563,76 @@ pub struct CpDiff {
 /// once — both surfaces pick up the change automatically.
 #[non_exhaustive]
 pub enum PlanRequest<'req> {
-    /// `plan ack` — projects the ack/unack of one or more comments.
     Ack {
-        /// Document path (already joined against the base dir / cwd).
+        /// Already joined against the base dir.
         path: PathBuf,
-        /// Comment ids to ack / unack.
         ids: Vec<String>,
-        /// `true` to remove this identity's ack; `false` to add one.
         remove: bool,
     },
-    /// `plan batch` — projects atomic creation of multiple comments.
     Batch {
         path: PathBuf,
         ops: Vec<ProjectBatchOp>,
     },
-    /// `plan comment` — projects creating a single comment.
     Comment {
         path: PathBuf,
         params: ProjectCommentParams<'req>,
     },
-    /// `plan cp` — projects a file copy.
-    /// Produces a [`CpDiff`] in [`PlanReport::cp_diff`] describing the
-    /// resolved src/dst paths, the copy kind, and the number of comment
-    /// blocks that would be dropped.
     Cp {
-        /// Source path as supplied by the caller.
         src: PathBuf,
-        /// Destination path as supplied by the caller.
         dst: PathBuf,
-        /// `true` to project the `--force` semantics (overwrite dst).
         force: bool,
     },
-    /// `plan delete` — projects deletion of one or more comments.
-    Delete { path: PathBuf, ids: Vec<String> },
-    /// `plan edit` — projects editing a comment's content.
+    Delete {
+        path: PathBuf,
+        ids: Vec<String>,
+    },
     Edit {
         path: PathBuf,
         id: &'req str,
         content: &'req str,
     },
-    /// `plan mv` — projects a file relocation.
-    /// Produces an [`MvDiff`] in [`PlanReport::mv_diff`] describing
-    /// the resolved src/dst paths, whether the destination already
-    /// exists, and whether the live op would settle as a no-op.
     Mv {
-        /// Source path as supplied by the caller (relative to
-        /// `base_dir` or absolute). Resolution mirrors
-        /// [`crate::operations::mv::mv`].
         src: PathBuf,
-        /// Destination path as supplied by the caller.
         dst: PathBuf,
-        /// `true` to project the `--force` semantics (the live op
-        /// would overwrite an existing destination).
         force: bool,
     },
-    /// `plan purge` — projects removal of all comments. When
-    /// `recursive` is true, `path` is treated as a directory and the
-    /// projection enumerates every visible `.md` file under it. The
-    /// report carries a [`PurgeDirDiff`] in
-    /// [`PlanReport::purge_dir_diff`] in the recursive case; the
-    /// document-level fields stay vacuously empty.
+    /// With `recursive`, `path` is a directory and the report carries a [`PurgeDirDiff`].
     Purge {
         path: PathBuf,
-        /// `true` to project a recursive directory purge.
         recursive: bool,
     },
-    /// `plan react` — projects add/remove of an emoji reaction.
     React {
         path: PathBuf,
         id: &'req str,
         emoji: &'req str,
-        /// `true` to remove the reaction; `false` to add.
         remove: bool,
     },
-    /// `plan restrict` — projects a config-mutation `restrict` op.
-    /// Unlike the document plans above, this variant produces a
-    /// [`ConfigPlanDiff`] in [`PlanReport::config_diff`] describing
-    /// every file the live op would touch.
     Restrict {
-        /// Caller's working directory; used for anchor discovery.
+        /// Used for anchor discovery.
         cwd: PathBuf,
-        /// Restrict args (`path`, `also_deny_bash`, `cli_allowed`).
         args: RestrictArgs,
-        /// Settings files the synchronizer would write into. Adapters
-        /// resolve project + user scope before dispatch.
+        /// Project and user scope, resolved by the adapter before dispatch.
         settings_files: Vec<PathBuf>,
     },
-    /// `plan sandbox-add` — projects staging the file in the caller's sandbox.
-    SandboxAdd { path: PathBuf },
-    /// `plan sandbox-remove` — projects unstaging the file from the caller's sandbox.
-    SandboxRemove { path: PathBuf },
-    /// `plan sign` — projects back-signing missing-signature comments
-    /// authored by the current identity. Unlike most plan ops,
-    /// this loads the configured signing key and attaches real
-    /// signatures to the projected `after` document so `verify_after`
-    /// can faithfully predict the post-op gate.
+    SandboxAdd {
+        path: PathBuf,
+    },
+    SandboxRemove {
+        path: PathBuf,
+    },
+    /// Unlike most plan ops this loads the signing key and attaches real signatures to the
+    /// projected document, so `verify_after` predicts the post-op gate.
     Sign {
         path: PathBuf,
-        /// Which comments to consider. `Ids` rejections (unknown id,
-        /// forgery guard) and `AllMine` filtering match the mutating
-        /// `sign` op.
         selection: SignSelection,
     },
-    /// `plan unprotect` — projects a config-mutation `unprotect` op.
-    /// Symmetric mirror of [`PlanRequest::Restrict`] for the reverse
-    /// direction. Produces an [`UnprotectConfigDiff`] in
-    /// [`PlanReport::unprotect_diff`] describing every file the live
-    /// op would touch and every drift conflict it would surface.
     Unprotect {
-        /// Caller's working directory; used for anchor discovery.
+        /// Used for anchor discovery.
         cwd: PathBuf,
-        /// Unprotect args (`path`, `strict`).
         args: UnprotectArgs,
     },
-    /// `plan write` — projects a whole-file / partial-range write.
-    ///
-    /// `path` is passed as-is to [`document::project_write`] so the
-    /// allowlist / partial-range / create-new-file semantics land in
-    /// exactly one place.
     Write {
-        /// The path relative to `base_dir`, exactly as the adapter
-        /// received it.
+        /// Relative to `base_dir`, exactly as the adapter received it.
         path: PathBuf,
         content: &'req str,
         opts: WriteOptions,
@@ -1474,14 +1215,10 @@ fn dispatch_mv(
     let empty = parser::parse("").context("parsing empty before-document for plan mv")?;
     let mut report = project_report("mv", &empty, &empty, cfg, identity)?;
 
-    // Wrap every preflight that the live op would perform; a failing
-    // check flips `would_commit` and surfaces the message verbatim.
     let projection = project_mv(system, base_dir, cfg, src, dst, force);
 
     match projection {
         Ok(diff) => {
-            // Same-path no-op and the idempotent already-settled
-            // branch both leave the filesystem untouched.
             report.noop = diff.state.noop_same_path || diff.state.idempotent_already_settled;
             report.would_commit = true;
             report.mv_diff = Some(diff);
@@ -2029,7 +1766,6 @@ fn decide_commit(
     (false, Some(reason), subset_gate)
 }
 
-/// Human-readable label for a [`EntryAction`] in plan text output.
 const fn entry_action_label(action: EntryAction) -> &'static str {
     match action {
         EntryAction::Added => "added",
@@ -2038,7 +1774,6 @@ const fn entry_action_label(action: EntryAction) -> &'static str {
     }
 }
 
-/// Human-readable label for a [`UnprotectEntryAction`] in plan text output.
 const fn unprotect_entry_action_label(action: UnprotectEntryAction) -> &'static str {
     match action {
         UnprotectEntryAction::Absent => "absent",

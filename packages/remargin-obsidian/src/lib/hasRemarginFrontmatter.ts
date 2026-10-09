@@ -1,3 +1,5 @@
+/** Detects whether a document carries remargin-managed frontmatter. */
+
 /**
  * Detect whether a markdown document's leading YAML frontmatter block
  * contains any `remargin_*` field.
@@ -25,10 +27,7 @@ export function hasRemarginFrontmatter(contents: string): boolean {
   const block = extractFrontmatterBlock(contents);
   if (block == null) return false;
   for (const line of block.split("\n")) {
-    // Match the first `key:` token on each line, ignoring leading
-    // whitespace (YAML allows two-space indents under nested maps but
-    // at the top level keys start in column 0; we tolerate indent to
-    // be forgiving).
+    // The first `key:` token on each line; leading indent is tolerated.
     const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/);
     if (match && match[1].startsWith("remargin_")) return true;
   }
@@ -43,12 +42,10 @@ export function hasRemarginFrontmatter(contents: string): boolean {
 function extractFrontmatterBlock(contents: string): string | null {
   const normalized = stripBom(contents).replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---")) return null;
-  // Skip the opening fence line.
   const afterFirstFence = normalized.indexOf("\n");
   if (afterFirstFence < 0) return null;
   const rest = normalized.slice(afterFirstFence + 1);
-  // Closing fence must be on its own line (leading `\n` in the search
-  // term) so we don't match a literal `---` that appears mid-field.
+  // The closing fence must sit on its own line, so a `---` inside a field does not match.
   const closing = rest.indexOf("\n---");
   if (closing < 0) return null;
   return rest.slice(0, closing);

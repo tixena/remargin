@@ -1,3 +1,5 @@
+/** Live Preview comment widgets: block decorations that replace remargin fences. */
+
 import { type EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
@@ -16,12 +18,7 @@ import { buildThreadTree, type ThreadNode } from "@/lib/threadTree";
 import type RemarginPlugin from "@/main";
 import { parseRemarginBlocks } from "@/parser/parseRemarginBlocks";
 
-/**
- * Test seam for `react-dom/client`'s `createRoot`. Production code uses
- * the default React 19 implementation; unit tests swap it for a mock so
- * `toDOM` / `destroy` lifecycle assertions can run without a real DOM.
- * Mirrors the pattern in `readingModeProcessor.ts`.
- */
+/** Test seam for `createRoot`, so lifecycle assertions can run without a real DOM. */
 let createRootImpl: typeof defaultCreateRoot = defaultCreateRoot;
 export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): void {
   createRootImpl = impl ?? defaultCreateRoot;
@@ -29,18 +26,12 @@ export function __setCreateRootForTests(impl: typeof defaultCreateRoot | null): 
 
 /**
  * Resolve the editor's mode from the `editorLivePreviewField` StateField
- * exported by Obsidian. It is the public, contract-stable signal for
- * Live-Preview-vs-Source-Mode and — critically — is readable from
- * inside another StateField, which the older host-DOM ancestor lookup
- * was not.
- *
- * The wider host change (state-field-based decorations) is forced by
- * CM6's rule that block decorations must come from a state field, not
- * a per-view plugin; this helper is the matching state-side mode probe.
+ * exported by Obsidian: the public signal for Live Preview versus Source
+ * Mode, and one that is readable from inside another StateField.
  */
 function isLivePreviewState(state: EditorState): boolean {
   try {
-    return state.field(editorLivePreviewField, /* require */ false) ?? false;
+    return state.field(editorLivePreviewField, false) ?? false;
   } catch {
     return false;
   }
@@ -56,7 +47,7 @@ function isLivePreviewState(state: EditorState): boolean {
  */
 function resolveSourcePath(state: EditorState): string {
   try {
-    const info = state.field(editorInfoField, /* require */ false);
+    const info = state.field(editorInfoField, false);
     return info?.file?.path ?? "";
   } catch {
     return "";
@@ -88,31 +79,21 @@ function hashRaw(s: string): number {
  * document. Replies whose parent IS in the document do not produce a
  * decoration — the parent's widget renders them nested.
  *
- * Critical fixes vs. the v1 attempt (commit 25a612a, reverted in
- * 67ef39d):
- *
  *  - `ignoreEvent()` returns `true` so typing/selection inside or
  *    adjacent to the replaced range is not eaten by the widget. The
  *    widget's own click is wired through React, not CM6's event path.
- *  - `eq()` compares id + collapsed state + raw-text hash. v1 only
- *    compared offsets, which yielded "stale data because the offset
- *    didn't move" misses whenever a comment was edited in place.
- *  - `toDOM()` mounts a React root and `destroy()` unmounts it — the
- *    React subtree gets a real lifecycle, not the leaky bare-DOM
- *    swap v1 used.
+ *  - `eq()` compares id + collapsed state + raw-text hash, so a comment
+ *    edited in place is rebuilt even though its offsets did not move.
+ *  - `toDOM()` mounts a React root and `destroy()` unmounts it, giving
+ *    the React subtree a real lifecycle.
  */
 export class RemarginWidget extends WidgetType {
-  /** Cached id of this block's root (always present — caller filters). */
   private readonly id: string;
   /** Hash of every descendant's raw text so `eq` rebuilds when ANY descendant changes. */
   private readonly subtreeHash: number;
   /**
-   * Collapsed state captured at *construction* time. Snapshotting here
-   * (rather than reading `plugin.collapseState.isCollapsed` inside
-   * `eq`) is the contract that lets the next `build()` produce a
-   * widget that `eq`-differs from the previous one for that id —
-   * otherwise both widgets would read the same current state and CM6
-   * would skip the rebuild we explicitly want.
+   * Captured at construction, not read live inside `eq`: two widgets reading the same current
+   * state would compare equal and CM6 would skip the rebuild a toggle needs.
    */
   private readonly collapsedAtBuildTime: boolean;
 
@@ -122,9 +103,7 @@ export class RemarginWidget extends WidgetType {
     private readonly sourcePath: string
   ) {
     super();
-    // The build path filters for `node.comment.id`; default to "" if
-    // some future caller forgets — better to render an unfocused
-    // widget than to throw inside CM6's decoration pipeline.
+    // "" when a caller did not filter: an unfocused widget beats a throw inside CM6's pipeline.
     this.id = threadNode.comment.id ?? "";
     this.subtreeHash = hashSubtree(threadNode);
     this.collapsedAtBuildTime = plugin.collapseState.isCollapsed(this.id);
@@ -149,15 +128,11 @@ export class RemarginWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const host = document.createElement("div");
-    // `remargin-container` makes Tailwind utilities scoped via
-    // tailwind.config.ts's `important: ".remargin-container"` apply
-    // to this widget's subtree (tooltips and all).
+    // `remargin-container` is what scopes the Tailwind utilities to this widget's subtree.
     host.className = "remargin-widget-host remargin-container";
     host.dataset.remarginId = this.id;
     const root = createRootImpl(host);
-    // Stash the root on the host so `destroy(dom)` can find it without
-    // an external map. The cast is intentional — CM6's WidgetType API
-    // hands the same DOM node back to `destroy`.
+    // Stashed on the host so `destroy(dom)`, handed the same node, can find the root.
     (host as HTMLElement & { __remarginRoot?: Root }).__remarginRoot = root;
     const me = this.plugin.currentIdentity ?? null;
     root.render(
@@ -165,8 +140,6 @@ export class RemarginWidget extends WidgetType {
         WidgetProviders,
         { plugin: this.plugin, portalContainer: host },
         createElement(WidgetCommentThread, {
-          // The build path filters for `valid` blocks; the cast to
-          // full `Comment` is sound and matches the prior shape.
           root: this.threadNode as { comment: Comment; replies: ThreadNode[] },
           sourcePath: this.sourcePath,
           me,
@@ -187,10 +160,7 @@ export class RemarginWidget extends WidgetType {
   }
 
   ignoreEvent(): boolean {
-    // True means "let CM6 handle this event normally" — i.e. don't
-    // swallow keystrokes/selection inside the widget. The widget's
-    // own click bridge is wired at the React layer; this flag is
-    // about the surrounding editor's caret handling.
+    // True lets CM6 handle the event normally, so the widget swallows no keystrokes or selection.
     return true;
   }
 }
@@ -203,12 +173,9 @@ export class RemarginWidget extends WidgetType {
  */
 function hashSubtree(node: ThreadNode): number {
   let h = hashRaw(node.comment.id ?? "");
-  // Stir in every descendant's id + content hash so that mutations
-  // anywhere in the subtree force a rebuild.
   for (const reply of node.replies) {
     h = (h * 31 + hashSubtree(reply)) | 0;
   }
-  // Mix the comment's content too so an edit-in-place rebuilds.
   h = (h * 31 + hashRaw(node.comment.content ?? "")) | 0;
   // Ack list affects pending badges; mix length + last ts.
   h = (h * 31 + node.comment.ack.length) | 0;
@@ -218,14 +185,14 @@ function hashSubtree(node: ThreadNode): number {
 /**
  * Build the decoration set for the current state. Skipped (returns
  * `Decoration.none`) when the feature toggle is off OR the editor is
- * in Source Mode — same fall-through to the raw fence as the
- * reading-mode widget (T37).
+ * in Source Mode, the same fall-through to the raw fence as the
+ * reading-mode widget.
  *
  * Document-scope thread building: parse every block in the doc once,
  * build the thread tree, then iterate blocks. For each block:
  *   - Root in tree → emit a decoration that renders the full subtree.
- *   - Reply with parent in this doc → emit NOTHING (parent's widget
- *     nests it).
+ *   - Reply with parent in this doc → emit a hidden decoration (the
+ *     parent's widget nests it).
  *   - Orphan reply (parent missing from doc) → emit a degraded-root
  *     decoration so it stays visible.
  */
@@ -238,9 +205,6 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
   const sourcePath = resolveSourcePath(state);
   const builder = new RangeSetBuilder<Decoration>();
 
-  // Build the document-scope thread tree from valid comments. The
-  // tree's roots are exactly the comments that should render at top
-  // level (real roots + orphan replies — see `buildThreadTree`).
   const validComments: Comment[] = blocks
     .filter((b) => b.valid && b.comment.id)
     .map((b) => b.comment as Comment);
@@ -253,10 +217,7 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
     if (!block.valid || !block.comment.id) continue;
     const id = block.comment.id;
     if (!rootIds.has(id)) {
-      // Reply with parent in this doc — the parent's widget renders it
-      // nested. Replace the source range with a hidden empty widget so
-      // the raw YAML fence does NOT appear below the parent's widget.
-      // Without this decoration CM6 would render the source verbatim.
+      // A hidden empty widget replaces the range, or CM6 would render the reply's raw fence.
       builder.add(
         block.startOffset,
         block.endOffset,
@@ -270,14 +231,8 @@ export function buildDecorations(state: EditorState, plugin: RemarginPlugin): De
     builder.add(
       block.startOffset,
       block.endOffset,
-      // `block: true` makes the widget take a full block in CM6's
-      // layout (the line is replaced wholesale, not inlined).
-      // `inclusive: true` lets the replaced range absorb its
-      // bounding cursor positions — without this flag CM6 reserves a
-      // boundary cursor zone above the widget, which Obsidian's Live
-      // Preview renders as an empty dark-gray bar. The `block: true`
-      // decoration already keeps the caret outside the widget, so
-      // `inclusive: false`'s caret-distinct semantics are redundant.
+      // `inclusive: true` lets the range absorb its bounding cursor positions; without it CM6 keeps
+      // a boundary cursor zone above the widget, which Live Preview draws as an empty dark bar.
       Decoration.replace({ widget, block: true, inclusive: true })
     );
   }
@@ -314,17 +269,8 @@ function collectNodes(node: ThreadNode, into: Map<string, ThreadNode>): void {
 }
 
 /**
- * CM6 effect dispatched whenever the shared `CollapseState` flips for
- * some comment id. The companion `collapseEffectBridge` ViewPlugin
- * subscribes to the store and dispatches this effect on every change;
- * the StateField below listens for it in `update` and rebuilds so the
- * widget snapshots reflect the new collapse state.
- *
- * Why an effect rather than reading the store directly inside `update`:
- * `StateField.update` only runs when something *triggers* a transaction.
- * `CollapseState.toggle` is a plain JS call — it does NOT produce a CM6
- * transaction on its own. The bridge plugin is what adapts the
- * subscription into a transaction so the field has a chance to react.
+ * Dispatched whenever the shared `CollapseState` flips for a comment id. `CollapseState.toggle`
+ * produces no CM6 transaction of its own, so the bridge plugin turns it into this effect.
  */
 export const collapseEffect = StateEffect.define<{ id: string }>();
 
@@ -345,15 +291,8 @@ export function commentWidgetPlugin(plugin: RemarginPlugin) {
       return buildDecorations(state, plugin);
     },
     update(decorations, tr) {
-      // Rebuild ONLY when the document changed OR a collapse effect
-      // crossed this transaction. Selection-only and viewport-only
-      // updates never produce widget content changes, so they should
-      // not touch the decoration set — just remap existing ranges
-      // through the (empty) change set so offsets stay coherent.
-      //
-      // Toggling a widget's chevron flips the in-memory store; without
-      // the collapse-effect branch the widget visual stays pinned until
-      // the next docChanged transaction forces a rebuild.
+      // Rebuild only on a document change or a collapse effect; selection and viewport updates just
+      // remap the existing ranges.
       if (tr.docChanged) {
         return buildDecorations(tr.state, plugin);
       }
@@ -383,9 +322,7 @@ export function commentWidgetPlugin(plugin: RemarginPlugin) {
  */
 export function collapseEffectBridge(plugin: RemarginPlugin) {
   return ViewPlugin.fromClass(
-    // The class is exported via `ViewPlugin.fromClass`'s inferred return
-    // type. TS4094 forbids `private`/`protected` members on anonymous
-    // exported classes, so `unsubscribe` is plain (still readonly).
+    // TS4094 forbids `private` members on an anonymous exported class, so `unsubscribe` is plain.
     class {
       readonly unsubscribe: () => void;
 

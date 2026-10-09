@@ -27,8 +27,7 @@ const INDICATORS: [char; 13] = [
     '#', '-', '?', ':', '&', '*', '!', '|', '>', '%', '@', '`', ',',
 ];
 
-/// Columns a nested block mapping is indented by, matching what
-/// `serde_yaml` emits so a written block reads like the rest of the file.
+/// Matches what `serde_yaml` emits, so a written block reads like the rest of the file.
 const NEST_INDENT: usize = 2;
 
 /// The change to make to remargin's entry.

@@ -12,19 +12,14 @@ use crate::handlers::cmd_session;
 use crate::io::IoSinks;
 use crate::{Cli, OutputArgs, SessionAction};
 
-/// The `./product` entry's own config: a launchable `session:` block the
-/// manifest entry overrides (`entry goal` / `2m` win over these).
+/// The `./product` entry's own config; the manifest entry's goal and loop win over these.
 const CANONICAL_PRODUCT: &[u8] = b"identity: product\nsession:\n  goal: own goal\n  loop: 30s\n";
 
-/// The `/lib/researcher` entry's own config: no manifest override rides on it,
-/// so its `session:` block is what launches.
+/// The `/lib/researcher` entry's own config; no manifest entry changes it.
 const CANONICAL_RESEARCHER: &[u8] = b"identity: researcher\nsession:\n  goal: research goal\n";
 
-/// `/ws` config for the canonical manifest tree: its own `ws_root` identity
-/// and a `session:` block, plus a `sessions:` manifest whose `evaluation`
-/// session rosters a `./product` entry (goal+loop overrides) and an
-/// absolute-path `/lib/researcher` entry, and whose `broken` session points at
-/// a missing folder. `default: evaluation` makes a bare launch resolve it.
+/// The canonical `/ws` config: its own identity and session block, an `evaluation` session
+/// over two entries, a `broken` session over a missing folder, and `default: evaluation`.
 const WS_MANIFEST: &[u8] = b"identity: ws_root\nsession:\n  goal: root goal\nsessions:\n  default: evaluation\n  evaluation:\n    agents:\n      - path: ./product\n        goal: entry goal\n        loop: 2m\n      - path: /lib/researcher\n  broken:\n    agents:\n      - path: ./missing\n";
 
 /// Build a `session launch` action over the mock `tmux` multiplexer. `name`
@@ -175,9 +170,7 @@ fn dry_run_flags_missing_goal_and_exits_nonzero() {
     );
 }
 
-/// A goal-only session (no `loop`) is launchable: the builder defaults the
-/// cadence to `5m`, and the dry-run loop cell says so rather than flagging a
-/// missing value.
+/// A goal-only session is launchable; the loop cell shows the `5m` default.
 #[test]
 fn dry_run_defaulted_loop_renders_5m_default() {
     let system = MemorySystem::new()
@@ -202,8 +195,6 @@ fn dry_run_defaulted_loop_renders_5m_default() {
     );
 }
 
-/// The `--json` output agrees with the table: a defaulted loop reports
-/// `5m (default)` and the entry is launchable.
 #[test]
 fn dry_run_json_defaulted_loop_reports_5m_default() {
     let system = MemorySystem::new()
@@ -256,9 +247,7 @@ fn dry_run_identity_filter_restricts_rows() {
     );
 }
 
-/// A bare launch that names an unknown multiplexer must fail on the flag
-/// before touching any session — and, crucially, without spawning tmux
-/// (which the gate must never do).
+/// The flag is refused before any session is touched, and tmux is never spawned.
 #[test]
 fn bare_launch_rejects_unknown_multiplexer() {
     let system = launchable_tree();
@@ -286,8 +275,7 @@ fn bare_launch_rejects_unknown_multiplexer() {
     assert!(stdout.is_empty(), "no output on a flag error: {stdout}");
 }
 
-/// zellij was removed in favour of herdr; naming it now fails on the flag,
-/// listing the allowed values (herdr, tmux), and spawns nothing.
+/// `zellij` is not an allowed value: the error lists herdr and tmux and nothing is spawned.
 #[test]
 fn bare_launch_rejects_zellij_now_removed() {
     let system = launchable_tree();
@@ -315,9 +303,7 @@ fn bare_launch_rejects_zellij_now_removed() {
     assert!(stdout.is_empty(), "no output on a flag error: {stdout}");
 }
 
-/// A bare (real) launch builds every identity's spec first, so a missing
-/// `goal` surfaces the task-84 error before any multiplexer command is
-/// spawned. This keeps the launch branch under test without a real tmux.
+/// Every spec is built before the first multiplexer command, so a missing `goal` spawns nothing.
 #[test]
 fn bare_launch_surfaces_task84_error_before_spawning() {
     let system = MemorySystem::new()
@@ -338,8 +324,6 @@ fn bare_launch_surfaces_task84_error_before_spawning() {
     );
 }
 
-/// A bare launch with no discovered identity bails clearly rather than
-/// spawning an empty session.
 #[test]
 fn bare_launch_no_identities_bails() {
     let system = MemorySystem::new()
@@ -361,7 +345,6 @@ fn print_emits_launch_command_and_seed_lines() {
 
     assert!(stdout.contains("# root_agent"), "header: {stdout}");
     assert!(stdout.contains("# finance"), "header: {stdout}");
-    // Runnable, interactive launch line -- never headless `claude -p`.
     assert!(stdout.contains("cd /demo &&"), "cd line: {stdout}");
     assert!(
         stdout.contains("claude --append-system-prompt"),
@@ -370,7 +353,6 @@ fn print_emits_launch_command_and_seed_lines() {
     assert!(stdout.contains("--strict-mcp-config"), "argv: {stdout}");
     assert!(stdout.contains("--permission-mode auto"), "argv: {stdout}");
     assert!(!stdout.contains(" -p "), "must not be headless: {stdout}");
-    // Seed lines are typed into the session, not passed as flags.
     assert!(stdout.contains("/loop 30s"), "loop seed: {stdout}");
     assert!(
         stdout.contains("/goal process pending"),
@@ -395,9 +377,7 @@ fn print_surfaces_task84_error_for_missing_goal() {
     );
 }
 
-/// `--backend` was retired: the backend is inferred per agent, so the flag no
-/// longer exists and clap rejects it as an unexpected argument. (Unknown
-/// backend *names* are still covered by `resolve_backend`'s own unit test.)
+/// There is no `--backend` flag: the backend is inferred per agent, so clap rejects it.
 #[test]
 fn launch_rejects_retired_backend_flag() {
     let err = Cli::try_parse_from(["remargin", "session", "launch", "--backend", "claude"])
@@ -410,8 +390,6 @@ fn launch_rejects_retired_backend_flag() {
     );
 }
 
-/// Launch by name resolves the manifest's named fleet: `evaluation` rosters
-/// both agents, and the dry-run lists exactly those two identities.
 #[test]
 fn dry_run_by_name_resolves_manifest_fleet() {
     let system = manifest_workspace();
@@ -425,8 +403,7 @@ fn dry_run_by_name_resolves_manifest_fleet() {
     );
 }
 
-/// A bare launch over a manifest applies the settled default rule: the
-/// declared `default: evaluation` session is resolved, not empty discovery.
+/// A bare launch over a manifest resolves the declared `default` session.
 #[test]
 fn dry_run_bare_over_manifest_uses_default_rule() {
     let system = manifest_workspace();
@@ -440,8 +417,7 @@ fn dry_run_bare_over_manifest_uses_default_rule() {
     );
 }
 
-/// The `--identity` filter applies to the resolved union fleet, not just
-/// downward discovery: naming `researcher` drops `product` from the roster.
+/// The `--identity` filter applies to the resolved union fleet, not only to discovery.
 #[test]
 fn dry_run_identity_filter_applies_to_named_fleet() {
     let system = manifest_workspace();
@@ -462,12 +438,8 @@ fn dry_run_identity_filter_applies_to_named_fleet() {
     );
 }
 
-// -- Canonical manifest tree: dry-run/print faithfulness + all-or-nothing --
-
-/// Dry-run over the canonical `evaluation` fleet renders the union in
-/// entry-first order (`product`, `researcher`, then the discovered `ws_root`),
-/// with the `./product` entry's overrides winning over its own config and the
-/// no-override members showing `5m (default)` cadence.
+/// Entries come first, an entry's fields win over its folder's config, and the rest show the
+/// default cadence.
 #[test]
 fn canonical_dry_run_union_table_orders_entries_first_with_overrides() {
     let system = canonical_workspace();
@@ -485,7 +457,6 @@ fn canonical_dry_run_union_table_orders_entries_first_with_overrides() {
         product < ws_root && researcher < ws_root,
         "manifest entries precede the discovered root: {stdout}"
     );
-    // The entry's goal+loop overrides win over product's own `session:` block.
     assert!(
         stdout.contains("entry goal"),
         "override goal shown: {stdout}"
@@ -495,7 +466,6 @@ fn canonical_dry_run_union_table_orders_entries_first_with_overrides() {
         "entry override replaces the folder's own goal: {stdout}"
     );
     assert!(stdout.contains("2m"), "override loop shown: {stdout}");
-    // No-override members keep their own goal and default the cadence.
     assert!(
         stdout.contains("research goal"),
         "researcher goal: {stdout}"
@@ -507,8 +477,6 @@ fn canonical_dry_run_union_table_orders_entries_first_with_overrides() {
     );
 }
 
-/// The `--json` array agrees with the table: same entry-first order, same
-/// applied overrides, and the same `5m (default)` marker on defaulted members.
 #[test]
 fn canonical_dry_run_union_json_agrees_with_table() {
     let system = canonical_workspace();
@@ -543,8 +511,7 @@ fn canonical_dry_run_union_json_agrees_with_table() {
     }
 }
 
-/// Dry-run over the `broken` session fails fleet resolution, naming the
-/// offending session and its missing entry, and prints no partial table.
+/// The error names the session and its missing entry, and no partial table is printed.
 #[test]
 fn canonical_dry_run_bad_entry_errs_naming_missing_with_no_table() {
     let system = canonical_workspace();
@@ -564,9 +531,6 @@ fn canonical_dry_run_bad_entry_errs_naming_missing_with_no_table() {
     );
 }
 
-/// Print over the canonical fleet emits a `cd … && claude …` line for every
-/// union member plus each member's `/loop` + `/goal` seeds, with the product
-/// entry's overrides reflected in its seeds.
 #[test]
 fn canonical_print_emits_cd_and_seeds_for_every_member() {
     let system = canonical_workspace();
@@ -596,8 +560,6 @@ fn canonical_print_emits_cd_and_seeds_for_every_member() {
         stdout.contains("claude --append-system-prompt"),
         "renders the interactive launch argv: {stdout}"
     );
-    // Seeds carry the overridden cadence/goal for product and the defaults for
-    // the no-override members.
     assert!(
         stdout.contains("/loop 2m"),
         "product override loop: {stdout}"
@@ -620,8 +582,7 @@ fn canonical_print_emits_cd_and_seeds_for_every_member() {
     );
 }
 
-/// All-or-nothing: a bad manifest entry aborts a real launch during fleet
-/// resolution — no `Launched` line, nothing printed, no multiplexer reached.
+/// A bad manifest entry aborts during fleet resolution: no output, no multiplexer.
 #[test]
 fn canonical_launch_aborts_on_bad_entry_before_any_output() {
     let system = canonical_workspace();
@@ -645,9 +606,7 @@ fn canonical_launch_aborts_on_bad_entry_before_any_output() {
     );
 }
 
-/// All-or-nothing: a member missing `goal` (here `/lib/researcher`, which
-/// carries no override goal) aborts the launch while building specs — before
-/// the multiplexer and before any output.
+/// A member with no `goal` aborts while specs are built, before any output.
 #[test]
 fn canonical_launch_aborts_on_member_missing_goal() {
     let system = canonical_workspace_with(
@@ -678,9 +637,7 @@ fn canonical_launch_aborts_on_member_missing_goal() {
     );
 }
 
-/// All-or-nothing: a strict-parse error in a member's own config (a typo'd
-/// `gaol:` key rejected by `deny_unknown_fields`) aborts fleet resolution
-/// before any spec is built — no `Launched` line, nothing printed.
+/// A key `deny_unknown_fields` rejects aborts fleet resolution before any spec is built.
 #[test]
 fn canonical_launch_aborts_on_strict_parse_error() {
     let system = canonical_workspace_with(
@@ -707,8 +664,6 @@ fn canonical_launch_aborts_on_strict_parse_error() {
     );
 }
 
-/// The `--identity` filter narrows the resolved union to a single manifest
-/// entry, and that entry's override still applies under the filter.
 #[test]
 fn canonical_identity_filter_selects_single_entry_row() {
     let system = canonical_workspace();
@@ -734,9 +689,7 @@ fn canonical_identity_filter_selects_single_entry_row() {
     );
 }
 
-/// The launch path must write no PID/registry file (discussion decisions 3
-/// & 5). Scan the handler source and assert it never references a
-/// `.remargin/sessions/` path.
+/// The launch path must write no PID or registry file.
 #[test]
 fn launch_handler_writes_no_session_registry_path() {
     use std::fs;
@@ -748,10 +701,7 @@ fn launch_handler_writes_no_session_registry_path() {
     );
 }
 
-/// The `--print` path renders commands; it must never spawn a child
-/// process. Rather than fake an intercept, scan the source of every
-/// function on that path and assert none references `Command` (the only
-/// route to `spawn`/`status`/`output`).
+/// No function on the `--print` path may reference `Command`, the only route to spawning.
 #[test]
 fn print_path_spawns_no_child_process() {
     use std::fs;

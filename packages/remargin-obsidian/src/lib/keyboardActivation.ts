@@ -1,3 +1,5 @@
+/** Keyboard activation for click targets promoted to `role="button"`. */
+
 import type { KeyboardEvent } from "react";
 
 /**

@@ -49,20 +49,13 @@ fn dot_folder_match(err: &anyhow::Error, expected_folder: &str, source: &str) ->
     )
 }
 
-// ---------------------------------------------------------------------
-// Allow-list polarity
-// ---------------------------------------------------------------------
-
-/// No `restrict` declared → open mode → everything allowed.
 #[test]
 fn scenario_01_no_restrict_allows_everything() {
     let system = realm_with("identity: alice\n");
     pre_mutate_check(&system, "comment", Path::new("/r/foo.md")).unwrap();
 }
 
-/// An out-of-realm `trusted_roots` entry makes resolution fail closed;
-/// the op guard surfaces it as an op error naming the yaml and the
-/// resolved anchor rather than proceeding under the inverted allow-list.
+/// The guard surfaces the failed resolution as an op error naming the yaml and the anchor.
 #[test]
 fn out_of_realm_trusted_root_surfaces_op_error() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: /other/secret\n");
@@ -73,15 +66,12 @@ fn out_of_realm_trusted_root_surfaces_op_error() {
     assert!(chain.contains("outside the realm"), "{chain}");
 }
 
-/// `restrict src/secret` allow-lists that subpath; mutating op INSIDE
-/// the allow-list succeeds.
 #[test]
 fn scenario_02_restrict_subpath_allows_inside() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
     pre_mutate_check(&system, "comment", Path::new("/r/src/secret/foo.md")).unwrap();
 }
 
-/// `restrict src/secret` blocks targets OUTSIDE the allow-list.
 #[test]
 fn scenario_03_restrict_subpath_blocks_outside() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/secret\n");
@@ -114,14 +104,12 @@ fn scenario_04b_restrict_allows_read_ops_inside_allow_list() {
     }
 }
 
-/// `restrict '*'` covers the whole realm; any path under it is allowed.
 #[test]
 fn scenario_05_wildcard_restrict_allows_anywhere_in_realm() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: '*'\n");
     pre_mutate_check(&system, "write", Path::new("/r/anywhere/file.md")).unwrap();
 }
 
-/// `deny_ops` matches; refusal cites `DeniedOp`.
 #[test]
 fn scenario_06_deny_ops_matches_and_refuses() {
     let system = realm_with("permissions:\n  deny_ops:\n    - path: src/foo\n      ops: [purge]\n");
@@ -129,14 +117,12 @@ fn scenario_06_deny_ops_matches_and_refuses() {
     assert!(denied_op_match(&err, "purge", "/r/.remargin.yaml"));
 }
 
-/// `deny_ops` op mismatch → allowed.
 #[test]
 fn scenario_07_deny_ops_op_mismatch_allows() {
     let system = realm_with("permissions:\n  deny_ops:\n    - path: src/foo\n      ops: [purge]\n");
     pre_mutate_check(&system, "comment", Path::new("/r/src/foo/x.md")).unwrap();
 }
 
-/// `deny_ops` covers descendants.
 #[test]
 fn scenario_08_deny_ops_covers_descendants() {
     let system = realm_with("permissions:\n  deny_ops:\n    - path: src/foo\n      ops: [purge]\n");
@@ -144,8 +130,6 @@ fn scenario_08_deny_ops_covers_descendants() {
     assert!(denied_op_match(&err, "purge", "/r/.remargin.yaml"));
 }
 
-/// Inside allow-list, target is also inside an unlisted dot-folder →
-/// `DotFolderDenied` fires.
 #[test]
 fn scenario_09_dot_folder_under_allow_list_is_denied() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: src/foo\n");
@@ -153,15 +137,13 @@ fn scenario_09_dot_folder_under_allow_list_is_denied() {
     assert!(dot_folder_match(&err, ".git", "/r/.remargin.yaml"));
 }
 
-/// Open mode (no restrict) — dot-folder default-deny does not fire.
+/// With no restrict declared the dot-folder default-deny does not fire.
 #[test]
 fn scenario_09b_dot_folder_outside_restrict_is_allowed() {
     let system = realm_with("identity: alice\n");
     pre_mutate_check(&system, "write", Path::new("/r/.git/foo.md")).unwrap();
 }
 
-/// `restrict '*'` allows everything in realm but dot-folder default-deny
-/// still fires for `.git/` etc.
 #[test]
 fn scenario_09c_wildcard_with_dot_folder_denial() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: '*'\n");
@@ -169,7 +151,6 @@ fn scenario_09c_wildcard_with_dot_folder_denial() {
     assert!(dot_folder_match(&err, ".git", "/r/.remargin.yaml"));
 }
 
-/// `allow_dot_folders` lifts the default-deny for the named folders.
 #[test]
 fn scenario_10_allow_dot_folders_unblocks_named_dot_folder() {
     let system = realm_with(
@@ -178,7 +159,6 @@ fn scenario_10_allow_dot_folders_unblocks_named_dot_folder() {
     pre_mutate_check(&system, "write", Path::new("/r/src/foo/.git/x.md")).unwrap();
 }
 
-/// `.remargin/` is always allowed — no dot-folder default-deny.
 #[test]
 fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
     let resolved = ResolvedPermissions {
@@ -205,11 +185,8 @@ fn scenario_11_remargin_folder_special_cased_by_dot_folder_check() {
     .unwrap();
 }
 
-/// Multi-realm: deepest `trusted_roots` declaration is what cites the
-/// source file when a path is outside its scope but inside the
-/// parent's. Since `trusted_roots` accumulates as an allow-list, the
-/// deepest entry declared at `/r/sub` covers `/r/sub/foo.md`, so the
-/// op succeeds.
+/// `trusted_roots` accumulates as an allow-list, so the entry declared at `/r/sub` covers its
+/// file.
 #[test]
 fn scenario_12_multi_realm_walks_combine() {
     let parent = "permissions:\n  trusted_roots:\n    - path: '*'\n";
@@ -224,8 +201,6 @@ fn scenario_12_multi_realm_walks_combine() {
     pre_mutate_check(&system, "write", Path::new("/r/sub/foo.md")).unwrap();
 }
 
-/// Per-op re-resolution: editing `.remargin.yaml` between calls takes
-/// effect immediately.
 #[test]
 fn scenario_17_no_caching_per_op_reresolves() {
     let with_restrict_outside = "permissions:\n  trusted_roots:\n    - path: only-this-subdir\n";
@@ -239,7 +214,6 @@ fn scenario_17_no_caching_per_op_reresolves() {
             with_restrict_outside.as_bytes(),
         )
         .unwrap();
-    // `/r/file.md` is OUTSIDE the allow-list `/r/only-this-subdir`.
     let err = pre_mutate_check(&initial, "comment", Path::new("/r/file.md")).unwrap_err();
     assert!(outside_allowed_match(&err, "comment", "/r/.remargin.yaml"));
 
@@ -249,11 +223,9 @@ fn scenario_17_no_caching_per_op_reresolves() {
     pre_mutate_check(&updated, "comment", Path::new("/r/file.md")).unwrap();
 }
 
-/// Refusal carries the absolute path of the declaring `.remargin.yaml`.
 #[test]
 fn scenario_19_source_file_in_every_refusal() {
     let system = realm_with("permissions:\n  trusted_roots:\n    - path: src\n");
-    // Outside the allow-list `src` → refused.
     let err = pre_mutate_check(&system, "write", Path::new("/r/other.md")).unwrap_err();
     let chain = format!("{err:#}");
     assert!(
@@ -261,10 +233,6 @@ fn scenario_19_source_file_in_every_refusal() {
         "error did not include source file path: {chain}"
     );
 }
-
-// ---------------------------------------------------------------------
-// Auxiliary unit tests
-// ---------------------------------------------------------------------
 
 #[test]
 fn trusted_root_covers_absolute_exact_and_descendants() {
@@ -362,10 +330,6 @@ fn scenario_13_symlink_target_resolves_to_allow_list_outside() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Op classification (read vs write)
-// ---------------------------------------------------------------------
-
 #[test]
 fn op_kind_classifies_read_ops() {
     for op in READ_OPS {
@@ -410,10 +374,6 @@ fn mutating_ops_constant_matches_op_name_write() {
     assert_eq!(from_const, from_enum);
 }
 
-// ---------------------------------------------------------------------
-// Denial-error wording (pinned)
-// ---------------------------------------------------------------------
-
 #[test]
 fn denial_error_wording_matches_canonical_template() {
     let outside = OpGuardError::OutsideAllowedRoots {
@@ -453,8 +413,6 @@ fn denial_error_wording_matches_canonical_template() {
     assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{target}"));
     assert!(DENY_OPS_DENIAL_TEMPLATE.contains("{source_file}"));
 }
-
-// Per-op exceptions on deny_ops + agent ~/.ssh/** default
 
 fn deny_ops_items(ops: Vec<ResolvedDenyOpsItem>, path: &str) -> Vec<ResolvedDenyOps> {
     vec![ResolvedDenyOps {
@@ -904,8 +862,6 @@ fn exceptions_match_via_identity_id() {
     .unwrap();
 }
 
-// ~/.ssh/** agent default-deny
-
 fn ssh_test_system() -> MemorySystem {
     MemorySystem::new().with_env("HOME", "/h").unwrap()
 }
@@ -982,12 +938,7 @@ fn open_mode_agent_can_read_ssh_no_synthesized_default() {
     .unwrap();
 }
 
-// trusted_roots three-state semantics
-
-/// `permissions:` block with no `trusted_roots:` key behaves like
-/// open mode — reads + writes anywhere are allowed (the implicit
-/// allow-listed root is supplied at the call-site boundary, not by
-/// the per-op guard).
+/// With no `trusted_roots:` key the guard is silent; the call site supplies the implicit root.
 #[test]
 fn rem_djfx_trusted_roots_key_absent_falls_back_to_open() {
     let system = realm_with("permissions:\n  allow_dot_folders: ['.git']\n");
@@ -995,9 +946,6 @@ fn rem_djfx_trusted_roots_key_absent_falls_back_to_open() {
     pre_mutate_check(&system, "get", Path::new("/elsewhere/x.md")).unwrap();
 }
 
-/// `trusted_roots: []` locks the realm — every read and write
-/// outside any inherited parent root is denied with the locker as
-/// the source.
 #[test]
 fn rem_djfx_explicit_empty_trusted_roots_locks_reads_and_writes() {
     let system = realm_with("permissions:\n  trusted_roots: []\n");
@@ -1007,10 +955,7 @@ fn rem_djfx_explicit_empty_trusted_roots_locks_reads_and_writes() {
     assert!(outside_allowed_match(&err_r, "get", "/r/.remargin.yaml"));
 }
 
-/// `trusted_roots: []` at the deepest level locks even though a
-/// parent declared a non-empty list — but inherited entries from
-/// shallower files still survive in the resolved set, so paths
-/// inside them remain reachable.
+/// A deeper `trusted_roots: []` locks, but entries inherited from shallower files stay reachable.
 #[test]
 fn rem_djfx_lock_does_not_drop_inherited_parent_roots() {
     let parent = "permissions:\n  trusted_roots:\n    - path: top\n";
@@ -1022,9 +967,7 @@ fn rem_djfx_lock_does_not_drop_inherited_parent_roots() {
         .unwrap()
         .with_file(Path::new("/r/sub/.remargin.yaml"), child.as_bytes())
         .unwrap();
-    // `/r/top` is still reachable via inheritance.
     pre_mutate_check(&system, "write", Path::new("/r/top/foo.md")).unwrap();
-    // `/r/sub/foo.md` is outside every inherited entry → denied.
     let err = pre_mutate_check(&system, "write", Path::new("/r/sub/foo.md")).unwrap_err();
     assert!(matches!(
         err.downcast_ref::<OpGuardError>(),
@@ -1036,8 +979,6 @@ fn rem_djfx_lock_does_not_drop_inherited_parent_roots() {
     ));
 }
 
-/// `deny_ops` still gates reads even when `trusted_roots` would
-/// have admitted the path.
 #[test]
 fn rem_djfx_deny_ops_wins_for_reads() {
     let system = realm_with(
@@ -1047,8 +988,6 @@ fn rem_djfx_deny_ops_wins_for_reads() {
     assert!(denied_op_match(&err, "get", "/r/.remargin.yaml"));
 }
 
-/// `.remargin/` reads are admitted just like writes — parity
-/// against the dot-folder default-deny.
 #[test]
 fn rem_djfx_remargin_dot_folder_read_parity() {
     let resolved = ResolvedPermissions {

@@ -1,23 +1,20 @@
+//! Tests for path expansion: tilde, environment variables, passthrough and the error cases.
+
 use std::path::PathBuf;
 
 use os_shim::mock::MemorySystem;
 
 use super::{ExpandPathError, expand_path};
 
-/// Helper: seed a mock system with a `HOME` env var and run expansion.
-/// Panics on test setup failure — this is test-only code and a HOME
-/// setter that cannot acquire its lock is a busted mock.
+/// A mock system with `HOME` set.
 fn make_system_with_home(home: &str) -> MemorySystem {
     MemorySystem::new().with_env("HOME", home).unwrap()
 }
 
-/// Helper: run expansion against a fresh mock with `HOME` set.
 fn expand_with_home(home: &str, input: &str) -> Result<PathBuf, ExpandPathError> {
     let system = make_system_with_home(home);
     expand_path(&system, input)
 }
-
-// --- Tilde expansion ------------------------------------------------
 
 #[test]
 fn tilde_alone_expands_to_home() {
@@ -72,8 +69,6 @@ fn double_tilde_is_unsupported() {
         Err(ExpandPathError::UnsupportedUserTilde(String::from("~")))
     );
 }
-
-// --- POSIX env vars -------------------------------------------------
 
 #[test]
 fn dollar_var_alone_expands() {
@@ -157,8 +152,6 @@ fn unclosed_braces_errors() {
     assert!(matches!(result, Err(ExpandPathError::InvalidSyntax(_))));
 }
 
-// --- Mixed tilde + env ----------------------------------------------
-
 #[test]
 fn tilde_plus_env_var_composes() {
     let system = MemorySystem::new()
@@ -175,8 +168,6 @@ fn tilde_mid_path_after_env_is_literal() {
     let result = expand_with_home("/home/alice", "$HOME/~/foo").unwrap();
     assert_eq!(result, PathBuf::from("/home/alice/~/foo"));
 }
-
-// --- Absolute / relative passthrough --------------------------------
 
 #[test]
 fn absolute_path_passthrough() {
@@ -212,8 +203,6 @@ fn empty_string_passthrough() {
     let result = expand_path(&system, "").unwrap();
     assert_eq!(result, PathBuf::new());
 }
-
-// --- Windows-specific -----------------------------------------------
 
 #[cfg(windows)]
 #[test]
@@ -266,11 +255,7 @@ fn windows_posix_dollar_home_also_works() {
     assert_eq!(result, PathBuf::from(r"C:\Users\alice"));
 }
 
-// --- Adapter parity -------------------------------------------------
-
-/// CLI and MCP must agree on expansion for every input. Rather than
-/// standing up two call sites, we verify the core helper behaves
-/// consistently over a table of representative inputs.
+/// The CLI and MCP share this helper, so one table of inputs covers both.
 #[test]
 fn adapter_parity_table() {
     let system = MemorySystem::new()

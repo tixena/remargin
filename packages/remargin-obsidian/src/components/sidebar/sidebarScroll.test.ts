@@ -1,19 +1,16 @@
+/**
+ * Source-text checks on the sidebar's scroll container: the `min-h-0` that lets `flex-1` cap
+ * the ScrollArea, and scrollbar colour classes that resolve to a real palette token.
+ */
+
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// Guards the sidebar's single scroll container against the flexbox
-// `min-height: auto` trap. A flex item will not shrink below its content
-// height unless `min-h-0` is set, so without it `flex-1` never caps the
-// ScrollArea: the Radix root grows to the full comment list, scrollHeight
-// equals clientHeight, no thumb is usable even under `type="always"`, and
-// Obsidian's outer pane scrolls instead of the panel.
-//
-// Asserted against the source text rather than a rendered tree because the
-// bug lives purely in the class list; rendering it would need a real layout
-// engine (jsdom computes no box sizes) to observe the same thing.
+// Asserted against the source text: the bug lives in the class list, and jsdom computes no box
+// sizes to observe it through a rendered tree.
 const here = dirname(fileURLToPath(import.meta.url));
 const shellSource = readFileSync(join(here, "SidebarShell.tsx"), "utf8");
 const scrollAreaSource = readFileSync(join(here, "..", "ui", "scroll-area.tsx"), "utf8");
@@ -54,13 +51,8 @@ describe("sidebar scroll container", () => {
   });
 });
 
-// Radix hides the native scrollbar and paints its own thumb, so a colour
-// class that resolves to nothing leaves the panel scrolling with no visible
-// scrollbar at all. `scroll-area.tsx` came from shadcn/ui, whose palette
-// defines a `border` token; this project's palette names it `bg-border`, so
-// the inherited `bg-border` class silently painted nothing. Tailwind does
-// not error on an unknown colour -- it just emits no rule -- so only a check
-// like this one catches it.
+// Radix paints its own thumb, and Tailwind emits no rule for an unknown colour, so a colour
+// class outside this project's palette leaves the scrollbar invisible without any error.
 
 /** Colour tokens defined in `tailwind.config.ts`, e.g. `bg-border`. */
 function paletteTokens(): Set<string> {
@@ -93,9 +85,7 @@ describe("scroll-area colour classes", () => {
 
   it("names no background colour the palette lacks", () => {
     const palette = paletteTokens();
-    // Scan whole classes inside `className="..."` literals only: matching
-    // raw source text would find `bg-border` inside the legitimate
-    // `bg-bg-border`, and again inside prose in the comments.
+    // Whole classes in `className="..."` only: raw text would find `bg-border` in `bg-bg-border`.
     const unresolved: string[] = [];
     for (const [, literal] of scrollAreaSource.matchAll(/className="([^"]*)"/g)) {
       for (const cls of literal.split(/\s+/)) {

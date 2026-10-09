@@ -1,13 +1,8 @@
-//! Cross-mode realm hazard: caller's CWD-resolved mode dominates over the
-//! doc's realm mode. A caller standing in an open-mode dir who batch-writes
-//! into a strict-mode realm produces unsigned comments inside that realm,
-//! which subsequently fail `remargin verify` from inside the realm.
+//! Cross-mode realm hazard for `remargin batch`.
 //!
-//! Reproduces a real scenario from manual testing: an agent's CWD was
-//! outside the realm under test (different `~/.remargin.yaml` declared
-//! `mode: open`), the doc lived in a strict-mode realm, and `remargin batch`
-//! silently wrote 23 unsigned comments. The realm's `verify` invariant
-//! broke until `remargin sign --all-mine` was run.
+//! A caller standing in an open-mode directory who batch-writes into a strict-mode realm must
+//! not leave unsigned comments in that realm, where `remargin verify` would then fail. Either
+//! the batch escalates to strict (signs) or it refuses with a cross-mode error.
 
 #[cfg(test)]
 #[path = "cli_batch_strict_realm/tests.rs"]

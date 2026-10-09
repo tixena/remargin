@@ -20,31 +20,19 @@ use crate::parser::heading::resolve_heading_path;
 use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
 use crate::reactions::quote_emoji_key;
 
-/// Filenames the writer refuses to modify under any circumstances.
-///
-/// Remargin (particularly agents driving the CLI) must never mutate its
-/// own configuration or participant registry through the document access
-/// layer. Doing so would let a caller silently grant itself registry
-/// access, rotate keys, flip modes, or revoke other participants.
-///
-/// Match is by exact basename only — `backup.remargin.yaml`,
-/// `old.remargin-registry.yaml`, etc. are not affected.
+/// Mutating these through the document layer would let a caller grant itself registry access,
+/// rotate keys or flip modes. Matched by exact basename only.
 pub const FORBIDDEN_TARGETS: &[&str] = &[".remargin.yaml", ".remargin-registry.yaml"];
 
 /// Where to insert a new comment in a document.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum InsertPosition {
-    /// Place after the comment with this ID.
     AfterComment(String),
-    /// Place after the ATX heading addressed by this `>`-separated path.
-    /// The resolver runs at write time against the current document
-    /// state; `--after-heading` is a lookup convenience and the
-    /// comment's stored `line` field still holds the resolved line.
+    /// The ATX heading addressed by this `>`-separated path, resolved at write time.
     AfterHeading(String),
-    /// Place after this line number (1-indexed).
+    /// 1-indexed.
     AfterLine(usize),
-    /// Place at the end of the document.
     Append,
 }
 
@@ -81,11 +69,9 @@ impl InsertPosition {
 /// Collapse an ack list to one entry per identity, preserving the latest
 /// timestamp.
 ///
-/// Remargin's invariant: every write produces a document
-/// whose `ack:` lists are deduped per identity. Parsed docs may carry
-/// legacy duplicates (older bug accumulated multiple acks for the same
-/// author when an auto-ack fired more than once); writes call this helper
-/// at the serialization boundary so the on-disk bytes are always clean.
+/// Every write produces a document whose `ack:` lists are deduped per identity. A parsed doc
+/// may still carry duplicates; writes call this at the serialization boundary so the on-disk
+/// bytes are always clean.
 ///
 /// Semantics: the first occurrence of each author is kept; if a later
 /// duplicate carries a strictly newer `ts`, that newer timestamp is
@@ -168,15 +154,9 @@ pub fn serialize_comment(comment: &Comment) -> Result<String, serde_yaml::Error>
 /// Emit the YAML header (between the two `---` markers) for `comment`.
 ///
 /// `OnDiskComment` is the wire shape; the writer reads its serialized
-/// `Mapping` so every emitted key is the rename'd on-disk name. The
-/// shape for `to`/`attachments`/`remargin_kind` is flow style; ack and
-/// reactions are block style with extra indentation matching the
-/// pre-serde-routing on-disk format.
-//
-// Defensive `if let` chains skip malformed values rather than panic.
-// Every shape mismatch here would mean `OnDiskComment` was changed in
-// a way the emitter does not yet understand — the
-// `every_on_disk_field_emits_a_line` test catches that at build time.
+/// `Mapping` so every emitted key is the rename'd on-disk name. `to`, `attachments` and
+/// `remargin_kind` are flow style; ack and reactions are block style with extra indentation.
+/// A malformed value is skipped, never panicked on.
 fn write_yaml_header(out: &mut String, comment: &Comment) -> Result<(), serde_yaml::Error> {
     let on_disk = OnDiskComment::from(comment);
     let value = serde_yaml::to_value(&on_disk)?;
@@ -269,11 +249,8 @@ pub fn insert_comment(
     comment: Comment,
     position: &InsertPosition,
 ) -> Result<()> {
-    // resolve heading-anchored placement up front and recurse
-    // with the concrete line. Resolution walks the document's current
-    // markdown, so prior batch insertions that shifted the body are
-    // picked up transparently — heading anchors do not need their own
-    // line-shift table.
+    // Heading-anchored placement is resolved up front against the current markdown, so earlier
+    // batch insertions are already reflected and no line-shift table is needed.
     if let InsertPosition::AfterHeading(path) = position {
         let line = resolve_heading_path(doc, path)
             .with_context(|| format!("after_heading: failed to resolve heading path {path:?}"))?;
@@ -284,7 +261,6 @@ pub fn insert_comment(
 
     match position {
         InsertPosition::Append => {
-            // Ensure there's a newline separator before the new comment.
             if let Some(Segment::Body(text)) = doc.segments.last()
                 && !text.ends_with('\n')
             {
@@ -301,7 +277,6 @@ pub fn insert_comment(
                 .position(|seg| matches!(seg, Segment::Comment(cm) if cm.id == *target_id))
                 .with_context(|| format!("comment with id {target_id:?} not found"))?;
 
-            // Insert after the target comment.
             let insert_at = target_idx + 1;
             doc.segments
                 .insert(insert_at, Segment::Body(String::from("\n")));
@@ -311,10 +286,7 @@ pub fn insert_comment(
         }
 
         InsertPosition::AfterHeading(_) => {
-            // Handled above by the early-return rewrite to
-            // [`InsertPosition::AfterLine`]. Falling through here would
-            // mean the rewrite was bypassed, which would be a real bug
-            // — surface it as an error rather than panicking.
+            // Handled by the early rewrite to `AfterLine`; reaching this arm is a bug, surfaced as an error.
             anyhow::bail!("AfterHeading should have been resolved before reaching this match");
         }
         InsertPosition::AfterLine(target_line) => {
@@ -325,7 +297,6 @@ pub fn insert_comment(
             // behaves as append rather than erroring.
             let clamped = (*target_line).min(lines.len());
 
-            // Find the byte offset after the target line.
             let mut byte_offset: usize = 0;
             for line in lines.iter().take(clamped) {
                 byte_offset += line.len() + 1; // +1 for the newline
@@ -334,26 +305,20 @@ pub fn insert_comment(
             // string produces an empty final element whose +1 overshoots.
             byte_offset = byte_offset.min(markdown.len());
 
-            // Rebuild: text before + new comment + text after.
             let before = &markdown[..byte_offset];
             let after = &markdown[byte_offset..];
             let serialized = serialize_comment_from_segment(&segment)?;
 
-            // Invariant: whatever precedes the opening fence must be empty or
-            // end with a newline — otherwise ``` glues onto the last body
-            // line and no longer parses as a code fence. The `Append` branch
-            // has an analogous guard; files with a trailing newline land in
-            // the else arm and output is byte-identical to before this fix.
+            // Whatever precedes the opening fence must be empty or end with a newline, or the fence glues
+            // onto the last body line and stops parsing as a code fence.
             let sep = if !before.is_empty() && !before.ends_with('\n') {
                 "\n"
             } else {
                 ""
             };
 
-            // `serialize_comment()` already ends with `\n` (the closing
-            // fence uses `writeln!`), so adding another `\n` after would
-            // produce a surplus blank line that becomes an artifact when
-            // the comment is later deleted.
+            // `serialize_comment()` already ends with `\n`; another one would leave a surplus blank line
+            // behind when the comment is deleted.
             let new_markdown = format!("{before}{sep}{serialized}{after}");
             let reparsed = parser::parse(&new_markdown)
                 .context("re-parsing after AfterLine insertion failed")?;
@@ -378,16 +343,13 @@ fn serialize_comment_from_segment(segment: &Segment) -> Result<String, serde_yam
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - Comments were unexpectedly added (not in `expected_added`)
-/// - Comments were unexpectedly removed (not in `expected_removed`)
+/// Returns an error if a comment was added or removed that the caller did not expect.
 pub fn verify_preservation(
     before_ids: &HashSet<String>,
     after_ids: &HashSet<String>,
     expected_added: &HashSet<String>,
     expected_removed: &HashSet<String>,
 ) -> Result<()> {
-    // Compute what we expect after_ids to be.
     let mut expected: HashSet<&str> = before_ids.iter().map(String::as_str).collect();
     for removed in expected_removed {
         expected.remove(removed.as_str());
@@ -398,14 +360,12 @@ pub fn verify_preservation(
 
     let actual: HashSet<&str> = after_ids.iter().map(String::as_str).collect();
 
-    // Check for unexpected additions.
     for id in &actual {
         if !expected.contains(id) {
             bail!("unexpected comment appeared: {id:?}");
         }
     }
 
-    // Check for unexpected removals.
     for id in &expected {
         if !actual.contains(id) {
             bail!("comment unexpectedly disappeared: {id:?}");
@@ -425,10 +385,8 @@ pub fn verify_preservation(
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The serialized document cannot be re-parsed
-/// - The preservation invariant is violated
-/// - Writing to disk fails
+/// Returns an error if the serialized document cannot be re-parsed, the preservation
+/// invariant is violated, or writing to disk fails.
 pub fn write_document(
     system: &dyn System,
     path: &Path,
@@ -442,7 +400,6 @@ pub fn write_document(
 
     let markdown = doc.to_markdown()?;
 
-    // Re-parse to verify integrity.
     let reparsed = parser::parse(&markdown).context("re-parsing serialized document failed")?;
     let after_ids: HashSet<String> = reparsed
         .comment_ids()

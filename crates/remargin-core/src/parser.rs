@@ -56,9 +56,6 @@ pub enum AuthorType {
 impl AuthorType {
     /// Canonical lowercase name for the author type, matching the YAML
     /// representation and the CLI / MCP JSON output.
-    ///
-    /// The enum is `#[non_exhaustive]`; if a future variant is added,
-    /// extend the match below with the new variant's canonical name.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -126,11 +123,8 @@ pub struct Comment {
 }
 
 impl Comment {
-    /// `max(ts, edited_at)` — the timestamp consumers should use
-    /// when deciding whether the comment is "newer than X." The
-    /// activity command uses this to surface edited
-    /// comments under their edit time rather than the original
-    /// creation time.
+    /// `max(ts, edited_at)`: the timestamp to use when deciding whether the comment is newer than a
+    /// cutoff, so an edited comment surfaces under its edit time.
     #[must_use]
     pub fn effective_ts(&self) -> DateTime<FixedOffset> {
         match self.edited_at {
@@ -177,7 +171,6 @@ impl Comment {
     }
 }
 
-/// A legacy inline comment block (`user comments` / `agent comments`).
 /// Sequence of body segments and comment blocks in document order. Preserves
 /// the exact structure for round-tripping.
 #[derive(Debug)]
@@ -186,15 +179,15 @@ pub struct ParsedDocument {
     pub segments: Vec<Segment>,
 }
 
+/// One piece of a parsed document: raw markdown or a comment block.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Segment {
-    /// Raw markdown text (not a remargin block).
     Body(String),
-    /// A parsed Remargin comment block (boxed to reduce enum size).
     Comment(Box<Comment>),
 }
 
+/// A fenced code block found in the source, with its byte range, info tag and inner text.
 #[derive(Debug)]
 struct FencedBlock {
     /// Byte offset one past the last character of the closing fence line.
@@ -469,16 +462,12 @@ fn scan_fences(source: &str) -> Vec<FencedBlock> {
     blocks
 }
 
-/// Parses entries like `"eduardo@2026-04-11T12:34:56+00:00"`.
-///
-/// Shape mirrors the on-disk `ack:` entries: author, literal `@`,
-/// RFC3339 timestamp. See [`SandboxEntry`].
+/// Parses entries like `"alice@2026-04-11T12:34:56+00:00"`: author, literal `@`, RFC 3339
+/// timestamp, the same shape as the on-disk `ack:` entries.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - The entry is missing the `@` separator
-/// - The timestamp cannot be parsed as RFC 3339
+/// Returns an error if the entry lacks the `@` separator or the timestamp is not RFC 3339.
 pub fn parse_sandbox_entry(entry: &str) -> Result<SandboxEntry> {
     let at_pos = entry
         .find('@')
@@ -500,7 +489,7 @@ pub fn format_sandbox_entry(entry: &SandboxEntry) -> String {
 /// `SecondsFormat::AutoSi` plus `Z` for zero offset, exactly what chrono's
 /// serde impl emits, so hand-formatted and serde-serialized fields agree
 /// byte for byte. Crypto canonicalization payloads deliberately do NOT use
-/// this — see `crypto.rs`.
+/// this.
 pub(crate) fn rfc3339_z<Tz>(ts: &DateTime<Tz>) -> String
 where
     Tz: TimeZone,
@@ -512,7 +501,6 @@ where
 fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
     let mut parts = inner.splitn(3, "---\n");
 
-    // Skip any text before the first `---` (should be empty or whitespace).
     let _prefix = parts.next().unwrap_or("");
 
     let yaml_str = parts
@@ -521,8 +509,7 @@ fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {
 
     let content_str = parts.next().unwrap_or("");
 
-    // Trim a single trailing newline from content if present (the newline
-    // before the closing fence is structural, not part of the content).
+    // The newline before the closing fence is structural, not part of the content.
     let content = content_str
         .strip_suffix('\n')
         .unwrap_or(content_str)

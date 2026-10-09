@@ -1,10 +1,8 @@
+/** The comment editor's CodeMirror theme. */
+
 import { EditorView } from "@codemirror/view";
 
-/**
- * Obsidian-native theme for the comment editor. Uses CSS custom properties
- * from Obsidian's theme engine so the editor adapts to light/dark mode and
- * user-installed themes automatically.
- */
+/** Built on Obsidian's CSS custom properties, so it follows light/dark mode and user themes. */
 export const commentEditorTheme = EditorView.theme({
   "&": {
     backgroundColor: "var(--background-primary)",

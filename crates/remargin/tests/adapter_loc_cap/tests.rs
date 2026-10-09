@@ -1,3 +1,5 @@
+//! Counts the lines of every CLI and MCP adapter handler and holds each to the cap.
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -5,41 +7,24 @@ use std::path::Path;
 use syn::spanned::Spanned as _;
 use syn::{Item, ItemFn};
 
-/// The two adapter files we hold to this cap. Relative paths from
-/// the crate manifest (resolved below via `CARGO_MANIFEST_DIR`).
+/// Relative to the crate manifest directory.
 const ADAPTER_FILES: &[(&str, &str)] = &[
     ("CLI", "../remargin/src/main.rs"),
     ("MCP", "../remargin-core/src/mcp.rs"),
 ];
 
-/// Prefixes that identify adapter-layer handlers: `cmd_*` in the
-/// CLI, `handle_*` in the MCP tool router.
 const ADAPTER_PREFIXES: &[&str] = &["cmd_", "handle_"];
 
-/// Physical-line cap for adapter-layer helpers. Set loose enough to
-/// keep the noise level low — its purpose is to prevent a new
-/// handler from crossing 2x the current upper-bound on adapter size
-/// without deliberate allowlisting. Tighten once the outliers in
-/// [`allowlist`] drop below.
+/// Physical lines per handler. Loose on purpose: the guard is against a new handler creeping in.
 const LOC_CAP: usize = 50;
 
-/// Named exceptions to the [`LOC_CAP`]. Each entry records a
-/// function that legitimately exceeds the cap today, paired with a
-/// one-line rationale the next reader can verify.
-///
-/// Entries should shrink over time as core helpers absorb more
-/// adapter glue. Any new entry is a signal that either (a) the
-/// function should be refactored, or (b) the cap should move.
+/// Named exceptions to the [`LOC_CAP`]: each function that exceeds it, with a one-line rationale.
 ///
 /// NOTE: values here are *recorded* line counts, not ceilings. If a
 /// function grows beyond the recorded value, the test fails and the
 /// entry must be re-examined (or the function refactored).
 fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
     let mut m = HashMap::new();
-    // CLI: plan dispatcher — consolidated match over all PlanAction
-    // variants, one arm per op. Shrinking further would duplicate
-    // argument unwrapping between cmd_plan and core dispatch; the
-    // match itself is low-density mapping code.
     m.insert(
             "cmd_plan",
             (
@@ -47,20 +32,11 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
                 "consolidated PlanAction -> PlanRequest match (plan restrict resolves anchor + user/project settings inline; plan unprotect builds UnprotectArgs inline; plan mv adds a 5-line src/dst/force unwrap)",
             ),
         );
-    // CLI: sandbox top-level command dispatches across four
-    // SandboxAction variants; each sub-branch is adapter glue
-    // (identity gating, strip_prefix_display, dry-run toggles).
     m.insert(
         "cmd_sandbox",
         (100, "dispatches four SandboxAction variants"),
     );
-    // CLI: MCP-server boot adapter — sets up stdin/stdout streams,
-    // the tracing sub-subscriber, and the MCP loop. Not per-op glue;
-    // configuration-heavy setup code.
     m.insert("cmd_mcp", (100, "MCP server bootstrap + tracing setup"));
-    // CLI: plugin install / uninstall / test — shells out to the
-    // Claude CLI for marketplace + plugin management; each arm is
-    // build-args + output-handling glue, not per-op core logic.
     m.insert(
         "cmd_plugin",
         (
@@ -68,23 +44,14 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "shells out to claude plugins marketplace add / install / uninstall / list",
         ),
     );
-    // CLI: Obsidian install/uninstall — opt-in via the `obsidian`
-    // feature; interactive-ish download + patch flow that is itself
-    // not part of the document API surface.
     m.insert(
         "cmd_obsidian",
         (75, "feature-gated Obsidian vault plugin install"),
     );
-    // CLI: query parses a rich filter DSL out of clap args; most
-    // lines are flag -> QueryOptions field assignments, no logic.
     m.insert(
         "cmd_query",
         (70, "parses rich QueryOptions from clap flags"),
     );
-    // CLI: activity adapter resolves explicit/implicit path, parses
-    // optional --since cutoff, and resolves caller identity through
-    // ResolvedConfig before delegating to activity::gather_activity.
-    // Each step is a 4-6 line block of clap-arg unwrapping.
     m.insert(
         "cmd_activity",
         (
@@ -92,9 +59,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "path/since/identity resolution before delegating to gather_activity",
         ),
     );
-    // CLI: search adapter unwraps eight clap fields (scope enum,
-    // pattern, options) into search::SearchOptions, expands the
-    // path through the System, then formats results.
     m.insert(
         "cmd_search",
         (
@@ -102,9 +66,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "extracts SearchOptions from clap flags + result formatting",
         ),
     );
-    // MCP: plan dispatcher mirrors the CLI shape above; same
-    // rationale. Shrinks when the adapter-layer PlanRequest builder
-    // grows helpers in core (follow-on work).
     m.insert(
         "handle_plan",
         (
@@ -112,11 +73,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "mirrors cmd_plan PlanAction dispatch (plan mv/cp each add a 4-line src/dst/force unwrap)",
         ),
     );
-    // CLI: get adapter splits json+line-numbers from the default
-    // path, both branches handing the resolved config to
-    // document::get. The split is shape-shifting on flag combos, not
-    // logic; pushing it into core would force the adapter to teach
-    // core about JSON output.
     m.insert(
         "cmd_get",
         (
@@ -124,8 +80,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "two-branch get adapter (json+line-numbers vs default) over document::get",
         ),
     );
-    // CLI: get binary adapter dispatches across --out / --json /
-    // raw-bytes shapes over document::read_binary.
     m.insert(
         "cmd_get_binary",
         (
@@ -133,9 +87,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
             "binary get dispatch (--out vs --json vs raw bytes) over read_binary",
         ),
     );
-    // MCP: get handler likewise splits binary vs text response
-    // shaping over document::read_binary / document::get. Shape-only
-    // adapter glue.
     m.insert(
         "handle_get",
         (65, "binary vs text response split over read_binary/get"),
@@ -160,9 +111,7 @@ fn collect_fn_line_counts(src: &str) -> Result<Vec<(String, usize)>, syn::Error>
             if !ADAPTER_PREFIXES.iter().any(|p| name.starts_with(p)) {
                 continue;
             }
-            // Measure from the `fn` keyword through the closing `}`.
-            // Use the block's span for the end so doc-comment
-            // attributes do not inflate the count.
+            // From the `fn` keyword to the closing `}`, so doc comments and attributes do not count.
             let start_line = sig.ident.span().start().line;
             let end_line = block.span().end().line;
             let loc = end_line.saturating_sub(start_line).saturating_add(1);

@@ -1,3 +1,5 @@
+/** Static-markup tests for the section header's structure. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { Mail } from "lucide-react";
@@ -47,7 +49,6 @@ function assertNoNestedButtons(html: string): void {
 describe("SectionHeader — actions render outside the trigger button", () => {
   it("no <button> has a <button> descendant", () => {
     const html = render(true);
-    // Sanity: both the trigger and the ViewToggle buttons rendered.
     const buttonCount = [...html.matchAll(/<button\b/g)].length;
     assert.equal(buttonCount, 3, `expected trigger + 2 toggle buttons, got: ${html}`);
     assertNoNestedButtons(html);

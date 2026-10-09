@@ -1,3 +1,5 @@
+/** Tests for patching the top-level `mode:` field of a YAML document. */
+
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { patchModeInYaml } from "./patchModeInYaml.ts";
@@ -37,8 +39,6 @@ describe("patchModeInYaml", () => {
   it("ignores nested mode keys (leading whitespace)", () => {
     const source = ["outer:", "  mode: nested", "identity: alice"].join("\n") + "\n";
     const patched = patchModeInYaml(source, "strict");
-    // Since no top-level mode exists, a new one is appended and the nested
-    // one is left untouched.
     assert.equal(
       patched,
       ["outer:", "  mode: nested", "identity: alice", "mode: strict", ""].join("\n")
@@ -70,8 +70,7 @@ describe("patchModeInYaml", () => {
   });
 
   it("only rewrites the first top-level mode key", () => {
-    // If somehow the file has two top-level mode keys (invalid YAML but we
-    // should be conservative), only the first one is rewritten.
+    // Two top-level `mode` keys is invalid YAML; only the first is rewritten.
     const source = "mode: open\nmode: strict\n";
     const patched = patchModeInYaml(source, "registered");
     assert.equal(patched, "mode: registered\nmode: strict\n");
