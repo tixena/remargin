@@ -534,10 +534,9 @@ export class RemarginBackend {
   }
 
   /**
-   * Resolve the `claude` binary path. Mirrors [`resolveBinary`] but
-   * keyed off `settings.claudePath`. Empty / bare-name values fall
-   * back to PATH lookup. Public for the same default-runner reason as
-   * [`resolveBinary`].
+   * Resolve the `claude` binary path from `settings.claudePath`; an empty
+   * or bare-name value falls back to PATH lookup. Public so the submit
+   * flow can bake the resolved path into the default runner command.
    */
   resolveClaudeBinary(): string {
     const configured = expandPath(this.settings.claudePath);

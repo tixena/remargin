@@ -18,7 +18,7 @@ pnpm install
 Then:
 
 ```bash
-# Dev server (http://localhost:4321/remargin/)
+# Dev server (http://localhost:4321/)
 pnpm --filter remargin-website dev
 
 # Production build (outputs to dist/)

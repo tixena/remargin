@@ -1,3 +1,5 @@
+# pnpm workspace: both packages, and the dependencies allowed to run build scripts.
+
 packages:
   - "*"
 

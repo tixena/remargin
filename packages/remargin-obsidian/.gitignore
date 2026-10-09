@@ -1,3 +1,5 @@
+# Dependencies, build output and generated sources of the plugin.
+
 node_modules/
 main.js
 *.js.map
