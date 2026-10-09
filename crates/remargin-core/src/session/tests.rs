@@ -364,7 +364,7 @@ fn flag_value<'argv>(argv: &'argv [String], flag: &str) -> Option<&'argv str> {
 }
 
 #[test]
-fn claude_launch_command_uses_task81_invocation() {
+fn claude_launch_command_is_the_interactive_invocation() {
     let system = launch_demo_tree();
     let spec = build_launch_spec(&discovered(&system, "finance")).unwrap();
 

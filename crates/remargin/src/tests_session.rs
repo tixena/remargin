@@ -305,7 +305,7 @@ fn bare_launch_rejects_zellij_now_removed() {
 
 /// Every spec is built before the first multiplexer command, so a missing `goal` spawns nothing.
 #[test]
-fn bare_launch_surfaces_task84_error_before_spawning() {
+fn bare_launch_surfaces_the_missing_goal_error_before_spawning() {
     let system = MemorySystem::new()
         .with_file(
             Path::new("/demo/.remargin.yaml"),
@@ -316,7 +316,7 @@ fn bare_launch_surfaces_task84_error_before_spawning() {
     let err = result.unwrap_err();
     assert!(
         format!("{err:#}").contains("`goal` is required"),
-        "task-84 error surfaces: {err:#}"
+        "missing-goal error surfaces: {err:#}"
     );
     assert!(
         stdout.is_empty(),
@@ -362,7 +362,7 @@ fn print_emits_launch_command_and_seed_lines() {
 }
 
 #[test]
-fn print_surfaces_task84_error_for_missing_goal() {
+fn print_surfaces_the_error_for_missing_goal() {
     let system = MemorySystem::new()
         .with_file(
             Path::new("/demo/.remargin.yaml"),
@@ -373,7 +373,7 @@ fn print_surfaces_task84_error_for_missing_goal() {
     let err = result.unwrap_err();
     assert!(
         format!("{err:#}").contains("`goal` is required"),
-        "task-84 error surfaces: {err:#}"
+        "missing-goal error surfaces: {err:#}"
     );
 }
 
