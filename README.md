@@ -272,9 +272,8 @@ remargin write docs/new-doc.md "# New Doc" --create
 remargin search "TODO" --path docs/
 remargin search "error|warning" --regex --ignore-case
 
-# Find/replace across document BODY text only (never inside comments).
-# Integrity-gated like write: a comment is never corrupted, and a pattern
-# that occurs only inside a comment is a no-op. Works on a file or a folder.
+# Find/replace in document BODY text only: a pattern that occurs only inside a comment is a
+# no-op. Integrity-gated like write. Works on a file or a folder.
 remargin replace "old name" "new name" --path docs/
 remargin replace "id=(\d+)" "id=[$1]" --regex --path docs/design.md
 remargin replace "foo" "bar" --path docs/ --dry-run   # preview; writes nothing
@@ -289,7 +288,6 @@ remargin ack --file docs/design.md abc def
 # Or ack by ID without specifying the file (folder-wide resolution)
 remargin ack abc
 
-# Add an emoji reaction
 remargin react docs/design.md abc "👍"
 ```
 
@@ -556,8 +554,8 @@ Selection rules:
 Reattach any time — one tab per identity:
 
 ```bash
-herdr session attach <name>     # herdr
-tmux attach -t <name>           # tmux
+herdr session attach <name>
+tmux attach -t <name>
 ```
 
 Watching, focusing, and stopping a session are your multiplexer's job. To stop one, kill its tab (or the whole session); it also stops itself when its `/goal` is reached.
@@ -782,11 +780,9 @@ The user-visible denial messages are pinned by `denial_error_wording_matches_can
 ### Commands
 
 ```
-# Add / remove restrictions
 remargin claude restrict <PATH | *> [--also-deny-bash CMD,CMD] [--cli-allowed]
 remargin claude unrestrict <PATH | *>
 
-# Inspect
 remargin permissions show [--json]
 remargin permissions check <PATH> [--why]
 ```
@@ -1058,13 +1054,10 @@ remargin query . --pending-for-me
 # Include broadcast conversations you haven't closed
 remargin query . --pending-for-me --pending-broadcast
 
-# Read the document
 remargin get docs/proposal.md
 
-# See the discussion
 remargin comments docs/proposal.md --pretty
 
-# Add your review comments
 remargin comment docs/proposal.md "Needs error handling." --after-line 42
 
 # Acknowledge comments addressed to you
@@ -1096,7 +1089,6 @@ If you have documents using the older `user comments` / `agent comments` fenced 
 # Preview what would change
 remargin plan migrate docs/old-doc.md
 
-# Convert
 remargin migrate docs/old-doc.md
 ```
 
@@ -1123,7 +1115,6 @@ cargo build
 # Release build (with LTO)
 cargo build --release
 
-# Run tests
 cargo test
 
 # Run clippy (strict — the project enforces deny-all clippy lints)

@@ -24,7 +24,6 @@ pnpm --filter remargin-website dev
 # Production build (outputs to dist/)
 pnpm --filter remargin-website build
 
-# Preview the production build
 pnpm --filter remargin-website preview
 
 # Type-check
