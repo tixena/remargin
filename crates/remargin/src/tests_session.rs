@@ -438,8 +438,7 @@ fn dry_run_identity_filter_applies_to_named_fleet() {
     );
 }
 
-/// Entries come first, an entry's fields win over its folder's config, and the rest show the
-/// default cadence.
+/// Entries come first, entry fields win over the folder's config, the rest show the default.
 #[test]
 fn canonical_dry_run_union_table_orders_entries_first_with_overrides() {
     let system = canonical_workspace();

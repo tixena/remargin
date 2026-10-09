@@ -584,8 +584,7 @@ describe("RemarginWidget", () => {
 });
 
 describe("commentWidgetPlugin shape", () => {
-  // CM6 forbids block decorations from a ViewPlugin ("Block decorations may not be specified via
-  // plugins"), so the extension must be a StateField.
+  // CM6 forbids block decorations from a ViewPlugin, so the extension must be a StateField.
   it("test #14: commentWidgetPlugin returns a CM6 StateField (NOT a ViewPlugin)", () => {
     const plugin = makePlugin(true);
     const field = commentWidgetPlugin(plugin as unknown as RemarginPlugin);

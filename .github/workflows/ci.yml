@@ -1,3 +1,6 @@
+# Runs the quality gate and a dependency audit on pushes and pull requests to master, then reports
+# the outcome to Discord.
+
 name: CI Pipeline
 
 on:
@@ -57,9 +60,8 @@ jobs:
       working-directory: packages
       run: pnpm install --frozen-lockfile
 
-    # The steps below run the equivalent of `just all`
-    # (generate-types -> lint -> build -> test), split into separate steps so
-    # the Discord notification can report which stage failed.
+    # The equivalent of `just all`, split into steps so the Discord notification can report which
+    # stage failed.
 
     - name: Generate types
       id: generate
@@ -98,10 +100,8 @@ jobs:
 
     - name: Send Discord notification
       if: always()
-      # All GitHub context is passed via env (NOT interpolated into the script
-      # body) so attacker-controllable strings like commit messages cannot break
-      # the JSON or inject shell. The payload is assembled with jq, which escapes
-      # everything safely.
+      # GitHub context arrives through env, never interpolated into the script, so a commit message
+      # cannot break the JSON or inject shell; jq assembles and escapes the payload.
       env:
         EVENT_NAME: ${{ github.event_name }}
         REPO: ${{ github.repository }}
@@ -129,7 +129,6 @@ jobs:
           exit 0
         fi
 
-        # Overall status + which step failed
         JOB_STATUS="success"
         FAILED_STEP="None"
         if [[ "$GEN" == "failure" ]]; then JOB_STATUS="failure"; FAILED_STEP="Generate types (just generate-types)";
@@ -143,7 +142,6 @@ jobs:
         STATUS_VALUE=$(printf '🧬 Generate: %s\n🔍 Lint: %s\n🏗️ Build: %s\n🧪 Tests: %s\n🔒 Audit: %s' \
           "$(icon "$GEN")" "$(icon "$CHK")" "$(icon "$BLD")" "$(icon "$TST")" "$(icon "$AUD")")
 
-        # Per-event details: commit message / author / PR link
         if [[ "$EVENT_NAME" == "pull_request" ]]; then
           COMMIT_MSG="$PR_TITLE"
           AUTHOR="${PR_AUTHOR:-$ACTOR}"
@@ -163,7 +161,6 @@ jobs:
           TITLE="❌ CI Pipeline Failed"; DESC="Build or tests failed!"; COLOR=15158332; BTN_STYLE=5; BTN_LABEL="View Failed Build"
         fi
 
-        # Assemble the payload with jq (safe escaping of all dynamic strings)
         PAYLOAD=$(jq -n \
           --arg title "$TITLE" --arg desc "$DESC" --argjson color "$COLOR" \
           --arg repo "$REPO" --arg branch "$BRANCH" --arg author "$AUTHOR" \

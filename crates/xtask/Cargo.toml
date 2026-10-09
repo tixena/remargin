@@ -1,3 +1,5 @@
+# Developer tooling, run as `cargo xtask <subcommand>`; never published.
+
 [package]
 name = "xtask"
 description = "Internal developer tooling for the remargin workspace"
@@ -20,8 +22,6 @@ path = "src/main.rs"
 # Core types drive the TypeScript + Zod schema generation.
 remargin-core.workspace = true
 
-# Subcommand dispatch.
 clap.workspace = true
 
-# Error handling.
 anyhow.workspace = true

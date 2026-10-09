@@ -1,3 +1,5 @@
+# Builds the website and deploys it to GitHub Pages when its sources change on master.
+
 name: Deploy site
 
 on:

@@ -112,8 +112,7 @@ fn restrict_args(path: &str) -> RestrictArgs {
     RestrictArgs::new(String::from(path), Vec::new(), false)
 }
 
-/// Both entries are `WouldBeRemoved`, each tracked file has rules to remove, and nothing
-/// conflicts.
+/// Both entries are `WouldBeRemoved`, each tracked file has rules to remove, nothing conflicts.
 #[test]
 fn clean_projection_after_restrict() {
     let (system, realm, project, user) = fresh_realm();

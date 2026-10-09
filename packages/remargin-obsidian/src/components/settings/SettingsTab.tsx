@@ -78,9 +78,8 @@ function PathInput({
       });
       if (picked) onChange(picked);
     } catch {
-      // Swallow dialog-level errors: the user can always type the path by
-      // hand, and surfacing a stack trace in the settings UI would be more
-      // alarming than useful.
+      // Dialog errors are swallowed: the user can still type the path, and a stack trace in the
+      // settings UI would alarm more than help.
     }
   }, [dialogTitle, filters, onChange, value]);
 

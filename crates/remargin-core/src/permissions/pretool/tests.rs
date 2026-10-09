@@ -188,8 +188,7 @@ fn bash_per_realm_extra_verb_triggers_check() {
     assert!(matches!(pretool(&system, &stdin), PretoolOutcome::Deny(_)));
 }
 
-/// With no `path` the search root is the event cwd, an ancestor of the trusted root, so it
-/// denies.
+/// With no `path` the search root is the event cwd, an ancestor of the trusted root: denied.
 #[test]
 fn glob_no_path_resolves_cwd_ancestor_of_root_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("secret"))]);
@@ -1112,8 +1111,7 @@ fn allow_dot_folders_allowed_dot_folder_bash_silent_allows() {
     assert_eq!(pretool(&system, &stdin), PretoolOutcome::SilentAllow);
 }
 
-/// The hook restricts a dot-folder path exactly when `hook_covered_rules` emits no re-allow
-/// for it.
+/// The hook restricts a dot-folder path exactly when `hook_covered_rules` emits no re-allow.
 #[test]
 fn allow_dot_folders_hook_matches_hook_covered_reallow() {
     use std::path::PathBuf;
@@ -1497,8 +1495,7 @@ fn bash_ancestor_deny_message_names_realm_no_false_redirect() {
     );
 }
 
-/// A glob below the realm root still resolves the realm; a glob at the root level is out of
-/// scope.
+/// A glob below the realm root still resolves the realm; one at the root level is out of scope.
 #[test]
 fn bash_glob_below_root_ancestor_word_denies() {
     let system = mock_with(&[("/r/.remargin.yaml", &restrict_yaml("a/secret"))]);

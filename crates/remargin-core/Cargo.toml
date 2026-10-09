@@ -1,3 +1,5 @@
+# The core library crate: every operation the CLI and the MCP server expose lives here.
+
 [package]
 name = "remargin-core"
 description = "Core library for the remargin document access layer and review protocol"
@@ -23,7 +25,6 @@ jsonschema = []
 session = ["dep:humantime"]
 
 [dependencies]
-# YAML / JSON processing
 serde.workspace = true
 serde_yaml.workspace = true
 serde_json.workspace = true
@@ -41,30 +42,25 @@ rand_core.workspace = true
 getrandom.workspace = true
 base64.workspace = true
 
-# Error handling
 anyhow.workspace = true
 thiserror.workspace = true
 
-# File system
 tempfile.workspace = true
 ignore.workspace = true
 
 # Image sampling / cropping for binary attachments
 image.workspace = true
 
-# Date/time
 chrono.workspace = true
 
 # Random ID generation
 rand.workspace = true
 
-# Regex (text search)
 regex.workspace = true
 
 # Human-friendly duration parsing for the `session:` block (session feature).
 humantime = { workspace = true, optional = true }
 
-# Logging
 tracing.workspace = true
 
 [dev-dependencies]
