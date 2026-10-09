@@ -354,7 +354,7 @@ fn cli_unprotect_strict_unrestricted_path_fails() {
 
 /// Unrestrict scrubs every deny rule an older `restrict` projected, through the matching sidecar.
 #[test]
-fn legacy_unprotect_scrubs_pre_rem_egp9_projected_rules() {
+fn unrestrict_scrubs_rules_projected_by_an_older_restrict() {
     let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_unprotect");
     let legacy_settings_body =
         fs::read_to_string(fixture_dir.join("legacy-settings.json")).unwrap();

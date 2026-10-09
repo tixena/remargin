@@ -4836,7 +4836,7 @@ fn identity_create_keeps_identity_fields() {
 }
 
 #[test]
-fn mcp_query_pending_includes_broadcast_rem_4j91() {
+fn mcp_query_pending_includes_broadcast() {
     let base = Path::new("/docs");
     let system = MemorySystem::new()
         .with_file(Path::new("/docs/a.md"), DOC_FOUR_SHAPES.as_bytes())

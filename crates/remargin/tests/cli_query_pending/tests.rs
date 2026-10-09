@@ -100,7 +100,7 @@ fn setup_realm(config: &str) -> (TempDir, PathBuf) {
 }
 
 #[test]
-fn pending_flag_includes_broadcast_rem_4j91() {
+fn pending_flag_includes_broadcast() {
     let (_tmp, cwd) = setup_realm(ALICE_CONFIG);
     seed(&cwd, "broadcast.md", BROADCAST_DOC);
 
