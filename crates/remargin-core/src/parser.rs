@@ -422,7 +422,7 @@ fn scan_fences(source: &str) -> Vec<FencedBlock> {
                             end: idx,
                             inner: source[content_start..close_line_start].to_owned(),
                             start: line_start,
-                            tag: tag.clone(),
+                            tag,
                         });
                         found_close = true;
                         break;

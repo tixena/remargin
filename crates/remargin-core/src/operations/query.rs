@@ -630,10 +630,7 @@ fn comment_matches_filters(cm: &parser::Comment, filter: &QueryFilter) -> bool {
     {
         return false;
     }
-    if !matches_kind_filter(cm.kinds(), &filter.remargin_kind) {
-        return false;
-    }
-    true
+    matches_kind_filter(cm.kinds(), &filter.remargin_kind)
 }
 
 /// Collect unique recipients who still have unacked comments, sorted.

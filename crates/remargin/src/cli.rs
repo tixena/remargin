@@ -1769,7 +1769,7 @@ pub struct PlanCommentArgs {
 #[derive(clap::Args)]
 pub struct PlanCpArgs {
     /// Destination path.
-    #[arg(index = 1, index = 2)]
+    #[arg(index = 2)]
     pub dst: String,
     /// Project the `--force` semantics.
     #[arg(long)]
@@ -1777,7 +1777,7 @@ pub struct PlanCpArgs {
     #[command(flatten)]
     pub output_args: OutputArgs,
     /// Source path.
-    #[arg(index = 2, index = 1)]
+    #[arg(index = 1)]
     pub src: String,
 }
 

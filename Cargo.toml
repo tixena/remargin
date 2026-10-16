@@ -61,9 +61,6 @@ tracing-subscriber = { version = ">=0.3.23", features = ["env-filter", "fmt"] }
 # to fetch plugin assets from GitHub releases at install time.
 ureq = { version = "3.4.2" }
 
-# Skill embedding
-include_dir = "0.7"
-
 # Test-only crates
 assert_cmd = "2"
 predicates = "3"
