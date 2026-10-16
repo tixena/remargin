@@ -873,7 +873,7 @@ pub fn verify_and_refresh(
 
     let report = verify_document(&doc, &escalated);
 
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
     let before_fm = frontmatter::parse_existing_frontmatter(&doc, fm.toml_enabled)
         .context("snapshotting current frontmatter")?;
     frontmatter::ensure_frontmatter_with(&mut doc, &escalated, fm)?;

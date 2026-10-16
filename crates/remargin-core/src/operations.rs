@@ -93,7 +93,7 @@ pub fn create_comment(
     // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let identity = cfg
         .identity
@@ -317,7 +317,7 @@ pub fn ack_comments(
         }
     }
 
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
     frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
 
     let empty: HashSet<String> = HashSet::new();
@@ -363,7 +363,7 @@ pub fn react(
 
     let _reaction_checksum = compute_reaction_checksum(&cm.reactions);
 
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
     frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
 
     let empty: HashSet<String> = HashSet::new();
@@ -455,7 +455,7 @@ pub fn delete_comments(
         }
     }
 
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
     frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
 
     let expected_added: HashSet<String> = HashSet::new();
@@ -549,7 +549,7 @@ pub fn edit_comment(
         }
     }
 
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
     frontmatter::ensure_frontmatter_with(&mut doc, cfg, fm)?;
 
     let empty: HashSet<String> = HashSet::new();

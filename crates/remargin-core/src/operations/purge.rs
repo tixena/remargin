@@ -171,7 +171,7 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
 
     clean_frontmatter(
         &mut doc,
-        frontmatter_settings_for_doc(system, path)?.toml_enabled,
+        frontmatter_settings_for_doc(system, path).toml_enabled,
     );
 
     let doc_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -236,11 +236,12 @@ fn clean_frontmatter(doc: &mut parser::ParsedDocument, toml_enabled: bool) {
         let remaining = lines[closer_idx + 1..].join("\n");
         let cleaned = remaining.trim_start_matches('\n');
         doc.segments[0] = Segment::Body(String::from(cleaned));
-    } else {
-        let block = frontmatter::render_block(fence, &Value::Mapping(mapping));
+    } else if let Some(block) = frontmatter::render_block(fence, &Value::Mapping(mapping)) {
         let after_fm = lines[closer_idx + 1..].join("\n");
         let new_body = format!("{block}{after_fm}");
         doc.segments[0] = Segment::Body(new_body);
+    } else {
+        // Unserialisable TOML: keep the block the file has.
     }
 }
 

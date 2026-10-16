@@ -682,14 +682,6 @@ struct WalkedIdentityFields {
     source_path: Option<PathBuf>,
 }
 
-/// The two frontmatter keys of one `.remargin.yaml`, read on their own so a bad value in them
-/// fails only the frontmatter walk.
-#[derive(Deserialize)]
-struct FrontmatterKeys {
-    frontmatter: Option<Fence>,
-    toml_frontmatter: Option<bool>,
-}
-
 /// The directory whose `.remargin.yaml` governs a read of `target`: a
 /// directory anchors at itself, a file at its parent, so a nested realm
 /// inside a listed directory is honored.
@@ -820,51 +812,48 @@ pub fn resolve_mode(system: &dyn System, start_dir: &Path) -> Result<ResolvedMod
 /// Resolve `toml_frontmatter` and `frontmatter` by walking up from `start_dir`.
 ///
 /// Each comes from the nearest `.remargin.yaml` that sets it, the way [`resolve_mode`] finds
-/// `mode`. Identity plays no part, so a manual identity sees the realm's settings too.
+/// `mode`, and the walk stops after the realm root (the first file that declares `mode:`).
+/// Identity plays no part, so a manual identity sees the realm's settings too.
 ///
-/// # Errors
-///
-/// Returns an error if a `.remargin.yaml` on the walk cannot be read or parsed.
-pub fn resolve_frontmatter_settings(
-    system: &dyn System,
-    start_dir: &Path,
-) -> Result<FrontmatterSettings> {
+/// Never fails: an unreadable file, invalid YAML, or a key of the wrong type counts as "not
+/// set", so these settings can never fail an op that worked without them.
+#[must_use]
+pub fn resolve_frontmatter_settings(system: &dyn System, start_dir: &Path) -> FrontmatterSettings {
     let mut toml_enabled: Option<bool> = None;
     let mut new_file: Option<Fence> = None;
     let mut current = start_dir.to_path_buf();
     while toml_enabled.is_none() || new_file.is_none() {
         let candidate = current.join(CONFIG_FILENAME);
-        if system
+        let parsed = system
             .exists(&candidate)
-            .with_context(|| format!("checking existence of {}", candidate.display()))?
-        {
-            let content = system
-                .read_to_string(&candidate)
-                .with_context(|| format!("reading {}", candidate.display()))?;
-            let keys: FrontmatterKeys = serde_yaml::from_str(&content)
-                .with_context(|| format!("parsing {}", candidate.display()))?;
-            toml_enabled = toml_enabled.or(keys.toml_frontmatter);
-            new_file = new_file.or(keys.frontmatter);
+            .unwrap_or(false)
+            .then(|| system.read_to_string(&candidate).ok())
+            .flatten()
+            .and_then(|content| serde_yaml::from_str::<serde_yaml::Value>(&content).ok());
+        if let Some(value) = parsed {
+            toml_enabled = toml_enabled.or_else(|| value.get("toml_frontmatter")?.as_bool());
+            new_file = new_file.or_else(|| match value.get("frontmatter")?.as_str()? {
+                "toml" => Some(Fence::Toml),
+                "yaml" => Some(Fence::Yaml),
+                _ => None,
+            });
+            if value.get("mode").is_some() {
+                break;
+            }
         }
         if !current.pop() {
             break;
         }
     }
-    Ok(FrontmatterSettings {
+    FrontmatterSettings {
         new_file: new_file.unwrap_or_default(),
         toml_enabled: toml_enabled.unwrap_or(false),
-    })
+    }
 }
 
 /// [`resolve_frontmatter_settings`] for the realm `doc_path` lives in.
-///
-/// # Errors
-///
-/// As [`resolve_frontmatter_settings`].
-pub fn frontmatter_settings_for_doc(
-    system: &dyn System,
-    doc_path: &Path,
-) -> Result<FrontmatterSettings> {
+#[must_use]
+pub fn frontmatter_settings_for_doc(system: &dyn System, doc_path: &Path) -> FrontmatterSettings {
     resolve_frontmatter_settings(system, doc_path.parent().unwrap_or(doc_path))
 }
 

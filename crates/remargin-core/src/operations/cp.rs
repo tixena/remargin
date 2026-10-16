@@ -307,7 +307,7 @@ fn write_markdown_copy(
 ) -> Result<()> {
     let mut doc = parser::parse(content)
         .with_context(|| format!("parsing markdown content for {}", dst.display()))?;
-    let fm = frontmatter_settings_for_doc(system, dst)?;
+    let fm = frontmatter_settings_for_doc(system, dst);
     frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
     frontmatter::write_sandbox_entries_with(&mut doc, &[], fm)?;
 

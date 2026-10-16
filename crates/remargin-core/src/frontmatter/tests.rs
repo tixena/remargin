@@ -1249,3 +1249,61 @@ fn links_and_lint_read_toml_frontmatter() {
     assert_eq!(fence_of("---\na: 1\n---\n", true), Some(Fence::Yaml));
     assert_eq!(fence_of("# Plain\n", true), None);
 }
+
+#[test]
+fn unreadable_frontmatter_settings_leave_every_file_as_before() {
+    // No `mode:` here, so the walk carries on to the ancestor's wrong-typed keys too. An ancestor
+    // that is not YAML at all already fails `ResolvedConfig::resolve` (its permissions walk).
+    let noisy_config =
+        "identity: golden\ntype: agent\nfrontmatter: obsidian\ntoml_frontmatter: \"yes\"\n";
+    let fixtures = [
+        (
+            include_str!("tests/golden/yaml_note.md"),
+            include_str!("tests/golden/yaml_note.comment.after.md"),
+            include_str!("tests/golden/yaml_note.write.after.md"),
+        ),
+        (
+            include_str!("tests/golden/plain_note.md"),
+            include_str!("tests/golden/plain_note.comment.after.md"),
+            include_str!("tests/golden/plain_note.write.after.md"),
+        ),
+        (
+            TOML_NOTE,
+            include_str!("tests/golden/toml_note.comment.after.md"),
+            include_str!("tests/golden/toml_note.write.after.md"),
+        ),
+    ];
+    let noisy_vault = |fixture: &str| {
+        vault(noisy_config, "note.md", fixture)
+            .with_file(
+                Path::new("/.remargin.yaml"),
+                b"toml_frontmatter: 7\nfrontmatter: [toml]\n",
+            )
+            .unwrap()
+    };
+    for (fixture, comment_golden, write_golden) in fixtures {
+        let commented = {
+            let system = noisy_vault(fixture);
+            comment(&system, &resolve(&system), "note.md", "golden")
+        };
+        assert_eq!(mask_timestamps(&commented), comment_golden);
+
+        let written = {
+            let system = noisy_vault(fixture);
+            rewrite(&system, &resolve(&system), "note.md")
+        };
+        assert_eq!(mask_timestamps(&written), write_golden);
+    }
+}
+
+#[test]
+fn the_opt_in_above_the_realm_root_is_ignored() {
+    let system = vault(GOLDEN_CONFIG, "note.md", TOML_NOTE)
+        .with_file(Path::new("/.remargin.yaml"), b"toml_frontmatter: true\n")
+        .unwrap();
+    let after = comment(&system, &resolve(&system), "note.md", "golden");
+    assert_eq!(
+        mask_timestamps(&after),
+        include_str!("tests/golden/toml_note.comment.after.md")
+    );
+}

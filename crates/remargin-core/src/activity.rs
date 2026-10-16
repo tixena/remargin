@@ -419,8 +419,7 @@ fn gather_one_file(
     let body = system.read_to_string(file_path).ok()?;
     let doc = parser::parse(&body).ok()?;
     let comments = doc.comments();
-    let toml_enabled =
-        frontmatter_settings_for_doc(system, file_path).is_ok_and(|fm| fm.toml_enabled);
+    let toml_enabled = frontmatter_settings_for_doc(system, file_path).toml_enabled;
     let sandbox_entries = read_sandbox_entries_with(&doc, toml_enabled).unwrap_or_default();
 
     let cutoff = since.map_or_else(

@@ -335,9 +335,7 @@ pub fn scan_all_entries(system: &dyn System, root: &Path) -> Result<Vec<SandboxS
         let Ok(doc) = parser::parse(&content) else {
             continue;
         };
-        // Best-effort like the read above: an unreadable realm setting just means no `+++`.
-        let toml_enabled =
-            frontmatter_settings_for_doc(system, &entry.path).is_ok_and(|fm| fm.toml_enabled);
+        let toml_enabled = frontmatter_settings_for_doc(system, &entry.path).toml_enabled;
         let Ok(sandbox) = frontmatter::read_sandbox_entries_with(&doc, toml_enabled) else {
             continue;
         };
@@ -366,7 +364,7 @@ fn add_one(
     pre_mutate_check_for_caller(system, "sandbox-add", file, &config.caller_info())?;
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
-    let fm = frontmatter_settings_for_doc(system, file)?;
+    let fm = frontmatter_settings_for_doc(system, file);
     let mut entries = frontmatter::read_sandbox_entries_with(&doc, fm.toml_enabled)?;
     let added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
     if added {
@@ -394,7 +392,7 @@ fn remove_one(
     pre_mutate_check_for_caller(system, "sandbox-remove", file, &config.caller_info())?;
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
-    let fm = frontmatter_settings_for_doc(system, file)?;
+    let fm = frontmatter_settings_for_doc(system, file);
     let mut entries = frontmatter::read_sandbox_entries_with(&doc, fm.toml_enabled)?;
     let removed = frontmatter::remove_sandbox_entry_for(&mut entries, identity);
     if removed {

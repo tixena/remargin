@@ -280,7 +280,7 @@ pub fn project_ack(
         .context("identity is required to ack")?;
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let now = Utc::now().fixed_offset();
 
@@ -347,7 +347,7 @@ pub fn project_batch(
     let author_type = config.author_type.clone().unwrap_or(AuthorType::Human);
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     linter::lint_or_fail_with(&after.to_markdown()?, fm.toml_enabled)
         .context("document has structural issues before write")?;
@@ -496,7 +496,7 @@ pub fn project_comment(
     comment_style::gate(params.content, &author_type)?;
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let markdown_before = after.to_markdown()?;
     linter::lint_or_fail_with(&markdown_before, fm.toml_enabled)
@@ -623,7 +623,7 @@ pub fn project_delete(
         .or_else(|| caller.identity_id.clone())
         .unwrap_or_default();
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     if let Err(delete_denial) = pre_mutate_check_for_caller(system, "delete", path, &caller) {
         let all_own = comment_ids
@@ -673,7 +673,7 @@ pub fn project_edit(
     new_content: &str,
 ) -> Result<(ParsedDocument, ParsedDocument)> {
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let cm = find_comment_mut(&mut after, comment_id)
         .with_context(|| format!("comment {comment_id:?} not found"))?;
@@ -721,7 +721,7 @@ pub fn project_purge(
     _config: &ResolvedConfig,
 ) -> Result<(ParsedDocument, ParsedDocument)> {
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     after.segments.retain(|seg| matches!(seg, Segment::Body(_)));
 
@@ -756,7 +756,7 @@ pub fn project_react(
         .context("identity is required to react")?;
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let cm = find_comment_mut(&mut after, comment_id)
         .with_context(|| format!("comment {comment_id:?} not found"))?;
@@ -823,7 +823,7 @@ pub fn project_sign(
     };
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     // Validate `--ids` before touching any comment. Already-signed ids are skipped here whatever
     // `--repair-checksum` says, and surface under `comments.preserved`.
@@ -875,7 +875,7 @@ pub fn project_sandbox_add(
     ensure_markdown_path(path)?;
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let now = Utc::now().fixed_offset();
     let mut entries = frontmatter::read_sandbox_entries_with(&after, fm.toml_enabled)?;
@@ -916,7 +916,7 @@ pub fn project_sandbox_remove(
     ensure_markdown_path(path)?;
 
     let (before, mut after) = parse_file_twice(system, path)?;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let mut entries = frontmatter::read_sandbox_entries_with(&after, fm.toml_enabled)?;
     let removed = frontmatter::remove_sandbox_entry_for(&mut entries, identity);
@@ -964,11 +964,12 @@ fn clean_remargin_frontmatter(doc: &mut ParsedDocument, toml_enabled: bool) {
         let remaining = lines[closer_idx + 1..].join("\n");
         let cleaned = remaining.trim_start_matches('\n');
         doc.segments[0] = Segment::Body(String::from(cleaned));
-    } else {
-        let block = frontmatter::render_block(fence, &Value::Mapping(mapping));
+    } else if let Some(block) = frontmatter::render_block(fence, &Value::Mapping(mapping)) {
         let after_fm = lines[closer_idx + 1..].join("\n");
         let new_body = format!("{block}{after_fm}");
         doc.segments[0] = Segment::Body(new_body);
+    } else {
+        // Unserialisable TOML: keep the block the file has.
     }
 }
 

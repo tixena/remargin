@@ -208,7 +208,7 @@ pub fn batch_comment(
     // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
-    let fm = frontmatter_settings_for_doc(system, path)?;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let identity = cfg
         .identity

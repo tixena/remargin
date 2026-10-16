@@ -181,9 +181,7 @@ pub fn lint_doc(
     let walk_anchor = doc_path
         .parent()
         .map_or_else(|| doc_path.to_path_buf(), Path::to_path_buf);
-    // A realm that fails to resolve is reported by the permissions pass, so it only means no `+++`.
-    let toml_enabled =
-        resolve_frontmatter_settings(system, &walk_anchor).is_ok_and(|fm| fm.toml_enabled);
+    let toml_enabled = resolve_frontmatter_settings(system, &walk_anchor).toml_enabled;
     let structural = lint_with(&content, toml_enabled)?;
     let permissions = lint_permissions_in_parents(system, &walk_anchor)?;
 

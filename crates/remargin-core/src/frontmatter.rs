@@ -22,7 +22,6 @@ mod tests;
 
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, FixedOffset, Utc};
-use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
@@ -33,8 +32,7 @@ use crate::parser::{self, Comment, ParsedDocument, SandboxEntry, Segment, rfc333
 pub const SANDBOX_KEY: &str = "sandbox";
 
 /// The fence that opens a frontmatter block.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Fence {
     /// `+++` TOML, recognised only with `toml_frontmatter: true`.
@@ -119,16 +117,24 @@ pub(crate) fn parse_block(fence: Fence, text: &str) -> Result<Value> {
 }
 
 /// The full block for `value`, delimiters and trailing newline included.
-pub(crate) fn render_block(fence: Fence, value: &Value) -> String {
+///
+/// `None` when the TOML cannot be serialised; callers then keep the block the file already has
+/// rather than write an empty one. The YAML path is always `Some`, exactly as before.
+pub(crate) fn render_block(fence: Fence, value: &Value) -> Option<String> {
     let inner = match fence {
         Fence::Yaml => serde_yaml::to_string(value).unwrap_or_default(),
-        Fence::Toml => match yaml_to_toml(value) {
-            Some(toml::Value::Table(table)) => toml::to_string(&table).unwrap_or_default(),
-            _ => String::new(),
+        Fence::Toml => match yaml_to_toml(value)? {
+            toml::Value::Table(table) => toml::to_string(&table).ok()?,
+            toml::Value::String(_)
+            | toml::Value::Integer(_)
+            | toml::Value::Float(_)
+            | toml::Value::Boolean(_)
+            | toml::Value::Datetime(_)
+            | toml::Value::Array(_) => return None,
         },
     };
     let delimiter = fence.delimiter();
-    format!("{delimiter}\n{inner}{delimiter}\n")
+    Some(format!("{delimiter}\n{inner}{delimiter}\n"))
 }
 
 fn toml_table_to_mapping(table: toml::Table) -> Mapping {
@@ -749,13 +755,16 @@ fn write_frontmatter_to_doc(doc: &mut ParsedDocument, yaml: &Value, settings: Fr
     if let Some(Segment::Body(text)) = doc.segments.first()
         && let Some(fence) = fence_of(text, settings.toml_enabled)
     {
-        let remaining = strip_frontmatter(text, fence);
-        let new_body = format!("{}{remaining}", render_block(fence, yaml));
-        doc.segments[0] = Segment::Body(new_body);
+        if let Some(block) = render_block(fence, yaml) {
+            let remaining = strip_frontmatter(text, fence);
+            doc.segments[0] = Segment::Body(format!("{block}{remaining}"));
+        }
         return;
     }
 
-    let frontmatter_block = render_block(settings.new_file_fence(), yaml);
+    let Some(frontmatter_block) = render_block(settings.new_file_fence(), yaml) else {
+        return;
+    };
     match doc.segments.first() {
         Some(Segment::Body(text)) => {
             let new_body = format!("{frontmatter_block}\n{text}");

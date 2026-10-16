@@ -602,7 +602,7 @@ pub fn get_with_links(
     // Blank comment blocks, keeping their newlines, so reference lines stay aligned with the window.
     let scan_text = mask_comment_blocks(&window);
     let doc_dir = resolved.parent().unwrap_or_else(|| Path::new("."));
-    let toml_enabled = frontmatter_settings_for_doc(system, &resolved)?.toml_enabled;
+    let toml_enabled = frontmatter_settings_for_doc(system, &resolved).toml_enabled;
     let outbound = links::extract_links_with(&scan_text, doc_dir, system, toml_enabled);
 
     let content = if line_numbers {
@@ -945,9 +945,7 @@ pub fn write(
     config: &ResolvedConfig,
     opts: WriteOptions,
 ) -> Result<WriteOutcome> {
-    // Advice never fails a write, so an unreadable realm setting just means no `+++` skip.
-    let toml_enabled =
-        frontmatter_settings_for_doc(system, &base_dir.join(path)).is_ok_and(|fm| fm.toml_enabled);
+    let toml_enabled = frontmatter_settings_for_doc(system, &base_dir.join(path)).toml_enabled;
     let warnings = review_payload(path, content, &opts, toml_enabled);
     let mut outcome = write_content(system, base_dir, path, content, config, opts)?;
     // Attached after the write lands, so advice never rides on a failure
@@ -1107,7 +1105,7 @@ pub(crate) fn commit_markdown(
 
     // The doc's realm is the source of truth for the author gate.
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
-    let fm = frontmatter_settings_for_doc(system, resolved)?;
+    let fm = frontmatter_settings_for_doc(system, resolved);
 
     let old_author = if create {
         None
@@ -1171,7 +1169,7 @@ pub(crate) fn project_commit_markdown(
     let new_doc = parser::parse(content_to_parse).context("parsing incoming content")?;
 
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
-    let fm = frontmatter_settings_for_doc(system, resolved)?;
+    let fm = frontmatter_settings_for_doc(system, resolved);
 
     let old_author = if let Ok(old_content) = system.read_to_string(resolved) {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
@@ -1283,7 +1281,7 @@ pub fn project_write(
     let new_doc = parser::parse(&content_to_parse).context("parsing incoming content")?;
 
     let realm_cfg = config.escalate_for_doc(system, &resolved)?;
-    let fm = frontmatter_settings_for_doc(system, &resolved)?;
+    let fm = frontmatter_settings_for_doc(system, &resolved);
 
     let (before, old_author) = if opts.create {
         (
@@ -1521,7 +1519,7 @@ pub fn metadata(
 
     let fm = extract_frontmatter(
         &content,
-        frontmatter_settings_for_doc(system, &resolved)?.toml_enabled,
+        frontmatter_settings_for_doc(system, &resolved).toml_enabled,
     );
 
     Ok(DocumentMetadata {
