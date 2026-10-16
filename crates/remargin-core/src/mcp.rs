@@ -1616,6 +1616,48 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
 /// Dispatch a tool call to the appropriate library function.
 ///
 /// Returns the tool result as a JSON value (either success or error content).
+/// The argument naming the file whose hash a tool's result carries, for the tools that read or
+/// rewrite exactly one file and do not build the hash themselves (`write` and `metadata` do).
+/// `rm` is absent on purpose: its file is gone. The multi-file tools (`sandbox_*`) are too.
+fn hashed_file_arg(tool: &str) -> Option<&'static str> {
+    match tool {
+        "ack" | "batch" | "comment" | "comments" | "delete" | "edit" | "purge" | "react"
+        | "reply" | "sign" => Some("file"),
+        "get" | "replace" => Some("path"),
+        "cp" | "mv" => Some("dst"),
+        _ => None,
+    }
+}
+
+/// Add `hash` to a tool result that names one file; a pre-built MCP content array (binary `get`)
+/// is left alone.
+fn attach_file_hash(
+    system: &dyn System,
+    base_dir: &Path,
+    tool: &str,
+    params: &Map<String, Value>,
+    result: &mut Value,
+) {
+    let Some(file) = hashed_file_arg(tool).and_then(|arg| params.get(arg)?.as_str()) else {
+        return;
+    };
+    if !result.get("content").is_some_and(Value::is_array) {
+        responses::attach_hash(result, system, &base_dir.join(file));
+    }
+}
+
+/// Wrap a handler's value as an MCP result. A pre-built MCP response (a "content" array) is passed
+/// through.
+fn tool_success(tool_name: &str, value: Value) -> Value {
+    if value.get("content").is_some_and(Value::is_array) {
+        value
+    } else if tool_emits_minified(tool_name) {
+        tool_result_success_min(&value)
+    } else {
+        tool_result_success(&value)
+    }
+}
+
 fn dispatch_tool(
     system: &dyn System,
     base_dir: &Path,
@@ -1709,15 +1751,9 @@ fn dispatch_tool(
     };
 
     match result {
-        Ok(value) => {
-            // A handler that returns a pre-built MCP response (a "content" array) is passed through.
-            if value.get("content").is_some_and(Value::is_array) {
-                value
-            } else if tool_emits_minified(tool_name) {
-                tool_result_success_min(&value)
-            } else {
-                tool_result_success(&value)
-            }
+        Ok(mut value) => {
+            attach_file_hash(system, base_dir, tool_name, p, &mut value);
+            tool_success(tool_name, value)
         }
         Err(err) => err
             .downcast_ref::<operations::verify::SubsetGateFailure>()

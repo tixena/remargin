@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use crate::config::identity::IdentityFlags;
 use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
+use crate::crypto::file_hash;
 use crate::mcp;
 use crate::operations::batch::OP_FIELDS;
 use crate::operations::projections::PLAN_OP_FIELDS;
@@ -7478,4 +7479,107 @@ fn comment_refuses_the_storage_name_remargin_kind() {
         tool_error_text(&response).starts_with("comment: unknown argument `remargin_kind`"),
         "{response}"
     );
+}
+
+fn disk_hash(system: &MemorySystem, path: &str) -> String {
+    file_hash(system, Path::new(path)).unwrap()
+}
+
+#[test]
+fn get_and_metadata_return_the_file_hash() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+    let want = disk_hash(&system, "/docs/doc.md");
+    assert!(want.starts_with("sha256:"));
+
+    for (tool, args) in [
+        ("get", json!({ "path": "doc.md" })),
+        (
+            "get",
+            json!({ "path": "doc.md", "start_line": 1_i32, "end_line": 2_i32 }),
+        ),
+        ("get", json!({ "path": "doc.md", "line_numbers": true })),
+        ("metadata", json!({ "path": "doc.md" })),
+        ("comments", json!({ "file": "doc.md" })),
+    ] {
+        let result = extract_tool_text(&call(&system, base, &config, &tool_request(tool, &args)));
+        assert_eq!(result["hash"], want, "{tool} {args}");
+    }
+}
+
+#[test]
+fn a_write_returns_the_hash_of_what_it_stored() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+    let config = test_config();
+
+    // The stored bytes gain frontmatter, so they differ from the payload.
+    let args = json!({ "path": "doc.md", "content": "# New\n\nBody.\n" });
+    let result = extract_tool_text(&call(&system, base, &config, &tool_request("write", &args)));
+    assert_eq!(result["noop"], false);
+    assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"));
+
+    // A noop write still reports the (unchanged) on-disk hash.
+    let create = json!({ "path": "n.txt", "content": "raw bytes\n", "raw": true, "create": true });
+    let first = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("write", &create),
+    ));
+    let resend = json!({ "path": "n.txt", "content": "raw bytes\n", "raw": true });
+    let again = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("write", &resend),
+    ));
+    assert_eq!(again["noop"], true);
+    assert_eq!(again["hash"], first["hash"]);
+    assert_eq!(again["hash"], disk_hash(&system, "/docs/n.txt"));
+
+    // rm deletes the file: no hash.
+    let rm = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("rm", &json!({ "path": "doc.md" })),
+    ));
+    assert!(rm.get("hash").is_none());
+}
+
+#[test]
+fn a_comment_returns_the_new_file_hash() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nSome body text.\n");
+    let config = test_config();
+    let before = disk_hash(&system, "/docs/doc.md");
+
+    let new_comment = json!({ "file": "doc.md", "content": "A comment." });
+    let created = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("comment", &new_comment),
+    ));
+    let id = created["id"].as_str().unwrap().to_owned();
+    assert_ne!(created["hash"], before);
+    assert_eq!(created["hash"], disk_hash(&system, "/docs/doc.md"));
+
+    for (tool, args) in [
+        ("ack", json!({ "file": "doc.md", "ids": [id] })),
+        (
+            "react",
+            json!({ "file": "doc.md", "id": id, "emoji": "+1" }),
+        ),
+        (
+            "edit",
+            json!({ "file": "doc.md", "id": id, "content": "Edited." }),
+        ),
+        ("delete", json!({ "file": "doc.md", "ids": [id] })),
+    ] {
+        let result = extract_tool_text(&call(&system, base, &config, &tool_request(tool, &args)));
+        assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"), "{tool}");
+    }
 }
