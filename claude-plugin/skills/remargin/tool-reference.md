@@ -62,7 +62,7 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 
 ## Version-checked writes
 
-Reads and writes return `hash` (`sha256:<hex>` of the file's bytes). Pass it back as `if_hash` (CLI: `--if-hash <hash>`) on a write to refuse the op if the file changed in between. Nothing is written on a mismatch. Without `if_hash`, nothing changes.
+Reads and writes return `hash` (`sha256:<hex>` of the file's bytes). Pass it back as `if_hash` (CLI: `--if-hash <hash>`) on a write to refuse the op if the file changed in between. Nothing is written on a mismatch. Without `if_hash`, nothing changes. The check runs before the write and is not atomic across processes; a server that serialises writers (the hub) makes it atomic.
 
 | Tool | File checked |
 |------|--------------|

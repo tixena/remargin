@@ -1670,11 +1670,19 @@ fn if_hash_target(tool: &str, params: &Map<String, Value>) -> Result<String> {
         "rm" => text("path"),
         "sandbox_add" | "sandbox_remove" => match params.get("files").and_then(Value::as_array) {
             Some(files) if files.len() == 1 => files[0].as_str().map(String::from),
-            _ => bail!("{tool}: if_hash needs exactly one entry in `files`"),
+            _ => bail!(
+                "{tool}: {} (exactly one entry in `files`)",
+                operations::if_hash::NEEDS_ONE_FILE
+            ),
         },
         _ => hashed_file_arg(tool).and_then(text),
     };
-    target.with_context(|| format!("{tool}: if_hash needs a file argument"))
+    target.with_context(|| {
+        format!(
+            "{tool}: {} (give the file argument)",
+            operations::if_hash::NEEDS_ONE_FILE
+        )
+    })
 }
 
 /// Enforce `if_hash` when the call carries one; no `if_hash`, no change.

@@ -1143,7 +1143,15 @@ fn check_cli_if_hash(cmd: &Commands, system: &dyn System, cwd: &Path) -> Result<
     let Some(expected) = args.if_hash() else {
         return Ok(());
     };
-    let guarded = file.context("--if-hash needs exactly one file (give --file, or one path)")?;
+    let guarded = file.with_context(|| {
+        format!(
+            "--if-hash: {} (give --file, or one path)",
+            operations::if_hash::NEEDS_ONE_FILE
+        )
+    })?;
+    if guarded == "-" {
+        bail!("--if-hash cannot guard stdin");
+    }
     let path = expand_cli_path(system, guarded)?;
     operations::if_hash::check_if_hash(system, cwd, &path, expected)
 }

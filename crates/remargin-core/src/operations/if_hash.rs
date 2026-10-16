@@ -1,5 +1,8 @@
 //! Optional `if_hash` guard for write ops: refuse the op when the file changed since the caller
 //! read it.
+//!
+//! The check runs before the write and is not atomic across processes; a server that serialises
+//! writers (the hub) makes it atomic.
 
 use std::path::{Path, PathBuf};
 
@@ -9,6 +12,9 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::crypto::file_hash;
+
+/// Error text when `if_hash` cannot name exactly one file; shared so the MCP and CLI cannot drift.
+pub const NEEDS_ONE_FILE: &str = "if_hash needs a single file";
 
 /// The file's current hash differs from the caller's `if_hash`. Nothing was written.
 ///
@@ -63,10 +69,7 @@ pub fn check_if_hash(
 ) -> Result<()> {
     let full = base_dir.join(path);
     if system.is_dir(&full).unwrap_or(false) {
-        bail!(
-            "if_hash needs a single file, but {} is a folder",
-            full.display()
-        );
+        bail!("{NEEDS_ONE_FILE}, but {} is a folder", full.display());
     }
     let current_hash = file_hash(system, &full)?;
     if current_hash == expected {

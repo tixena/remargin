@@ -63,3 +63,12 @@ fn the_cli_accepts_if_hash_on_write_commands_only() {
     let plain = run(&root, &["write", "a.md", "# Again\n"]);
     assert!(plain.status.success(), "{plain:?}");
 }
+
+#[test]
+fn if_hash_cannot_guard_stdin() {
+    let (_guard, root) = vault();
+    fs::write(root.join("-"), "decoy\n").unwrap();
+    let out = run(&root, &["ack", "x", "--file", "-", "--if-hash", STALE]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--if-hash cannot guard stdin"));
+}

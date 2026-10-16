@@ -20,6 +20,7 @@ use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto::file_hash;
 use crate::mcp;
+use crate::operations;
 use crate::operations::batch::OP_FIELDS;
 use crate::operations::projections::PLAN_OP_FIELDS;
 use crate::operations::{CreateCommentParams, create_comment};
@@ -7704,4 +7705,67 @@ fn every_if_hash_tool_declares_it_in_its_schema() {
         assert_eq!(declared, mcp::IF_HASH_TOOLS.contains(&name), "{name}");
     }
     assert_eq!(mcp::IF_HASH_TOOLS.len(), 16);
+}
+
+#[test]
+fn every_if_hash_tool_refuses_a_stale_hash_on_the_documented_file() {
+    let base = Path::new("/docs");
+    let system = MemorySystem::new()
+        .with_file(Path::new("/docs/doc.md"), b"# Old\n")
+        .unwrap()
+        .with_file(Path::new("/docs/other.md"), b"# Other\n")
+        .unwrap();
+    let config = test_config();
+    let current = disk_hash(&system, "/docs/doc.md");
+
+    for tool in mcp::IF_HASH_TOOLS {
+        let args = match *tool {
+            "batch" => json!({ "file": "doc.md", "operations": [], "if_hash": STALE }),
+            "cp" | "mv" => json!({ "src": "doc.md", "dst": "other.md", "if_hash": STALE }),
+            "replace" => {
+                json!({ "path": "doc.md", "pattern": "a", "replacement": "b", "if_hash": STALE })
+            }
+            "rm" => json!({ "path": "doc.md", "if_hash": STALE }),
+            "write" => json!({ "path": "doc.md", "content": "x", "if_hash": STALE }),
+            "sandbox_add" | "sandbox_remove" => json!({ "files": ["doc.md"], "if_hash": STALE }),
+            "comment" | "reply" => json!({ "file": "doc.md", "content": "x", "if_hash": STALE }),
+            "ack" | "delete" | "sign" => {
+                json!({ "file": "doc.md", "ids": ["x"], "if_hash": STALE })
+            }
+            "edit" => json!({ "file": "doc.md", "id": "x", "content": "x", "if_hash": STALE }),
+            "react" => json!({ "file": "doc.md", "id": "x", "emoji": "+1", "if_hash": STALE }),
+            _ => json!({ "file": "doc.md", "if_hash": STALE }),
+        };
+        let resp = call(&system, base, &config, &tool_request(tool, &args));
+        assert!(
+            is_tool_error(&resp) && tool_error_text(&resp).starts_with('{'),
+            "{tool}: {resp}"
+        );
+        let err = stale_error(&resp);
+        assert_eq!(err["error_kind"], "stale_version", "{tool}: {err}");
+        assert_eq!(err["current_hash"], current, "{tool}");
+        assert_eq!(err["path"], "/docs/doc.md", "{tool}");
+    }
+
+    // mv/cp check `src`, not `dst`: a current hash for src passes even though dst differs.
+    let other = disk_hash(&system, "/docs/other.md");
+    let cp_args = json!({ "src": "doc.md", "dst": "copy.md", "if_hash": other });
+    let err = stale_error(&call(&system, base, &config, &tool_request("cp", &cp_args)));
+    assert_eq!(err["error_kind"], "stale_version");
+
+    // ack without `file`, and sandbox with several files: the documented error.
+    for (tool, bad_args) in [
+        ("ack", json!({ "ids": ["x"], "if_hash": STALE })),
+        (
+            "sandbox_add",
+            json!({ "files": ["doc.md", "other.md"], "if_hash": STALE }),
+        ),
+    ] {
+        let response = call(&system, base, &config, &tool_request(tool, &bad_args));
+        assert!(is_tool_error(&response), "{tool}");
+        assert!(
+            tool_error_text(&response).contains(operations::if_hash::NEEDS_ONE_FILE),
+            "{tool}: {response}"
+        );
+    }
 }
