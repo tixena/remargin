@@ -2442,7 +2442,10 @@ pub fn cmd_sandbox(
         .context("identity is required for sandbox operations")?;
 
     match action {
-        SandboxAction::Add { files } => {
+        SandboxAction::Add {
+            files,
+            if_hash_args: _,
+        } => {
             let absolute: Vec<PathBuf> = files
                 .iter()
                 .map(|f| {
@@ -2462,7 +2465,10 @@ pub fn cmd_sandbox(
                 bail!("sandbox add: {} file(s) failed", result.failed.len())
             }
         }
-        SandboxAction::Remove { files } => {
+        SandboxAction::Remove {
+            files,
+            if_hash_args: _,
+        } => {
             let absolute: Vec<PathBuf> = files
                 .iter()
                 .map(|f| {

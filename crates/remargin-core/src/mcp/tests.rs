@@ -161,6 +161,8 @@ Body for P11.
 Body for P3.
 ";
 
+const STALE: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
         assets_dir: String::from("assets"),
@@ -653,7 +655,7 @@ fn batch_op_schema_declares_every_comment_field() {
         .as_object()
         .unwrap()
         .keys()
-        .filter(|key| key.as_str() != "file")
+        .filter(|key| !["file", "if_hash"].contains(&key.as_str()))
         .filter(|key| !op_fields.contains_key(*key))
         .collect();
     assert!(missing.is_empty(), "batch ops lack {missing:?}");
@@ -7582,4 +7584,124 @@ fn a_comment_returns_the_new_file_hash() {
         let result = extract_tool_text(&call(&system, base, &config, &tool_request(tool, &args)));
         assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"), "{tool}");
     }
+}
+
+fn stale_error(response: &Value) -> Value {
+    assert!(is_tool_error(response), "{response}");
+    serde_json::from_str(&tool_error_text(response)).unwrap()
+}
+
+#[test]
+fn a_write_with_a_stale_if_hash_is_refused_and_leaves_the_file() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+    let config = test_config();
+    let before = disk_hash(&system, "/docs/doc.md");
+
+    let args = json!({ "path": "doc.md", "content": "# New\n", "if_hash": STALE });
+    let err = stale_error(&call(&system, base, &config, &tool_request("write", &args)));
+    assert_eq!(err["error_kind"], "stale_version");
+    assert_eq!(err["expected"], STALE);
+    assert_eq!(err["current_hash"], before);
+    assert_eq!(err["path"], "/docs/doc.md");
+    assert_eq!(disk_hash(&system, "/docs/doc.md"), before);
+}
+
+#[test]
+fn a_comment_with_a_stale_if_hash_is_refused() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody.\n");
+    let before = disk_hash(&system, "/docs/doc.md");
+
+    let args = json!({ "file": "doc.md", "content": "Hi.", "if_hash": STALE });
+    let err = stale_error(&call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("comment", &args),
+    ));
+    assert_eq!(err["error_kind"], "stale_version");
+    assert_eq!(disk_hash(&system, "/docs/doc.md"), before);
+}
+
+#[test]
+fn an_rm_with_a_stale_if_hash_is_refused() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+
+    let args = json!({ "path": "doc.md", "if_hash": STALE });
+    let err = stale_error(&call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("rm", &args),
+    ));
+    assert_eq!(err["error_kind"], "stale_version");
+    assert!(system.exists(Path::new("/docs/doc.md")).unwrap());
+}
+
+#[test]
+fn the_current_if_hash_lets_the_write_through() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+    let config = test_config();
+    let current = disk_hash(&system, "/docs/doc.md");
+
+    let args = json!({ "path": "doc.md", "content": "# New\n", "if_hash": current });
+    let result = extract_tool_text(&call(&system, base, &config, &tool_request("write", &args)));
+    assert_eq!(result["noop"], false);
+    assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"));
+    assert_ne!(result["hash"], current);
+}
+
+#[test]
+fn no_if_hash_behaves_exactly_as_before() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+
+    let args = json!({ "path": "doc.md", "content": "# New\n" });
+    let result = extract_tool_text(&call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("write", &args),
+    ));
+    assert_eq!(result["noop"], false);
+}
+
+#[test]
+fn if_hash_on_a_folder_replace_is_an_error() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "sub/doc.md", "# Old\n");
+
+    let args = json!({ "path": "sub", "pattern": "Old", "replacement": "New", "if_hash": STALE });
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("replace", &args),
+    );
+    assert!(is_tool_error(&response));
+    assert!(
+        tool_error_text(&response).contains("if_hash needs a single file"),
+        "{response}"
+    );
+}
+
+#[test]
+fn every_if_hash_tool_declares_it_in_its_schema() {
+    let base = Path::new("/docs");
+    let response = call(
+        &MemorySystem::new(),
+        base,
+        &test_config(),
+        &json!({ "jsonrpc": "2.0", "id": 1_i32, "method": "tools/list" }),
+    );
+    let tools = response["result"]["tools"].as_array().unwrap();
+    for tool in tools {
+        let name = tool["name"].as_str().unwrap();
+        let declared = tool["inputSchema"]["properties"].get("if_hash").is_some();
+        assert_eq!(declared, mcp::IF_HASH_TOOLS.contains(&name), "{name}");
+    }
+    assert_eq!(mcp::IF_HASH_TOOLS.len(), 16);
 }
