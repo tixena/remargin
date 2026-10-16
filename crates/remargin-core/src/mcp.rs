@@ -1613,17 +1613,14 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
     )
 }
 
-/// Dispatch a tool call to the appropriate library function.
-///
-/// Returns the tool result as a JSON value (either success or error content).
 /// The argument naming the file whose hash a tool's result carries, for the tools that read or
-/// rewrite exactly one file and do not build the hash themselves (`write` and `metadata` do).
+/// rewrite exactly one file.
 /// `rm` is absent on purpose: its file is gone. The multi-file tools (`sandbox_*`) are too.
 fn hashed_file_arg(tool: &str) -> Option<&'static str> {
     match tool {
         "ack" | "batch" | "comment" | "comments" | "delete" | "edit" | "purge" | "react"
         | "reply" | "sign" => Some("file"),
-        "get" | "replace" => Some("path"),
+        "get" | "metadata" | "replace" | "write" => Some("path"),
         "cp" | "mv" => Some("dst"),
         _ => None,
     }
@@ -1658,6 +1655,9 @@ fn tool_success(tool_name: &str, value: Value) -> Value {
     }
 }
 
+/// Dispatch a tool call to the appropriate library function.
+///
+/// Returns the tool result as a JSON value (either success or error content).
 fn dispatch_tool(
     system: &dyn System,
     base_dir: &Path,

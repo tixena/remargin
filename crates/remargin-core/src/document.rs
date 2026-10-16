@@ -193,7 +193,7 @@ impl RmOutcome {
 #[non_exhaustive]
 pub struct WriteOutcome {
     /// Hash of the bytes on disk after the write (see [`crypto::file_hash`]); `None` only when
-    /// they could not be read back. Never fails the write.
+    /// they could not be read back. Never fails the write. `to_json` leaves it out.
     pub hash: Option<String>,
     pub noop: bool,
     /// Advisory only: the write has already succeeded when these are attached.
@@ -223,9 +223,6 @@ impl WriteOutcome {
             "raw": raw || binary,
             "noop": self.noop,
         });
-        if let Some(hash) = self.hash {
-            payload["hash"] = json!(hash);
-        }
         if !self.warnings.is_empty() {
             payload["warnings"] = advice::to_json(&self.warnings);
         }
@@ -248,8 +245,9 @@ pub struct DocumentMetadata {
     pub binary: bool,
     pub comment_count: Option<usize>,
     pub frontmatter: Option<serde_yaml::Value>,
-    /// `sha256:<hex>` of the file's raw bytes (see [`crypto::file_hash`]).
-    pub hash: String,
+    /// `sha256:<hex>` of the file's raw bytes (see [`crypto::file_hash`]); `None` only when they
+    /// could not be read. `to_json` leaves it out: the JSON layers add it (text output is unchanged).
+    pub hash: Option<String>,
     pub last_activity: Option<String>,
     pub line_count: Option<usize>,
     /// Extension-based MIME type. Unknown extensions → `application/octet-stream`.
@@ -268,7 +266,6 @@ impl DocumentMetadata {
     pub fn to_json(&self, include_frontmatter: bool) -> Value {
         let mut map = serde_json::Map::new();
         map.insert("binary".into(), json!(self.binary));
-        map.insert("hash".into(), json!(self.hash));
         map.insert("mime".into(), json!(self.mime));
         map.insert("path".into(), json!(self.path));
         map.insert("size_bytes".into(), json!(self.size_bytes));
@@ -1483,7 +1480,7 @@ pub fn metadata(
         .metadata(&resolved)
         .with_context(|| format!("stat {}", resolved.display()))?
         .len;
-    let hash = crypto::file_hash(system, &resolved)?;
+    let hash = crypto::file_hash(system, &resolved).ok();
 
     if binary {
         return Ok(DocumentMetadata {

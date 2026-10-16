@@ -83,3 +83,46 @@ fn json_writes_return_the_hash_of_what_they_stored() {
     // rm deletes the file: no hash.
     assert!(run_json(&root, &["rm", "c.md"]).get("hash").is_none());
 }
+
+#[test]
+fn text_output_of_metadata_and_write_has_no_hash_line() {
+    let (_guard, root) = vault();
+    for args in [
+        &["metadata", "a.md"][..],
+        &["write", "a.md", "# New\n\nBody.\n"],
+    ] {
+        let out = Command::cargo_bin("remargin")
+            .unwrap()
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {out:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(!text.contains("hash"), "{args:?}: {text}");
+    }
+}
+
+#[test]
+fn ack_by_id_hashes_only_when_every_id_is_in_one_file() {
+    let (_guard, root) = vault();
+    fs::write(root.join("b.md"), "# B\n").unwrap();
+    let a = run_json(&root, &["comment", "a.md", "one"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let a2 = run_json(&root, &["comment", "a.md", "two"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let b = run_json(&root, &["comment", "b.md", "three"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let same = run_json(&root, &["ack", &a, &a2]);
+    assert_eq!(same["hash"], on_disk(&root, "a.md"));
+
+    let split = run_json(&root, &["ack", &a, &b, "--remove"]);
+    assert!(split.get("hash").is_none(), "{split}");
+}

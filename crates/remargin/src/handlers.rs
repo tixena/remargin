@@ -1692,7 +1692,11 @@ pub fn cmd_metadata(
     let target = target_buf.as_path();
     let meta = document::metadata(system, cwd, target, config)?;
 
-    print_output(sinks, json_mode, &meta.to_json(false))
+    let mut payload = meta.to_json(false);
+    if json_mode {
+        responses::attach_hash(&mut payload, system, &meta.path);
+    }
+    print_output(sinks, json_mode, &payload)
 }
 
 /// Route a `plan` subcommand to its projection and print the report.
@@ -3459,9 +3463,10 @@ pub fn cmd_write(
         );
     }
 
-    print_output(
-        sinks,
-        wp.json_mode,
-        &outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw),
-    )
+    let stored_hash = outcome.hash.clone();
+    let mut payload = outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw);
+    if let (true, Some(stored), Some(map)) = (wp.json_mode, stored_hash, payload.as_object_mut()) {
+        map.insert(String::from("hash"), Value::String(stored));
+    }
+    print_output(sinks, wp.json_mode, &payload)
 }
