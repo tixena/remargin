@@ -1,7 +1,8 @@
 //! Checksum (SHA-256) and signature (Ed25519) operations.
 
 mod hex;
-mod ssh;
+/// Ed25519 OpenSSH key loading, `sshsig` signing and verification, for callers outside this crate.
+pub mod ssh;
 
 #[cfg(test)]
 mod tests;
