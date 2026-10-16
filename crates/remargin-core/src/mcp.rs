@@ -59,7 +59,7 @@ const SERVER_NAME: &str = "remargin";
 
 /// In UTF-8 bytes of emitted tool-result text: a proxy for the client's token limit, seeded low
 /// so a fresh session rarely spills. The cap only ratchets down from here.
-const DEFAULT_SPILL_CAP: usize = 40_000;
+pub const DEFAULT_SPILL_CAP: usize = 40_000;
 
 /// One part in this many of the cap is held back for the response envelope and indentation.
 const SPILL_MARGIN_DIVISOR: usize = 10;
