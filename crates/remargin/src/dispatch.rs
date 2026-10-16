@@ -1123,7 +1123,8 @@ fn if_hash_target(cmd: &Commands) -> Option<(&IfHashArgs, Option<&str>)> {
                     files,
                     if_hash_args,
                 },
-            ..
+            identity_args: _,
+            output_args: _,
         }) => (
             if_hash_args,
             match files.as_slice() {
