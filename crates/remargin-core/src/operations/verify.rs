@@ -44,7 +44,7 @@ use thiserror::Error;
 use tixschema::model_schema;
 
 use crate::config::registry::{Registry, RegistryParticipantStatus};
-use crate::config::{Mode, ResolvedConfig};
+use crate::config::{Mode, ResolvedConfig, frontmatter_settings_for_doc};
 use crate::crypto;
 use crate::document::allowlist;
 use crate::frontmatter;
@@ -873,10 +873,11 @@ pub fn verify_and_refresh(
 
     let report = verify_document(&doc, &escalated);
 
-    let before_fm = frontmatter::parse_existing_frontmatter(&doc)
+    let fm = frontmatter_settings_for_doc(system, path);
+    let before_fm = frontmatter::parse_existing_frontmatter(&doc, fm.toml_enabled)
         .context("snapshotting current frontmatter")?;
-    frontmatter::ensure_frontmatter(&mut doc, &escalated)?;
-    let after_fm = frontmatter::parse_existing_frontmatter(&doc)
+    frontmatter::ensure_frontmatter_with(&mut doc, &escalated, fm)?;
+    let after_fm = frontmatter::parse_existing_frontmatter(&doc, fm.toml_enabled)
         .context("snapshotting recomputed frontmatter")?;
 
     if before_fm != after_fm {

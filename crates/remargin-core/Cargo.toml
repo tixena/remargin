@@ -27,6 +27,7 @@ session = ["dep:humantime"]
 [dependencies]
 serde.workspace = true
 serde_yaml.workspace = true
+toml.workspace = true
 serde_json.workspace = true
 
 # System abstraction (filesystem, env, temp dirs)
