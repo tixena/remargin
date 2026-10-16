@@ -21,8 +21,9 @@ use os_shim::{System, WalkEntry};
 use serde_json::{Value as JsonValue, json};
 use serde_yaml::Value;
 
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, frontmatter_settings_for_doc};
 use crate::document::allowlist;
+use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Segment};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
@@ -168,7 +169,10 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
 
     collapse_body_segments(&mut doc.segments);
 
-    clean_frontmatter(&mut doc);
+    clean_frontmatter(
+        &mut doc,
+        frontmatter_settings_for_doc(system, path).toml_enabled,
+    );
 
     let doc_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut attachments_cleaned: usize = 0;
@@ -197,35 +201,22 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
 }
 
 /// Clean up remargin_* fields from frontmatter.
-fn clean_frontmatter(doc: &mut parser::ParsedDocument) {
+fn clean_frontmatter(doc: &mut parser::ParsedDocument, toml_enabled: bool) {
     let Some(Segment::Body(text)) = doc.segments.first() else {
         return;
     };
 
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with("---") {
-        return;
-    }
-
-    let lines: Vec<&str> = text.split('\n').collect();
-    let opener = lines.iter().position(|line| line.trim() == "---");
-    let Some(opener_idx) = opener else {
+    let Some(fence) = frontmatter::fence_of(text, toml_enabled) else {
         return;
     };
 
-    let closer = lines
-        .iter()
-        .enumerate()
-        .skip(opener_idx + 1)
-        .find(|(_, line)| line.trim() == "---")
-        .map(|(i, _)| i);
-
-    let Some(closer_idx) = closer else {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let Some((opener_idx, closer_idx)) = frontmatter::block_bounds(&lines, fence) else {
         return;
     };
 
     let yaml_str: String = lines[opener_idx + 1..closer_idx].join("\n");
-    let parsed: Result<Value, _> = serde_yaml::from_str(&yaml_str);
+    let parsed: Result<Value, _> = frontmatter::parse_block(fence, &yaml_str);
     let Ok(Value::Mapping(mut mapping)) = parsed else {
         return;
     };
@@ -245,12 +236,12 @@ fn clean_frontmatter(doc: &mut parser::ParsedDocument) {
         let remaining = lines[closer_idx + 1..].join("\n");
         let cleaned = remaining.trim_start_matches('\n');
         doc.segments[0] = Segment::Body(String::from(cleaned));
-    } else {
-        let new_yaml = serde_yaml::to_string(&Value::Mapping(mapping)).unwrap_or_default();
-        let before_fm = "";
+    } else if let Some(block) = frontmatter::render_block(fence, &Value::Mapping(mapping)) {
         let after_fm = lines[closer_idx + 1..].join("\n");
-        let new_body = format!("{before_fm}---\n{new_yaml}---\n{after_fm}");
+        let new_body = format!("{block}{after_fm}");
         doc.segments[0] = Segment::Body(new_body);
+    } else {
+        // Unserialisable TOML: keep the block the file has.
     }
 }
 

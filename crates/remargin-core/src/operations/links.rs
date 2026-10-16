@@ -122,18 +122,35 @@ pub fn to_compact_rows(links: Vec<Link>) -> Vec<CompactLinkRow> {
 /// when the caller passed a slice, whole-file-relative otherwise.
 #[must_use]
 pub fn extract_links(body: &str, base_dir: &Path, system: &dyn System) -> Vec<Link> {
+    extract_links_with(body, base_dir, system, false)
+}
+
+/// [`extract_links`] with `+++` TOML frontmatter read too when `toml_enabled`, for the
+/// document's relations and for each target's title.
+#[must_use]
+pub fn extract_links_with(
+    body: &str,
+    base_dir: &Path,
+    system: &dyn System,
+    toml_enabled: bool,
+) -> Vec<Link> {
     let mut raw: Vec<RawLink> = Vec::new();
 
-    collect_frontmatter_links(body, &mut raw);
+    collect_frontmatter_links(body, toml_enabled, &mut raw);
     collect_body_links(body, &mut raw);
 
-    dedup_and_resolve(raw, base_dir, system)
+    dedup_and_resolve(raw, base_dir, system, toml_enabled)
 }
 
 /// Collapse raw occurrences into deduped [`Link`] entries, resolving
 /// internal targets same-folder only and dropping broken internal links
 /// and every external URL (local links only).
-fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) -> Vec<Link> {
+fn dedup_and_resolve(
+    raw: Vec<RawLink>,
+    base_dir: &Path,
+    system: &dyn System,
+    toml_enabled: bool,
+) -> Vec<Link> {
     let mut out: Vec<Link> = Vec::new();
 
     for occurrence in raw {
@@ -152,10 +169,11 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
             continue;
         }
 
-        let (path, title) = match resolve_internal(&occurrence.target, base_dir, system) {
-            None => continue,
-            Some(resolved) => (Some(resolved.path), resolved.title),
-        };
+        let (path, title) =
+            match resolve_internal(&occurrence.target, base_dir, system, toml_enabled) {
+                None => continue,
+                Some(resolved) => (Some(resolved.path), resolved.title),
+            };
 
         out.push(Link {
             alias: occurrence.alias,
@@ -179,7 +197,12 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
 /// taken verbatim. An anchor-only target (`#heading`, empty after the
 /// strip) is a self-reference and resolves to the document's own folder
 /// marker, which has no file — so it is dropped.
-fn resolve_internal(target: &str, base_dir: &Path, system: &dyn System) -> Option<Resolved> {
+fn resolve_internal(
+    target: &str,
+    base_dir: &Path,
+    system: &dyn System,
+    toml_enabled: bool,
+) -> Option<Resolved> {
     if target.is_empty() {
         return None;
     }
@@ -196,7 +219,7 @@ fn resolve_internal(target: &str, base_dir: &Path, system: &dyn System) -> Optio
         return None;
     }
 
-    let title = read_target_title(system, &candidate);
+    let title = read_target_title(system, &candidate, toml_enabled);
     Some(Resolved {
         path: relative,
         title,
@@ -206,34 +229,25 @@ fn resolve_internal(target: &str, base_dir: &Path, system: &dyn System) -> Optio
 /// Read the target document's own title: prefer the frontmatter `title:`
 /// field, fall back to the first `# heading`. Returns `None` for
 /// non-markdown targets or when neither is present.
-fn read_target_title(system: &dyn System, path: &Path) -> Option<String> {
+fn read_target_title(system: &dyn System, path: &Path, toml_enabled: bool) -> Option<String> {
     let content = system.read_to_string(path).ok()?;
 
-    if let Some(title) = frontmatter_title(&content) {
+    if let Some(title) = frontmatter_title(&content, toml_enabled) {
         return Some(title);
     }
 
-    let body = strip_frontmatter(&content);
+    let body = strip_frontmatter(&content, toml_enabled);
     frontmatter::extract_title_from_heading(body)
 }
 
 /// Pull the `title:` value out of a document's YAML frontmatter, when
 /// present and non-empty.
-fn frontmatter_title(content: &str) -> Option<String> {
-    let body = content.trim_start();
-    if !body.starts_with("---") {
-        return None;
-    }
+fn frontmatter_title(content: &str, toml_enabled: bool) -> Option<String> {
+    let fence = frontmatter::fence_of(content, toml_enabled)?;
     let lines: Vec<&str> = content.split('\n').collect();
-    let opener = lines.iter().position(|line| line.trim() == "---")?;
-    let closer = lines
-        .iter()
-        .enumerate()
-        .skip(opener + 1)
-        .find(|(_, line)| line.trim() == "---")
-        .map(|(i, _)| i)?;
-    let yaml_str: String = lines[opener + 1..closer].join("\n");
-    let value: serde_yaml::Value = serde_yaml::from_str(&yaml_str).ok()?;
+    let (opener, closer) = frontmatter::block_bounds(&lines, fence)?;
+    let block: String = lines[opener + 1..closer].join("\n");
+    let value: serde_yaml::Value = frontmatter::parse_block(fence, &block).ok()?;
     let title = value.get("title")?.as_str()?.trim();
     if title.is_empty() {
         None
@@ -242,17 +256,16 @@ fn frontmatter_title(content: &str) -> Option<String> {
     }
 }
 
-/// Strip a leading YAML frontmatter block, returning the remaining body.
-fn strip_frontmatter(content: &str) -> &str {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
+/// Strip a leading frontmatter block, returning the remaining body.
+fn strip_frontmatter(content: &str, toml_enabled: bool) -> &str {
+    let Some(fence) = frontmatter::fence_of(content, toml_enabled) else {
         return content;
-    }
+    };
     let mut seen_open = false;
     let mut offset = 0;
     for line in content.split_inclusive('\n') {
         let stripped = line.strip_suffix('\n').unwrap_or(line);
-        if stripped.trim() == "---" {
+        if stripped.trim() == fence.delimiter() {
             if seen_open {
                 return &content[offset + line.len()..];
             }
@@ -269,29 +282,24 @@ fn strip_frontmatter(content: &str) -> &str {
 /// block list) forms are both supported. Each value is recorded at the
 /// 1-indexed line of the property key, treated as an internal link.
 /// Wikilink wrapping (`up: "[[Note]]"`) is unwrapped to the bare target.
-fn collect_frontmatter_links(body: &str, raw: &mut Vec<RawLink>) {
-    let trimmed = body.trim_start();
-    if !trimmed.starts_with("---") {
-        return;
-    }
-    let lines: Vec<&str> = body.split('\n').collect();
-    let Some(opener) = lines.iter().position(|line| line.trim() == "---") else {
+/// A `+++` block (when `toml_enabled`) is read the same way with `=` for `:`.
+fn collect_frontmatter_links(body: &str, toml_enabled: bool, raw: &mut Vec<RawLink>) {
+    let Some(fence) = frontmatter::fence_of(body, toml_enabled) else {
         return;
     };
-    let Some(closer) = lines
-        .iter()
-        .enumerate()
-        .skip(opener + 1)
-        .find(|(_, line)| line.trim() == "---")
-        .map(|(i, _)| i)
-    else {
+    let separator = match fence {
+        frontmatter::Fence::Yaml => ':',
+        frontmatter::Fence::Toml => '=',
+    };
+    let lines: Vec<&str> = body.split('\n').collect();
+    let Some((opener, closer)) = frontmatter::block_bounds(&lines, fence) else {
         return;
     };
 
     let mut idx = opener + 1;
     while idx < closer {
         let line = lines[idx];
-        let Some((raw_key, rest)) = line.split_once(':') else {
+        let Some((raw_key, rest)) = line.split_once(separator) else {
             idx += 1;
             continue;
         };

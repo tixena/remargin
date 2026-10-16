@@ -15,7 +15,10 @@ use os_shim::System;
 use serde::Serialize;
 
 use crate::config::permissions::resolve::lint_permissions_in_parents;
-use crate::config::{Mode, ResolvedConfig, load_registry, resolve_mode};
+use crate::config::{
+    Mode, ResolvedConfig, load_registry, resolve_frontmatter_settings, resolve_mode,
+};
+use crate::frontmatter::{Fence, fence_of, parse_block};
 
 const REQUIRED_REMARGIN_FIELDS: &[&str] = &["id", "author", "type", "ts", "checksum"];
 
@@ -127,10 +130,19 @@ impl LintReport {
 ///
 /// Returns an error only on internal failures (not lint violations).
 pub fn lint(content: &str) -> Result<Vec<LintError>> {
+    lint_with(content, false)
+}
+
+/// [`lint`] with a leading `+++` block checked as TOML frontmatter when `toml_enabled`.
+///
+/// # Errors
+///
+/// As [`lint`].
+pub fn lint_with(content: &str, toml_enabled: bool) -> Result<Vec<LintError>> {
     let mut errors = Vec::new();
 
     check_unclosed_fences(content, &mut errors);
-    check_yaml_frontmatter(content, &mut errors);
+    check_frontmatter(content, toml_enabled, &mut errors);
     check_remargin_blocks(content, &mut errors);
 
     Ok(errors)
@@ -166,10 +178,11 @@ pub fn lint_doc(
     let content = system
         .read_to_string(doc_path)
         .with_context(|| format!("reading {}", doc_path.display()))?;
-    let structural = lint(&content)?;
     let walk_anchor = doc_path
         .parent()
         .map_or_else(|| doc_path.to_path_buf(), Path::to_path_buf);
+    let toml_enabled = resolve_frontmatter_settings(system, &walk_anchor).toml_enabled;
+    let structural = lint_with(&content, toml_enabled)?;
     let permissions = lint_permissions_in_parents(system, &walk_anchor)?;
 
     // Only in registered/strict mode with a registry. Config errors are skipped here: the
@@ -222,7 +235,16 @@ pub fn lint_doc(
 /// Returns an error if any lint issues are detected, with all issues
 /// formatted in the error message.
 pub fn lint_or_fail(content: &str) -> Result<()> {
-    let errors = lint(content)?;
+    lint_or_fail_with(content, false)
+}
+
+/// [`lint_or_fail`] with a leading `+++` block checked as TOML frontmatter when `toml_enabled`.
+///
+/// # Errors
+///
+/// As [`lint_or_fail`].
+pub fn lint_or_fail_with(content: &str, toml_enabled: bool) -> Result<()> {
+    let errors = lint_with(content, toml_enabled)?;
     if errors.is_empty() {
         Ok(())
     } else {
@@ -338,25 +360,30 @@ fn check_remargin_blocks(content: &str, errors: &mut Vec<LintError>) {
     }
 }
 
-/// Check YAML frontmatter validity.
+/// Check frontmatter validity.
 ///
-/// If the document starts with `---`, the closing `---` must exist and
-/// the content between must be valid YAML.
-fn check_yaml_frontmatter(content: &str, errors: &mut Vec<LintError>) {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
+/// If the document starts with `---` (or `+++` when `toml_enabled`), the
+/// closing delimiter must exist and the content between must be valid YAML
+/// (or TOML).
+fn check_frontmatter(content: &str, toml_enabled: bool, errors: &mut Vec<LintError>) {
+    let Some(fence) = fence_of(content, toml_enabled) else {
         return;
-    }
+    };
+    let delimiter = fence.delimiter();
+    let format = match fence {
+        Fence::Toml => "TOML",
+        Fence::Yaml => "YAML",
+    };
 
     let lines: Vec<&str> = content.split('\n').collect();
     let first_line_idx = lines
         .iter()
-        .position(|line| line.trim() == "---")
+        .position(|line| line.trim() == delimiter)
         .unwrap_or(0);
 
     let mut closing_idx = None;
     for (i, line) in lines.iter().enumerate().skip(first_line_idx + 1) {
-        if line.trim() == "---" {
+        if line.trim() == delimiter {
             closing_idx = Some(i);
             break;
         }
@@ -365,7 +392,7 @@ fn check_yaml_frontmatter(content: &str, errors: &mut Vec<LintError>) {
     let Some(close_idx) = closing_idx else {
         errors.push(LintError {
             line: first_line_idx + 1,
-            message: String::from("unclosed YAML frontmatter (no closing --- found)"),
+            message: format!("unclosed {format} frontmatter (no closing {delimiter} found)"),
         });
         return;
     };
@@ -373,10 +400,10 @@ fn check_yaml_frontmatter(content: &str, errors: &mut Vec<LintError>) {
     let yaml_lines: Vec<&str> = lines[first_line_idx + 1..close_idx].to_vec();
     let yaml_str = yaml_lines.join("\n");
 
-    if let Err(err) = serde_yaml::from_str::<serde_yaml::Value>(&yaml_str) {
+    if let Err(err) = parse_block(fence, &yaml_str) {
         errors.push(LintError {
             line: first_line_idx + 2,
-            message: format!("invalid YAML in frontmatter: {err}"),
+            message: format!("invalid {format} in frontmatter: {err}"),
         });
     }
 }

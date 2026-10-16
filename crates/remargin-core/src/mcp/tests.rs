@@ -18,7 +18,9 @@ use serde_json::{Value, json};
 use crate::config::identity::IdentityFlags;
 use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
+use crate::crypto::file_hash;
 use crate::mcp;
+use crate::operations;
 use crate::operations::batch::OP_FIELDS;
 use crate::operations::projections::PLAN_OP_FIELDS;
 use crate::operations::{CreateCommentParams, create_comment};
@@ -159,6 +161,8 @@ Body for P11.
 
 Body for P3.
 ";
+
+const STALE: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -652,7 +656,7 @@ fn batch_op_schema_declares_every_comment_field() {
         .as_object()
         .unwrap()
         .keys()
-        .filter(|key| key.as_str() != "file")
+        .filter(|key| !["file", "if_hash"].contains(&key.as_str()))
         .filter(|key| !op_fields.contains_key(*key))
         .collect();
     assert!(missing.is_empty(), "batch ops lack {missing:?}");
@@ -7478,4 +7482,290 @@ fn comment_refuses_the_storage_name_remargin_kind() {
         tool_error_text(&response).starts_with("comment: unknown argument `remargin_kind`"),
         "{response}"
     );
+}
+
+fn disk_hash(system: &MemorySystem, path: &str) -> String {
+    file_hash(system, Path::new(path)).unwrap()
+}
+
+#[test]
+fn get_and_metadata_return_the_file_hash() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", DOC_WITH_COMMENT);
+    let config = test_config();
+    let want = disk_hash(&system, "/docs/doc.md");
+    assert!(want.starts_with("sha256:"));
+
+    for (tool, args) in [
+        ("get", json!({ "path": "doc.md" })),
+        (
+            "get",
+            json!({ "path": "doc.md", "start_line": 1_i32, "end_line": 2_i32 }),
+        ),
+        ("get", json!({ "path": "doc.md", "line_numbers": true })),
+        ("metadata", json!({ "path": "doc.md" })),
+        ("comments", json!({ "file": "doc.md" })),
+    ] {
+        let result = extract_tool_text(&call(&system, base, &config, &tool_request(tool, &args)));
+        assert_eq!(result["hash"], want, "{tool} {args}");
+    }
+}
+
+#[test]
+fn a_write_returns_the_hash_of_what_it_stored() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+    let config = test_config();
+
+    // The stored bytes gain frontmatter, so they differ from the payload.
+    let args = json!({ "path": "doc.md", "content": "# New\n\nBody.\n" });
+    let result = extract_tool_text(&call(&system, base, &config, &tool_request("write", &args)));
+    assert_eq!(result["noop"], false);
+    assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"));
+
+    // A noop write still reports the (unchanged) on-disk hash.
+    let create = json!({ "path": "n.txt", "content": "raw bytes\n", "raw": true, "create": true });
+    let first = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("write", &create),
+    ));
+    let resend = json!({ "path": "n.txt", "content": "raw bytes\n", "raw": true });
+    let again = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("write", &resend),
+    ));
+    assert_eq!(again["noop"], true);
+    assert_eq!(again["hash"], first["hash"]);
+    assert_eq!(again["hash"], disk_hash(&system, "/docs/n.txt"));
+
+    // rm deletes the file: no hash.
+    let rm = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("rm", &json!({ "path": "doc.md" })),
+    ));
+    assert!(rm.get("hash").is_none());
+}
+
+#[test]
+fn a_comment_returns_the_new_file_hash() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nSome body text.\n");
+    let config = test_config();
+    let before = disk_hash(&system, "/docs/doc.md");
+
+    let new_comment = json!({ "file": "doc.md", "content": "A comment." });
+    let created = extract_tool_text(&call(
+        &system,
+        base,
+        &config,
+        &tool_request("comment", &new_comment),
+    ));
+    let id = created["id"].as_str().unwrap().to_owned();
+    assert_ne!(created["hash"], before);
+    assert_eq!(created["hash"], disk_hash(&system, "/docs/doc.md"));
+
+    for (tool, args) in [
+        ("ack", json!({ "file": "doc.md", "ids": [id] })),
+        (
+            "react",
+            json!({ "file": "doc.md", "id": id, "emoji": "+1" }),
+        ),
+        (
+            "edit",
+            json!({ "file": "doc.md", "id": id, "content": "Edited." }),
+        ),
+        ("delete", json!({ "file": "doc.md", "ids": [id] })),
+    ] {
+        let result = extract_tool_text(&call(&system, base, &config, &tool_request(tool, &args)));
+        assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"), "{tool}");
+    }
+}
+
+fn stale_error(response: &Value) -> Value {
+    assert!(is_tool_error(response), "{response}");
+    serde_json::from_str(&tool_error_text(response)).unwrap()
+}
+
+#[test]
+fn a_write_with_a_stale_if_hash_is_refused_and_leaves_the_file() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+    let config = test_config();
+    let before = disk_hash(&system, "/docs/doc.md");
+
+    let args = json!({ "path": "doc.md", "content": "# New\n", "if_hash": STALE });
+    let err = stale_error(&call(&system, base, &config, &tool_request("write", &args)));
+    assert_eq!(err["error_kind"], "stale_version");
+    assert_eq!(err["expected"], STALE);
+    assert_eq!(err["current_hash"], before);
+    assert_eq!(err["path"], "/docs/doc.md");
+    assert_eq!(disk_hash(&system, "/docs/doc.md"), before);
+}
+
+#[test]
+fn a_comment_with_a_stale_if_hash_is_refused() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Hello\n\nBody.\n");
+    let before = disk_hash(&system, "/docs/doc.md");
+
+    let args = json!({ "file": "doc.md", "content": "Hi.", "if_hash": STALE });
+    let err = stale_error(&call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("comment", &args),
+    ));
+    assert_eq!(err["error_kind"], "stale_version");
+    assert_eq!(disk_hash(&system, "/docs/doc.md"), before);
+}
+
+#[test]
+fn an_rm_with_a_stale_if_hash_is_refused() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+
+    let args = json!({ "path": "doc.md", "if_hash": STALE });
+    let err = stale_error(&call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("rm", &args),
+    ));
+    assert_eq!(err["error_kind"], "stale_version");
+    assert!(system.exists(Path::new("/docs/doc.md")).unwrap());
+}
+
+#[test]
+fn the_current_if_hash_lets_the_write_through() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+    let config = test_config();
+    let current = disk_hash(&system, "/docs/doc.md");
+
+    let args = json!({ "path": "doc.md", "content": "# New\n", "if_hash": current });
+    let result = extract_tool_text(&call(&system, base, &config, &tool_request("write", &args)));
+    assert_eq!(result["noop"], false);
+    assert_eq!(result["hash"], disk_hash(&system, "/docs/doc.md"));
+    assert_ne!(result["hash"], current);
+}
+
+#[test]
+fn no_if_hash_behaves_exactly_as_before() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "doc.md", "# Old\n");
+
+    let args = json!({ "path": "doc.md", "content": "# New\n" });
+    let result = extract_tool_text(&call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("write", &args),
+    ));
+    assert_eq!(result["noop"], false);
+}
+
+#[test]
+fn if_hash_on_a_folder_replace_is_an_error() {
+    let base = Path::new("/docs");
+    let system = system_with_doc(base, "sub/doc.md", "# Old\n");
+
+    let args = json!({ "path": "sub", "pattern": "Old", "replacement": "New", "if_hash": STALE });
+    let response = call(
+        &system,
+        base,
+        &test_config(),
+        &tool_request("replace", &args),
+    );
+    assert!(is_tool_error(&response));
+    assert!(
+        tool_error_text(&response).contains("if_hash needs a single file"),
+        "{response}"
+    );
+}
+
+#[test]
+fn every_if_hash_tool_declares_it_in_its_schema() {
+    let base = Path::new("/docs");
+    let response = call(
+        &MemorySystem::new(),
+        base,
+        &test_config(),
+        &json!({ "jsonrpc": "2.0", "id": 1_i32, "method": "tools/list" }),
+    );
+    let tools = response["result"]["tools"].as_array().unwrap();
+    for tool in tools {
+        let name = tool["name"].as_str().unwrap();
+        let declared = tool["inputSchema"]["properties"].get("if_hash").is_some();
+        assert_eq!(declared, mcp::IF_HASH_TOOLS.contains(&name), "{name}");
+    }
+    assert_eq!(mcp::IF_HASH_TOOLS.len(), 16);
+}
+
+#[test]
+fn every_if_hash_tool_refuses_a_stale_hash_on_the_documented_file() {
+    let base = Path::new("/docs");
+    let system = MemorySystem::new()
+        .with_file(Path::new("/docs/doc.md"), b"# Old\n")
+        .unwrap()
+        .with_file(Path::new("/docs/other.md"), b"# Other\n")
+        .unwrap();
+    let config = test_config();
+    let current = disk_hash(&system, "/docs/doc.md");
+
+    for tool in mcp::IF_HASH_TOOLS {
+        let args = match *tool {
+            "batch" => json!({ "file": "doc.md", "operations": [], "if_hash": STALE }),
+            "cp" | "mv" => json!({ "src": "doc.md", "dst": "other.md", "if_hash": STALE }),
+            "replace" => {
+                json!({ "path": "doc.md", "pattern": "a", "replacement": "b", "if_hash": STALE })
+            }
+            "rm" => json!({ "path": "doc.md", "if_hash": STALE }),
+            "write" => json!({ "path": "doc.md", "content": "x", "if_hash": STALE }),
+            "sandbox_add" | "sandbox_remove" => json!({ "files": ["doc.md"], "if_hash": STALE }),
+            "comment" | "reply" => json!({ "file": "doc.md", "content": "x", "if_hash": STALE }),
+            "ack" | "delete" | "sign" => {
+                json!({ "file": "doc.md", "ids": ["x"], "if_hash": STALE })
+            }
+            "edit" => json!({ "file": "doc.md", "id": "x", "content": "x", "if_hash": STALE }),
+            "react" => json!({ "file": "doc.md", "id": "x", "emoji": "+1", "if_hash": STALE }),
+            _ => json!({ "file": "doc.md", "if_hash": STALE }),
+        };
+        let resp = call(&system, base, &config, &tool_request(tool, &args));
+        assert!(
+            is_tool_error(&resp) && tool_error_text(&resp).starts_with('{'),
+            "{tool}: {resp}"
+        );
+        let err = stale_error(&resp);
+        assert_eq!(err["error_kind"], "stale_version", "{tool}: {err}");
+        assert_eq!(err["current_hash"], current, "{tool}");
+        assert_eq!(err["path"], "/docs/doc.md", "{tool}");
+    }
+
+    // mv/cp check `src`, not `dst`: a current hash for src passes even though dst differs.
+    let other = disk_hash(&system, "/docs/other.md");
+    let cp_args = json!({ "src": "doc.md", "dst": "copy.md", "if_hash": other });
+    let err = stale_error(&call(&system, base, &config, &tool_request("cp", &cp_args)));
+    assert_eq!(err["error_kind"], "stale_version");
+
+    // ack without `file`, and sandbox with several files: the documented error.
+    for (tool, bad_args) in [
+        ("ack", json!({ "ids": ["x"], "if_hash": STALE })),
+        (
+            "sandbox_add",
+            json!({ "files": ["doc.md", "other.md"], "if_hash": STALE }),
+        ),
+    ] {
+        let response = call(&system, base, &config, &tool_request(tool, &bad_args));
+        assert!(is_tool_error(&response), "{tool}");
+        assert!(
+            tool_error_text(&response).contains(operations::if_hash::NEEDS_ONE_FILE),
+            "{tool}: {response}"
+        );
+    }
 }

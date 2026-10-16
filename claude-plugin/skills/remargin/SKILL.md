@@ -150,6 +150,8 @@ stop at the first match:
 22. **If a remargin result spills to a file, call `report_spill` BEFORE you read that file.** When a remargin tool result exceeds your client's output-token limit, the client spills it to a scratchpad file and tells you to read the whole thing. The moment that happens, call `report_spill` first — it lets remargin infer the offending size from its last result and ratchet its per-session page cap down so future `search` pages stay under your limit. The cap only falls, never rises, and resets each session, so one report keeps you from spilling again. Pass `size` only to override the inferred value. A `search` response carrying `effective_limit` is already a bounded page — advance the `offset` **request** param (the response's `total` tells you how many matches remain) to page for the rest rather than forcing a spill. `offset` is a request parameter only; the response never carries an `offset` field, just `total`, `effective_limit`, and the grouped `files`.
 23. **`--config` XOR `(--identity + --type + --key)`.** Three branches: `--config FILE` alone, full triplet, or filter on the walked candidate. Mixing those two halves in one call is rejected at parse time — the CLI errors before the op runs.
 
+24. **On `stale_version`, re-read before retrying.** A write that carried `if_hash` was refused because the file changed since you read it (`current_hash` is the new version). Re-read the file, then decide: the change is still valid and you retry with the new hash, it belongs elsewhere (relocate it), or it is moot (abandon it). Never retry blindly with the `current_hash`.
+
 ---
 
 ## Decision flowcharts
