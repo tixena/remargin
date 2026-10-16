@@ -9,6 +9,7 @@
 
 use anyhow::{Context as _, Result, bail};
 
+use crate::frontmatter::{Fence, fence_of};
 use crate::parser::ParsedDocument;
 
 /// One ATX heading found by [`scan_headings`].
@@ -46,11 +47,24 @@ struct FenceState {
 /// trailing or doubled `>` separators), or when no matching heading is
 /// found in the document.
 pub fn resolve_heading_path(doc: &ParsedDocument, path: &str) -> Result<usize> {
+    resolve_heading_path_with(doc, path, false)
+}
+
+/// [`resolve_heading_path`] with a leading `+++` block skipped like `---` when `toml_enabled`.
+///
+/// # Errors
+///
+/// As [`resolve_heading_path`].
+pub fn resolve_heading_path_with(
+    doc: &ParsedDocument,
+    path: &str,
+    toml_enabled: bool,
+) -> Result<usize> {
     let segments = parse_path(path)?;
     let markdown = doc
         .to_markdown()
         .context("serializing document to markdown for heading resolution")?;
-    let headings = scan_headings(&markdown);
+    let headings = scan_headings(&markdown, toml_enabled);
     match_path(&headings, &segments).ok_or_else(|| anyhow::anyhow!("no heading matched {path:?}"))
 }
 
@@ -169,9 +183,11 @@ fn parse_path(path: &str) -> Result<Vec<String>> {
 }
 
 /// Walk `markdown` and return every ATX heading outside the YAML
-/// frontmatter and outside fenced code blocks, in document order.
-fn scan_headings(markdown: &str) -> Vec<Heading> {
+/// frontmatter (or `+++` TOML frontmatter when `toml_enabled`) and outside
+/// fenced code blocks, in document order.
+fn scan_headings(markdown: &str, toml_enabled: bool) -> Vec<Heading> {
     let mut headings: Vec<Heading> = Vec::new();
+    let delimiter = fence_of(markdown, toml_enabled).map_or("---", Fence::delimiter);
     let mut in_frontmatter = false;
     let mut frontmatter_done = false;
     let mut fence: Option<FenceState> = None;
@@ -181,12 +197,12 @@ fn scan_headings(markdown: &str) -> Vec<Heading> {
         let trimmed_full = raw_line.trim();
 
         if !frontmatter_done {
-            if idx == 0 && trimmed_full == "---" {
+            if idx == 0 && trimmed_full == delimiter {
                 in_frontmatter = true;
                 continue;
             }
             if in_frontmatter {
-                if trimmed_full == "---" {
+                if trimmed_full == delimiter {
                     in_frontmatter = false;
                     frontmatter_done = true;
                 }

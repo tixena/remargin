@@ -33,7 +33,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tixschema::model_schema;
 
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, frontmatter_settings_for_doc};
 use crate::document::allowlist;
 use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
@@ -335,7 +335,10 @@ pub fn scan_all_entries(system: &dyn System, root: &Path) -> Result<Vec<SandboxS
         let Ok(doc) = parser::parse(&content) else {
             continue;
         };
-        let Ok(sandbox) = frontmatter::read_sandbox_entries(&doc) else {
+        // Best-effort like the read above: an unreadable realm setting just means no `+++`.
+        let toml_enabled =
+            frontmatter_settings_for_doc(system, &entry.path).is_ok_and(|fm| fm.toml_enabled);
+        let Ok(sandbox) = frontmatter::read_sandbox_entries_with(&doc, toml_enabled) else {
             continue;
         };
         for sb in sandbox {
@@ -363,10 +366,11 @@ fn add_one(
     pre_mutate_check_for_caller(system, "sandbox-add", file, &config.caller_info())?;
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
-    let mut entries = frontmatter::read_sandbox_entries(&doc)?;
+    let fm = frontmatter_settings_for_doc(system, file)?;
+    let mut entries = frontmatter::read_sandbox_entries_with(&doc, fm.toml_enabled)?;
     let added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
     if added {
-        frontmatter::write_sandbox_entries(&mut doc, &entries)?;
+        frontmatter::write_sandbox_entries_with(&mut doc, &entries, fm)?;
         commit_with_verify(system, &doc, config, file, |verified_doc| {
             let markdown = verified_doc.to_markdown()?;
             system
@@ -390,10 +394,11 @@ fn remove_one(
     pre_mutate_check_for_caller(system, "sandbox-remove", file, &config.caller_info())?;
     ensure_markdown(file)?;
     let mut doc = parser::parse_file(system, file)?;
-    let mut entries = frontmatter::read_sandbox_entries(&doc)?;
+    let fm = frontmatter_settings_for_doc(system, file)?;
+    let mut entries = frontmatter::read_sandbox_entries_with(&doc, fm.toml_enabled)?;
     let removed = frontmatter::remove_sandbox_entry_for(&mut entries, identity);
     if removed {
-        frontmatter::write_sandbox_entries(&mut doc, &entries)?;
+        frontmatter::write_sandbox_entries_with(&mut doc, &entries, fm)?;
         commit_with_verify(system, &doc, config, file, |verified_doc| {
             let markdown = verified_doc.to_markdown()?;
             system

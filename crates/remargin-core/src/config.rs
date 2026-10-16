@@ -25,6 +25,7 @@ use serde::Deserialize;
 use crate::config::permissions::Permissions;
 use crate::config::permissions::resolve::resolve_trusted_roots_for_cwd;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
+use crate::frontmatter::{Fence, FrontmatterSettings};
 use crate::parser::AuthorType;
 use crate::path::expand_path;
 use crate::permissions::op_guard::CallerInfo;
@@ -681,6 +682,14 @@ struct WalkedIdentityFields {
     source_path: Option<PathBuf>,
 }
 
+/// The two frontmatter keys of one `.remargin.yaml`, read on their own so a bad value in them
+/// fails only the frontmatter walk.
+#[derive(Deserialize)]
+struct FrontmatterKeys {
+    frontmatter: Option<Fence>,
+    toml_frontmatter: Option<bool>,
+}
+
 /// The directory whose `.remargin.yaml` governs a read of `target`: a
 /// directory anchors at itself, a file at its parent, so a nested realm
 /// inside a listed directory is honored.
@@ -806,6 +815,57 @@ pub fn resolve_mode(system: &dyn System, start_dir: &Path) -> Result<ResolvedMod
             });
         }
     }
+}
+
+/// Resolve `toml_frontmatter` and `frontmatter` by walking up from `start_dir`.
+///
+/// Each comes from the nearest `.remargin.yaml` that sets it, the way [`resolve_mode`] finds
+/// `mode`. Identity plays no part, so a manual identity sees the realm's settings too.
+///
+/// # Errors
+///
+/// Returns an error if a `.remargin.yaml` on the walk cannot be read or parsed.
+pub fn resolve_frontmatter_settings(
+    system: &dyn System,
+    start_dir: &Path,
+) -> Result<FrontmatterSettings> {
+    let mut toml_enabled: Option<bool> = None;
+    let mut new_file: Option<Fence> = None;
+    let mut current = start_dir.to_path_buf();
+    while toml_enabled.is_none() || new_file.is_none() {
+        let candidate = current.join(CONFIG_FILENAME);
+        if system
+            .exists(&candidate)
+            .with_context(|| format!("checking existence of {}", candidate.display()))?
+        {
+            let content = system
+                .read_to_string(&candidate)
+                .with_context(|| format!("reading {}", candidate.display()))?;
+            let keys: FrontmatterKeys = serde_yaml::from_str(&content)
+                .with_context(|| format!("parsing {}", candidate.display()))?;
+            toml_enabled = toml_enabled.or(keys.toml_frontmatter);
+            new_file = new_file.or(keys.frontmatter);
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    Ok(FrontmatterSettings {
+        new_file: new_file.unwrap_or_default(),
+        toml_enabled: toml_enabled.unwrap_or(false),
+    })
+}
+
+/// [`resolve_frontmatter_settings`] for the realm `doc_path` lives in.
+///
+/// # Errors
+///
+/// As [`resolve_frontmatter_settings`].
+pub fn frontmatter_settings_for_doc(
+    system: &dyn System,
+    doc_path: &Path,
+) -> Result<FrontmatterSettings> {
+    resolve_frontmatter_settings(system, doc_path.parent().unwrap_or(doc_path))
 }
 
 /// Load config by walking up from `start_dir`.

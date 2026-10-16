@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 
 use crate::advice::OpAdvice;
 use crate::comment_style;
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, frontmatter_settings_for_doc};
 use crate::crypto::{compute_checksum, compute_signature};
 use crate::frontmatter;
 use crate::id;
@@ -208,6 +208,7 @@ pub fn batch_comment(
     // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
+    let fm = frontmatter_settings_for_doc(system, path)?;
 
     let identity = cfg
         .identity
@@ -222,7 +223,7 @@ pub fn batch_comment(
     let mut doc = parser::parse_file(system, path)?;
 
     let markdown_before = doc.to_markdown()?;
-    linter::lint_or_fail(&markdown_before)
+    linter::lint_or_fail_with(&markdown_before, fm.toml_enabled)
         .context("document has structural issues before write")?;
 
     gate_ops(operations, &author_type)?;
@@ -291,7 +292,7 @@ pub fn batch_comment(
 
         let lines_before = doc.to_markdown()?.matches('\n').count();
 
-        writer::insert_comment(&mut doc, comment, &position)
+        writer::insert_comment_with(&mut doc, comment, &position, fm.toml_enabled)
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
 
         if let Some(parent_id) = op.reply_to.as_deref() {
@@ -323,14 +324,14 @@ pub fn batch_comment(
         outcome.ids.push(new_id);
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, cfg)?;
+    frontmatter::ensure_frontmatter_with(&mut doc, cfg, fm)?;
 
     if operations.iter().any(|op| op.sandbox) {
-        apply_sandbox_entry(&mut doc, identity, Utc::now().fixed_offset())?;
+        apply_sandbox_entry(&mut doc, identity, Utc::now().fixed_offset(), fm)?;
     }
 
     let markdown_after = doc.to_markdown()?;
-    linter::lint_or_fail(&markdown_after)
+    linter::lint_or_fail_with(&markdown_after, fm.toml_enabled)
         .context("document has structural issues after batch write")?;
 
     write_batch_result(system, path, cfg, &doc, &outcome.ids)?;

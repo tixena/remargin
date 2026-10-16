@@ -664,6 +664,12 @@ assets_dir: assets
 ignore:
   - "drafts/**"
   - "*.tmp"
+
+# Read and write `+++` TOML frontmatter (default false: only `---` YAML is recognised)
+toml_frontmatter: false
+
+# Frontmatter format for files that have none yet: yaml or toml (only used with toml_frontmatter)
+frontmatter: yaml
 ```
 
 ### `session:` block — per-agent launch parameters

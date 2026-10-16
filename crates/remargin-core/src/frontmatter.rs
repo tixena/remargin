@@ -1,5 +1,8 @@
 //! YAML frontmatter management for `remargin_*` fields.
 //!
+//! With `toml_frontmatter: true` in the realm's `.remargin.yaml`, a `+++` TOML block is read into
+//! the same [`Mapping`] model and written back as TOML. Without it every file takes the YAML path.
+//!
 //! User-owned fields (`title`, `description`, `created`) are
 //! auto-populated on first save but never overwritten. Tool-managed fields
 //! (`remargin_pending`, `remargin_pending_for`, `remargin_last_activity`)
@@ -19,6 +22,7 @@ mod tests;
 
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, FixedOffset, Utc};
+use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
@@ -28,7 +32,164 @@ use crate::parser::{self, Comment, ParsedDocument, SandboxEntry, Segment, rfc333
 /// is user-written state.
 pub const SANDBOX_KEY: &str = "sandbox";
 
-const FRONTMATTER_DELIMITER: &str = "---";
+/// The fence that opens a frontmatter block.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum Fence {
+    /// `+++` TOML, recognised only with `toml_frontmatter: true`.
+    Toml,
+    /// `---` YAML, the default.
+    #[default]
+    Yaml,
+}
+
+impl Fence {
+    /// The delimiter line that opens and closes the block.
+    #[must_use]
+    pub const fn delimiter(self) -> &'static str {
+        match self {
+            Self::Toml => "+++",
+            Self::Yaml => "---",
+        }
+    }
+}
+
+/// How a realm's documents carry frontmatter, from the `toml_frontmatter` and `frontmatter`
+/// keys of the nearest `.remargin.yaml` that sets each
+/// ([`crate::config::resolve_frontmatter_settings`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FrontmatterSettings {
+    /// The format for a file with no frontmatter yet. Only used when `toml_enabled` is set.
+    pub new_file: Fence,
+    /// `+++` blocks are recognised. Off by default: then every file takes the YAML path.
+    pub toml_enabled: bool,
+}
+
+impl FrontmatterSettings {
+    /// The fence a file without frontmatter gets.
+    const fn new_file_fence(self) -> Fence {
+        if self.toml_enabled {
+            self.new_file
+        } else {
+            Fence::Yaml
+        }
+    }
+}
+
+/// The fence of the frontmatter block `text` starts with, if any. `+++` counts only when
+/// `toml_enabled`; `---` always does.
+#[must_use]
+pub fn fence_of(text: &str, toml_enabled: bool) -> Option<Fence> {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with(Fence::Yaml.delimiter()) {
+        Some(Fence::Yaml)
+    } else if toml_enabled && trimmed.starts_with(Fence::Toml.delimiter()) {
+        Some(Fence::Toml)
+    } else {
+        None
+    }
+}
+
+/// Line indices of the first `fence` delimiter line in `lines` and of the next one after it.
+pub(crate) fn block_bounds(lines: &[&str], fence: Fence) -> Option<(usize, usize)> {
+    let delimiter = fence.delimiter();
+    let opener = lines.iter().position(|line| line.trim() == delimiter)?;
+    let closer = lines
+        .iter()
+        .enumerate()
+        .skip(opener + 1)
+        .find(|(_, line)| line.trim() == delimiter)
+        .map(|(i, _)| i)?;
+    Some((opener, closer))
+}
+
+/// Parse the text between the delimiters into the YAML value model. TOML datetimes become
+/// RFC 3339 strings, the form YAML frontmatter stores `created` in.
+///
+/// # Errors
+///
+/// Returns the YAML or TOML parse error.
+pub(crate) fn parse_block(fence: Fence, text: &str) -> Result<Value> {
+    match fence {
+        Fence::Yaml => Ok(serde_yaml::from_str(text)?),
+        Fence::Toml => Ok(Value::Mapping(toml_table_to_mapping(text.parse()?))),
+    }
+}
+
+/// The full block for `value`, delimiters and trailing newline included.
+pub(crate) fn render_block(fence: Fence, value: &Value) -> String {
+    let inner = match fence {
+        Fence::Yaml => serde_yaml::to_string(value).unwrap_or_default(),
+        Fence::Toml => match yaml_to_toml(value) {
+            Some(toml::Value::Table(table)) => toml::to_string(&table).unwrap_or_default(),
+            _ => String::new(),
+        },
+    };
+    let delimiter = fence.delimiter();
+    format!("{delimiter}\n{inner}{delimiter}\n")
+}
+
+fn toml_table_to_mapping(table: toml::Table) -> Mapping {
+    table
+        .into_iter()
+        .map(|(key, value)| (Value::String(key), toml_to_yaml(value)))
+        .collect()
+}
+
+fn toml_to_yaml(value: toml::Value) -> Value {
+    match value {
+        toml::Value::String(s) => Value::String(s),
+        toml::Value::Integer(i) => Value::Number(i.into()),
+        toml::Value::Float(f) => Value::Number(f.into()),
+        toml::Value::Boolean(b) => Value::Bool(b),
+        toml::Value::Datetime(dt) => {
+            let raw = dt.to_string();
+            Value::String(
+                DateTime::parse_from_rfc3339(&raw)
+                    .map_or(raw, |parsed| rfc3339_z(&parsed.with_timezone(&Utc))),
+            )
+        }
+        toml::Value::Array(items) => Value::Sequence(items.into_iter().map(toml_to_yaml).collect()),
+        toml::Value::Table(table) => Value::Mapping(toml_table_to_mapping(table)),
+    }
+}
+
+/// TOML has no null: null values (such as `remargin_last_activity` before any comment) are
+/// left out.
+fn yaml_to_toml(value: &Value) -> Option<toml::Value> {
+    match value {
+        Value::Null => None,
+        Value::Bool(b) => Some(toml::Value::Boolean(*b)),
+        Value::Number(n) => n
+            .as_i64()
+            .map(toml::Value::Integer)
+            .or_else(|| n.as_f64().map(toml::Value::Float)),
+        Value::String(s) => Some(toml::Value::String(s.clone())),
+        Value::Sequence(items) => Some(toml::Value::Array(
+            items.iter().filter_map(yaml_to_toml).collect(),
+        )),
+        Value::Mapping(mapping) => Some(toml::Value::Table(
+            mapping
+                .iter()
+                .filter_map(|(key, entry)| {
+                    let name = key.as_str().map_or_else(
+                        || {
+                            serde_yaml::to_string(key)
+                                .unwrap_or_default()
+                                .trim_end()
+                                .to_owned()
+                        },
+                        str::to_owned,
+                    );
+                    yaml_to_toml(entry).map(|converted| (name, converted))
+                })
+                .collect(),
+        )),
+        Value::Tagged(tagged) => yaml_to_toml(&tagged.value),
+    }
+}
 
 /// Ensure a document has frontmatter. If missing, add it.
 /// If present, merge (add missing user fields, recompute remargin fields).
@@ -37,16 +198,29 @@ const FRONTMATTER_DELIMITER: &str = "---";
 ///
 /// Returns an error if existing frontmatter YAML cannot be parsed.
 pub fn ensure_frontmatter(doc: &mut ParsedDocument, config: &ResolvedConfig) -> Result<()> {
+    ensure_frontmatter_with(doc, config, FrontmatterSettings::default())
+}
+
+/// [`ensure_frontmatter`] under the realm's [`FrontmatterSettings`].
+///
+/// # Errors
+///
+/// Returns an error if existing frontmatter cannot be parsed.
+pub fn ensure_frontmatter_with(
+    doc: &mut ParsedDocument,
+    config: &ResolvedConfig,
+    settings: FrontmatterSettings,
+) -> Result<()> {
     let comments: Vec<&Comment> = doc.comments();
     let body = extract_body_text(doc);
 
-    let mut mapping = parse_existing_frontmatter(doc)?;
+    let mut mapping = parse_existing_frontmatter(doc, settings.toml_enabled)?;
 
     populate_user_fields(&mut mapping, &body, config);
     update_remargin_fields(&mut mapping, &comments);
 
     let yaml = Value::Mapping(mapping);
-    write_frontmatter_to_doc(doc, &yaml);
+    write_frontmatter_to_doc(doc, &yaml, settings);
 
     Ok(())
 }
@@ -78,10 +252,32 @@ pub fn ensure_frontmatter_authored(
     create: bool,
     old_author: Option<&str>,
 ) -> Result<()> {
+    ensure_frontmatter_authored_with(
+        doc,
+        config,
+        create,
+        old_author,
+        FrontmatterSettings::default(),
+    )
+}
+
+/// [`ensure_frontmatter_authored`] under the realm's [`FrontmatterSettings`].
+///
+/// # Errors
+///
+/// Returns an error if existing frontmatter cannot be parsed, or if the author change is
+/// rejected by the realm's mode gate.
+pub fn ensure_frontmatter_authored_with(
+    doc: &mut ParsedDocument,
+    config: &ResolvedConfig,
+    create: bool,
+    old_author: Option<&str>,
+    settings: FrontmatterSettings,
+) -> Result<()> {
     let comments: Vec<&Comment> = doc.comments();
     let body = extract_body_text(doc);
 
-    let mut mapping = parse_existing_frontmatter(doc)?;
+    let mut mapping = parse_existing_frontmatter(doc, settings.toml_enabled)?;
 
     // Judge `author` as written, before the generic fill can back-fill it from the caller
     // identity.
@@ -90,7 +286,7 @@ pub fn ensure_frontmatter_authored(
     update_remargin_fields(&mut mapping, &comments);
 
     let yaml = Value::Mapping(mapping);
-    write_frontmatter_to_doc(doc, &yaml);
+    write_frontmatter_to_doc(doc, &yaml, settings);
 
     Ok(())
 }
@@ -102,8 +298,14 @@ pub fn ensure_frontmatter_authored(
 /// # Errors
 ///
 /// Returns an error if existing frontmatter YAML cannot be parsed.
+#[cfg(test)]
 pub(crate) fn read_author(doc: &ParsedDocument) -> Result<Option<String>> {
-    let mapping = parse_existing_frontmatter(doc)?;
+    read_author_with(doc, false)
+}
+
+/// [`read_author`] with `+++` recognised when `toml_enabled`.
+pub(crate) fn read_author_with(doc: &ParsedDocument, toml_enabled: bool) -> Result<Option<String>> {
+    let mapping = parse_existing_frontmatter(doc, toml_enabled)?;
     Ok(mapping
         .get("author")
         .and_then(Value::as_str)
@@ -201,7 +403,19 @@ fn authenticate_author(
 /// sandbox value is present but neither null nor a sequence, or if a
 /// sandbox entry is not a well-formed `author@timestamp` string.
 pub fn read_sandbox_entries(doc: &ParsedDocument) -> Result<Vec<SandboxEntry>> {
-    let mapping = parse_existing_frontmatter(doc)?;
+    read_sandbox_entries_with(doc, false)
+}
+
+/// [`read_sandbox_entries`] with `+++` recognised when `toml_enabled`.
+///
+/// # Errors
+///
+/// As [`read_sandbox_entries`].
+pub fn read_sandbox_entries_with(
+    doc: &ParsedDocument,
+    toml_enabled: bool,
+) -> Result<Vec<SandboxEntry>> {
+    let mapping = parse_existing_frontmatter(doc, toml_enabled)?;
     let items = read_sequence_or_empty(&mapping, SANDBOX_KEY)?;
 
     let mut entries = Vec::with_capacity(items.len());
@@ -257,10 +471,23 @@ fn read_sequence_or_empty(mapping: &Mapping, key: &str) -> Result<Vec<Value>> {
 ///
 /// Returns an error if existing frontmatter YAML cannot be parsed.
 pub fn write_sandbox_entries(doc: &mut ParsedDocument, entries: &[SandboxEntry]) -> Result<()> {
-    let mut mapping = parse_existing_frontmatter(doc)?;
+    write_sandbox_entries_with(doc, entries, FrontmatterSettings::default())
+}
+
+/// [`write_sandbox_entries`] under the realm's [`FrontmatterSettings`].
+///
+/// # Errors
+///
+/// Returns an error if existing frontmatter cannot be parsed.
+pub fn write_sandbox_entries_with(
+    doc: &mut ParsedDocument,
+    entries: &[SandboxEntry],
+    settings: FrontmatterSettings,
+) -> Result<()> {
+    let mut mapping = parse_existing_frontmatter(doc, settings.toml_enabled)?;
     set_sandbox_on_mapping(&mut mapping, entries);
     let yaml = Value::Mapping(mapping);
-    write_frontmatter_to_doc(doc, &yaml);
+    write_frontmatter_to_doc(doc, &yaml, settings);
     Ok(())
 }
 
@@ -469,41 +696,31 @@ fn max_ts(
     }
 }
 
-/// Parse existing frontmatter from the document's first body segment.
-/// Returns a `Mapping` (possibly empty if no frontmatter exists).
-pub(crate) fn parse_existing_frontmatter(doc: &ParsedDocument) -> Result<Mapping> {
+/// Parse existing frontmatter from the document's first body segment, `+++` included when
+/// `toml_enabled`. Returns a `Mapping` (possibly empty if no frontmatter exists).
+pub(crate) fn parse_existing_frontmatter(
+    doc: &ParsedDocument,
+    toml_enabled: bool,
+) -> Result<Mapping> {
     let first_body = match doc.segments.first() {
         Some(Segment::Body(text)) => text.as_str(),
         _ => return Ok(Mapping::new()),
     };
 
-    let trimmed = first_body.trim_start();
-    if !trimmed.starts_with(FRONTMATTER_DELIMITER) {
+    let Some(fence) = fence_of(first_body, toml_enabled) else {
         return Ok(Mapping::new());
-    }
+    };
 
     let lines: Vec<&str> = first_body.split('\n').collect();
-    let opener = lines
-        .iter()
-        .position(|line| line.trim() == FRONTMATTER_DELIMITER);
-    let Some(opener_idx) = opener else {
+    let Some((opener_idx, closer_idx)) = block_bounds(&lines, fence) else {
         return Ok(Mapping::new());
     };
 
-    let closer = lines
-        .iter()
-        .enumerate()
-        .skip(opener_idx + 1)
-        .find(|(_, line)| line.trim() == FRONTMATTER_DELIMITER)
-        .map(|(i, _)| i);
-
-    let Some(closer_idx) = closer else {
-        return Ok(Mapping::new());
-    };
-
-    let yaml_str: String = lines[opener_idx + 1..closer_idx].join("\n");
-    let value: Value =
-        serde_yaml::from_str(&yaml_str).context("failed to parse existing frontmatter YAML")?;
+    let block: String = lines[opener_idx + 1..closer_idx].join("\n");
+    let value = parse_block(fence, &block).with_context(|| match fence {
+        Fence::Yaml => "failed to parse existing frontmatter YAML",
+        Fence::Toml => "failed to parse existing frontmatter TOML",
+    })?;
 
     match value {
         Value::Mapping(m) => Ok(m),
@@ -516,23 +733,9 @@ pub(crate) fn parse_existing_frontmatter(doc: &ParsedDocument) -> Result<Mapping
     }
 }
 
-fn strip_frontmatter(text: &str) -> String {
+fn strip_frontmatter(text: &str, fence: Fence) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
-    let opener = lines
-        .iter()
-        .position(|line| line.trim() == FRONTMATTER_DELIMITER);
-    let Some(opener_idx) = opener else {
-        return String::from(text);
-    };
-
-    let closer = lines
-        .iter()
-        .enumerate()
-        .skip(opener_idx + 1)
-        .find(|(_, line)| line.trim() == FRONTMATTER_DELIMITER)
-        .map(|(i, _)| i);
-
-    let Some(closer_idx) = closer else {
+    let Some((_, closer_idx)) = block_bounds(&lines, fence) else {
         return String::from(text);
     };
 
@@ -540,21 +743,19 @@ fn strip_frontmatter(text: &str) -> String {
     remaining_lines.join("\n")
 }
 
-/// Write the frontmatter YAML back into the document's first body segment.
-fn write_frontmatter_to_doc(doc: &mut ParsedDocument, yaml: &Value) {
-    let yaml_str = serde_yaml::to_string(yaml).unwrap_or_default();
-    let frontmatter_block = format!("{FRONTMATTER_DELIMITER}\n{yaml_str}{FRONTMATTER_DELIMITER}\n");
-
-    if let Some(Segment::Body(text)) = doc.segments.first() {
-        let trimmed = text.trim_start();
-        if trimmed.starts_with(FRONTMATTER_DELIMITER) {
-            let remaining = strip_frontmatter(text);
-            let new_body = format!("{frontmatter_block}{remaining}");
-            doc.segments[0] = Segment::Body(new_body);
-            return;
-        }
+/// Write the frontmatter back into the document's first body segment, in the fence the file
+/// already uses, or the realm's new-file fence when it has none.
+fn write_frontmatter_to_doc(doc: &mut ParsedDocument, yaml: &Value, settings: FrontmatterSettings) {
+    if let Some(Segment::Body(text)) = doc.segments.first()
+        && let Some(fence) = fence_of(text, settings.toml_enabled)
+    {
+        let remaining = strip_frontmatter(text, fence);
+        let new_body = format!("{}{remaining}", render_block(fence, yaml));
+        doc.segments[0] = Segment::Body(new_body);
+        return;
     }
 
+    let frontmatter_block = render_block(settings.new_file_fence(), yaml);
     match doc.segments.first() {
         Some(Segment::Body(text)) => {
             let new_body = format!("{frontmatter_block}\n{text}");

@@ -2,19 +2,32 @@
 
 extern crate alloc;
 
+use std::path::Path;
+
 use chrono::{DateTime, FixedOffset};
+use os_shim::System as _;
+use os_shim::mock::MemorySystem;
+use regex::Regex;
+use serde_json::json;
 use serde_yaml::{Mapping, Value};
 
+use crate::config::identity::IdentityFlags;
 use crate::config::{Mode, ResolvedConfig};
+use crate::document::{get_with_links, metadata};
 use crate::frontmatter::{
-    add_sandbox_entry_for, ensure_frontmatter, ensure_frontmatter_authored,
-    extract_title_from_heading, populate_user_fields, read_author, read_sandbox_entries,
-    update_remargin_fields, write_sandbox_entries,
+    Fence, add_sandbox_entry_for, ensure_frontmatter, ensure_frontmatter_authored,
+    extract_title_from_heading, fence_of, parse_existing_frontmatter, populate_user_fields,
+    read_author, read_sandbox_entries, update_remargin_fields, write_sandbox_entries,
 };
+use crate::linter::lint_doc;
+use crate::mcp;
+use crate::operations::purge::purge;
+use crate::operations::{CreateCommentParams, ack_comments, create_comment};
 use crate::parser::{
-    self, Acknowledgment, AuthorType, Comment, ParsedDocument, SandboxEntry, Segment,
+    self, Acknowledgment, AuthorType, Comment, ParsedDocument, SandboxEntry, Segment, rfc3339_z,
 };
 use crate::reactions::Reactions;
+use crate::writer::InsertPosition;
 
 const AUTHOR_GATE_REGISTRY_YAML: &str = "\
 participants:
@@ -27,6 +40,14 @@ participants:
     status: revoked
     pubkeys: []
 ";
+
+// Opt-in `+++` TOML frontmatter (R1). The golden fixtures under `tests/golden/` were captured
+// with the pre-change binary: `remargin comment <fixture> "golden"` and the MCP `write` of the
+// fixture's own bytes, in an open-mode vault whose `.remargin.yaml` declares `identity: golden`
+// and `type: agent`. Comment ids and timestamps are replaced by `<ID>` / `<TS>`.
+const GOLDEN_CONFIG: &str = "mode: open\nidentity: golden\ntype: agent\n";
+const TOML_CONFIG: &str = "mode: open\nidentity: golden\ntype: agent\ntoml_frontmatter: true\n";
+const TOML_NOTE: &str = include_str!("tests/golden/toml_note.md");
 
 fn test_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -847,4 +868,384 @@ fn add_sandbox_entry_preserves_order_across_refresh() {
     assert_eq!(entries[1].author, "bob");
     assert_eq!(entries[1].ts, t4());
     assert_eq!(entries[2].author, "carol");
+}
+
+fn vault(config_yaml: &str, file: &str, content: &str) -> MemorySystem {
+    MemorySystem::new()
+        .with_file(Path::new("/vault/.remargin.yaml"), config_yaml.as_bytes())
+        .unwrap()
+        .with_file(Path::new("/vault").join(file), content.as_bytes())
+        .unwrap()
+}
+
+fn resolve(system: &MemorySystem) -> ResolvedConfig {
+    ResolvedConfig::resolve(system, Path::new("/vault"), &IdentityFlags::default(), None).unwrap()
+}
+
+/// Mirror of `remargin comment <file> "<content>"`; returns the file after the write with the
+/// new id replaced by `<ID>`.
+fn comment(system: &MemorySystem, config: &ResolvedConfig, file: &str, content: &str) -> String {
+    let path = Path::new("/vault").join(file);
+    let id = create_comment(
+        system,
+        &path,
+        config,
+        &CreateCommentParams::new(content, &InsertPosition::Append),
+    )
+    .unwrap();
+    let after = system.read_to_string(&path).unwrap();
+    after.replace(&format!("id: {id}\n"), "id: <ID>\n")
+}
+
+/// Mirror of the MCP `write` of the file's own bytes.
+fn rewrite(system: &MemorySystem, config: &ResolvedConfig, file: &str) -> String {
+    let path = Path::new("/vault").join(file);
+    let content = system.read_to_string(&path).unwrap();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1_i32,
+        "method": "tools/call",
+        "params": {"name": "write", "arguments": {"path": file, "content": content}},
+    });
+    let response = mcp::process_request(system, Path::new("/vault"), config, &request.to_string())
+        .unwrap()
+        .unwrap();
+    assert!(!response.contains("\"error\""), "write failed: {response}");
+    system.read_to_string(&path).unwrap()
+}
+
+fn mask_timestamps(text: &str) -> String {
+    Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})")
+        .unwrap()
+        .replace_all(text, "<TS>")
+        .into_owned()
+}
+
+fn assert_golden(fixture: &str, comment_golden: &str, write_golden: &str) {
+    let commented = {
+        let system = vault(GOLDEN_CONFIG, "note.md", fixture);
+        comment(&system, &resolve(&system), "note.md", "golden")
+    };
+    assert_eq!(mask_timestamps(&commented), comment_golden);
+
+    let written = {
+        let system = vault(GOLDEN_CONFIG, "note.md", fixture);
+        rewrite(&system, &resolve(&system), "note.md")
+    };
+    assert_eq!(mask_timestamps(&written), write_golden);
+}
+
+/// The `+++` block at the top of `text`, parsed as TOML. Panics when there is none.
+fn toml_block(text: &str) -> toml::Table {
+    let rest = text.strip_prefix("+++\n").unwrap();
+    let end = rest.find("\n+++\n").unwrap();
+    rest[..end].parse::<toml::Table>().unwrap()
+}
+
+/// The text from the first comment block on, with timestamps masked.
+fn comment_blocks(text: &str) -> String {
+    mask_timestamps(&text[text.find("```remargin").unwrap()..])
+}
+
+#[test]
+fn a_yaml_file_is_written_exactly_as_before() {
+    assert_golden(
+        include_str!("tests/golden/yaml_note.md"),
+        include_str!("tests/golden/yaml_note.comment.after.md"),
+        include_str!("tests/golden/yaml_note.write.after.md"),
+    );
+}
+
+#[test]
+fn a_file_without_frontmatter_is_written_exactly_as_before() {
+    assert_golden(
+        include_str!("tests/golden/plain_note.md"),
+        include_str!("tests/golden/plain_note.comment.after.md"),
+        include_str!("tests/golden/plain_note.write.after.md"),
+    );
+}
+
+#[test]
+fn a_toml_file_without_the_opt_in_is_written_exactly_as_before() {
+    assert_golden(
+        TOML_NOTE,
+        include_str!("tests/golden/toml_note.comment.after.md"),
+        include_str!("tests/golden/toml_note.write.after.md"),
+    );
+}
+
+#[test]
+fn a_toml_file_keeps_toml_after_a_comment() {
+    let system = vault(TOML_CONFIG, "note.md", TOML_NOTE);
+    let after = comment(&system, &resolve(&system), "note.md", "golden");
+
+    assert!(after.starts_with("+++\n"), "{after}");
+    let before_comment = &after[..after.find("```remargin").unwrap()];
+    assert!(!before_comment.lines().any(|line| line == "---"), "{after}");
+    assert!(before_comment.contains("# Toml note\n\nBody text under TOML frontmatter.\n"));
+
+    let table = toml_block(&after);
+    assert_eq!(table["title"].as_str(), Some("Toml note"));
+    assert_eq!(table["tags"].as_array().unwrap().len(), 2);
+    assert_eq!(table["created"].as_str(), Some("2026-01-02T03:04:05Z"));
+    assert_eq!(table["author"].as_str(), Some("golden"));
+    assert_eq!(table["remargin_pending"].as_integer(), Some(1));
+}
+
+#[test]
+fn a_toml_comment_line_is_not_taken_for_a_heading() {
+    // A TOML comment that looks like a heading must not catch an after-heading insert.
+    let shadowed = "+++\n# Toml note\ntitle = \"Toml note\"\n+++\n\n# Toml note\n\nBody.\n";
+    let system = vault(TOML_CONFIG, "note.md", shadowed);
+    let path = Path::new("/vault/note.md");
+    let position = InsertPosition::AfterHeading(String::from("Toml note"));
+    create_comment(
+        &system,
+        path,
+        &resolve(&system),
+        &CreateCommentParams::new("here", &position),
+    )
+    .unwrap();
+
+    let after = system.read_to_string(path).unwrap();
+    let body_heading = after.find("+++\n\n# Toml note\n").unwrap();
+    assert!(after.find("```remargin").unwrap() > body_heading, "{after}");
+    assert_eq!(toml_block(&after)["title"].as_str(), Some("Toml note"));
+}
+
+#[test]
+fn pending_counts_are_recomputed_in_toml() {
+    let system = vault(TOML_CONFIG, "note.md", TOML_NOTE);
+    let config = resolve(&system);
+    let path = Path::new("/vault/note.md");
+    let append = InsertPosition::Append;
+    let first = create_comment(
+        &system,
+        path,
+        &config,
+        &CreateCommentParams::new("one", &append),
+    )
+    .unwrap();
+    let second = create_comment(
+        &system,
+        path,
+        &config,
+        &CreateCommentParams::new("two", &append),
+    )
+    .unwrap();
+    let two_pending = toml_block(&system.read_to_string(path).unwrap());
+    assert_eq!(two_pending["remargin_pending"].as_integer(), Some(2));
+    assert_eq!(
+        two_pending["remargin_pending_for"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    ack_comments(
+        &system,
+        path,
+        &config,
+        &[first.as_str(), second.as_str()],
+        false,
+    )
+    .unwrap();
+    let acked = system.read_to_string(path).unwrap();
+    let none_pending = toml_block(&acked);
+    assert!(!none_pending.contains_key("remargin_pending"), "{acked}");
+    assert!(
+        !none_pending.contains_key("remargin_pending_for"),
+        "{acked}"
+    );
+    assert!(none_pending["remargin_last_activity"].as_str().is_some());
+
+    purge(&system, path, &config).unwrap();
+    let purged = system.read_to_string(path).unwrap();
+    let cleaned = toml_block(&purged);
+    assert!(
+        !cleaned.keys().any(|key| key.starts_with("remargin_")),
+        "{purged}"
+    );
+    assert_eq!(cleaned["title"].as_str(), Some("Toml note"));
+}
+
+#[test]
+fn a_new_file_uses_yaml_unless_configured_toml() {
+    let plain = include_str!("tests/golden/plain_note.md");
+
+    for (config_yaml, opener) in [
+        (String::from(TOML_CONFIG), "---\n"),
+        (format!("{GOLDEN_CONFIG}frontmatter: toml\n"), "---\n"),
+        (format!("{TOML_CONFIG}frontmatter: yaml\n"), "---\n"),
+        (format!("{TOML_CONFIG}frontmatter: toml\n"), "+++\n"),
+    ] {
+        let system = vault(&config_yaml, "note.md", plain);
+        let after = comment(&system, &resolve(&system), "note.md", "golden");
+        assert!(after.starts_with(opener), "{config_yaml}\n{after}");
+        if opener == "+++\n" {
+            assert_eq!(toml_block(&after)["title"].as_str(), Some("Plain note"));
+        }
+    }
+}
+
+#[test]
+fn a_toml_datetime_reads_as_the_string_yaml_would_store() {
+    let text = "+++\ncreated = 2026-01-02T03:04:05+02:00\nzulu = 2026-01-02T03:04:05.5Z\nday = 2026-01-02\n+++\n\nBody.\n";
+    let doc = parser::parse(text).unwrap();
+    let mapping = parse_existing_frontmatter(&doc, true).unwrap();
+    let utc = DateTime::parse_from_rfc3339("2026-01-02T01:04:05Z").unwrap();
+    assert_eq!(
+        mapping.get("created").and_then(Value::as_str),
+        Some(rfc3339_z(&utc).as_str())
+    );
+    assert_eq!(
+        mapping.get("zulu").and_then(Value::as_str),
+        Some("2026-01-02T03:04:05.500Z")
+    );
+    assert_eq!(
+        mapping.get("day").and_then(Value::as_str),
+        Some("2026-01-02")
+    );
+    assert!(parse_existing_frontmatter(&doc, false).unwrap().is_empty());
+
+    let system = vault(TOML_CONFIG, "note.md", TOML_NOTE);
+    let meta = metadata(
+        &system,
+        Path::new("/vault"),
+        Path::new("note.md"),
+        &resolve(&system),
+    )
+    .unwrap();
+    assert_eq!(
+        meta.frontmatter
+            .unwrap()
+            .get("created")
+            .and_then(Value::as_str),
+        Some("2026-01-02T03:04:05Z")
+    );
+}
+
+#[test]
+fn the_opt_in_is_found_by_walk_up_for_a_manual_identity() {
+    let system = MemorySystem::new()
+        .with_file(
+            Path::new("/vault/.remargin.yaml"),
+            b"mode: open\ntoml_frontmatter: true\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/vault/sub/note.md"), TOML_NOTE.as_bytes())
+        .unwrap();
+    let flags = IdentityFlags {
+        author_type: Some(AuthorType::Agent),
+        identity: Some(String::from("hub")),
+        ..IdentityFlags::default()
+    };
+    let config = ResolvedConfig::resolve(&system, Path::new("/"), &flags, None).unwrap();
+    assert!(config.source_path.is_none());
+
+    let after = comment(&system, &config, "sub/note.md", "golden");
+    assert!(after.starts_with("+++\n"), "{after}");
+    assert_eq!(toml_block(&after)["author"].as_str(), Some("hub"));
+}
+
+#[test]
+fn comment_blocks_are_byte_identical_in_both_formats() {
+    let body = "\n# Note\n\nBody.\n";
+
+    let yaml_system = vault(
+        TOML_CONFIG,
+        "note.md",
+        &format!("---\ntitle: Note\n---\n{body}"),
+    );
+    let yaml_after = comment(
+        &yaml_system,
+        &resolve(&yaml_system),
+        "note.md",
+        "same words",
+    );
+
+    let toml_system = vault(
+        TOML_CONFIG,
+        "note.md",
+        &format!("+++\ntitle = \"Note\"\n+++\n{body}"),
+    );
+    let toml_after = comment(
+        &toml_system,
+        &resolve(&toml_system),
+        "note.md",
+        "same words",
+    );
+
+    assert!(yaml_after.starts_with("---\n"));
+    assert!(toml_after.starts_with("+++\n"));
+    assert_eq!(comment_blocks(&yaml_after), comment_blocks(&toml_after));
+}
+
+#[test]
+fn links_and_lint_read_toml_frontmatter() {
+    let note = "+++\nup = \"Parent\"\nrelated = [\"Sibling\"]\n+++\n\n# Note\n";
+    let system = vault(TOML_CONFIG, "note.md", note)
+        .with_file(
+            Path::new("/vault/Parent.md"),
+            b"+++\ntitle = \"The parent\"\n+++\n\nBody.\n",
+        )
+        .unwrap()
+        .with_file(Path::new("/vault/Sibling.md"), b"# Sibling\n")
+        .unwrap();
+    let config = resolve(&system);
+    let got = get_with_links(
+        &system,
+        Path::new("/vault"),
+        Path::new("note.md"),
+        None,
+        false,
+        &config,
+    )
+    .unwrap();
+    let found: Vec<(&str, &[usize], Option<&str>)> = got
+        .links
+        .iter()
+        .map(|link| {
+            (
+                link.target.as_str(),
+                link.lines.as_slice(),
+                link.title.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("Parent", &[2_usize][..], Some("The parent")),
+            ("Sibling", &[3_usize][..], Some("Sibling")),
+        ]
+    );
+
+    let broken = "+++\ntitle = \n+++\n\nBody.\n";
+    let unclosed = "+++\ntitle = \"x\"\n\nBody.\n";
+    for (text, expected) in [
+        (broken, "invalid TOML in frontmatter"),
+        (unclosed, "unclosed TOML frontmatter"),
+    ] {
+        let opted_in = vault(TOML_CONFIG, "note.md", text);
+        let found_errors = lint_doc(&opted_in, Path::new("/vault/note.md"), &config).unwrap();
+        assert!(
+            found_errors
+                .errors
+                .iter()
+                .any(|err| err.message.starts_with(expected)),
+            "{text}: {:?}",
+            found_errors.errors
+        );
+
+        let not_opted_in = vault(GOLDEN_CONFIG, "note.md", text);
+        let clean = lint_doc(&not_opted_in, Path::new("/vault/note.md"), &config).unwrap();
+        assert!(clean.errors.is_empty(), "{:?}", clean.errors);
+    }
+
+    assert_eq!(fence_of("+++\na = 1\n+++\n", true), Some(Fence::Toml));
+    assert_eq!(fence_of("+++\na = 1\n+++\n", false), None);
+    assert_eq!(fence_of("---\na: 1\n---\n", true), Some(Fence::Yaml));
+    assert_eq!(fence_of("# Plain\n", true), None);
 }

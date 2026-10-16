@@ -20,8 +20,10 @@ use serde_json::{Value, json};
 use tixschema::model_schema;
 
 use crate::config::registry::Registry;
-use crate::config::{ResolvedConfig, load_config_filtered_with_path, load_registry};
-use crate::frontmatter::read_sandbox_entries;
+use crate::config::{
+    ResolvedConfig, frontmatter_settings_for_doc, load_config_filtered_with_path, load_registry,
+};
+use crate::frontmatter::read_sandbox_entries_with;
 use crate::parser::{self, Comment, SandboxEntry};
 
 /// Columns a change kind lacks are `null` in that kind's row.
@@ -417,7 +419,9 @@ fn gather_one_file(
     let body = system.read_to_string(file_path).ok()?;
     let doc = parser::parse(&body).ok()?;
     let comments = doc.comments();
-    let sandbox_entries = read_sandbox_entries(&doc).unwrap_or_default();
+    let toml_enabled =
+        frontmatter_settings_for_doc(system, file_path).is_ok_and(|fm| fm.toml_enabled);
+    let sandbox_entries = read_sandbox_entries_with(&doc, toml_enabled).unwrap_or_default();
 
     let cutoff = since.map_or_else(
         || caller_last_action(&comments, &sandbox_entries, caller_identity),
