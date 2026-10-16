@@ -724,10 +724,12 @@ pub fn cmd_ack(
         remove,
         search_path,
     } = *params;
+    let mut touched: Vec<PathBuf> = Vec::new();
     if let Some(doc_file) = file {
         let path = resolve_doc_path(system, cwd, doc_file)?;
         let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
         operations::ack_comments(system, &path, config, &id_refs, remove)?;
+        touched.push(path);
     } else {
         let base_dir = cwd.join(search_path);
         for comment_id in ids {
@@ -739,6 +741,7 @@ pub fn cmd_ack(
                 1 => {
                     let id_refs: Vec<&str> = vec![comment_id.as_str()];
                     operations::ack_comments(system, &matches[0], config, &id_refs, remove)?;
+                    touched.push(matches[0].clone());
                 }
                 n => {
                     let file_list: Vec<String> =
@@ -751,7 +754,15 @@ pub fn cmd_ack(
             }
         }
     }
-    print_output(sinks, json_mode, &responses::ack(ids, remove))
+    let mut result = responses::ack(ids, remove);
+    // One hash only when every id landed in the same file.
+    if let [first, rest @ ..] = touched.as_slice()
+        && json_mode
+        && rest.iter().all(|p| p == first)
+    {
+        responses::attach_hash(&mut result, system, first);
+    }
+    print_output(sinks, json_mode, &result)
 }
 
 pub fn cmd_batch(
@@ -782,6 +793,7 @@ pub fn cmd_batch(
     let mut result = responses::batch(&outcome.ids);
     if json_mode {
         advice::attach_op_notes(&mut result, &outcome.warnings);
+        responses::attach_hash(&mut result, system, &path);
     } else {
         let text = advice::format_op_text(&outcome.warnings);
         if !text.is_empty() {
@@ -833,6 +845,7 @@ pub fn cmd_comment(
     let notes = comment_style::notes(cp.content);
     if cp.json_mode {
         advice::attach_notes(&mut result, &notes);
+        responses::attach_hash(&mut result, system, &path);
     } else {
         let text = advice::format_text(&notes);
         if !text.is_empty() {
@@ -875,7 +888,9 @@ pub fn cmd_comments(
             .iter()
             .map(serde_json::to_value)
             .collect::<Result<Vec<serde_json::Value>, _>>()?;
-        out_json(sinks, &json!({ "comments": items }))
+        let mut result = json!({ "comments": items });
+        responses::attach_hash(&mut result, system, &path);
+        out_json(sinks, &result)
     } else {
         for cm in &comments {
             let ack_status = if cm.ack.is_empty() {
@@ -911,7 +926,11 @@ pub fn cmd_delete(
     let path = resolve_doc_path(system, cwd, file)?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     operations::delete_comments(system, &path, config, &id_refs)?;
-    print_output(sinks, json_mode, &responses::comments_deleted(ids))
+    let mut result = responses::comments_deleted(ids);
+    if json_mode {
+        responses::attach_hash(&mut result, system, &path);
+    }
+    print_output(sinks, json_mode, &result)
 }
 
 pub fn cmd_edit(
@@ -930,6 +949,7 @@ pub fn cmd_edit(
     let notes = comment_style::notes(p.content);
     if p.json_mode {
         advice::attach_notes(&mut result, &notes);
+        responses::attach_hash(&mut result, system, &path);
     } else {
         let text = advice::format_text(&notes);
         if !text.is_empty() {
@@ -969,19 +989,15 @@ pub fn cmd_get(
             .enumerate()
             .map(|(i, text)| json!({ "line": start_num + i, "text": text }))
             .collect();
-        print_output(
-            sinks,
-            true,
-            &json!({ "lines": json_lines, "links": result.links }),
-        )
+        let mut payload = json!({ "lines": json_lines, "links": result.links });
+        responses::attach_hash(&mut payload, system, &cwd.join(target));
+        print_output(sinks, true, &payload)
     } else {
         let result = document::get_with_links(system, cwd, target, lines, gp.line_numbers, config)?;
         if gp.output.is_json() {
-            print_output(
-                sinks,
-                true,
-                &json!({ "content": result.content, "links": result.links }),
-            )
+            let mut payload = json!({ "content": result.content, "links": result.links });
+            responses::attach_hash(&mut payload, system, &cwd.join(target));
+            print_output(sinks, true, &payload)
         } else {
             out_raw(sinks, &result.content)?;
             let block = render_links_block(&result.links);
@@ -1676,7 +1692,11 @@ pub fn cmd_metadata(
     let target = target_buf.as_path();
     let meta = document::metadata(system, cwd, target, config)?;
 
-    print_output(sinks, json_mode, &meta.to_json(false))
+    let mut payload = meta.to_json(false);
+    if json_mode {
+        responses::attach_hash(&mut payload, system, &meta.path);
+    }
+    print_output(sinks, json_mode, &payload)
 }
 
 /// Route a `plan` subcommand to its projection and print the report.
@@ -2153,7 +2173,11 @@ pub fn cmd_purge(
         );
     }
     let result = purge::purge(system, &path, config)?;
-    print_output(sinks, json_mode, &result.to_json())
+    let mut payload = result.to_json();
+    if json_mode {
+        responses::attach_hash(&mut payload, system, &path);
+    }
+    print_output(sinks, json_mode, &payload)
 }
 
 pub fn cmd_query(
@@ -2290,7 +2314,9 @@ pub fn cmd_replace(
     let report = replace::replace(system, cwd, &target, &params.options, config)?;
 
     if params.json_mode {
-        return print_output(sinks, true, &serde_json::to_value(&report)?);
+        let mut payload = serde_json::to_value(&report)?;
+        responses::attach_hash(&mut payload, system, &target);
+        return print_output(sinks, true, &payload);
     }
 
     for file in &report.files {
@@ -2349,11 +2375,11 @@ pub fn cmd_react(
         params.emoji,
         params.remove,
     )?;
-    print_output(
-        sinks,
-        params.json_mode,
-        &responses::react(params.emoji, params.id, params.remove),
-    )
+    let mut result = responses::react(params.emoji, params.id, params.remove);
+    if params.json_mode {
+        responses::attach_hash(&mut result, system, &path);
+    }
+    print_output(sinks, params.json_mode, &result)
 }
 
 /// Render a single registry participant as a JSON object for
@@ -2502,7 +2528,9 @@ pub fn cmd_cp(
     let outcome = cp_op::cp(system, cwd, config, &args)?;
 
     if params.json_mode {
-        out_json(sinks, &serde_json::to_value(&outcome)?)
+        let mut payload = serde_json::to_value(&outcome)?;
+        responses::attach_hash(&mut payload, system, &cwd.join(params.dst));
+        out_json(sinks, &payload)
     } else {
         out(
             sinks,
@@ -2525,7 +2553,9 @@ pub fn cmd_mv(
     let outcome = mv_op::mv(system, cwd, config, &args)?;
 
     if params.json_mode {
-        out_json(sinks, &outcome.to_json())
+        let mut payload = outcome.to_json();
+        responses::attach_hash(&mut payload, system, &cwd.join(params.dst));
+        out_json(sinks, &payload)
     } else {
         out(
             sinks,
@@ -2672,7 +2702,9 @@ pub fn cmd_sign(
     options.repair_checksum = repair_checksum;
     let result = operations::sign::sign_comments(system, &path, config, &selection, options)?;
     if json_mode {
-        print_output(sinks, true, &result.to_json())
+        let mut payload = result.to_json();
+        responses::attach_hash(&mut payload, system, &path);
+        print_output(sinks, true, &payload)
     } else {
         render::render_sign_result_text(sinks, &result)
     }
@@ -3431,9 +3463,10 @@ pub fn cmd_write(
         );
     }
 
-    print_output(
-        sinks,
-        wp.json_mode,
-        &outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw),
-    )
+    let stored_hash = outcome.hash.clone();
+    let mut payload = outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw);
+    if let (true, Some(stored), Some(map)) = (wp.json_mode, stored_hash, payload.as_object_mut()) {
+        map.insert(String::from("hash"), Value::String(stored));
+    }
+    print_output(sinks, wp.json_mode, &payload)
 }
