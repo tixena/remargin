@@ -1,7 +1,26 @@
 //! Canonical JSON response shapes for mutating ops whose core fn
 //! returns `()`. Both CLI and MCP call these.
 
+use std::path::Path;
+
+use os_shim::System;
 use serde_json::{Value, json};
+
+use crate::crypto;
+
+/// Add `hash` (see [`crypto::file_hash`]) to a JSON object result, so a caller learns the version
+/// of the file the op just read or left on disk.
+///
+/// Best effort: a directory, a missing file or a non-object result is left as it is, because the
+/// op itself has already succeeded.
+pub fn attach_hash(result: &mut Value, system: &dyn System, path: &Path) {
+    if system.is_dir(path).unwrap_or(false) {
+        return;
+    }
+    if let (Some(map), Ok(hash)) = (result.as_object_mut(), crypto::file_hash(system, path)) {
+        map.insert(String::from("hash"), Value::String(hash));
+    }
+}
 
 #[must_use]
 pub fn ack(ids: &[String], remove: bool) -> Value {

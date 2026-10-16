@@ -60,6 +60,20 @@ Sandbox staging is a per-identity, per-file marker stored in document frontmatte
 |----|---------|
 | `plan` | Projection for any mutating op. Takes `op` + the same args as the underlying call. Returns predicted outcome without touching disk. Covers `ack`, `batch`, `comment`, `reply`, `delete`, `edit`, `migrate`, `purge`, `react`, `sandbox-add`, `sandbox-remove`, `sign`, `write`. `op: "reply"` is a synonym for `op: "comment"` with a required `parent_id`. |
 
+## Version-checked writes
+
+Reads and writes return `hash` (`sha256:<hex>` of the file's bytes). Pass it back as `if_hash` (CLI: `--if-hash <hash>`) on a write to refuse the op if the file changed in between. Nothing is written on a mismatch. Without `if_hash`, nothing changes. The check runs before the write and is not atomic across processes; a server that serialises writers (the hub) makes it atomic.
+
+| Tool | File checked |
+|------|--------------|
+| `batch comment delete edit purge react reply sign` | `file` |
+| `write rm replace` | `path` (`replace` needs a single file, not a folder) |
+| `mv cp` | `src` |
+| `ack` | `file` (`if_hash` without `file` is an error) |
+| `sandbox_add sandbox_remove` | the one entry in `files` (exactly one required) |
+
+A mismatch returns `{error_kind: "stale_version", path, expected, current_hash, headline}`.
+
 ## Admin (CLI-only — user-facing setup)
 
 - `keygen` — generate Ed25519 signing key pair.
