@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use chrono::Utc;
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_yaml::{Mapping, Value};
 
 use crate::parser::rfc3339_z;
@@ -224,7 +224,7 @@ pub fn write_remargin_yaml(system: &dyn System, anchor: &Path, body: &str) -> Re
     let path = anchor.join(".remargin.yaml");
     let was_absent = system.read_to_string(&path).is_err();
     system
-        .write(&path, body.as_bytes())
+        .write(&path, body.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(was_absent)
 }

@@ -5,6 +5,7 @@ use core::time::Duration;
 use std::path::Path;
 
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 
 use crate::parser::AuthorType;
@@ -1277,7 +1278,11 @@ fn read_gate_caches_one_verdict_per_anchor() {
     );
 
     system
-        .write(Path::new("/project/.remargin.yaml"), b"mode: open\n")
+        .write(
+            Path::new("/project/.remargin.yaml"),
+            b"mode: open\n",
+            WriteMode::Replace,
+        )
         .unwrap();
 
     assert!(

@@ -83,7 +83,7 @@ fn install_preserves_data_json() {
     fs.create_dir_all(&plugin_dir).unwrap();
     let data_json = plugin_dir.join("data.json");
     let payload = br#"{"identity":"alice","sidebarSide":"left"}"#;
-    fs.write(&data_json, payload).unwrap();
+    fs.write(&data_json, payload, WriteMode::Replace).unwrap();
 
     let report = install_stub(&fs, &vault, None).unwrap();
     assert_eq!(report.preserved_data_bytes, Some(payload.len()));

@@ -6,6 +6,7 @@ use std::thread;
 
 use chrono::DateTime;
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 
 use crate::config::{Mode, ResolvedConfig};
@@ -87,7 +88,9 @@ fn write_file(system: &MemorySystem, path: &str, content: &str) {
     if let Some(parent) = Path::new(path).parent() {
         system.create_dir_all(parent).unwrap();
     }
-    system.write(Path::new(path), content.as_bytes()).unwrap();
+    system
+        .write(Path::new(path), content.as_bytes(), WriteMode::Replace)
+        .unwrap();
 }
 
 fn read_file(system: &MemorySystem, path: &str) -> String {

@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 use serde_yaml::Value;
 
@@ -136,7 +137,11 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
 
     let sidecar_path = anchor.join(".claude/.remargin-restrictions.json");
     system
-        .write(&sidecar_path, b"{\"version\":1,\"entries\":{}}")
+        .write(
+            &sidecar_path,
+            b"{\"version\":1,\"entries\":{}}",
+            WriteMode::Replace,
+        )
         .unwrap();
 
     let outcome = unprotect(
@@ -214,7 +219,9 @@ fn manual_rule_deletion_surfaces_warning() {
         .unwrap();
     deny.retain(|v| v.as_str() != Some(edit_rule.as_str()));
     let updated = serde_json::to_string_pretty(&value).unwrap();
-    system.write(&local, updated.as_bytes()).unwrap();
+    system
+        .write(&local, updated.as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let outcome = unprotect(
         &system,

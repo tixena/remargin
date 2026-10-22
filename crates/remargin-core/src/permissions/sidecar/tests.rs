@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 
 use crate::permissions::sidecar::{
@@ -106,7 +107,9 @@ fn load_rejects_unknown_version() {
     let body = "{\"version\":99,\"entries\":{}}\n";
     let path = sidecar_path(&anchor);
     system.create_dir_all(path.parent().unwrap()).unwrap();
-    system.write(&path, body.as_bytes()).unwrap();
+    system
+        .write(&path, body.as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let err = load(&system, &anchor).unwrap_err();
     let chain = format!("{err:#}");
@@ -121,7 +124,9 @@ fn load_rejects_malformed_json() {
     let (system, anchor) = empty_anchor();
     let path = sidecar_path(&anchor);
     system.create_dir_all(path.parent().unwrap()).unwrap();
-    system.write(&path, b"{not json").unwrap();
+    system
+        .write(&path, b"{not json", WriteMode::Replace)
+        .unwrap();
 
     let err = load(&system, &anchor).unwrap_err();
     let chain = format!("{err:#}");
@@ -162,7 +167,11 @@ fn save_preserves_existing_gitignore_entry() {
     let (system, anchor) = empty_anchor();
     let original = format!("# user notes\n{SIDECAR_GITIGNORE_ENTRY}\n");
     system
-        .write(&anchor.join(".gitignore"), original.as_bytes())
+        .write(
+            &anchor.join(".gitignore"),
+            original.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
     save(&system, &anchor, &Sidecar::new()).unwrap();
     let updated = system.read_to_string(&anchor.join(".gitignore")).unwrap();
@@ -174,7 +183,11 @@ fn save_appends_to_existing_gitignore_without_clobbering() {
     let (system, anchor) = empty_anchor();
     let original = "target/\n*.log\n";
     system
-        .write(&anchor.join(".gitignore"), original.as_bytes())
+        .write(
+            &anchor.join(".gitignore"),
+            original.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
     save(&system, &anchor, &Sidecar::new()).unwrap();
     let updated = system.read_to_string(&anchor.join(".gitignore")).unwrap();

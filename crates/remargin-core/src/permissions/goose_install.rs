@@ -26,7 +26,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_json::{Map, Value, json};
 
 /// Plugin directory name under `<root>/.agents/plugins/`.
@@ -464,6 +464,6 @@ fn write_file(system: &dyn System, path: &Path, body: &str) -> Result<()> {
             .with_context(|| format!("creating goose plugin directory {}", parent.display()))?;
     }
     system
-        .write(path, body.as_bytes())
+        .write(path, body.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing goose plugin file {}", path.display()))
 }

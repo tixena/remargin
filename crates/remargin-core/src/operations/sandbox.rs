@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, FixedOffset, Utc};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde::Serialize;
 use serde_json::Value;
 use tixschema::model_schema;
@@ -370,7 +370,7 @@ fn add_one(
         commit_with_verify(system, &doc, config, file, |verified_doc| {
             let markdown = verified_doc.to_markdown()?;
             system
-                .write(file, markdown.as_bytes())
+                .write(file, markdown.as_bytes(), WriteMode::Replace)
                 .with_context(|| format!("writing {}", file.display()))
         })?;
     }
@@ -397,7 +397,7 @@ fn remove_one(
         commit_with_verify(system, &doc, config, file, |verified_doc| {
             let markdown = verified_doc.to_markdown()?;
             system
-                .write(file, markdown.as_bytes())
+                .write(file, markdown.as_bytes(), WriteMode::Replace)
                 .with_context(|| format!("writing {}", file.display()))
         })?;
     }

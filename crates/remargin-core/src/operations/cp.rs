@@ -22,7 +22,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
@@ -314,7 +314,7 @@ fn write_markdown_copy(
         .to_markdown()
         .with_context(|| format!("serializing markdown for {}", dst.display()))?;
     system
-        .write(dst, serialized.as_bytes())
+        .write(dst, serialized.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing {}", dst.display()))
 }
 

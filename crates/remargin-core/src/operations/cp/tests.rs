@@ -10,6 +10,7 @@ extern crate alloc;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 
 use crate::config::{Mode, ResolvedConfig};
@@ -142,7 +143,11 @@ fn source_signatures_intact_after_copy() {
         "---\ntitle: src\n---\n\n# Body\n\n```remargin\n---\nid: c0001\nauthor: alice\ntype: human\nts: 2024-01-01T00:00:00+00:00\nchecksum: {checksum}\n---\n{content}\n```\n"
     );
     system
-        .write(base().join("src.md").as_path(), src.as_bytes())
+        .write(
+            base().join("src.md").as_path(),
+            src.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
 
     let args = CpArgs::new(PathBuf::from("src.md"), PathBuf::from("dst.md"));

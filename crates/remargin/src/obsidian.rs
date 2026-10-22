@@ -15,7 +15,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_json::json;
 
 /// The plugin settings file, preserved across reinstalls.
@@ -188,17 +188,17 @@ pub fn install_from_bytes(
 
     let main_js_path = plugin_dir.join("main.js");
     system
-        .write(&main_js_path, main_js)
+        .write(&main_js_path, main_js, WriteMode::Replace)
         .with_context(|| format!("failed to write {}", main_js_path.display()))?;
 
     let manifest_path = plugin_dir.join("manifest.json");
     system
-        .write(&manifest_path, manifest)
+        .write(&manifest_path, manifest, WriteMode::Replace)
         .with_context(|| format!("failed to write {}", manifest_path.display()))?;
 
     let preserved_bytes = if let Some(contents) = preserved_data.as_ref() {
         system
-            .write(&data_json_path, contents.as_bytes())
+            .write(&data_json_path, contents.as_bytes(), WriteMode::Replace)
             .with_context(|| format!("failed to write {}", data_json_path.display()))?;
         Some(contents.len())
     } else {

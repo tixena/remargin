@@ -4,9 +4,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use std::env::VarError;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use os_shim::mock::MemorySystem;
-use os_shim::{FileMetadata, System, TempDirHandle, WalkEntry};
+use os_shim::{FileMetadata, System, TempDirHandle, WalkEntry, WriteMode};
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::operations::mv::{MvArgs, mv};
@@ -79,6 +80,10 @@ impl System for ExdevSystem<'_> {
         self.inner.metadata(path)
     }
 
+    fn now(&self) -> SystemTime {
+        self.inner.now()
+    }
+
     fn open(&self, path: &Path) -> io::Result<Box<dyn Read + '_>> {
         self.inner.open(path)
     }
@@ -123,8 +128,8 @@ impl System for ExdevSystem<'_> {
         self.inner.walk_dir(path, follow_links, hidden)
     }
 
-    fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
-        self.inner.write(path, contents)
+    fn write(&self, path: &Path, contents: &[u8], mode: WriteMode) -> io::Result<()> {
+        self.inner.write(path, contents, mode)
     }
 }
 

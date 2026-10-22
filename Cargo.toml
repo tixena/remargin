@@ -23,7 +23,7 @@ serde_yaml = "0.9"
 serde_json = "1.0"
 
 # System abstraction (filesystem, env, temp dirs)
-os-shim = "0.1.0"
+os-shim = "0.1.1"
 
 # TypeScript type + Zod schema generation from Rust models
 tixschema = { git = "https://github.com/tixena/tixschema.git", features = ["chrono"] }

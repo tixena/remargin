@@ -12,6 +12,7 @@ use image::codecs::gif::GifEncoder;
 use image::codecs::png::PngEncoder;
 use image::{Frame, Rgb, RgbImage, Rgba, RgbaImage};
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 use serde_json::{Value, json};
 
@@ -7318,7 +7319,11 @@ fn query_pages_rows_across_files_and_regroups_them() {
     let system = system_with_comments(base, 2);
     let config = test_config();
     system
-        .write(&base.join("other.md"), b"# Other\n\nBody.\n")
+        .write(
+            &base.join("other.md"),
+            b"# Other\n\nBody.\n",
+            WriteMode::Replace,
+        )
         .unwrap();
     let response = call(
         &system,
@@ -7366,6 +7371,7 @@ fn activity_reports_total_and_pages_changes() {
         .write(
             &base.join(".remargin.yaml"),
             b"identity: tester\ntype: human\n",
+            WriteMode::Replace,
         )
         .unwrap();
     let response = call(

@@ -45,7 +45,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_yaml::{Mapping, Value};
 
 use self::config_splice::Edit;
@@ -483,7 +483,7 @@ fn write_config(system: &dyn System, path: &Path, body: &str) -> Result<()> {
     }
     let temp = temp_path(path);
     system
-        .write(&temp, body.as_bytes())
+        .write(&temp, body.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing goose config {}", temp.display()))?;
     system
         .rename(&temp, path)

@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_json::{Value, json};
 
 use remargin_core::activity;
@@ -240,7 +240,7 @@ pub fn render_get_image_result(
 ) -> Result<()> {
     if let Some(dest) = out_path {
         system
-            .write(dest, &result.bytes)
+            .write(dest, &result.bytes, WriteMode::Replace)
             .with_context(|| format!("writing {}", dest.display()))?;
         let mut summary = result.to_json_without_content();
         summary["out"] = json!(dest);

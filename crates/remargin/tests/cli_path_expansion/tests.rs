@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 use remargin_core::config::ResolvedConfig;
 use remargin_core::config::identity::IdentityFlags;
@@ -20,7 +21,11 @@ fn make_mock_home_with_note() -> (MemorySystem, String) {
     let system = MemorySystem::new().with_env("HOME", "/home/alice").unwrap();
     system.create_dir_all(Path::new("/home/alice")).unwrap();
     system
-        .write(Path::new("/home/alice/note.md"), b"# Hello\n\nBody.\n")
+        .write(
+            Path::new("/home/alice/note.md"),
+            b"# Hello\n\nBody.\n",
+            WriteMode::Replace,
+        )
         .unwrap();
     (system, String::from("/home/alice"))
 }

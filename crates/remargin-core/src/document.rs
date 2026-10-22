@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -1020,7 +1020,7 @@ fn write_content(
             return Ok(WriteOutcome::new(true));
         }
         system
-            .write(&resolved, &bytes)
+            .write(&resolved, &bytes, WriteMode::Replace)
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(WriteOutcome::new(false));
     }
@@ -1030,7 +1030,7 @@ fn write_content(
             return Ok(WriteOutcome::new(true));
         }
         system
-            .write(&resolved, content.as_bytes())
+            .write(&resolved, content.as_bytes(), WriteMode::Replace)
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(WriteOutcome::new(false));
     }
@@ -1049,7 +1049,7 @@ fn write_content(
             return Ok(WriteOutcome::new(true));
         }
         system
-            .write(&resolved, &bytes)
+            .write(&resolved, &bytes, WriteMode::Replace)
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(WriteOutcome::new(false));
     }
@@ -1127,7 +1127,7 @@ pub(crate) fn commit_markdown(
     commit_with_verify(system, &final_doc, &realm_cfg, resolved, |verified_doc| {
         let serialized = verified_doc.to_markdown()?;
         system
-            .write(resolved, serialized.as_bytes())
+            .write(resolved, serialized.as_bytes(), WriteMode::Replace)
             .with_context(|| format!("writing {}", resolved.display()))
     })?;
 

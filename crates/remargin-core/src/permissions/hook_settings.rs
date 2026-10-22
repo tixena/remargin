@@ -15,7 +15,7 @@
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_json::{Map, Value};
 
 /// What a settings file says about one installer's hook command.
@@ -131,6 +131,6 @@ pub fn write_settings(system: &dyn System, settings_file: &Path, value: &Value) 
     let mut bytes = body.into_bytes();
     bytes.push(b'\n');
     system
-        .write(settings_file, &bytes)
+        .write(settings_file, &bytes, WriteMode::Replace)
         .with_context(|| format!("writing settings to {}", settings_file.display()))
 }

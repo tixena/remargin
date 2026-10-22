@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 
 use crate::config::registry::Registry;
@@ -522,7 +523,11 @@ fn sign_on_tampered_content_without_repair_checksum_lands_signature() {
     let tampered = edit_fence_content_in_place(&before, "alice's note", "alice's NOTE (edited)");
     assert_ne!(before, tampered, "tamper must actually change bytes");
     system
-        .write(Path::new("/d/a.md"), tampered.as_bytes())
+        .write(
+            Path::new("/d/a.md"),
+            tampered.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
 
     sign_comments(
@@ -550,7 +555,11 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
     let before = system.read_to_string(Path::new("/d/a.md")).unwrap();
     let tampered = edit_fence_content_in_place(&before, "alice's note", "alice's NOTE (edited)");
     system
-        .write(Path::new("/d/a.md"), tampered.as_bytes())
+        .write(
+            Path::new("/d/a.md"),
+            tampered.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
 
     let pre_sign = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
@@ -638,7 +647,11 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
     let tampered =
         edit_fence_content_in_place(&pre_signed, "alice's note", "alice's NOTE (edited)");
     system
-        .write(Path::new("/d/a.md"), tampered.as_bytes())
+        .write(
+            Path::new("/d/a.md"),
+            tampered.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
 
     let baseline = sign_comments(
@@ -702,7 +715,11 @@ fn sign_forgery_guard_blocks_repair_on_foreign_comment() {
 
     let tampered = edit_fence_content_in_place(&before, "bob's note", "bob's NOTE (edited)");
     system
-        .write(Path::new("/d/a.md"), tampered.as_bytes())
+        .write(
+            Path::new("/d/a.md"),
+            tampered.as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
 
     let err = sign_comments(

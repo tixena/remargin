@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_json::{Value, json};
 
 #[cfg(feature = "obsidian")]
@@ -1052,7 +1052,7 @@ pub fn cmd_get_binary(
 
     if let Some(out_path) = gp.out {
         system
-            .write(out_path, &payload.bytes)
+            .write(out_path, &payload.bytes, WriteMode::Replace)
             .with_context(|| format!("writing {}", out_path.display()))?;
         let summary = json!({
             "mime": payload.mime,
@@ -1590,12 +1590,12 @@ pub fn cmd_keygen(sinks: &mut IoSinks<'_>, system: &dyn System, output: &Path) -
     let (private_pem, public_openssh) = crypto::generate_keypair("remargin")?;
 
     system
-        .write(output, private_pem.as_bytes())
+        .write(output, private_pem.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing private key to {}", output.display()))?;
 
     let pub_path = output.with_extension("pub");
     system
-        .write(&pub_path, public_openssh.as_bytes())
+        .write(&pub_path, public_openssh.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing public key to {}", pub_path.display()))?;
 
     writeln!(sinks.stderr, "Private key: {}", output.display()).context("writing to stderr")?;

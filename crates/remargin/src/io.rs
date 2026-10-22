@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde_json::{Value, json};
 
 use remargin_core::path::expand_path;
@@ -141,7 +141,7 @@ pub fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<P
             .unwrap_or_else(|_err| String::from("/tmp"));
         let temp_path = PathBuf::from(temp_root).join("remargin-stdin.md");
         system
-            .write(&temp_path, input.as_bytes())
+            .write(&temp_path, input.as_bytes(), WriteMode::Replace)
             .context("writing stdin to temp file")?;
         Ok(temp_path)
     } else {

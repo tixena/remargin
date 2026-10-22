@@ -17,7 +17,7 @@
 //! of scope here.
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -121,7 +121,7 @@ pub fn delete(
     diff_only_system_prompt(&existing, &result.content)
         .context("post-splice diff: refusing write that changes fields other than system_prompt")?;
     system
-        .write(&target, result.content.as_bytes())
+        .write(&target, result.content.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(PromptDeleteOutcome {
         absent: false,
@@ -246,7 +246,7 @@ pub fn set(
     diff_only_system_prompt(&existing, &result.content)
         .context("post-splice diff: refusing write that changes fields other than system_prompt")?;
     system
-        .write(&target, result.content.as_bytes())
+        .write(&target, result.content.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(PromptSetOutcome {
         created,

@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 
 use crate::on_disk_comment::OnDiskComment;
 use crate::parser::heading::resolve_heading_path;
@@ -411,7 +411,7 @@ pub fn write_document(
         .context("comment preservation invariant violated")?;
 
     system
-        .write(path, markdown.as_bytes())
+        .write(path, markdown.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing {}", path.display()))?;
 
     Ok(())

@@ -10,6 +10,7 @@ use core::slice::from_ref;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::WriteMode;
 use os_shim::mock::MemorySystem;
 use serde_json::{Value, json};
 
@@ -518,7 +519,9 @@ fn apply_preserves_existing_unrelated_rules() {
     });
     let local = anchor.join(".claude/settings.local.json");
     system.create_dir_all(local.parent().unwrap()).unwrap();
-    system.write(&local, prior.to_string().as_bytes()).unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let rules = small_rule_set();
     apply_rules(
@@ -591,7 +594,9 @@ fn apply_dedupes_against_manually_duplicated_rules() {
             "allow": []
         }
     });
-    system.write(&local, prior.to_string().as_bytes()).unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let rules = small_rule_set();
     apply_rules(
@@ -645,7 +650,11 @@ fn revert_after_apply_restores_clean_state() {
     let pre_apply_local = json!({ "env": { "PRESERVE": "true" } });
     system.create_dir_all(local.parent().unwrap()).unwrap();
     system
-        .write(&local, pre_apply_local.to_string().as_bytes())
+        .write(
+            &local,
+            pre_apply_local.to_string().as_bytes(),
+            WriteMode::Replace,
+        )
         .unwrap();
 
     let rules = small_rule_set();
@@ -684,7 +693,9 @@ fn revert_warns_on_manually_deleted_rules() {
     let deny = value["permissions"]["deny"].as_array_mut().unwrap();
     deny.retain(|v| v.as_str() != Some("Edit(/r/secret/**)"));
     let body = serde_json::to_string_pretty(&value).unwrap();
-    system.write(&local, body.as_bytes()).unwrap();
+    system
+        .write(&local, body.as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let report = revert_rules(&system, &anchor, "/r/secret").unwrap();
     assert!(
@@ -714,7 +725,9 @@ fn apply_preserves_top_level_keys() {
         "env": { "DEBUG": "true" },
         "hooks": { "stop": ["echo done"] }
     });
-    system.write(&local, prior.to_string().as_bytes()).unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     apply_rules(
         &system,
@@ -780,7 +793,9 @@ fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
             "allow": []
         }
     });
-    system.write(&local, prior.to_string().as_bytes()).unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let rules = small_rule_set();
     let sims = simulate_apply_rules(&system, from_ref(&local), &rules).unwrap();
@@ -804,7 +819,9 @@ fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
             "allow": []
         }
     });
-    system.write(&local, prior.to_string().as_bytes()).unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     apply_rules(
         &system,
@@ -842,7 +859,9 @@ fn revert_rules_strips_legacy_double_slash_rule() {
             "allow": []
         }
     });
-    system.write(&local, prior.to_string().as_bytes()).unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .unwrap();
 
     let rules = small_rule_set();
     let entry = sidecar::SidecarEntry {

@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 use core::mem;
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::{System, WalkEntry};
+use os_shim::{System, WalkEntry, WriteMode};
 use serde_json::{Value as JsonValue, json};
 use serde_yaml::Value;
 
@@ -186,7 +186,7 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
     commit_with_verify(system, &doc, config, path, |verified_doc| {
         let markdown = verified_doc.to_markdown()?;
         system
-            .write(path, markdown.as_bytes())
+            .write(path, markdown.as_bytes(), WriteMode::Replace)
             .with_context(|| format!("writing {}", path.display()))
     })?;
 

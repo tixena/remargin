@@ -17,7 +17,7 @@ use alloc::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::System;
+use os_shim::{System, WriteMode};
 use serde::{Deserialize, Serialize};
 
 /// Bumped only on incompatible shape changes; loaders refuse a version they do not recognise.
@@ -147,7 +147,7 @@ pub fn save(system: &dyn System, anchor: &Path, sidecar: &Sidecar) -> Result<()>
     }
     let body = serde_json::to_string_pretty(sidecar).context("serializing sidecar JSON")?;
     system
-        .write(&path, body.as_bytes())
+        .write(&path, body.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("writing sidecar to {}", path.display()))?;
     ensure_gitignored(system, anchor)?;
     Ok(())
@@ -177,6 +177,6 @@ fn ensure_gitignored(system: &dyn System, anchor: &Path) -> Result<()> {
     updated.push_str(SIDECAR_GITIGNORE_ENTRY);
     updated.push('\n');
     system
-        .write(&gitignore, updated.as_bytes())
+        .write(&gitignore, updated.as_bytes(), WriteMode::Replace)
         .with_context(|| format!("updating {}", gitignore.display()))
 }
