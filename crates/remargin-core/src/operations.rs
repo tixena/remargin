@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod cp;
+pub mod if_hash;
 pub mod links;
 pub mod mv;
 pub mod plan;
@@ -29,9 +30,9 @@ use chrono::Utc;
 use os_shim::System;
 
 use crate::comment_style;
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, frontmatter_settings_for_doc};
 use crate::crypto::{compute_checksum, compute_reaction_checksum, compute_signature};
-use crate::frontmatter;
+use crate::frontmatter::{self, FrontmatterSettings};
 use crate::id;
 use crate::kind::validate_kinds;
 use crate::linter;
@@ -93,6 +94,7 @@ pub fn create_comment(
     // Realm-mode floor: doc's realm wins if stricter than caller-mode.
     let escalated = config.escalate_for_doc(system, path)?;
     let cfg = &escalated;
+    let fm = frontmatter_settings_for_doc(system, path);
 
     let identity = cfg
         .identity
@@ -109,7 +111,7 @@ pub fn create_comment(
 
     let mut doc = parser::parse_file(system, path)?;
     let markdown_before = doc.to_markdown()?;
-    linter::lint_or_fail(&markdown_before)
+    linter::lint_or_fail_with(&markdown_before, fm.toml_enabled)
         .context("document has structural issues before write")?;
 
     let new_id = id::generate(&doc.comment_ids());
@@ -156,23 +158,24 @@ pub fn create_comment(
         comment.signature = Some(sig);
     }
 
-    writer::insert_comment(&mut doc, comment, params.position)?;
+    writer::insert_comment_with(&mut doc, comment, params.position, fm.toml_enabled)?;
 
     if let Some(parent_id) = params.reply_to {
         apply_auto_ack_to_parent(&mut doc, parent_id, identity, params.auto_ack, now)?;
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, cfg)?;
+    frontmatter::ensure_frontmatter_with(&mut doc, cfg, fm)?;
 
     if params.sandbox {
-        apply_sandbox_entry(&mut doc, identity, now)?;
+        apply_sandbox_entry(&mut doc, identity, now, fm)?;
     }
 
     let expected_added: HashSet<String> = HashSet::from([new_id.clone()]);
     let expected_removed: HashSet<String> = HashSet::new();
 
     let markdown_after = doc.to_markdown()?;
-    linter::lint_or_fail(&markdown_after).context("document has structural issues after write")?;
+    linter::lint_or_fail_with(&markdown_after, fm.toml_enabled)
+        .context("document has structural issues after write")?;
 
     commit_with_verify(system, &doc, cfg, path, |verified_doc| {
         writer::write_document(
@@ -257,10 +260,11 @@ fn apply_sandbox_entry(
     doc: &mut ParsedDocument,
     identity: &str,
     now: chrono::DateTime<chrono::FixedOffset>,
+    fm: FrontmatterSettings,
 ) -> Result<()> {
-    let mut entries = frontmatter::read_sandbox_entries(doc)?;
+    let mut entries = frontmatter::read_sandbox_entries_with(doc, fm.toml_enabled)?;
     let _added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
-    frontmatter::write_sandbox_entries(doc, &entries)?;
+    frontmatter::write_sandbox_entries_with(doc, &entries, fm)?;
     Ok(())
 }
 
@@ -314,7 +318,8 @@ pub fn ack_comments(
         }
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
+    let fm = frontmatter_settings_for_doc(system, path);
+    frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
 
     let empty: HashSet<String> = HashSet::new();
     commit_with_verify(system, &doc, config, path, |verified_doc| {
@@ -359,7 +364,8 @@ pub fn react(
 
     let _reaction_checksum = compute_reaction_checksum(&cm.reactions);
 
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
+    let fm = frontmatter_settings_for_doc(system, path);
+    frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
 
     let empty: HashSet<String> = HashSet::new();
     commit_with_verify(system, &doc, config, path, |verified_doc| {
@@ -450,7 +456,8 @@ pub fn delete_comments(
         }
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
+    let fm = frontmatter_settings_for_doc(system, path);
+    frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
 
     let expected_added: HashSet<String> = HashSet::new();
     let expected_removed: HashSet<String> = comment_ids.iter().map(|s| String::from(*s)).collect();
@@ -543,7 +550,8 @@ pub fn edit_comment(
         }
     }
 
-    frontmatter::ensure_frontmatter(&mut doc, cfg)?;
+    let fm = frontmatter_settings_for_doc(system, path);
+    frontmatter::ensure_frontmatter_with(&mut doc, cfg, fm)?;
 
     let empty: HashSet<String> = HashSet::new();
     commit_with_verify(system, &doc, cfg, path, |verified_doc| {

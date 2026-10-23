@@ -59,7 +59,7 @@ const SERVER_NAME: &str = "remargin";
 
 /// In UTF-8 bytes of emitted tool-result text: a proxy for the client's token limit, seeded low
 /// so a fresh session rarely spills. The cap only ratchets down from here.
-const DEFAULT_SPILL_CAP: usize = 40_000;
+pub const DEFAULT_SPILL_CAP: usize = 40_000;
 
 /// One part in this many of the cap is held back for the response envelope and indentation.
 const SPILL_MARGIN_DIVISOR: usize = 10;
@@ -70,6 +70,26 @@ const SCALAR_PATH_FIELDS: &[&str] = &["config_path", "dst", "file", "key", "path
 
 /// Each element is expanded independently.
 const ARRAY_PATH_FIELDS: &[&str] = &["files", "attachments"];
+
+/// Tools that accept the optional `if_hash` guard. Alphabetical.
+pub const IF_HASH_TOOLS: &[&str] = &[
+    "ack",
+    "batch",
+    "comment",
+    "cp",
+    "delete",
+    "edit",
+    "mv",
+    "purge",
+    "react",
+    "replace",
+    "reply",
+    "rm",
+    "sandbox_add",
+    "sandbox_remove",
+    "sign",
+    "write",
+];
 
 /// Tools exempt from the dispatch-time boundary check: they take no path or, like
 /// `permissions_check`, must answer for a path outside `trusted_roots`. Alphabetical.
@@ -1286,7 +1306,7 @@ fn desc_write() -> ToolDesc {
 }
 
 fn tool_descriptors() -> Vec<ToolDesc> {
-    vec![
+    let mut tools = vec![
         desc_ack(),
         desc_activity(),
         desc_batch(),
@@ -1325,7 +1345,21 @@ fn tool_descriptors() -> Vec<ToolDesc> {
         desc_verify(),
         desc_whoami(),
         desc_write(),
-    ]
+    ];
+    for tool in &mut tools {
+        if let Some(props) = tool
+            .schema
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+            .filter(|_| IF_HASH_TOOLS.contains(&tool.name))
+        {
+            props.insert(String::from("if_hash"), json!({
+                "type": "string",
+                "description": "Refuse the op with `stale_version` (writing nothing) unless the file's current hash equals this value. Use the `hash` a previous read or write returned."
+            }));
+        }
+    }
+    tools
 }
 
 fn success_response(id: &Value, result: &Value) -> Value {
@@ -1613,6 +1647,108 @@ fn resolve_insert_position(params: &Map<String, Value>, reply_to: Option<&str>) 
     )
 }
 
+/// The argument naming the file whose hash a tool's result carries, for the tools that read or
+/// rewrite exactly one file.
+/// `rm` is absent on purpose: its file is gone. The multi-file tools (`sandbox_*`) are too.
+fn hashed_file_arg(tool: &str) -> Option<&'static str> {
+    match tool {
+        "ack" | "batch" | "comment" | "comments" | "delete" | "edit" | "purge" | "react"
+        | "reply" | "sign" => Some("file"),
+        "get" | "metadata" | "replace" | "write" => Some("path"),
+        "cp" | "mv" => Some("dst"),
+        _ => None,
+    }
+}
+
+/// The file an `if_hash` guards, per tool: `src` for `cp`/`mv`, `path` for `rm`, the single `files`
+/// entry for the sandbox tools, `file` (required) for `ack`, and otherwise the file whose hash the
+/// tool's result carries ([`hashed_file_arg`]).
+fn if_hash_target(tool: &str, params: &Map<String, Value>) -> Result<String> {
+    let text = |arg: &str| params.get(arg).and_then(Value::as_str).map(String::from);
+    let target = match tool {
+        "cp" | "mv" => text("src"),
+        "rm" => text("path"),
+        "sandbox_add" | "sandbox_remove" => match params.get("files").and_then(Value::as_array) {
+            Some(files) if files.len() == 1 => files[0].as_str().map(String::from),
+            _ => bail!(
+                "{tool}: {} (exactly one entry in `files`)",
+                operations::if_hash::NEEDS_ONE_FILE
+            ),
+        },
+        _ => hashed_file_arg(tool).and_then(text),
+    };
+    target.with_context(|| {
+        format!(
+            "{tool}: {} (give the file argument)",
+            operations::if_hash::NEEDS_ONE_FILE
+        )
+    })
+}
+
+/// Enforce `if_hash` when the call carries one; no `if_hash`, no change.
+fn check_mcp_if_hash(
+    system: &dyn System,
+    base_dir: &Path,
+    tool: &str,
+    params: &Map<String, Value>,
+) -> Result<()> {
+    let Some(raw) = params.get("if_hash") else {
+        return Ok(());
+    };
+    let expected = raw
+        .as_str()
+        .with_context(|| format!("{tool}: if_hash must be a string"))?;
+    let target = if_hash_target(tool, params)?;
+    operations::if_hash::check_if_hash(system, base_dir, Path::new(&target), expected)
+}
+
+/// Structured error payload for a failed tool call.
+fn tool_error(err: &anyhow::Error) -> Value {
+    err.downcast_ref::<operations::verify::SubsetGateFailure>()
+        .map(operations::verify::SubsetGateFailure::to_json)
+        .or_else(|| {
+            err.downcast_ref::<operations::verify::VerifyFailure>()
+                .map(operations::verify::VerifyFailure::to_json)
+        })
+        .or_else(|| {
+            err.downcast_ref::<operations::if_hash::StaleVersion>()
+                .map(operations::if_hash::StaleVersion::to_json)
+        })
+        .map_or_else(
+            || tool_result_error(&format!("{err:#}")),
+            |payload| tool_result_error_json(&payload),
+        )
+}
+
+/// Add `hash` to a tool result that names one file; a pre-built MCP content array (binary `get`)
+/// is left alone.
+fn attach_file_hash(
+    system: &dyn System,
+    base_dir: &Path,
+    tool: &str,
+    params: &Map<String, Value>,
+    result: &mut Value,
+) {
+    let Some(file) = hashed_file_arg(tool).and_then(|arg| params.get(arg)?.as_str()) else {
+        return;
+    };
+    if !result.get("content").is_some_and(Value::is_array) {
+        responses::attach_hash(result, system, &base_dir.join(file));
+    }
+}
+
+/// Wrap a handler's value as an MCP result. A pre-built MCP response (a "content" array) is passed
+/// through.
+fn tool_success(tool_name: &str, value: Value) -> Value {
+    if value.get("content").is_some_and(Value::is_array) {
+        value
+    } else if tool_emits_minified(tool_name) {
+        tool_result_success_min(&value)
+    } else {
+        tool_result_success(&value)
+    }
+}
+
 /// Dispatch a tool call to the appropriate library function.
 ///
 /// Returns the tool result as a JSON value (either success or error content).
@@ -1653,6 +1789,9 @@ fn dispatch_tool(
 
     if let Err(err) = ensure_path_in_scope(system, base_dir, permissions, tool_name, p) {
         return tool_result_error(&format!("{err:#}"));
+    }
+    if let Err(err) = check_mcp_if_hash(system, base_dir, tool_name, p) {
+        return tool_error(&err);
     }
     let result = match tool_name {
         "ack" => handle_ack(system, base_dir, config, p),
@@ -1709,27 +1848,11 @@ fn dispatch_tool(
     };
 
     match result {
-        Ok(value) => {
-            // A handler that returns a pre-built MCP response (a "content" array) is passed through.
-            if value.get("content").is_some_and(Value::is_array) {
-                value
-            } else if tool_emits_minified(tool_name) {
-                tool_result_success_min(&value)
-            } else {
-                tool_result_success(&value)
-            }
+        Ok(mut value) => {
+            attach_file_hash(system, base_dir, tool_name, p, &mut value);
+            tool_success(tool_name, value)
         }
-        Err(err) => err
-            .downcast_ref::<operations::verify::SubsetGateFailure>()
-            .map(operations::verify::SubsetGateFailure::to_json)
-            .or_else(|| {
-                err.downcast_ref::<operations::verify::VerifyFailure>()
-                    .map(operations::verify::VerifyFailure::to_json)
-            })
-            .map_or_else(
-                || tool_result_error(&format!("{err:#}")),
-                |payload| tool_result_error_json(&payload),
-            ),
+        Err(err) => tool_error(&err),
     }
 }
 

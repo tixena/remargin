@@ -16,7 +16,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::{System, WriteMode};
 
 use crate::on_disk_comment::OnDiskComment;
-use crate::parser::heading::resolve_heading_path;
+use crate::parser::heading::resolve_heading_path_with;
 use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
 use crate::reactions::quote_emoji_key;
 
@@ -249,10 +249,24 @@ pub fn insert_comment(
     comment: Comment,
     position: &InsertPosition,
 ) -> Result<()> {
+    insert_comment_with(doc, comment, position, false)
+}
+
+/// [`insert_comment`] with a leading `+++` block skipped by `AfterHeading` when `toml_enabled`.
+///
+/// # Errors
+///
+/// As [`insert_comment`].
+pub fn insert_comment_with(
+    doc: &mut ParsedDocument,
+    comment: Comment,
+    position: &InsertPosition,
+    toml_enabled: bool,
+) -> Result<()> {
     // Heading-anchored placement is resolved up front against the current markdown, so earlier
     // batch insertions are already reflected and no line-shift table is needed.
     if let InsertPosition::AfterHeading(path) = position {
-        let line = resolve_heading_path(doc, path)
+        let line = resolve_heading_path_with(doc, path, toml_enabled)
             .with_context(|| format!("after_heading: failed to resolve heading path {path:?}"))?;
         return insert_comment(doc, comment, &InsertPosition::AfterLine(line));
     }
