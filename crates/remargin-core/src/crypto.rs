@@ -7,6 +7,7 @@ mod ssh;
 mod tests;
 
 use core::fmt::Write as _;
+use std::io::Read as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
@@ -54,6 +55,20 @@ pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
     }
     let hash = Sha256::digest(payload.as_bytes());
     format!("sha256:{}", hex::encode(hash))
+}
+
+/// `sha256:<hex>` of the file's raw bytes: the version token for `if_hash`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or read.
+pub fn file_hash(system: &dyn System, path: &Path) -> Result<String> {
+    let mut bytes = Vec::new();
+    system
+        .open(path)
+        .and_then(|mut reader| reader.read_to_end(&mut bytes))
+        .with_context(|| format!("hashing {}", path.display()))?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(&bytes))))
 }
 
 /// Returns a string in the format `sha256:<hex>`.

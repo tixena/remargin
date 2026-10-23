@@ -25,7 +25,8 @@ use serde_json::{Value, json};
 use tixschema::model_schema;
 
 use crate::advice::{self, Advice};
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, frontmatter_settings_for_doc};
+use crate::crypto;
 use crate::frontmatter;
 use crate::operations::links::{self, Link};
 use crate::operations::verify::commit_with_verify;
@@ -191,6 +192,9 @@ impl RmOutcome {
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct WriteOutcome {
+    /// Hash of the bytes on disk after the write (see [`crypto::file_hash`]); `None` only when
+    /// they could not be read back. Never fails the write. `to_json` leaves it out.
+    pub hash: Option<String>,
     pub noop: bool,
     /// Advisory only: the write has already succeeded when these are attached.
     pub warnings: Vec<Advice>,
@@ -201,6 +205,7 @@ impl WriteOutcome {
     #[must_use]
     const fn new(noop: bool) -> Self {
         Self {
+            hash: None,
             noop,
             warnings: Vec::new(),
         }
@@ -240,6 +245,9 @@ pub struct DocumentMetadata {
     pub binary: bool,
     pub comment_count: Option<usize>,
     pub frontmatter: Option<serde_yaml::Value>,
+    /// `sha256:<hex>` of the file's raw bytes (see [`crypto::file_hash`]); `None` only when they
+    /// could not be read. `to_json` leaves it out: the JSON layers add it (text output is unchanged).
+    pub hash: Option<String>,
     pub last_activity: Option<String>,
     pub line_count: Option<usize>,
     /// Extension-based MIME type. Unknown extensions → `application/octet-stream`.
@@ -602,7 +610,8 @@ pub fn get_with_links(
     // Blank comment blocks, keeping their newlines, so reference lines stay aligned with the window.
     let scan_text = mask_comment_blocks(&window);
     let doc_dir = resolved.parent().unwrap_or_else(|| Path::new("."));
-    let outbound = links::extract_links(&scan_text, doc_dir, system);
+    let toml_enabled = frontmatter_settings_for_doc(system, &resolved).toml_enabled;
+    let outbound = links::extract_links_with(&scan_text, doc_dir, system, toml_enabled);
 
     let content = if line_numbers {
         let start_num = lines.map_or(1, |(s, _)| s);
@@ -944,11 +953,13 @@ pub fn write(
     config: &ResolvedConfig,
     opts: WriteOptions,
 ) -> Result<WriteOutcome> {
-    let warnings = review_payload(path, content, &opts);
+    let toml_enabled = frontmatter_settings_for_doc(system, &base_dir.join(path)).toml_enabled;
+    let warnings = review_payload(path, content, &opts, toml_enabled);
     let mut outcome = write_content(system, base_dir, path, content, config, opts)?;
     // Attached after the write lands, so advice never rides on a failure
     // and never has a say in whether the write happened.
     outcome.warnings = warnings;
+    outcome.hash = crypto::file_hash(system, &base_dir.join(path)).ok();
     Ok(outcome)
 }
 
@@ -959,11 +970,16 @@ pub fn write(
 /// elsewhere in the file. Binary payloads and non-markdown targets carry
 /// no prose to review. A partial write's notes are shifted to the file's
 /// own line numbering.
-fn review_payload(path: &Path, content: &str, opts: &WriteOptions) -> Vec<Advice> {
+fn review_payload(
+    path: &Path,
+    content: &str,
+    opts: &WriteOptions,
+    toml_enabled: bool,
+) -> Vec<Advice> {
     if opts.binary || !is_markdown_extension(path) {
         return Vec::new();
     }
-    let mut notes = advice::review(content);
+    let mut notes = advice::review_with(content, toml_enabled);
     if let Some((start, _)) = opts.lines {
         advice::offset_lines(&mut notes, start.saturating_sub(1));
     }
@@ -1098,23 +1114,25 @@ pub(crate) fn commit_markdown(
 
     // The doc's realm is the source of truth for the author gate.
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
+    let fm = frontmatter_settings_for_doc(system, resolved);
 
     let old_author = if create {
         None
     } else if let Ok(old_content) = system.read_to_string(resolved) {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
         check_comment_preservation(&old_doc, &new_doc)?;
-        frontmatter::read_author(&old_doc)?
+        frontmatter::read_author_with(&old_doc, fm.toml_enabled)?
     } else {
         None
     };
 
     let mut final_doc = new_doc;
-    frontmatter::ensure_frontmatter_authored(
+    frontmatter::ensure_frontmatter_authored_with(
         &mut final_doc,
         &realm_cfg,
         create,
         old_author.as_deref(),
+        fm,
     )?;
 
     // A byte-identical output skips the write and the verify gate: the file is already in the
@@ -1160,21 +1178,23 @@ pub(crate) fn project_commit_markdown(
     let new_doc = parser::parse(content_to_parse).context("parsing incoming content")?;
 
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
+    let fm = frontmatter_settings_for_doc(system, resolved);
 
     let old_author = if let Ok(old_content) = system.read_to_string(resolved) {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
         check_comment_preservation(&old_doc, &new_doc)?;
-        frontmatter::read_author(&old_doc)?
+        frontmatter::read_author_with(&old_doc, fm.toml_enabled)?
     } else {
         None
     };
 
     let mut final_doc = new_doc;
-    frontmatter::ensure_frontmatter_authored(
+    frontmatter::ensure_frontmatter_authored_with(
         &mut final_doc,
         &realm_cfg,
         false,
         old_author.as_deref(),
+        fm,
     )?;
 
     let final_content = final_doc.to_markdown()?;
@@ -1270,6 +1290,7 @@ pub fn project_write(
     let new_doc = parser::parse(&content_to_parse).context("parsing incoming content")?;
 
     let realm_cfg = config.escalate_for_doc(system, &resolved)?;
+    let fm = frontmatter_settings_for_doc(system, &resolved);
 
     let (before, old_author) = if opts.create {
         (
@@ -1281,7 +1302,7 @@ pub fn project_write(
             Ok(existing) => {
                 let old_doc = parser::parse(&existing).context("parsing existing document")?;
                 check_comment_preservation(&old_doc, &new_doc)?;
-                let old_author = frontmatter::read_author(&old_doc)?;
+                let old_author = frontmatter::read_author_with(&old_doc, fm.toml_enabled)?;
                 (old_doc, old_author)
             }
             Err(_) => (
@@ -1292,11 +1313,12 @@ pub fn project_write(
     };
 
     let mut after = new_doc;
-    frontmatter::ensure_frontmatter_authored(
+    frontmatter::ensure_frontmatter_authored_with(
         &mut after,
         &realm_cfg,
         opts.create,
         old_author.as_deref(),
+        fm,
     )?;
 
     let after_bytes = after.to_markdown()?;
@@ -1458,12 +1480,14 @@ pub fn metadata(
         .metadata(&resolved)
         .with_context(|| format!("stat {}", resolved.display()))?
         .len;
+    let hash = crypto::file_hash(system, &resolved).ok();
 
     if binary {
         return Ok(DocumentMetadata {
             binary,
             comment_count: None,
             frontmatter: None,
+            hash,
             last_activity: None,
             line_count: None,
             mime: mime_type,
@@ -1504,12 +1528,16 @@ pub fn metadata(
         .max()
         .map(|ts| parser::rfc3339_z(&ts));
 
-    let fm = extract_frontmatter(&content);
+    let fm = extract_frontmatter(
+        &content,
+        frontmatter_settings_for_doc(system, &resolved).toml_enabled,
+    );
 
     Ok(DocumentMetadata {
         binary,
         comment_count: Some(comment_count),
         frontmatter: fm,
+        hash,
         last_activity,
         line_count: Some(line_count),
         mime: mime_type,
@@ -1520,23 +1548,14 @@ pub fn metadata(
     })
 }
 
-fn extract_frontmatter(content: &str) -> Option<serde_yaml::Value> {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return None;
-    }
+fn extract_frontmatter(content: &str, toml_enabled: bool) -> Option<serde_yaml::Value> {
+    let fence = frontmatter::fence_of(content, toml_enabled)?;
 
     let lines: Vec<&str> = content.split('\n').collect();
-    let opener = lines.iter().position(|line| line.trim() == "---")?;
-    let closer = lines
-        .iter()
-        .enumerate()
-        .skip(opener + 1)
-        .find(|(_, line)| line.trim() == "---")
-        .map(|(i, _)| i)?;
+    let (opener, closer) = frontmatter::block_bounds(&lines, fence)?;
 
-    let yaml_str: String = lines[opener + 1..closer].join("\n");
-    serde_yaml::from_str(&yaml_str).ok()
+    let block: String = lines[opener + 1..closer].join("\n");
+    frontmatter::parse_block(fence, &block).ok()
 }
 
 fn get_remargin_metadata(system: &dyn System, path: &Path) -> (Option<u32>, Option<String>) {

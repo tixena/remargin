@@ -26,7 +26,7 @@ use os_shim::{System, WriteMode};
 use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, frontmatter_settings_for_doc};
 use crate::document::allowlist;
 use crate::frontmatter;
 use crate::parser::{self, Segment};
@@ -307,8 +307,9 @@ fn write_markdown_copy(
 ) -> Result<()> {
     let mut doc = parser::parse(content)
         .with_context(|| format!("parsing markdown content for {}", dst.display()))?;
-    frontmatter::ensure_frontmatter(&mut doc, config)?;
-    frontmatter::write_sandbox_entries(&mut doc, &[])?;
+    let fm = frontmatter_settings_for_doc(system, dst);
+    frontmatter::ensure_frontmatter_with(&mut doc, config, fm)?;
+    frontmatter::write_sandbox_entries_with(&mut doc, &[], fm)?;
 
     let serialized = doc
         .to_markdown()

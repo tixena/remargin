@@ -18,6 +18,8 @@ use core::fmt::Write as _;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::frontmatter::fence_of;
+
 /// One advisory note about authored content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -65,8 +67,14 @@ pub(crate) struct ProseBlock<'text> {
 /// case, and the one callers should treat as "say nothing".
 #[must_use]
 pub fn review(content: &str) -> Vec<Advice> {
+    review_with(content, false)
+}
+
+/// [`review`] with a leading `+++` block skipped as frontmatter when `toml_enabled`.
+#[must_use]
+pub fn review_with(content: &str, toml_enabled: bool) -> Vec<Advice> {
     let mut notes = Vec::new();
-    check_hard_wrapped_paragraphs(content, &mut notes);
+    check_hard_wrapped_paragraphs(content, toml_enabled, &mut notes);
     notes
 }
 
@@ -166,8 +174,8 @@ pub fn format_op_text(notes: &[OpAdvice]) -> String {
 /// blocks, themselves ```` ```remargin ```` fences), headings, tables,
 /// blockquotes, list items, HTML, indented blocks, and any line ending in
 /// an explicit markdown hard break.
-fn check_hard_wrapped_paragraphs(content: &str, notes: &mut Vec<Advice>) {
-    for block in prose_blocks(content) {
+fn check_hard_wrapped_paragraphs(content: &str, toml_enabled: bool, notes: &mut Vec<Advice>) {
+    for block in prose_blocks_with(content, toml_enabled) {
         let span = block.lines.len();
         if span > 1 {
             notes.push(Advice {
@@ -188,14 +196,19 @@ fn check_hard_wrapped_paragraphs(content: &str, notes: &mut Vec<Advice>) {
 /// silently change what gets rejected.
 pub(crate) fn hard_wrapped_paragraphs(content: &str) -> Vec<Advice> {
     let mut notes = Vec::new();
-    check_hard_wrapped_paragraphs(content, &mut notes);
+    check_hard_wrapped_paragraphs(content, false, &mut notes);
     notes
 }
 
 /// Segment `content` into the runs of prose the author wrote themselves.
 pub(crate) fn prose_blocks(content: &str) -> Vec<ProseBlock<'_>> {
+    prose_blocks_with(content, false)
+}
+
+/// [`prose_blocks`] with a leading `+++` block skipped when `toml_enabled`.
+fn prose_blocks_with(content: &str, toml_enabled: bool) -> Vec<ProseBlock<'_>> {
     let lines: Vec<&str> = content.split('\n').collect();
-    let mut idx = skip_frontmatter(&lines);
+    let mut idx = skip_frontmatter(&lines, toml_enabled);
     let mut blocks = Vec::new();
 
     while idx < lines.len() {
@@ -228,18 +241,20 @@ pub(crate) fn prose_blocks(content: &str) -> Vec<ProseBlock<'_>> {
     blocks
 }
 
-/// The first line past a leading `---` frontmatter block.
+/// The first line past a leading `---` (or, when `toml_enabled`, `+++`) frontmatter block.
 ///
 /// An unterminated opener means the whole payload is frontmatter as far as
 /// this check is concerned: YAML keys look exactly like wrapped prose, so
 /// scanning them would flag every document with metadata.
-fn skip_frontmatter(lines: &[&str]) -> usize {
-    if lines.first().map(|line| line.trim_end()) != Some("---") {
+fn skip_frontmatter(lines: &[&str], toml_enabled: bool) -> usize {
+    let Some(fence) = lines.first().and_then(|first| {
+        fence_of(first, toml_enabled).filter(|fence| first.trim_end() == fence.delimiter())
+    }) else {
         return 0;
-    }
+    };
     lines
         .iter()
-        .position(|line| line.trim_end() == "---")
+        .position(|line| line.trim_end() == fence.delimiter())
         .filter(|pos| *pos > 0)
         .map_or(lines.len(), |pos| pos + 1)
 }
