@@ -89,6 +89,23 @@ pub struct OutputArgs {
     pub verbose: bool,
 }
 
+/// Per-subcommand `--if-hash` flag.
+///
+/// Flattened ONLY into the write commands: the op is refused with `stale_version`, writing
+/// nothing, unless the file's current hash equals the value.
+#[derive(clap::Args, Default)]
+pub struct IfHashArgs {
+    /// Refuse the write unless the file's current hash equals this value.
+    #[arg(long)]
+    if_hash: Option<String>,
+}
+
+impl IfHashArgs {
+    pub fn if_hash(&self) -> Option<&str> {
+        self.if_hash.as_deref()
+    }
+}
+
 /// Per-subcommand `--assets-dir` flag.
 ///
 /// Flattened ONLY into subcommands that write attachments: comment,
@@ -738,6 +755,8 @@ pub enum SandboxAction {
         /// Markdown files to stage.
         #[arg(required = true)]
         files: Vec<PathBuf>,
+        #[command(flatten)]
+        if_hash_args: IfHashArgs,
     },
     /// List every markdown file staged for the caller.
     List {
@@ -753,6 +772,8 @@ pub enum SandboxAction {
         /// Markdown files to unstage.
         #[arg(required = true)]
         files: Vec<PathBuf>,
+        #[command(flatten)]
+        if_hash_args: IfHashArgs,
     },
 }
 
@@ -994,6 +1015,8 @@ pub struct AckArgs {
     #[arg(index = 1, required = true)]
     pub ids: Vec<String>,
     #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
+    #[command(flatten)]
     pub output_args: OutputArgs,
     /// Base directory to search when resolving by ID (default: .).
     #[arg(long, default_value = ".")]
@@ -1032,6 +1055,8 @@ pub struct BatchArgs {
     pub file: String,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     /// JSON array of operations.
     #[arg(long)]
     pub ops: String,
@@ -1077,6 +1102,8 @@ pub struct CommentArgs {
     pub file: String,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     /// Force-skip the auto-ack of the parent comment. Mutually exclusive
     /// with --auto-ack.
     #[arg(long = "no-auto-ack", conflicts_with = "auto_ack")]
@@ -1131,6 +1158,8 @@ pub struct CpArgs {
     #[command(flatten)]
     pub identity_args: IdentityArgs,
     #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
+    #[command(flatten)]
     pub output_args: OutputArgs,
     /// Source path.
     #[arg(index = 1)]
@@ -1150,6 +1179,8 @@ pub struct DeleteArgs {
     /// Comment IDs to delete.
     #[arg(index = 2, required = true)]
     pub ids: Vec<String>,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     #[command(flatten)]
     pub output_args: OutputArgs,
 }
@@ -1195,6 +1226,8 @@ pub struct EditArgs {
     pub id: String,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     #[command(flatten)]
     pub output_args: OutputArgs,
     /// Replacement classification tag list. Repeat to set multiple
@@ -1359,6 +1392,8 @@ pub struct MvArgs {
     #[command(flatten)]
     pub identity_args: IdentityArgs,
     #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
+    #[command(flatten)]
     pub output_args: OutputArgs,
     /// Source path.
     #[arg(index = 1)]
@@ -1405,6 +1440,8 @@ pub struct PurgeArgs {
     pub file: String,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     #[command(flatten)]
     pub output_args: OutputArgs,
     /// Recursively purge every `.md` file under the directory at `file`.
@@ -1500,6 +1537,8 @@ pub struct ReactArgs {
     #[command(flatten)]
     pub identity_args: IdentityArgs,
     #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
+    #[command(flatten)]
     pub output_args: OutputArgs,
     /// Remove instead of add.
     #[arg(long)]
@@ -1524,6 +1563,8 @@ pub struct ReplaceArgs {
     pub dry_run: bool,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     /// Case-insensitive matching.
     #[arg(long, short = 'i')]
     pub ignore_case: bool,
@@ -1565,6 +1606,8 @@ pub struct RmArgs {
     pub file: String,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     #[command(flatten)]
     pub output_args: OutputArgs,
     #[command(flatten)]
@@ -1631,6 +1674,8 @@ pub struct SignArgs {
     #[arg(long, value_delimiter = ',', conflicts_with = "all_mine")]
     pub ids: Vec<String>,
     #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
+    #[command(flatten)]
     pub output_args: OutputArgs,
     /// Recompute each target comment's stored checksum from its
     /// current content before signing. The forgery guard still
@@ -1668,6 +1713,8 @@ pub struct WriteArgs {
     pub create: bool,
     #[command(flatten)]
     pub identity_args: IdentityArgs,
+    #[command(flatten)]
+    pub if_hash_args: IfHashArgs,
     /// Replace only lines `START-END` (1-indexed, inclusive) and leave
     /// every other line byte-identical. Comment blocks inside the
     /// range must be reincluded (by id) in the replacement; writes

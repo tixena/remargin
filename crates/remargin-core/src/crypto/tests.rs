@@ -8,8 +8,8 @@ use chrono::DateTime;
 use os_shim::mock::MemorySystem;
 
 use crate::crypto::{
-    compute_checksum, compute_reaction_checksum, compute_signature, normalize_whitespace,
-    signature_payload, verify_checksum, verify_signature,
+    compute_checksum, compute_reaction_checksum, compute_signature, file_hash,
+    normalize_whitespace, signature_payload, verify_checksum, verify_signature,
 };
 use crate::parser::{AuthorType, Comment};
 use crate::reactions::{Reactions, ReactionsExt as _};
@@ -534,4 +534,16 @@ fn ssh_keygen_accepts_our_keypair() {
         derived_blob, ours_blob,
         "ssh-keygen-derived public key disagrees with ours"
     );
+}
+
+#[test]
+fn file_hash_is_sha256_of_the_bytes() {
+    let system = MemorySystem::new()
+        .with_file(Path::new("/d/a.txt"), b"hello")
+        .unwrap();
+    assert_eq!(
+        file_hash(&system, Path::new("/d/a.txt")).unwrap(),
+        "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+    file_hash(&system, Path::new("/d/missing.txt")).unwrap_err();
 }

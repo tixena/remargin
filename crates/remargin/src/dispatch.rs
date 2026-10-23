@@ -16,6 +16,7 @@ use serde_json::json;
 use crate::SessionAction;
 #[cfg(feature = "obsidian")]
 use crate::cli::ObsidianArgs;
+use crate::cli::{IfHashArgs, SandboxAction};
 use crate::handlers;
 use crate::io::{
     IoSinks, expand_cli_path, expand_cli_pathbuf, inject_elapsed_ms, parse_line_range,
@@ -517,6 +518,10 @@ pub fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) 
                 let payload = subset_failure
                     .map(operations::verify::SubsetGateFailure::to_json)
                     .or_else(|| verify_failure.map(operations::verify::VerifyFailure::to_json))
+                    .or_else(|| {
+                        err.downcast_ref::<operations::if_hash::StaleVersion>()
+                            .map(operations::if_hash::StaleVersion::to_json)
+                    })
                     .unwrap_or_else(|| json!({ "error": err_msg }));
                 let error_json = inject_elapsed_ms(&payload);
                 let _ = writeln!(
@@ -1088,6 +1093,70 @@ fn handle_claude_session_guard_dispatch(
     }
 }
 
+/// The `--if-hash` value and the file it guards, for the write commands that take the flag.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "every command without the flag is the same: no guard"
+)]
+fn if_hash_target(cmd: &Commands) -> Option<(&IfHashArgs, Option<&str>)> {
+    Some(match cmd {
+        Commands::Ack(a) => (&a.if_hash_args, a.file.as_deref()),
+        Commands::Batch(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Comment(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Delete(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Edit(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Purge(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::React(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Rm(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Sign(a) => (&a.if_hash_args, Some(&a.file)),
+        Commands::Replace(a) => (&a.if_hash_args, Some(&a.path)),
+        Commands::Write(a) => (&a.if_hash_args, Some(&a.path)),
+        Commands::Cp(a) => (&a.if_hash_args, Some(&a.src)),
+        Commands::Mv(a) => (&a.if_hash_args, Some(&a.src)),
+        Commands::Sandbox(SandboxArgs {
+            action:
+                SandboxAction::Add {
+                    files,
+                    if_hash_args,
+                }
+                | SandboxAction::Remove {
+                    files,
+                    if_hash_args,
+                },
+            identity_args: _,
+            output_args: _,
+        }) => (
+            if_hash_args,
+            match files.as_slice() {
+                [one] => one.to_str(),
+                _ => None,
+            },
+        ),
+        _ => return None,
+    })
+}
+
+/// Refuse the command with `stale_version` when `--if-hash` is given and the file has changed.
+fn check_cli_if_hash(cmd: &Commands, system: &dyn System, cwd: &Path) -> Result<()> {
+    let Some((args, file)) = if_hash_target(cmd) else {
+        return Ok(());
+    };
+    let Some(expected) = args.if_hash() else {
+        return Ok(());
+    };
+    let guarded = file.with_context(|| {
+        format!(
+            "--if-hash: {} (give --file, or one path)",
+            operations::if_hash::NEEDS_ONE_FILE
+        )
+    })?;
+    if guarded == "-" {
+        bail!("--if-hash cannot guard stdin");
+    }
+    let path = expand_cli_path(system, guarded)?;
+    operations::if_hash::check_if_hash(system, cwd, &path, expected)
+}
+
 fn dispatch_with_config(
     sinks: &mut IoSinks<'_>,
     cli: &Cli,
@@ -1095,6 +1164,7 @@ fn dispatch_with_config(
     cwd: &Path,
     config: &ResolvedConfig,
 ) -> Result<()> {
+    check_cli_if_hash(cli.cmd(), system, cwd)?;
     match cli.cmd() {
         Commands::Ack(_) => handle_ack(cli.cmd(), sinks, system, cwd, config),
         Commands::Batch(_) => handle_batch(cli.cmd(), sinks, system, cwd, config),
@@ -1147,6 +1217,7 @@ fn handle_ack(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Ack(AckArgs {
+        if_hash_args: _,
         file,
         ids,
         path,
@@ -1175,6 +1246,7 @@ fn handle_batch(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Batch(BatchArgs {
+        if_hash_args: _,
         file,
         ops,
         output_args,
@@ -1195,6 +1267,7 @@ fn handle_comment(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Comment(CommentArgs {
+        if_hash_args: _,
         file,
         content,
         after_comment,
@@ -1281,6 +1354,7 @@ fn handle_delete(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Delete(DeleteArgs {
+        if_hash_args: _,
         file,
         ids,
         output_args,
@@ -1300,6 +1374,7 @@ fn handle_edit(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Edit(EditArgs {
+        if_hash_args: _,
         file,
         id,
         content,
@@ -1426,6 +1501,7 @@ fn handle_cp(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Cp(CpArgs {
+        if_hash_args: _,
         src,
         dst,
         force,
@@ -1453,6 +1529,7 @@ fn handle_mv(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Mv(MvArgs {
+        if_hash_args: _,
         src,
         dst,
         force,
@@ -1504,6 +1581,7 @@ fn handle_purge(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Purge(PurgeArgs {
+        if_hash_args: _,
         file,
         output_args,
         recursive,
@@ -1542,6 +1620,7 @@ fn handle_react(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::React(ReactArgs {
+        if_hash_args: _,
         file,
         id,
         emoji,
@@ -1570,6 +1649,7 @@ fn handle_replace(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Replace(ReplaceArgs {
+        if_hash_args: _,
         pattern,
         replacement,
         path,
@@ -1622,6 +1702,7 @@ fn handle_rm(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Rm(RmArgs {
+        if_hash_args: _,
         file,
         output_args,
         identity_args: _,
@@ -1733,6 +1814,7 @@ fn handle_sign(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Sign(SignArgs {
+        if_hash_args: _,
         file,
         ids,
         all_mine,
@@ -1779,6 +1861,7 @@ fn handle_write(
     config: &ResolvedConfig,
 ) -> Result<()> {
     let Commands::Write(WriteArgs {
+        if_hash_args: _,
         path,
         content,
         binary,
