@@ -16,6 +16,7 @@ use os_shim::System;
 use os_shim::bucket::Condition;
 use serde_json::{Value, json};
 
+#[cfg(feature = "obsidian")]
 use crate::ObsidianAction;
 #[cfg(feature = "session")]
 use crate::SessionAction;
@@ -87,7 +88,6 @@ use remargin_core::session::multiplexer::{
 };
 #[cfg(feature = "session")]
 use remargin_core::session::spec::build_launch_spec;
-#[cfg(feature = "obsidian")]
 use remargin_core::wait::Wait as _;
 use remargin_core::writer::InsertPosition;
 
