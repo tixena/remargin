@@ -48,20 +48,20 @@ describe("report schemas — live --json payloads parse whole", () => {
     const report = DoctorReport$Schema.parse(JSON.parse(DOCTOR));
     assert.equal(report.hook_installed, true);
     assert.equal(report.findings.length, 0);
-    assert.equal(report.elapsed_ms, 24);
+    assert.equal(report.elapsed_ms, 24n);
   });
 
   it("replace: parses the report with its nested file outcomes", () => {
     const report = ReplaceReport$Schema.parse(JSON.parse(REPLACE));
     assert.equal(report.total_replacements, 1);
     assert.equal(report.files[0].path, "doc.md");
-    assert.equal(report.elapsed_ms, 2);
+    assert.equal(report.elapsed_ms, 2n);
   });
 
   it("sandbox remove: parses the report", () => {
     const report = SandboxRemoveReport$Schema.parse(JSON.parse(SANDBOX_REMOVE));
     assert.deepStrictEqual(report.removed, ["doc.md"]);
-    assert.equal(report.elapsed_ms, 2);
+    assert.equal(report.elapsed_ms, 2n);
   });
 
   it("elapsed_ms is optional, so a payload without it still parses", () => {

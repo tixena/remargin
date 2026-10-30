@@ -1258,8 +1258,9 @@ dependencies = [
 
 [[package]]
 name = "tixschema"
-version = "0.1.0"
-source = "git+https://github.com/tixena/tixschema.git#e6d509908cad363728504432f279f6c509f0172e"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69989627fc9555b03ceb6e49adbad2c58b0f80bbfd1981116b9ddad24c476730"
 dependencies = [
  "log",
  "proc-macro2",

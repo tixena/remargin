@@ -39,7 +39,7 @@ describe("parseVerifyFailure", () => {
     assert.strictEqual(parsed?.failures.length, 2);
     assert.strictEqual(parsed?.path, "/d/a.md");
     assert.strictEqual(parsed?.mode, "strict");
-    assert.strictEqual(parsed?.elapsed_ms, 12);
+    assert.strictEqual(parsed?.elapsed_ms, 12n);
     assert.match(parsed?.headline ?? "", /^verify failed:/u);
   });
 

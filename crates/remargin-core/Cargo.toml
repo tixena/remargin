@@ -14,12 +14,8 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["zod", "jsonschema"]
+default = []
 unrestricted = []
-# Feature flags mirrored from tixschema so its proc macro expands
-# cfg(feature = "...") checks successfully in this crate's scope.
-zod = []
-jsonschema = []
 # Optional `session:` config block (SessionConfig + humantime duration
 # parsing). Off by default so the default build stays feature-free.
 session = ["dep:humantime"]

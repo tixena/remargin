@@ -146,13 +146,13 @@ describe("envelopeParsing — real CLI output parses", () => {
     assert.equal(parsed.error_kind, "verify_failed");
     assert.equal(parsed.failures.length, 1);
     assert.equal(parsed.failures[0].id, "abc");
-    assert.equal(parsed.elapsed_ms, 2);
+    assert.equal(parsed.elapsed_ms, 2n);
   });
 
   it("verify refusal: the payload schema takes the injected elapsed_ms directly", () => {
     const parsed = VerifyFailurePayload$Schema.parse(JSON.parse(VERIFY_REFUSAL));
     assert.equal(parsed.error_kind, "verify_failed");
-    assert.equal(parsed.elapsed_ms, 2);
+    assert.equal(parsed.elapsed_ms, 2n);
   });
 });
 

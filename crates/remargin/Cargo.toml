@@ -19,11 +19,9 @@ path = "src/main.rs"
 
 [features]
 # `obsidian` is on by default so the plugin's Update button can run `remargin obsidian install`
-# on any cargo-installed binary; opt out with `--no-default-features --features "zod jsonschema"`.
-default = ["zod", "jsonschema", "obsidian"]
+# on any cargo-installed binary; opt out with `--no-default-features`.
+default = ["obsidian"]
 unrestricted = ["remargin-core/unrestricted"]
-zod = ["remargin-core/zod"]
-jsonschema = ["remargin-core/jsonschema"]
 # The `remargin obsidian install|uninstall` subcommand. Install fetches `main.js` and
 # `manifest.json` from the matching GitHub release at runtime, so the CLI needs no TypeScript build.
 obsidian = ["dep:ureq", "dep:rustls-webpki", "dep:webpki-roots"]
