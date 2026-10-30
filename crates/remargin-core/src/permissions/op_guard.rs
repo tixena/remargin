@@ -17,6 +17,7 @@ use crate::config::permissions::resolve::{
     resolve_permissions, trusted_root_anchor, trusted_root_covers,
 };
 use crate::parser::AuthorType;
+use crate::wait::Wait as _;
 
 /// The dot-folder remargin owns. Never default-denied.
 const REMARGIN_DOT_FOLDER: &str = ".remargin";
@@ -202,6 +203,7 @@ pub fn pre_mutate_check_for_caller(
 ) -> Result<()> {
     let canonical_target = system
         .canonicalize(target)
+        .wait()
         .unwrap_or_else(|_err| target.to_path_buf());
     let walk_anchor = canonical_target
         .parent()

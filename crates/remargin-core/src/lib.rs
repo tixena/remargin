@@ -29,4 +29,5 @@ pub mod reactions;
 pub mod responses;
 #[cfg(feature = "session")]
 pub mod session;
+pub mod wait;
 pub mod writer;

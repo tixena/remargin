@@ -20,6 +20,7 @@ use tixschema::model_schema;
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::parser;
+use crate::wait::Wait as _;
 
 /// Column names of a compact match row; `comment_id` is `null` for a body match.
 pub const MATCH_COLS: [&str; 4] = ["line", "location", "text", "comment_id"];
@@ -298,9 +299,9 @@ pub fn search(
 
     // A path naming one file is searched directly; walking a file as a
     // directory yields no entries (silent zero matches). Mirrors query.
-    if system.is_file(search_dir).unwrap_or(false) {
+    if system.is_file(search_dir).wait().unwrap_or(false) {
         let mut results = Vec::new();
-        if let Ok(content) = system.read_to_string(search_dir) {
+        if let Ok(content) = system.read_to_string(search_dir).wait() {
             let relative = search_dir
                 .strip_prefix(base_dir)
                 .unwrap_or(search_dir)
@@ -312,6 +313,7 @@ pub fn search(
 
     let entries = system
         .walk_dir(search_dir, false, false)
+        .wait()
         .with_context(|| format!("walking directory {}", search_dir.display()))?;
 
     let mut gate = config.read_gate();
@@ -334,7 +336,7 @@ pub fn search(
             continue;
         }
 
-        let Ok(content) = system.read_to_string(&entry.path) else {
+        let Ok(content) = system.read_to_string(&entry.path).wait() else {
             continue;
         };
 

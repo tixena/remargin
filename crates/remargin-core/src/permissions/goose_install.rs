@@ -26,8 +26,11 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_json::{Map, Value, json};
+
+use crate::wait::Wait as _;
 
 /// Plugin directory name under `<root>/.agents/plugins/`.
 pub const PLUGIN_NAME: &str = "remargin-guard";
@@ -297,7 +300,7 @@ fn entry_json(command: &str) -> Value {
 }
 
 fn entry_state(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<EntryState> {
-    if !system.exists(dir)? {
+    if !system.exists(dir).wait()? {
         return Ok(EntryState::DirAbsent);
     }
     let manifest = match load_manifest(system, dir) {
@@ -308,7 +311,7 @@ fn entry_state(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<EntryS
         return Ok(EntryState::Absent);
     };
     let binary = command_binary(command, hook.subcommand);
-    if system.exists(Path::new(binary))? {
+    if system.exists(Path::new(binary)).wait()? {
         Ok(EntryState::Wired)
     } else {
         Ok(EntryState::BinaryMissing(String::from(binary)))
@@ -316,7 +319,10 @@ fn entry_state(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<EntryS
 }
 
 fn file_matches(system: &dyn System, path: &Path, body: &str) -> bool {
-    system.read_to_string(path).is_ok_and(|found| found == body)
+    system
+        .read_to_string(path)
+        .wait()
+        .is_ok_and(|found| found == body)
 }
 
 /// The hook command: the absolute path to the running remargin binary plus
@@ -357,7 +363,7 @@ fn install_hook(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<Insta
 
 fn load_manifest(system: &dyn System, dir: &Path) -> ManifestState {
     let path = hooks_file(dir);
-    let Ok(body) = system.read_to_string(&path) else {
+    let Ok(body) = system.read_to_string(&path).wait() else {
         return ManifestState::Unusable(format!("{} is unreadable", path.display()));
     };
     match serde_json::from_str::<Value>(&body) {
@@ -390,6 +396,7 @@ fn plugin_manifest() -> Value {
 fn remove_plugin(system: &dyn System, dir: &Path) -> Result<()> {
     system
         .remove_dir_all(dir)
+        .wait()
         .with_context(|| format!("removing goose plugin directory {}", dir.display()))
 }
 
@@ -400,7 +407,7 @@ fn render(value: &Value) -> Result<String> {
 }
 
 fn uninstall_hook(system: &dyn System, dir: &Path, hook: HookSpec) -> Result<UninstallOutcome> {
-    if !system.exists(dir)? {
+    if !system.exists(dir).wait()? {
         return Ok(UninstallOutcome::NotInstalled);
     }
     let ManifestState::Usable(manifest) = load_manifest(system, dir) else {
@@ -461,9 +468,12 @@ fn write_file(system: &dyn System, path: &Path, body: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         system
             .create_dir_all(parent)
+            .wait()
             .with_context(|| format!("creating goose plugin directory {}", parent.display()))?;
     }
     system
-        .write(path, body.as_bytes(), WriteMode::Replace)
-        .with_context(|| format!("writing goose plugin file {}", path.display()))
+        .write(path, body.as_bytes(), Condition::None)
+        .wait()
+        .with_context(|| format!("writing goose plugin file {}", path.display()))?;
+    Ok(())
 }

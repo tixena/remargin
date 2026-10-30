@@ -15,8 +15,11 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_json::json;
+
+use remargin_core::wait::Wait as _;
 
 /// The plugin settings file, preserved across reinstalls.
 const DATA_JSON: &str = "data.json";
@@ -162,8 +165,8 @@ pub fn install_from_bytes(
     let data_json_path = plugin_dir.join(DATA_JSON);
 
     // `read_to_string` is enough: `data.json` is JSON text.
-    let preserved_data = if system.exists(&data_json_path).unwrap_or(false) {
-        match system.read_to_string(&data_json_path) {
+    let preserved_data = if system.exists(&data_json_path).wait().unwrap_or(false) {
+        match system.read_to_string(&data_json_path).wait() {
             Ok(contents) => Some(contents),
             Err(err) => {
                 eprintln!(
@@ -177,28 +180,33 @@ pub fn install_from_bytes(
         None
     };
 
-    if system.exists(&plugin_dir).unwrap_or(false) {
+    if system.exists(&plugin_dir).wait().unwrap_or(false) {
         system
             .remove_dir_all(&plugin_dir)
+            .wait()
             .with_context(|| format!("failed to remove {}", plugin_dir.display()))?;
     }
     system
         .create_dir_all(&plugin_dir)
+        .wait()
         .with_context(|| format!("failed to create {}", plugin_dir.display()))?;
 
     let main_js_path = plugin_dir.join("main.js");
     system
-        .write(&main_js_path, main_js, WriteMode::Replace)
+        .write(&main_js_path, main_js, Condition::None)
+        .wait()
         .with_context(|| format!("failed to write {}", main_js_path.display()))?;
 
     let manifest_path = plugin_dir.join("manifest.json");
     system
-        .write(&manifest_path, manifest, WriteMode::Replace)
+        .write(&manifest_path, manifest, Condition::None)
+        .wait()
         .with_context(|| format!("failed to write {}", manifest_path.display()))?;
 
     let preserved_bytes = if let Some(contents) = preserved_data.as_ref() {
         system
-            .write(&data_json_path, contents.as_bytes(), WriteMode::Replace)
+            .write(&data_json_path, contents.as_bytes(), Condition::None)
+            .wait()
             .with_context(|| format!("failed to write {}", data_json_path.display()))?;
         Some(contents.len())
     } else {
@@ -223,12 +231,13 @@ pub fn uninstall(
     let vault = resolve_vault(system, cwd, vault_path)?;
     let plugin_dir = vault.join(PLUGIN_REL_PATH);
 
-    if !system.exists(&plugin_dir).unwrap_or(false) {
+    if !system.exists(&plugin_dir).wait().unwrap_or(false) {
         return Ok(UninstallStatus::NotInstalled { plugin_dir });
     }
 
     system
         .remove_dir_all(&plugin_dir)
+        .wait()
         .with_context(|| format!("failed to remove {}", plugin_dir.display()))?;
 
     Ok(UninstallStatus::Removed { plugin_dir })
@@ -242,6 +251,7 @@ fn resolve_vault(system: &dyn System, cwd: &Path, vault_path: Option<&Path>) -> 
     let dot_obsidian = vault.join(DOT_OBSIDIAN);
     let is_dir = system
         .is_dir(&dot_obsidian)
+        .wait()
         .with_context(|| format!("failed to inspect {}", dot_obsidian.display()))?;
     if !is_dir {
         bail!(

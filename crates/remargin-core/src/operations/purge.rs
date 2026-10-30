@@ -17,7 +17,8 @@ use std::path::{Component, Path, PathBuf};
 use core::mem;
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::{System, WalkEntry, WriteMode};
+use os_shim::bucket::Condition;
+use os_shim::{System, WalkEntry};
 use serde_json::{Value as JsonValue, json};
 use serde_yaml::Value;
 
@@ -26,6 +27,7 @@ use crate::document::allowlist;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Segment};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
+use crate::wait::Wait as _;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Result of a purge operation.
@@ -176,7 +178,7 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
         let attachment_path = doc_dir
             .join(&config.assets_dir)
             .join(Path::new(attachment).file_name().unwrap_or_default());
-        if system.remove_file(&attachment_path).is_ok() {
+        if system.remove_file(&attachment_path).wait().is_ok() {
             attachments_cleaned += 1;
         }
     }
@@ -186,8 +188,10 @@ pub fn purge(system: &dyn System, path: &Path, config: &ResolvedConfig) -> Resul
     commit_with_verify(system, &doc, config, path, |verified_doc| {
         let markdown = verified_doc.to_markdown()?;
         system
-            .write(path, markdown.as_bytes(), WriteMode::Replace)
-            .with_context(|| format!("writing {}", path.display()))
+            .write(path, markdown.as_bytes(), Condition::None)
+            .wait()
+            .with_context(|| format!("writing {}", path.display()))?;
+        Ok(())
     })?;
 
     Ok(PurgeResult {
@@ -337,15 +341,16 @@ pub fn purge_dir(
     dir: &Path,
     config: &ResolvedConfig,
 ) -> Result<PurgeBulkResult> {
-    if !system.exists(dir).unwrap_or(false) {
+    if !system.exists(dir).wait().unwrap_or(false) {
         bail!("directory does not exist: {}", dir.display());
     }
-    if !system.is_dir(dir).unwrap_or(false) {
+    if !system.is_dir(dir).wait().unwrap_or(false) {
         bail!("not a directory: {}", dir.display());
     }
 
     let entries = system
         .walk_dir(dir, false, false)
+        .wait()
         .with_context(|| format!("walking directory {}", dir.display()))?;
 
     let candidates = collect_purge_candidates(&entries, dir);

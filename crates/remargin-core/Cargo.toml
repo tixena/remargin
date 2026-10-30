@@ -60,4 +60,6 @@ humantime = { workspace = true, optional = true }
 tracing.workspace = true
 
 [dev-dependencies]
+# Names the stream types of the `System` that `operations/mv/tests.rs` implements.
+futures-io.workspace = true
 tempfile.workspace = true

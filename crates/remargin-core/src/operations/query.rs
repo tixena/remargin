@@ -25,6 +25,7 @@ use crate::kind::matches_kind_filter;
 use crate::parser::{self, Acknowledgment, AuthorType};
 use crate::parser::{acknowledgment_schema, author_type_schema};
 use crate::reactions::{ReactionEntry, reaction_entry_schema};
+use crate::wait::Wait as _;
 
 /// Column names of a compact comment row, `content` last; `checksum`, `signature` and `file`
 /// are left out.
@@ -467,7 +468,7 @@ pub fn query(
 
     // A file named explicitly skips the `.md` and visibility gates the walk applies; its relative
     // path is the file name, as a directory query of the parent would render it.
-    if system.is_file(base_dir).unwrap_or(false) {
+    if system.is_file(base_dir).wait().unwrap_or(false) {
         let relative = base_dir
             .file_name()
             .map_or_else(|| base_dir.to_path_buf(), PathBuf::from);
@@ -478,6 +479,7 @@ pub fn query(
 
     let entries = system
         .walk_dir(base_dir, false, false)
+        .wait()
         .with_context(|| format!("walking directory {}", base_dir.display()))?;
 
     let mut gate = config.read_gate();
@@ -527,7 +529,7 @@ fn process_document(
     relative: &Path,
     filter: &QueryFilter,
 ) -> Option<QueryResult> {
-    let content = system.read_to_string(file_path).ok()?;
+    let content = system.read_to_string(file_path).wait().ok()?;
 
     let doc = parser::parse(&content).ok()?;
 
@@ -709,6 +711,7 @@ pub fn resolve_comment_id(
 ) -> Result<Vec<PathBuf>> {
     let entries = system
         .walk_dir(base_dir, false, false)
+        .wait()
         .with_context(|| format!("walking directory {}", base_dir.display()))?;
 
     let mut matches = Vec::new();
@@ -726,7 +729,7 @@ pub fn resolve_comment_id(
             continue;
         }
 
-        let Ok(content) = system.read_to_string(&entry.path) else {
+        let Ok(content) = system.read_to_string(&entry.path).wait() else {
             continue;
         };
 

@@ -28,6 +28,7 @@ use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::parser::AuthorType;
 use crate::path::expand_path;
 use crate::permissions::op_guard::CallerInfo;
+use crate::wait::Wait as _;
 
 pub(crate) const CONFIG_FILENAME: &str = ".remargin.yaml";
 const REGISTRY_FILENAME: &str = ".remargin-registry.yaml";
@@ -685,7 +686,7 @@ struct WalkedIdentityFields {
 /// directory anchors at itself, a file at its parent, so a nested realm
 /// inside a listed directory is honored.
 fn read_anchor<'target>(system: &dyn System, target: &'target Path) -> &'target Path {
-    if system.is_dir(target).unwrap_or(false) {
+    if system.is_dir(target).wait().unwrap_or(false) {
         target
     } else {
         target.parent().unwrap_or(target)
@@ -754,6 +755,7 @@ fn find_file_upward(
         let candidate = current.join(filename);
         if system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?
         {
             return Ok(Some(candidate));
@@ -785,10 +787,12 @@ pub fn resolve_mode(system: &dyn System, start_dir: &Path) -> Result<ResolvedMod
         let candidate = current.join(CONFIG_FILENAME);
         if system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?
         {
             let content = system
                 .read_to_string(&candidate)
+                .wait()
                 .with_context(|| format!("reading {}", candidate.display()))?;
             let cfg: Config = serde_yaml::from_str(&content)
                 .with_context(|| format!("parsing {}", candidate.display()))?;
@@ -858,10 +862,12 @@ pub fn load_config_filtered_with_path(
         let candidate = current.join(CONFIG_FILENAME);
         if system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?
         {
             let content = system
                 .read_to_string(&candidate)
+                .wait()
                 .with_context(|| format!("reading {}", candidate.display()))?;
             let config: Config = serde_yaml::from_str(&content)
                 .with_context(|| format!("parsing {}", candidate.display()))?;
@@ -894,6 +900,7 @@ pub fn load_registry(system: &dyn System, start_dir: &Path) -> Result<Option<Reg
         Some(found) => {
             let content = system
                 .read_to_string(&found)
+                .wait()
                 .with_context(|| format!("reading {}", found.display()))?;
             let reg: Registry = serde_yaml::from_str(&content)
                 .with_context(|| format!("parsing {}", found.display()))?;

@@ -13,12 +13,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 
 use crate::on_disk_comment::OnDiskComment;
 use crate::parser::heading::resolve_heading_path;
 use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
 use crate::reactions::quote_emoji_key;
+use crate::wait::Wait as _;
 
 /// Mutating these through the document layer would let a caller grant itself registry access,
 /// rotate keys or flip modes. Matched by exact basename only.
@@ -411,7 +413,8 @@ pub fn write_document(
         .context("comment preservation invariant violated")?;
 
     system
-        .write(path, markdown.as_bytes(), WriteMode::Replace)
+        .write(path, markdown.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing {}", path.display()))?;
 
     Ok(())

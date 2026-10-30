@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::config::permissions::resolve::lint_permissions_in_parents;
 use crate::config::{Mode, ResolvedConfig, load_registry, resolve_mode};
+use crate::wait::Wait as _;
 
 const REQUIRED_REMARGIN_FIELDS: &[&str] = &["id", "author", "type", "ts", "checksum"];
 
@@ -165,6 +166,7 @@ pub fn lint_doc(
 
     let content = system
         .read_to_string(doc_path)
+        .wait()
         .with_context(|| format!("reading {}", doc_path.display()))?;
     let structural = lint(&content)?;
     let walk_anchor = doc_path

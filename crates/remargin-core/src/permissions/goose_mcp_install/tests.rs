@@ -17,6 +17,7 @@ use super::{
     EXTENSION_KEY, EXTENSION_NAME, InstallOutcome, TestOutcome, UninstallOutcome, install,
     local_config_file, test, uninstall, user_config_file,
 };
+use crate::wait::Wait as _;
 
 const EXE: &str = "/opt/bin/remargin";
 
@@ -139,7 +140,7 @@ fn without_entry_block(body: &str) -> String {
 }
 
 fn config_of(system: &dyn System) -> Mapping {
-    serde_yaml::from_str::<Value>(&system.read_to_string(&config_path()).unwrap())
+    serde_yaml::from_str::<Value>(&system.read_to_string(&config_path()).wait().unwrap())
         .unwrap()
         .as_mapping()
         .unwrap()
@@ -275,12 +276,15 @@ fn install_is_idempotent() {
 fn reinstalling_leaves_the_file_byte_identical() {
     let system = mock();
     let _outcome = install(&system, &config_path()).unwrap();
-    let before = system.read_to_string(&config_path()).unwrap();
+    let before = system.read_to_string(&config_path()).wait().unwrap();
     assert_eq!(
         install(&system, &config_path()).unwrap(),
         InstallOutcome::AlreadyInstalled,
     );
-    assert_eq!(system.read_to_string(&config_path()).unwrap(), before);
+    assert_eq!(
+        system.read_to_string(&config_path()).wait().unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -337,7 +341,7 @@ fn install_refuses_to_overwrite_an_unparseable_config() {
         "error should name the parse fault: {err}",
     );
     assert_eq!(
-        system.read_to_string(&config_path()).unwrap(),
+        system.read_to_string(&config_path()).wait().unwrap(),
         "extensions: [ this is not\n",
         "the unreadable config must survive untouched",
     );
@@ -395,7 +399,7 @@ fn uninstall_is_a_no_op_when_absent() {
         UninstallOutcome::NotInstalled,
     );
     assert_eq!(
-        seeded.read_to_string(&config_path()).unwrap(),
+        seeded.read_to_string(&config_path()).wait().unwrap(),
         "active_provider: ollama\n",
         "a config with no remargin entry must not be rewritten",
     );
@@ -506,7 +510,7 @@ fn install_preserves_every_byte_outside_the_entry() {
     let system = seed(mock(), &original);
     assert_eq!(install(&system, &config_path()).unwrap(), installed(false));
 
-    let after = system.read_to_string(&config_path()).unwrap();
+    let after = system.read_to_string(&config_path()).wait().unwrap();
     assert_eq!(without_entry_block(&after), original);
     assert_eq!(field(&entry_of(&system), "cmd"), Value::from(EXE));
 }
@@ -518,7 +522,7 @@ fn install_repairs_a_drifted_entry_without_reflowing_the_rest() {
     let system = seed(mock(), &original);
     assert_eq!(install(&system, &config_path()).unwrap(), installed(false));
 
-    let after = system.read_to_string(&config_path()).unwrap();
+    let after = system.read_to_string(&config_path()).wait().unwrap();
     assert_eq!(without_entry_block(&after), without_entry_block(&original));
     assert_eq!(field(&entry_of(&system), "cmd"), Value::from(EXE));
 }
@@ -532,7 +536,7 @@ fn install_appends_to_a_config_that_declares_no_extensions() {
     let system = seed(mock(), &original);
     assert_eq!(install(&system, &config_path()).unwrap(), installed(false));
 
-    let after = system.read_to_string(&config_path()).unwrap();
+    let after = system.read_to_string(&config_path()).wait().unwrap();
     assert!(
         after.starts_with(&original),
         "the user's lines should be untouched above the appended block: {after}",
@@ -549,7 +553,7 @@ fn uninstall_removes_only_the_entrys_lines() {
         uninstalled(false),
     );
     assert_eq!(
-        system.read_to_string(&config_path()).unwrap(),
+        system.read_to_string(&config_path()).wait().unwrap(),
         without_entry_block(&original),
     );
 }
@@ -563,7 +567,7 @@ fn uninstall_of_the_last_entry_empties_the_mapping_in_place() {
         uninstalled(false),
     );
     assert_eq!(
-        system.read_to_string(&config_path()).unwrap(),
+        system.read_to_string(&config_path()).wait().unwrap(),
         joined(SOLE_ENTRY_UNINSTALLED),
     );
     assert_eq!(

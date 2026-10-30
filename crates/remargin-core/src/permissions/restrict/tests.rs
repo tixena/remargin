@@ -4,10 +4,10 @@
 //! (create + merge + idempotency), Claude-sync invocation through
 //! `apply_rules`.
 
-use std::io;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::error::StorageError;
 use os_shim::mock::MemorySystem;
 use serde_yaml::Value;
 
@@ -15,6 +15,7 @@ use crate::permissions::restrict::{
     RestrictArgs, find_claude_anchor, restrict, write_remargin_yaml,
 };
 use crate::permissions::sidecar;
+use crate::wait::Wait as _;
 
 fn realm_with_claude(extra_files: &[(&str, &str)]) -> (MemorySystem, PathBuf) {
     let anchor = PathBuf::from("/r");
@@ -45,7 +46,7 @@ fn args(path: &str) -> RestrictArgs {
 }
 
 fn read_yaml(system: &MemorySystem, path: &Path) -> Value {
-    let body = system.read_to_string(path).unwrap();
+    let body = system.read_to_string(path).wait().unwrap();
     serde_yaml::from_str(&body).unwrap()
 }
 
@@ -60,7 +61,7 @@ fn anchor_discovery_when_cwd_is_anchor() {
 fn anchor_discovery_walks_up_to_nearest_claude_dir() {
     let (system, _anchor) = realm_with_claude(&[]);
     let deep = PathBuf::from("/r/sub/sub2");
-    system.create_dir_all(&deep).unwrap();
+    system.create_dir_all(&deep).wait().unwrap();
     let found = find_claude_anchor(&system, &deep).unwrap();
     assert_eq!(found, PathBuf::from("/r"));
 }
@@ -174,11 +175,11 @@ fn rerun_writes_no_settings_or_sidecar() {
     let files = settings_files(&anchor);
     restrict(&system, &anchor, &args("src/secret"), &files).unwrap();
 
-    let _: io::Error = system.read_to_string(&files[0]).unwrap_err();
+    let _: StorageError = system.read_to_string(&files[0]).wait().unwrap_err();
     assert!(sidecar::load(&system, &anchor).unwrap().entries.is_empty());
 
     restrict(&system, &anchor, &args("src/secret"), &files).unwrap();
-    let _: io::Error = system.read_to_string(&files[0]).unwrap_err();
+    let _: StorageError = system.read_to_string(&files[0]).wait().unwrap_err();
     assert!(sidecar::load(&system, &anchor).unwrap().entries.is_empty());
 }
 
@@ -249,6 +250,7 @@ fn write_remargin_yaml_bypass_is_scoped_to_this_module() {
     assert!(
         system
             .read_to_string(&anchor.join(".remargin.yaml"))
+            .wait()
             .is_ok(),
         ".remargin.yaml must exist after restrict"
     );
@@ -258,6 +260,7 @@ fn write_remargin_yaml_bypass_is_scoped_to_this_module() {
     assert_eq!(
         system
             .read_to_string(&anchor.join(".remargin.yaml"))
+            .wait()
             .unwrap(),
         body
     );

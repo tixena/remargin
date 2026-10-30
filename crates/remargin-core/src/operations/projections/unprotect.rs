@@ -23,6 +23,7 @@ use crate::permissions::claude_sync::canonicalize_rule;
 use crate::permissions::restrict::{RestrictEntryProjection, find_claude_anchor};
 use crate::permissions::sidecar;
 use crate::permissions::unprotect::UnprotectArgs;
+use crate::wait::Wait as _;
 
 const RESTRICT_WILDCARD: &str = "*";
 
@@ -69,7 +70,7 @@ pub fn project_unprotect(
         anchor.clone()
     } else {
         let candidate = anchor.join(&args.path);
-        system.canonicalize(&candidate).unwrap_or(candidate)
+        system.canonicalize(&candidate).wait().unwrap_or(candidate)
     };
     let target_key = absolute_path.display().to_string();
 
@@ -154,7 +155,7 @@ fn read_yaml_entry(
     yaml_path: &Path,
     path_on_disk: &str,
 ) -> Result<Option<RestrictEntryProjection>> {
-    let body = match system.read_to_string(yaml_path) {
+    let body = match system.read_to_string(yaml_path).wait() {
         Ok(body) => body,
         Err(_err) => return Ok(None),
     };
@@ -225,7 +226,7 @@ fn simulate_settings_scrub(
     deny_rules: &[String],
     conflicts: &mut Vec<UnprotectConflict>,
 ) -> Result<UnprotectSettingsDiff> {
-    let body = system.read_to_string(settings_file).ok();
+    let body = system.read_to_string(settings_file).wait().ok();
     let value: Option<serde_json::Value> = match body.as_deref() {
         Some(text) if !text.trim().is_empty() => Some(
             serde_json::from_str(text)

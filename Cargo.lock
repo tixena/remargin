@@ -456,6 +456,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
 
 [[package]]
+name = "futures-io"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
+
+[[package]]
 name = "futures-task"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -770,11 +776,14 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "os-shim"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8c44f74aede4d9db3b3ed1d7734eae1e167d5600851d0ef1da352b2a1f3f80a"
+checksum = "20d5792660b5c7e990afb540d1460468d76b205c0100a768c74a5d88675d4775"
 dependencies = [
+ "futures-io",
  "ignore",
+ "same-file",
+ "sha2",
  "tempfile",
  "tracing",
 ]
@@ -949,6 +958,7 @@ dependencies = [
  "base64",
  "chrono",
  "ed25519-dalek",
+ "futures-io",
  "getrandom 0.4.3",
  "humantime",
  "ignore",

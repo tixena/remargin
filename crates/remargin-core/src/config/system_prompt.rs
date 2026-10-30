@@ -12,6 +12,7 @@ use os_shim::System;
 use serde::Serialize;
 
 use crate::config::{CONFIG_FILENAME, Config};
+use crate::wait::Wait as _;
 
 /// The `<files>` token is substituted by the caller; the resolver returns the body verbatim.
 pub const DEFAULT_PROMPT_BODY: &str =
@@ -65,10 +66,12 @@ pub fn resolve_system_prompt(
         let candidate = current.join(CONFIG_FILENAME);
         if system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?
         {
             let content = system
                 .read_to_string(&candidate)
+                .wait()
                 .with_context(|| format!("reading {}", candidate.display()))?;
             let config: Config = serde_yaml::from_str(&content)
                 .with_context(|| format!("parsing {}", candidate.display()))?;

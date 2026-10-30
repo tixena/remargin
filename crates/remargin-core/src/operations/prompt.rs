@@ -17,12 +17,14 @@
 //! of scope here.
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 use crate::config::ResolvedConfig;
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
+use crate::wait::Wait as _;
 
 /// Result of a successful `delete` write.
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +97,7 @@ pub fn delete(
 
     let file_present = system
         .exists(&target)
+        .wait()
         .with_context(|| format!("checking existence of {}", target.display()))?;
     if !file_present {
         return Ok(PromptDeleteOutcome {
@@ -109,6 +112,7 @@ pub fn delete(
 
     let existing = system
         .read_to_string(&target)
+        .wait()
         .with_context(|| format!("reading {}", target.display()))?;
     let result = remove_system_prompt(&existing);
     if result.noop {
@@ -121,7 +125,8 @@ pub fn delete(
     diff_only_system_prompt(&existing, &result.content)
         .context("post-splice diff: refusing write that changes fields other than system_prompt")?;
     system
-        .write(&target, result.content.as_bytes(), WriteMode::Replace)
+        .write(&target, result.content.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(PromptDeleteOutcome {
         absent: false,
@@ -141,6 +146,7 @@ pub fn list(system: &dyn System, root: &Path) -> Result<Vec<PromptListEntry>> {
     // hidden=true: targets are `.remargin.yaml` dotfiles.
     let entries = system
         .walk_dir(root, false, true)
+        .wait()
         .with_context(|| format!("walking directory {}", root.display()))?;
 
     let mut out = Vec::new();
@@ -151,7 +157,7 @@ pub fn list(system: &dyn System, root: &Path) -> Result<Vec<PromptListEntry>> {
         if entry.path.file_name().and_then(|n| n.to_str()) != Some(".remargin.yaml") {
             continue;
         }
-        let Ok(content) = system.read_to_string(&entry.path) else {
+        let Ok(content) = system.read_to_string(&entry.path).wait() else {
             continue;
         };
         let Ok(parsed) = serde_yaml::from_str::<serde_yaml::Value>(&content) else {
@@ -226,6 +232,7 @@ pub fn set(
 
     let created = !system
         .exists(&target)
+        .wait()
         .with_context(|| format!("checking existence of {}", target.display()))?;
     let existing = read_or_empty(system, &target)?;
     let result = splice_system_prompt(
@@ -246,7 +253,8 @@ pub fn set(
     diff_only_system_prompt(&existing, &result.content)
         .context("post-splice diff: refusing write that changes fields other than system_prompt")?;
     system
-        .write(&target, result.content.as_bytes(), WriteMode::Replace)
+        .write(&target, result.content.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(PromptSetOutcome {
         created,
@@ -290,12 +298,14 @@ pub(crate) fn diff_only_system_prompt(old: &str, new: &str) -> Result<()> {
 fn ensure_folder(system: &dyn System, folder: &Path) -> Result<()> {
     let exists = system
         .exists(folder)
+        .wait()
         .with_context(|| format!("checking existence of {}", folder.display()))?;
     if !exists {
         bail!("folder does not exist: {}", folder.display());
     }
     if !system
         .is_dir(folder)
+        .wait()
         .with_context(|| format!("checking directory: {}", folder.display()))?
     {
         bail!("path is not a directory: {}", folder.display());
@@ -375,12 +385,14 @@ fn quote_scalar(s: &str) -> String {
 fn read_or_empty(system: &dyn System, target: &Path) -> Result<String> {
     if !system
         .exists(target)
+        .wait()
         .with_context(|| format!("checking existence of {}", target.display()))?
     {
         return Ok(String::new());
     }
     system
         .read_to_string(target)
+        .wait()
         .with_context(|| format!("reading {}", target.display()))
 }
 

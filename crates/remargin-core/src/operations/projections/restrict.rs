@@ -24,6 +24,7 @@ use crate::permissions::restrict::{
     self as permissions_restrict, RestrictArgs, RestrictEntryProjection,
 };
 use crate::permissions::sidecar;
+use crate::wait::Wait as _;
 
 const RESTRICT_WILDCARD: &str = "*";
 
@@ -69,6 +70,7 @@ pub fn project_restrict(
 ) -> Result<RestrictProjection> {
     let canonical_cwd = system
         .canonicalize(cwd)
+        .wait()
         .unwrap_or_else(|_err| cwd.to_path_buf());
     let anchor = match permissions_restrict::find_claude_anchor(system, cwd) {
         Ok(anchor) => anchor,
@@ -235,6 +237,7 @@ fn resolve_path(system: &dyn System, anchor: &Path, args: &RestrictArgs) -> Resu
     let lexically_normalised = lexical_normalise(&candidate);
     let absolute = system
         .canonicalize(&lexically_normalised)
+        .wait()
         .unwrap_or(lexically_normalised);
     if !absolute.starts_with(anchor) {
         anyhow::bail!(
@@ -312,7 +315,7 @@ fn simulate_sidecar(
             will_be_created: false,
         });
     }
-    let exists_on_disk = system.read_to_string(&sidecar_path).is_ok();
+    let exists_on_disk = system.read_to_string(&sidecar_path).wait().is_ok();
     let will_be_created = !exists_on_disk;
 
     let loaded = sidecar::load(system, anchor)?;

@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_json::{Value, json};
 
-#[cfg(feature = "obsidian")]
 use crate::ObsidianAction;
 #[cfg(feature = "session")]
 use crate::SessionAction;
@@ -87,6 +87,8 @@ use remargin_core::session::multiplexer::{
 };
 #[cfg(feature = "session")]
 use remargin_core::session::spec::build_launch_spec;
+#[cfg(feature = "obsidian")]
+use remargin_core::wait::Wait as _;
 use remargin_core::writer::InsertPosition;
 
 /// Names which entry a goose verdict is about: both are reported over the same plugin directory.
@@ -841,7 +843,7 @@ pub fn cmd_comment(
     }
 
     if cp.file == "-" {
-        let updated = system.read_to_string(&path)?;
+        let updated = system.read_to_string(&path).wait()?;
         out_raw(sinks, &updated)?;
     }
 
@@ -1052,7 +1054,8 @@ pub fn cmd_get_binary(
 
     if let Some(out_path) = gp.out {
         system
-            .write(out_path, &payload.bytes, WriteMode::Replace)
+            .write(out_path, &payload.bytes, Condition::None)
+            .wait()
             .with_context(|| format!("writing {}", out_path.display()))?;
         let summary = json!({
             "mime": payload.mime,
@@ -1590,12 +1593,14 @@ pub fn cmd_keygen(sinks: &mut IoSinks<'_>, system: &dyn System, output: &Path) -
     let (private_pem, public_openssh) = crypto::generate_keypair("remargin")?;
 
     system
-        .write(output, private_pem.as_bytes(), WriteMode::Replace)
+        .write(output, private_pem.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing private key to {}", output.display()))?;
 
     let pub_path = output.with_extension("pub");
     system
-        .write(&pub_path, public_openssh.as_bytes(), WriteMode::Replace)
+        .write(&pub_path, public_openssh.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing public key to {}", pub_path.display()))?;
 
     writeln!(sinks.stderr, "Private key: {}", output.display()).context("writing to stderr")?;
@@ -2113,6 +2118,7 @@ fn read_plan_batch_ops(
     } else {
         system
             .read_to_string(Path::new(path))
+            .wait()
             .with_context(|| format!("reading plan batch ops file {path}"))?
     };
     let raw: Value =
@@ -2147,7 +2153,7 @@ pub fn cmd_purge(
         return print_output(sinks, json_mode, &result.to_json(cwd));
     }
 
-    if system.is_dir(&path).unwrap_or(false) {
+    if system.is_dir(&path).wait().unwrap_or(false) {
         anyhow::bail!(
             "target is a directory: {file} (pass --recursive to purge every .md file under it)"
         );
@@ -2165,7 +2171,8 @@ pub fn cmd_query(
 ) -> Result<()> {
     let target = cwd.join(expand_cli_path(system, params.path)?);
     let filter = build_query_filter(config, params)?;
-    let base_path = query::display_base_path(params.path, system.is_file(&target).unwrap_or(false));
+    let base_path =
+        query::display_base_path(params.path, system.is_file(&target).wait().unwrap_or(false));
     let results = query::query(system, &target, &filter, config)?;
     render::render_query_output(
         sinks,
@@ -3252,7 +3259,7 @@ pub fn cmd_verify(
     // A directory sweeps the tree; `-` (stdin) and plain files take the single-file path.
     if file != "-" {
         let target = cwd.join(expand_cli_path(system, file)?);
-        if system.is_dir(&target).unwrap_or(false) {
+        if system.is_dir(&target).wait().unwrap_or(false) {
             return cmd_verify_folder(sinks, system, cwd, &target, config, json_mode);
         }
     }

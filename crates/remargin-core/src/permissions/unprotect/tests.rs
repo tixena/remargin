@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 use serde_yaml::Value;
 
@@ -15,6 +15,7 @@ use crate::permissions::claude_sync::{RuleSet, apply_rules};
 use crate::permissions::restrict::{self, RestrictArgs};
 use crate::permissions::sidecar;
 use crate::permissions::unprotect::{UnprotectArgs, unprotect};
+use crate::wait::Wait as _;
 
 /// Restrict `path`, then seed the settings files and the sidecar with a deny set, so the
 /// sidecar-driven reverse has something to scrub. The current `restrict` writes neither.
@@ -68,7 +69,7 @@ fn restrict_args(path: &str) -> RestrictArgs {
 }
 
 fn read_yaml(system: &MemorySystem, path: &Path) -> Value {
-    let body = system.read_to_string(path).unwrap();
+    let body = system.read_to_string(path).wait().unwrap();
     serde_yaml::from_str(&body).unwrap()
 }
 
@@ -90,6 +91,7 @@ fn clean_reverse_restores_state() {
 
     let yaml_body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
+        .wait()
         .unwrap();
     assert!(
         !yaml_body.contains("permissions:") && !yaml_body.contains("restrict:"),
@@ -99,7 +101,7 @@ fn clean_reverse_restores_state() {
     let sc = sidecar::load(&system, &anchor).unwrap();
     assert!(sc.entries.is_empty());
 
-    let settings_body = system.read_to_string(&files[0]).unwrap();
+    let settings_body = system.read_to_string(&files[0]).wait().unwrap();
     assert!(
         !settings_body.contains("src/secret"),
         "settings should no longer reference src/secret after unprotect: {settings_body}"
@@ -140,8 +142,9 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
         .write(
             &sidecar_path,
             b"{\"version\":1,\"entries\":{}}",
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
 
     let outcome = unprotect(
@@ -161,7 +164,7 @@ fn yaml_present_sidecar_absent_removes_yaml_only() {
         outcome.warnings
     );
 
-    let body = system.read_to_string(&files[0]).unwrap();
+    let body = system.read_to_string(&files[0]).wait().unwrap();
     assert!(
         body.contains("Edit(") && body.contains("src/secret"),
         "settings should still carry the Edit deny (sidecar absent, rules not scrubbed): {body}"
@@ -190,7 +193,7 @@ fn yaml_missing_sidecar_present_reverts_settings_only() {
         outcome.warnings
     );
 
-    let body = system.read_to_string(&files[0]).unwrap();
+    let body = system.read_to_string(&files[0]).wait().unwrap();
     assert!(
         !body.contains("src/secret"),
         "settings should no longer reference src/secret after sidecar-guided revert: {body}"
@@ -205,7 +208,7 @@ fn manual_rule_deletion_surfaces_warning() {
     restrict_with_legacy_sidecar(&system, &anchor, "src/secret", &files);
 
     let local = files[0].clone();
-    let body = system.read_to_string(&local).unwrap();
+    let body = system.read_to_string(&local).wait().unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&body).unwrap();
     let deny = value["permissions"]["deny"].as_array_mut().unwrap();
     let edit_rule = deny
@@ -220,7 +223,8 @@ fn manual_rule_deletion_surfaces_warning() {
     deny.retain(|v| v.as_str() != Some(edit_rule.as_str()));
     let updated = serde_json::to_string_pretty(&value).unwrap();
     system
-        .write(&local, updated.as_bytes(), WriteMode::Replace)
+        .write(&local, updated.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let outcome = unprotect(
@@ -251,6 +255,7 @@ fn wildcard_restrict_and_unprotect_round_trip() {
 
     let body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
+        .wait()
         .unwrap();
     assert!(
         !body.contains("permissions:") && !body.contains("restrict:"),
@@ -335,6 +340,7 @@ fn last_removal_compacts_permissions_block_out_of_yaml() {
     .unwrap();
     let body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
+        .wait()
         .unwrap();
     assert!(
         !body.contains("permissions:") && !body.contains("restrict:"),
@@ -350,7 +356,7 @@ fn last_restrict_removal_keeps_other_permissions_subkeys() {
     restrict::restrict(&system, &anchor, &restrict_args("src/secret"), &files).unwrap();
 
     let yaml_path = anchor.join(".remargin.yaml");
-    let body = system.read_to_string(&yaml_path).unwrap();
+    let body = system.read_to_string(&yaml_path).wait().unwrap();
     let mut value: Value = serde_yaml::from_str(&body).unwrap();
     let perms = value
         .get_mut(Value::String(String::from("permissions")))
@@ -372,7 +378,7 @@ fn last_restrict_removal_keeps_other_permissions_subkeys() {
     )
     .unwrap();
 
-    let final_body = system.read_to_string(&yaml_path).unwrap();
+    let final_body = system.read_to_string(&yaml_path).wait().unwrap();
     assert!(
         !final_body.contains("restrict:"),
         "empty restrict array should be pruned: {final_body}",
@@ -410,6 +416,7 @@ fn next_unprotect_compacts_pre_existing_empty_restrict() {
 
     let final_body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
+        .wait()
         .unwrap();
     assert!(
         !final_body.contains("restrict:"),
@@ -437,6 +444,7 @@ fn empty_permissions_block_is_removed_entirely() {
 
     let final_body = system
         .read_to_string(&anchor.join(".remargin.yaml"))
+        .wait()
         .unwrap();
     assert!(
         !final_body.contains("permissions:"),
@@ -495,6 +503,7 @@ fn bypass_uses_dedicated_helper() {
 
     system
         .read_to_string(&anchor.join(".remargin.yaml"))
+        .wait()
         .unwrap();
 
     let body = "permissions:\n  trusted_roots: []\n";

@@ -12,6 +12,7 @@ use super::{
     SESSION_HOOK_SUBCOMMAND, TestOutcome, UninstallOutcome, install, install_session_guard,
     plugin_dir, test, test_session_guard, uninstall, uninstall_session_guard,
 };
+use crate::wait::Wait as _;
 
 const EXE: &str = "/opt/bin/remargin";
 
@@ -33,7 +34,7 @@ fn mock() -> MemorySystem {
 }
 
 fn read_json(system: &dyn System, path: &Path) -> Value {
-    serde_json::from_str(&system.read_to_string(path).unwrap()).unwrap()
+    serde_json::from_str(&system.read_to_string(path).wait().unwrap()).unwrap()
 }
 
 fn hooks_json(system: &dyn System) -> Value {
@@ -157,8 +158,8 @@ fn uninstall_removes_the_guard_and_preserves_sibling_plugins() {
         uninstall(&system, &guard_dir()).unwrap(),
         UninstallOutcome::Uninstalled,
     );
-    assert!(!system.exists(&guard_dir()).unwrap());
-    assert!(system.exists(&sibling).unwrap());
+    assert!(!system.exists(&guard_dir()).wait().unwrap());
+    assert!(system.exists(&sibling).wait().unwrap());
 }
 
 #[test]
@@ -201,7 +202,7 @@ fn test_reports_broken_for_each_corrupt_shape() {
 
     let missing_binary = mock();
     install(&missing_binary, &guard_dir()).unwrap();
-    missing_binary.remove_file(Path::new(EXE)).unwrap();
+    missing_binary.remove_file(Path::new(EXE)).wait().unwrap();
     let binary_reason = expect_broken(test(&missing_binary, &guard_dir()).unwrap());
     assert!(
         binary_reason.contains(EXE),
@@ -255,7 +256,12 @@ fn session_guard_install_creates_the_plugin_when_absent() {
         install_session_guard(&system, &guard_dir()).unwrap(),
         InstallOutcome::Installed,
     );
-    assert!(system.exists(&guard_dir().join("plugin.json")).unwrap());
+    assert!(
+        system
+            .exists(&guard_dir().join("plugin.json"))
+            .wait()
+            .unwrap()
+    );
     assert_eq!(session_entries(&system).len(), 1);
     assert_eq!(
         install_session_guard(&system, &guard_dir()).unwrap(),
@@ -320,7 +326,10 @@ fn session_guard_uninstall_removes_only_its_own_entry() {
         uninstall_session_guard(&system, &guard_dir()).unwrap(),
         UninstallOutcome::Uninstalled,
     );
-    assert!(system.exists(&guard_dir()).unwrap(), "plugin must survive");
+    assert!(
+        system.exists(&guard_dir()).wait().unwrap(),
+        "plugin must survive"
+    );
     assert_eq!(session_entries(&system), [] as [serde_json::Value; 0]);
     assert_eq!(pretool_entries(&system).len(), 1);
     assert_eq!(test(&system, &guard_dir()).unwrap(), TestOutcome::Installed);
@@ -336,7 +345,10 @@ fn pretool_uninstall_leaves_the_session_guard_entry() {
         uninstall(&system, &guard_dir()).unwrap(),
         UninstallOutcome::Uninstalled,
     );
-    assert!(system.exists(&guard_dir()).unwrap(), "plugin must survive");
+    assert!(
+        system.exists(&guard_dir()).wait().unwrap(),
+        "plugin must survive"
+    );
     assert_eq!(session_entries(&system).len(), 1);
 }
 
@@ -348,7 +360,7 @@ fn session_guard_uninstall_removes_the_plugin_when_it_was_the_last_entry() {
         uninstall_session_guard(&system, &guard_dir()).unwrap(),
         UninstallOutcome::Uninstalled,
     );
-    assert!(!system.exists(&guard_dir()).unwrap());
+    assert!(!system.exists(&guard_dir()).wait().unwrap());
 }
 
 #[test]
@@ -391,7 +403,7 @@ fn session_guard_test_reports_broken_for_corrupt_shapes() {
 
     let missing_binary = mock();
     install_session_guard(&missing_binary, &guard_dir()).unwrap();
-    missing_binary.remove_file(Path::new(EXE)).unwrap();
+    missing_binary.remove_file(Path::new(EXE)).wait().unwrap();
     let binary_reason = expect_broken(test_session_guard(&missing_binary, &guard_dir()).unwrap());
     assert!(
         binary_reason.contains(EXE),

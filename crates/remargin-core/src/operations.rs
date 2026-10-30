@@ -39,6 +39,7 @@ use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
 use crate::permissions::op_guard::{pre_mutate_check, pre_mutate_check_for_caller};
 use crate::reactions::{Reactions, ReactionsExt as _};
+use crate::wait::Wait as _;
 use crate::writer::{self, InsertPosition};
 
 /// Parameters for creating a new comment.
@@ -446,7 +447,7 @@ pub fn delete_comments(
                 .unwrap_or_else(|| Path::new("."))
                 .join(attachment);
             // Best-effort deletion; ignore errors if the file is already gone.
-            let _: Result<(), _> = system.remove_file(&attachment_path);
+            let _: Result<(), _> = system.remove_file(&attachment_path).wait();
         }
     }
 
@@ -715,11 +716,12 @@ fn copy_attachments(
 
     system
         .create_dir_all(&assets_dir)
+        .wait()
         .context("creating assets directory")?;
 
     let mut result = Vec::new();
     for src_path in attachments {
-        if !system.exists(src_path).unwrap_or(false) {
+        if !system.exists(src_path).wait().unwrap_or(false) {
             bail!("attachment not found: {}", src_path.display());
         }
 
@@ -732,6 +734,7 @@ fn copy_attachments(
         let dest_path = assets_dir.join(filename);
         system
             .copy(src_path, &dest_path)
+            .wait()
             .with_context(|| format!("copying attachment {}", src_path.display()))?;
 
         let relative = format!("{}/{filename}", config.assets_dir);

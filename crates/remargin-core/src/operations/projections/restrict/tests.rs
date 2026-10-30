@@ -1,9 +1,9 @@
 //! Unit tests for [`crate::operations::projections::restrict::project_restrict`].
 
-use std::io;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::error::StorageError;
 use os_shim::mock::MemorySystem;
 
 use crate::operations::plan::{
@@ -11,6 +11,7 @@ use crate::operations::plan::{
 };
 use crate::operations::projections::restrict::{RestrictProjection, project_restrict};
 use crate::permissions::restrict::{RestrictArgs, restrict};
+use crate::wait::Wait as _;
 
 /// Realm fixture: `<r>/.claude/` exists, no `.remargin.yaml`, no
 /// settings files. Anchor is `<r>`. Returns `(system, realm_root,
@@ -107,11 +108,12 @@ fn anchor_at_cwd_with_empty_state_projects_yaml_only() {
             .iter()
             .any(|c| matches!(c, ConfigConflict::AnchorIsAncestor { anchor: _, cwd: _ }))
     );
-    let _: io::Error = system
+    let _: StorageError = system
         .read_to_string(&realm.join(".remargin.yaml"))
+        .wait()
         .unwrap_err();
-    let _: io::Error = system.read_to_string(&project).unwrap_err();
-    let _: io::Error = system.read_to_string(&user).unwrap_err();
+    let _: StorageError = system.read_to_string(&project).wait().unwrap_err();
+    let _: StorageError = system.read_to_string(&user).wait().unwrap_err();
 }
 
 #[test]
@@ -332,10 +334,11 @@ fn project_restrict_does_not_write_to_disk() {
     let _projection =
         project_restrict(&system, &realm, &args, &[project.clone(), user.clone()]).unwrap();
 
-    let _: io::Error = system.read_to_string(&yaml_path).unwrap_err();
-    let _: io::Error = system.read_to_string(&project).unwrap_err();
-    let _: io::Error = system.read_to_string(&user).unwrap_err();
-    let _: io::Error = system
+    let _: StorageError = system.read_to_string(&yaml_path).wait().unwrap_err();
+    let _: StorageError = system.read_to_string(&project).wait().unwrap_err();
+    let _: StorageError = system.read_to_string(&user).wait().unwrap_err();
+    let _: StorageError = system
         .read_to_string(&realm.join(".claude/.remargin-restrictions.json"))
+        .wait()
         .unwrap_err();
 }

@@ -31,6 +31,7 @@ use crate::config::ResolvedConfig;
 use crate::document::{self, allowlist};
 use crate::parser::{self, ParsedDocument, Segment};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
+use crate::wait::Wait as _;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Options for a replace operation.
@@ -195,9 +196,10 @@ pub fn replace(
 
     let mut files: Vec<ReplaceFileOutcome> = Vec::new();
 
-    if system.is_dir(&resolved_target).unwrap_or(false) {
+    if system.is_dir(&resolved_target).wait().unwrap_or(false) {
         let entries = system
             .walk_dir(&resolved_target, false, false)
+            .wait()
             .with_context(|| format!("walking directory {}", resolved_target.display()))?;
         for entry in &entries {
             if !entry.is_file {
@@ -298,6 +300,7 @@ fn try_replace_one(
 
     let content = system
         .read_to_string(resolved)
+        .wait()
         .with_context(|| format!("reading {}", resolved.display()))?;
     let doc = parser::parse(&content).context("parsing document")?;
 

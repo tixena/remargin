@@ -13,6 +13,7 @@ use crate::linter;
 use crate::on_disk_comment::OnDiskComment;
 use crate::parser::{self, Acknowledgment, AuthorType, Comment};
 use crate::reactions::{Reactions, ReactionsExt as _};
+use crate::wait::Wait as _;
 
 use super::{
     InsertPosition, dedupe_acks, insert_comment, serialize_comment, verify_preservation,
@@ -265,7 +266,10 @@ fn write_with_mock_system() {
 
     write_document(&system, Path::new("/docs/test.md"), &doc, &added, &removed).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(content.contains("id: wrt1"));
 }
 
@@ -654,7 +658,7 @@ fn write_document_self_heals_legacy_duplicate_acks() {
     let doc = doc_with_duplicate_acks();
     let empty: HashSet<String> = HashSet::new();
     write_document(&system, path, &doc, &empty, &empty).unwrap();
-    let written = system.read_to_string(path).unwrap();
+    let written = system.read_to_string(path).wait().unwrap();
     let occurrences = written.matches("- eduardo-burgos@").count();
     assert_eq!(
         occurrences, 1,
@@ -673,11 +677,11 @@ fn write_then_reparse_then_write_is_byte_stable_for_duped_input() {
     let doc = doc_with_duplicate_acks();
     let empty: HashSet<String> = HashSet::new();
     write_document(&system, path, &doc, &empty, &empty).unwrap();
-    let first = system.read_to_string(path).unwrap();
+    let first = system.read_to_string(path).wait().unwrap();
 
     let reparsed = parser::parse(&first).unwrap();
     write_document(&system, path, &reparsed, &empty, &empty).unwrap();
-    let second = system.read_to_string(path).unwrap();
+    let second = system.read_to_string(path).wait().unwrap();
 
     assert_eq!(first, second, "second write must be byte-identical");
 }

@@ -14,11 +14,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use chrono::Utc;
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_yaml::{Mapping, Value};
 
 use crate::parser::rfc3339_z;
 use crate::permissions::claude_sync::{RuleSet, apply_rules, residual_rules};
+use crate::wait::Wait as _;
 
 const RESTRICT_WILDCARD: &str = "*";
 
@@ -138,6 +140,7 @@ pub fn restrict(
         let lexically_normalised = lexical_normalise(&candidate);
         let absolute = system
             .canonicalize(&lexically_normalised)
+            .wait()
             .unwrap_or(lexically_normalised);
         if !absolute.starts_with(&anchor) {
             bail!(
@@ -193,11 +196,12 @@ pub fn restrict(
 pub fn find_claude_anchor(system: &dyn System, cwd: &Path) -> Result<PathBuf> {
     let canonical_cwd = system
         .canonicalize(cwd)
+        .wait()
         .unwrap_or_else(|_err| cwd.to_path_buf());
     let mut cursor = canonical_cwd.as_path();
     loop {
         let candidate = cursor.join(".claude");
-        if system.is_dir(&candidate).unwrap_or(false) {
+        if system.is_dir(&candidate).wait().unwrap_or(false) {
             return Ok(cursor.to_path_buf());
         }
         match cursor.parent() {
@@ -222,9 +226,10 @@ pub fn find_claude_anchor(system: &dyn System, cwd: &Path) -> Result<PathBuf> {
 /// I/O / parse failures from reading or writing the file.
 pub fn write_remargin_yaml(system: &dyn System, anchor: &Path, body: &str) -> Result<bool> {
     let path = anchor.join(".remargin.yaml");
-    let was_absent = system.read_to_string(&path).is_err();
+    let was_absent = system.read_to_string(&path).wait().is_err();
     system
-        .write(&path, body.as_bytes(), WriteMode::Replace)
+        .write(&path, body.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(was_absent)
 }
@@ -281,7 +286,7 @@ pub fn simulate_upsert_remargin_yaml(
     args: &RestrictArgs,
 ) -> Result<RemarginYamlSim> {
     let yaml_path = anchor.join(".remargin.yaml");
-    let existing = system.read_to_string(&yaml_path).ok();
+    let existing = system.read_to_string(&yaml_path).wait().ok();
     let will_be_created = existing.is_none();
     let existing_body = existing.clone().unwrap_or_default();
     let mut value: Value = match existing.as_deref() {

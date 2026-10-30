@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 
 use super::{
@@ -12,6 +12,7 @@ use super::{
 };
 use crate::config::{Mode, ResolvedConfig};
 use crate::parser::AuthorType;
+use crate::wait::Wait as _;
 
 fn open_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -29,20 +30,21 @@ fn open_config() -> ResolvedConfig {
 }
 
 fn mkdir(system: &MemorySystem, path: &str) {
-    system.create_dir_all(Path::new(path)).unwrap();
+    system.create_dir_all(Path::new(path)).wait().unwrap();
 }
 
 fn write_file(system: &MemorySystem, path: &str, content: &str) {
     if let Some(parent) = Path::new(path).parent() {
-        system.create_dir_all(parent).unwrap();
+        system.create_dir_all(parent).wait().unwrap();
     }
     system
-        .write(Path::new(path), content.as_bytes(), WriteMode::Replace)
+        .write(Path::new(path), content.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 }
 
 fn read_file(system: &MemorySystem, path: &str) -> String {
-    system.read_to_string(Path::new(path)).unwrap()
+    system.read_to_string(Path::new(path)).wait().unwrap()
 }
 
 #[test]
@@ -456,6 +458,7 @@ fn delete_leaves_empty_file_in_place() {
     assert!(
         system
             .exists(Path::new("/vault/foo/.remargin.yaml"))
+            .wait()
             .unwrap()
     );
 }

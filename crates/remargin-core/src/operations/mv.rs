@@ -28,16 +28,19 @@
 #[cfg(test)]
 mod tests;
 
+use core::error::Error as _;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
+use os_shim::error::StorageError;
 use serde::Serialize;
 
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::permissions::op_guard::{CallerInfo, pre_mutate_check_for_caller};
+use crate::wait::Wait as _;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Inputs to [`mv`].
@@ -176,11 +179,11 @@ pub fn mv(
     ensure_not_forbidden_target(&args.dst)?;
 
     let src_lexical = lexical_join(base_dir, &args.src);
-    let src_is_dir = system.is_dir(&src_lexical).unwrap_or(false);
+    let src_is_dir = system.is_dir(&src_lexical).wait().unwrap_or(false);
     let src_resolved_opt = resolve_src(system, base_dir, &args.src, &src_lexical, config)?;
 
     let dst_lexical = lexical_join(base_dir, &args.dst);
-    let dst_is_dir = system.is_dir(&dst_lexical).unwrap_or(false);
+    let dst_is_dir = system.is_dir(&dst_lexical).wait().unwrap_or(false);
 
     // A file cannot be moved onto an existing directory; a directory source is handled below.
     if !src_is_dir && dst_is_dir {
@@ -205,7 +208,7 @@ pub fn mv(
         return idempotent_already_settled(system, &dst_resolved, &src_lexical, &args.src, &caller);
     };
 
-    if system.is_dir(&src_resolved).unwrap_or(false) {
+    if system.is_dir(&src_resolved).wait().unwrap_or(false) {
         return mv_directory(system, args, &src_resolved, dst_resolved, config);
     }
 
@@ -223,7 +226,7 @@ pub fn mv(
     pre_mutate_check_for_caller(system, "mv", &dst_resolved, &caller)?;
     config.ensure_can_read(system, &src_resolved)?;
 
-    let dst_pre_existed = system.exists(&dst_resolved).unwrap_or(false);
+    let dst_pre_existed = system.exists(&dst_resolved).wait().unwrap_or(false);
     if dst_pre_existed && !args.force {
         bail!(
             "destination exists: {} (pass --force to overwrite)",
@@ -273,7 +276,7 @@ fn resolve_src(
     src_lexical: &Path,
     config: &ResolvedConfig,
 ) -> Result<Option<PathBuf>> {
-    if system.exists(src_lexical).unwrap_or(false) {
+    if system.exists(src_lexical).wait().unwrap_or(false) {
         Ok(Some(allowlist::resolve_sandboxed(
             system,
             base_dir,
@@ -305,9 +308,9 @@ fn idempotent_already_settled(
     requested_src: &Path,
     caller: &CallerInfo,
 ) -> Result<MvOutcome> {
-    if system.exists(dst_resolved).unwrap_or(false) {
+    if system.exists(dst_resolved).wait().unwrap_or(false) {
         pre_mutate_check_for_caller(system, "mv", dst_resolved, caller)?;
-        let is_directory = system.is_dir(dst_resolved).unwrap_or(false);
+        let is_directory = system.is_dir(dst_resolved).wait().unwrap_or(false);
         return Ok(MvOutcome {
             bytes_moved: 0,
             dst_absolute: dst_resolved.to_path_buf(),
@@ -340,7 +343,7 @@ fn same_path_noop(
 ) -> Result<MvOutcome> {
     pre_mutate_check_for_caller(system, "mv", src_resolved, &config.caller_info())?;
     config.ensure_can_read(system, src_resolved)?;
-    let is_directory = system.is_dir(src_resolved).unwrap_or(false);
+    let is_directory = system.is_dir(src_resolved).wait().unwrap_or(false);
     let bytes_moved = if is_directory {
         0
     } else {
@@ -366,7 +369,7 @@ fn same_path_noop(
 /// the read fails (the outcome's `bytes_moved` field is informational
 /// — a failure here doesn't change whether the move itself succeeded).
 fn file_size(system: &dyn System, path: &Path) -> u64 {
-    let Ok(content) = system.read_to_string(path) else {
+    let Ok(content) = system.read_to_string(path).wait() else {
         return 0;
     };
     u64::try_from(content.len()).unwrap_or(0)
@@ -377,17 +380,17 @@ fn file_size(system: &dyn System, path: &Path) -> u64 {
 /// the destination write returns `Ok`). Returns `true` when the
 /// fallback fired.
 fn perform_move(system: &dyn System, src: &Path, dst: &Path) -> Result<bool> {
-    match system.rename(src, dst) {
+    match system.rename(src, dst).wait() {
         Ok(()) => Ok(false),
         Err(err) if is_cross_filesystem(&err) => {
-            system.copy(src, dst).with_context(|| {
+            system.copy(src, dst).wait().with_context(|| {
                 format!(
                     "cross-filesystem fallback: copying {} -> {}",
                     src.display(),
                     dst.display()
                 )
             })?;
-            system.remove_file(src).with_context(|| {
+            system.remove_file(src).wait().with_context(|| {
                 format!(
                     "cross-filesystem fallback: removing source {} after copy",
                     src.display()
@@ -431,7 +434,7 @@ fn mv_directory(
     pre_mutate_check_for_caller(system, "mv", &dst_resolved, caller)?;
     config.ensure_can_read(system, src_resolved)?;
 
-    let dst_pre_existed = system.exists(&dst_resolved).unwrap_or(false);
+    let dst_pre_existed = system.exists(&dst_resolved).wait().unwrap_or(false);
     if dst_pre_existed && !args.force {
         bail!(
             "destination exists: {} (pass --force to overwrite)",
@@ -444,13 +447,17 @@ fn mv_directory(
 
     if dst_pre_existed && args.force {
         // Clear the destination subtree first so the rename can land, as `mv -f` does.
-        if system.is_dir(&dst_resolved).unwrap_or(false) {
-            system.remove_dir_all(&dst_resolved).with_context(|| {
-                format!("removing existing destination {}", dst_resolved.display())
-            })?;
+        if system.is_dir(&dst_resolved).wait().unwrap_or(false) {
+            system
+                .remove_dir_all(&dst_resolved)
+                .wait()
+                .with_context(|| {
+                    format!("removing existing destination {}", dst_resolved.display())
+                })?;
         } else {
             system
                 .remove_file(&dst_resolved)
+                .wait()
                 .with_context(|| format!("removing existing file {}", dst_resolved.display()))?;
         }
     }
@@ -478,7 +485,7 @@ fn mv_directory(
 /// failing the rename. The numbers are informational — the rename's
 /// success doesn't hinge on them.
 fn directory_size_summary(system: &dyn System, dir: &Path) -> (usize, u64) {
-    let Ok(entries) = system.walk_dir(dir, false, false) else {
+    let Ok(entries) = system.walk_dir(dir, false, false).wait() else {
         return (0, 0);
     };
     let mut count: usize = 0;
@@ -488,21 +495,21 @@ fn directory_size_summary(system: &dyn System, dir: &Path) -> (usize, u64) {
             continue;
         }
         count = count.saturating_add(1);
-        if let Ok(meta) = system.metadata(&entry.path) {
+        if let Ok(meta) = system.metadata(&entry.path).wait() {
             bytes = bytes.saturating_add(meta.len);
         }
     }
     (count, bytes)
 }
 
-/// Detect EXDEV (cross-filesystem rename) on both real Linux/macOS
-/// (`raw_os_error == 18` on Linux, `18` on macOS) and the synthetic
-/// `ErrorKind::CrossesDevices` surface stable Rust started exposing
-/// without a stable enum variant. The existing `kind() ==
-/// ErrorKind::Other` fallback covers older toolchains and mocks that
-/// don't carry a raw OS error.
-fn is_cross_filesystem(err: &io::Error) -> bool {
-    if err.raw_os_error() == Some(18_i32) {
+/// Detect `EXDEV` (cross-filesystem rename): the raw OS error `18` of the `io::Error` the
+/// `StorageError` carries, or a message naming it for a system that carries no raw OS error.
+fn is_cross_filesystem(err: &StorageError) -> bool {
+    let os_error = err
+        .source()
+        .and_then(|source| source.downcast_ref::<io::Error>())
+        .and_then(io::Error::raw_os_error);
+    if os_error == Some(18_i32) {
         return true;
     }
     let msg = err.to_string();

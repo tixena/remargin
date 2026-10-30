@@ -38,6 +38,7 @@ use serde::Serialize;
 
 use crate::config;
 use crate::permissions::pretool_install::{self, TestOutcome};
+use crate::wait::Wait as _;
 
 /// The name a `PATH`-relative `PreToolUse` entry resolves; if it does not, enforcement is off.
 const BINARY_NAME: &str = "remargin";
@@ -197,7 +198,12 @@ fn remargin_on_path(system: &dyn System) -> bool {
     let Ok(path_var) = system.env_var("PATH") else {
         return false;
     };
-    split_paths(&path_var).any(|dir| system.is_file(&dir.join(BINARY_NAME)).unwrap_or(false))
+    split_paths(&path_var).any(|dir| {
+        system
+            .is_file(&dir.join(BINARY_NAME))
+            .wait()
+            .unwrap_or(false)
+    })
 }
 
 fn build_diagnostic(failures: &[String]) -> GuardDiagnostic {

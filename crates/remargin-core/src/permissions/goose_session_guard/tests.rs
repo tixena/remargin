@@ -8,6 +8,7 @@ use os_shim::mock::MemorySystem;
 use serde_json::json;
 
 use super::{GuardOutcome, goose_session_guard};
+use crate::wait::Wait as _;
 
 const EXE: &str = "/opt/bin/remargin";
 
@@ -130,7 +131,7 @@ fn absent_plugin_fails_and_names_both_scopes() {
 #[test]
 fn plugin_pointing_at_a_missing_binary_fails_and_names_it() {
     let system = mock_with_user_plugin();
-    system.remove_file(Path::new(EXE)).unwrap();
+    system.remove_file(Path::new(EXE)).wait().unwrap();
 
     let diagnostic = expect_fail(goose_session_guard(
         &system,

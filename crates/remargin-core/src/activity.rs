@@ -23,6 +23,7 @@ use crate::config::registry::Registry;
 use crate::config::{ResolvedConfig, load_config_filtered_with_path, load_registry};
 use crate::frontmatter::read_sandbox_entries;
 use crate::parser::{self, Comment, SandboxEntry};
+use crate::wait::Wait as _;
 
 /// Columns a change kind lacks are `null` in that kind's row.
 pub const CHANGE_COLS: [&str; 9] = [
@@ -331,7 +332,7 @@ pub fn gather_activity(
              identity flags or a config path)"
         );
     };
-    let realm_anchor = if system.is_dir(path).unwrap_or(false) {
+    let realm_anchor = if system.is_dir(path).wait().unwrap_or(false) {
         path
     } else {
         path.parent().unwrap_or(path)
@@ -376,11 +377,12 @@ fn collect_managed_md_files(
     path: &Path,
     config: &ResolvedConfig,
 ) -> Result<Vec<PathBuf>> {
-    if !system.is_dir(path).unwrap_or(false) {
+    if !system.is_dir(path).wait().unwrap_or(false) {
         return Ok(vec![path.to_path_buf()]);
     }
     let entries = system
         .walk_dir(path, false, false)
+        .wait()
         .with_context(|| format!("walking {}", path.display()))?;
     let mut gate = config.read_gate();
     let mut out: Vec<PathBuf> = Vec::new();
@@ -414,7 +416,7 @@ fn gather_one_file(
     caller_identity: &str,
     registry: Option<&Registry>,
 ) -> Option<FileChanges> {
-    let body = system.read_to_string(file_path).ok()?;
+    let body = system.read_to_string(file_path).wait().ok()?;
     let doc = parser::parse(&body).ok()?;
     let comments = doc.comments();
     let sandbox_entries = read_sandbox_entries(&doc).unwrap_or_default();

@@ -15,6 +15,7 @@ use crate::config::permissions::resolve::{
     ResolvedDenyOpsItem, ResolvedPermissions, TrustedRootPath, resolve_permissions,
 };
 use crate::permissions::op_guard::target_is_sanctioned;
+use crate::wait::Wait as _;
 
 /// Serialised view of a single `allow_dot_folders` declaration.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -101,6 +102,7 @@ pub struct ShowOutput {
 pub fn check(system: &dyn System, cwd: &Path, path: &Path, why: bool) -> Result<CheckOutput> {
     let canonical = system
         .canonicalize(path)
+        .wait()
         .unwrap_or_else(|_err| absolutise(cwd, path));
     let resolved = resolve_permissions(system, cwd)?;
     let matching_rule = first_matching_rule(&resolved, &canonical);

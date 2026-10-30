@@ -33,6 +33,7 @@ use crate::permissions::goose_install::{self, TestOutcome as GooseTestOutcome};
 use crate::permissions::goose_mcp_install::{self, TestOutcome as GooseMcpTestOutcome};
 use crate::permissions::pretool_install::{self, TestOutcome};
 use crate::permissions::session_guard_install::{self, TestOutcome as GuardTestOutcome};
+use crate::wait::Wait as _;
 
 /// Severity levels for doctor findings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -803,7 +804,7 @@ fn probe_goose(system: &dyn System, cwd: &Path) -> Result<Option<GooseProbe>> {
         return Ok(None);
     };
     let home = PathBuf::from(home_var);
-    if !system.exists(&goose_install::agents_dir(&home))? {
+    if !system.exists(&goose_install::agents_dir(&home)).wait()? {
         return Ok(None);
     }
 
@@ -1092,7 +1093,7 @@ fn trusted_root_missing_findings(system: &dyn System, cwd: &Path) -> Result<Vec<
     let mut findings = Vec::new();
     for root in &resolved.trusted_roots {
         let anchor = trusted_root_anchor(root);
-        if !system.exists(anchor)? {
+        if !system.exists(anchor).wait()? {
             findings.push(trusted_root_missing_finding(root, anchor));
         }
     }
@@ -1213,7 +1214,7 @@ fn identity_key_findings(system: &dyn System, cwd: &Path) -> Result<Vec<DoctorFi
 /// `read_to_string` probe the config loader uses, so a missing file and an
 /// unreadable one collapse to the same "not a readable file" verdict.
 fn key_is_readable(system: &dyn System, key_path: &Path) -> bool {
-    system.read_to_string(key_path).is_ok()
+    system.read_to_string(key_path).wait().is_ok()
 }
 
 /// The active identity is an agent. The registry participant's `type:` is

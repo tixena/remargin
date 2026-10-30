@@ -1,9 +1,9 @@
 //! Unit tests for [`crate::operations::projections::unprotect::project_unprotect`].
 
-use std::io;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
+use os_shim::error::StorageError;
 use os_shim::mock::MemorySystem;
 
 use crate::operations::plan::{
@@ -14,6 +14,7 @@ use crate::operations::projections::unprotect::{UnprotectProjection, project_unp
 use crate::permissions::claude_sync::{RuleSet, apply_rules};
 use crate::permissions::restrict::{RestrictArgs, restrict};
 use crate::permissions::unprotect::UnprotectArgs;
+use crate::wait::Wait as _;
 
 /// Restrict `path`, then seed the settings files and the sidecar with a deny set, so the
 /// unprotect projection has a populated sidecar to reverse. The current `restrict` writes
@@ -46,10 +47,13 @@ fn restrict_with_legacy_sidecar(
     .unwrap();
 }
 
-fn snapshot(system: &MemorySystem, paths: &[&Path]) -> Vec<(PathBuf, Result<String, io::Error>)> {
+fn snapshot(
+    system: &MemorySystem,
+    paths: &[&Path],
+) -> Vec<(PathBuf, Result<String, StorageError>)> {
     paths
         .iter()
-        .map(|p| (p.to_path_buf(), system.read_to_string(p)))
+        .map(|p| (p.to_path_buf(), system.read_to_string(p).wait()))
         .collect()
 }
 
@@ -251,7 +255,7 @@ fn rule_already_absent_drift_surfaces_conflict() {
     let settings = vec![project.clone(), user];
     restrict_with_legacy_sidecar(&system, &realm, "src/secret", &settings);
 
-    let body = system.read_to_string(&project).unwrap();
+    let body = system.read_to_string(&project).wait().unwrap();
     let mut value: serde_json::Value = serde_json::from_str(&body).unwrap();
     let removed_rule = {
         let deny = value

@@ -11,6 +11,7 @@ use super::{
     HOOK_MATCHER, HOOK_SUBCOMMAND, InstallOutcome, LEGACY_HOOK_COMMAND, TestOutcome,
     UninstallOutcome, install, test, uninstall,
 };
+use crate::wait::Wait as _;
 
 const EXE: &str = "/opt/bin/remargin";
 
@@ -34,7 +35,7 @@ fn hook_command() -> String {
 }
 
 fn read_json(system: &dyn System, path: &Path) -> Value {
-    let body = system.read_to_string(path).unwrap();
+    let body = system.read_to_string(path).wait().unwrap();
     serde_json::from_str(&body).unwrap()
 }
 
@@ -185,7 +186,7 @@ fn uninstall_no_op_when_settings_file_missing() {
     let path = settings_path();
     let outcome = uninstall(&system, &path).unwrap();
     assert_eq!(outcome, UninstallOutcome::NotInstalled);
-    let _read_err = system.read_to_string(&path).unwrap_err();
+    let _read_err = system.read_to_string(&path).wait().unwrap_err();
 }
 
 #[test]
@@ -328,7 +329,7 @@ fn test_reports_path_relative_legacy_entry_without_rewriting_it() {
         test(&system, &path).unwrap(),
         TestOutcome::PathRelative(String::from(LEGACY_HOOK_COMMAND)),
     );
-    assert_eq!(system.read_to_string(&path).unwrap(), body);
+    assert_eq!(system.read_to_string(&path).wait().unwrap(), body);
 }
 
 /// A bare-name command and a stale absolute path are both rewritten in place.

@@ -12,6 +12,7 @@ use crate::crypto::compute_checksum;
 use crate::frontmatter;
 use crate::operations::batch::{BatchCommentOp, batch_comment};
 use crate::parser::{self, AuthorType};
+use crate::wait::Wait as _;
 
 const MINIMAL_DOC: &str = "\
 ---
@@ -140,7 +141,10 @@ fn simple_batch() {
         .ids;
     assert_eq!(ids.len(), 3);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 3);
 }
@@ -186,7 +190,10 @@ fn batch_with_reply() {
         .ids;
     assert_eq!(reply_ids.len(), 1);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&reply_ids[0]).unwrap();
     assert_eq!(reply.reply_to.as_deref(), Some(ids[0].as_str()));
@@ -228,7 +235,10 @@ fn batch_failure_rolls_back() {
     let result = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops);
     result.unwrap_err();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
 }
@@ -275,7 +285,10 @@ Existing comment.
         .ids;
     assert_eq!(ids.len(), 1);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 2);
     assert!(doc.find_comment("existing").is_some());
@@ -319,7 +332,10 @@ fn batch_two_after_line_comments_both_placed_correctly() {
         .ids;
     assert_eq!(ids.len(), 2);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 2);
 
@@ -382,7 +398,10 @@ fn batch_after_line_reverse_order() {
         .ids;
     assert_eq!(ids.len(), 2);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
 
     let cm_three = doc.find_comment(&ids[0]).unwrap();
@@ -445,7 +464,10 @@ fn batch_three_after_line_same_region() {
         .ids;
     assert_eq!(ids.len(), 3);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 3);
 
@@ -516,7 +538,10 @@ fn batch_mixed_after_line_and_append() {
         .ids;
     assert_eq!(ids.len(), 3);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 3);
 
@@ -596,7 +621,10 @@ Line after comment.
         .ids;
     assert_eq!(ids.len(), 2);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 3);
 
@@ -650,7 +678,10 @@ fn batch_two_after_same_line() {
         .ids;
     assert_eq!(ids.len(), 2);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 2);
 
@@ -687,7 +718,10 @@ fn batch_after_line_beyond_document_length() {
         .unwrap()
         .ids;
     assert_eq!(ids.len(), 1);
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(doc.comments().len(), 1);
     assert_eq!(doc.comments()[0].content, "Appended at end.");
@@ -714,7 +748,10 @@ fn batch_after_line_zero() {
     let result = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops);
     if let Ok(outcome) = result {
         assert_eq!(outcome.ids.len(), 1);
-        let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+        let content = system
+            .read_to_string(Path::new("/docs/test.md"))
+            .wait()
+            .unwrap();
         let doc = parser::parse(&content).unwrap();
         assert_eq!(doc.comments().len(), 1);
     }
@@ -770,7 +807,10 @@ fn batch_auto_ack_single_op() {
         .ids;
     assert_eq!(ids.len(), 1);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert_eq!(parent.ack.len(), 1);
@@ -826,7 +866,10 @@ fn batch_auto_ack_mixed_ops() {
         .ids;
     assert_eq!(ids.len(), 3);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
 
     let parent = doc.find_comment("abc").unwrap();
@@ -875,7 +918,10 @@ fn batch_auto_ack_forward_reference() {
         .ids;
     assert_eq!(reply_ids.len(), 1);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment(&parent_ids[0]).unwrap();
     assert_eq!(parent.ack.len(), 1);
@@ -942,7 +988,10 @@ Line after comment.
         .ids;
     assert_eq!(ids.len(), 2);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
 
     assert_eq!(doc.comments().len(), 3);
@@ -1037,7 +1086,10 @@ End text.
         .ids;
     assert_eq!(ids.len(), 3);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
 
     assert_eq!(doc.comments().len(), 5);
@@ -1092,7 +1144,10 @@ fn batch_auto_ack_without_reply_to_errors() {
         "unexpected error: {err_msg}"
     );
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(content, MINIMAL_DOC);
 }
 
@@ -1159,7 +1214,10 @@ By eduardo (the caller).
 
     batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let parsed = parser::parse(&content).unwrap();
 
     let alice_parent = parsed.find_comment("abc").unwrap();
@@ -1199,7 +1257,10 @@ fn batch_reply_auto_populates_to() {
         .unwrap()
         .ids;
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&ids[0]).unwrap();
     assert_eq!(
@@ -1231,7 +1292,10 @@ fn batch_reply_explicit_to() {
         .unwrap()
         .ids;
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&ids[0]).unwrap();
     assert_eq!(
@@ -1297,7 +1361,10 @@ fn batch_recipient_gate_bad_op_aborts_whole_batch() {
         "batch should be refused for bad recipient: {msg}"
     );
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(
         doc.comments().is_empty(),
@@ -1329,7 +1396,10 @@ fn batch_recipient_gate_in_batch_reply_to_active_author_allowed() {
         .ids;
     assert_eq!(ids.len(), 2, "both ops should succeed");
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert_eq!(
         doc.comments().len(),

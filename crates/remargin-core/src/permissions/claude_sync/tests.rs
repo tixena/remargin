@@ -10,7 +10,7 @@ use core::slice::from_ref;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 use serde_json::{Value, json};
 
@@ -22,6 +22,7 @@ use crate::permissions::claude_sync::{
     BASH_MUTATORS, RuleSet, apply_rules, hook_covered_rules, revert_rules,
 };
 use crate::permissions::sidecar::{self, sidecar_path};
+use crate::wait::Wait as _;
 
 fn restrict_subpath(path: &str, also_deny_bash: &[&str], cli_allowed: bool) -> ResolvedTrustedRoot {
     ResolvedTrustedRoot {
@@ -470,7 +471,7 @@ fn settings_files(anchor: &Path) -> Vec<PathBuf> {
 }
 
 fn read_settings(system: &MemorySystem, path: &Path) -> Value {
-    let body = system.read_to_string(path).unwrap();
+    let body = system.read_to_string(path).wait().unwrap();
     serde_json::from_str(&body).unwrap()
 }
 
@@ -503,7 +504,10 @@ fn apply_creates_missing_settings_files_and_sidecar() {
     assert_eq!(entry.allow, rules.allow);
     assert_eq!(entry.added_at, "2026-04-26T10:00:00Z");
 
-    let gitignore = system.read_to_string(&anchor.join(".gitignore")).unwrap();
+    let gitignore = system
+        .read_to_string(&anchor.join(".gitignore"))
+        .wait()
+        .unwrap();
     assert!(gitignore.contains(".claude/.remargin-restrictions.json"));
 }
 
@@ -518,9 +522,13 @@ fn apply_preserves_existing_unrelated_rules() {
         "env": { "FOO": "bar" }
     });
     let local = anchor.join(".claude/settings.local.json");
-    system.create_dir_all(local.parent().unwrap()).unwrap();
     system
-        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
+    system
+        .write(&local, prior.to_string().as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let rules = small_rule_set();
@@ -584,7 +592,10 @@ fn apply_is_idempotent_on_repeat() {
 fn apply_dedupes_against_manually_duplicated_rules() {
     let (system, anchor) = empty_anchor();
     let local = anchor.join(".claude/settings.local.json");
-    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
     let prior = json!({
         "permissions": {
             "deny": [
@@ -595,7 +606,8 @@ fn apply_dedupes_against_manually_duplicated_rules() {
         }
     });
     system
-        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .write(&local, prior.to_string().as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let rules = small_rule_set();
@@ -648,13 +660,17 @@ fn revert_after_apply_restores_clean_state() {
     let files = settings_files(&anchor);
     let local = files[0].clone();
     let pre_apply_local = json!({ "env": { "PRESERVE": "true" } });
-    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
     system
         .write(
             &local,
             pre_apply_local.to_string().as_bytes(),
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
 
     let rules = small_rule_set();
@@ -694,7 +710,8 @@ fn revert_warns_on_manually_deleted_rules() {
     deny.retain(|v| v.as_str() != Some("Edit(/r/secret/**)"));
     let body = serde_json::to_string_pretty(&value).unwrap();
     system
-        .write(&local, body.as_bytes(), WriteMode::Replace)
+        .write(&local, body.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let report = revert_rules(&system, &anchor, "/r/secret").unwrap();
@@ -720,13 +737,17 @@ fn revert_empty_when_no_sidecar_entry() {
 fn apply_preserves_top_level_keys() {
     let (system, anchor) = empty_anchor();
     let local = anchor.join(".claude/settings.local.json");
-    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
     let prior = json!({
         "env": { "DEBUG": "true" },
         "hooks": { "stop": ["echo done"] }
     });
     system
-        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .write(&local, prior.to_string().as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     apply_rules(
@@ -786,7 +807,10 @@ fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
     use crate::permissions::claude_sync::simulate_apply_rules;
     let (system, anchor) = empty_anchor();
     let local = anchor.join(".claude/settings.local.json");
-    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
     let prior = json!({
         "permissions": {
             "deny": ["Edit(///r/secret/**)", "Write(//r/secret/**)"],
@@ -794,7 +818,8 @@ fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
         }
     });
     system
-        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .write(&local, prior.to_string().as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let rules = small_rule_set();
@@ -812,7 +837,10 @@ fn simulate_apply_rules_membership_collapses_legacy_double_slash() {
 fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
     let (system, anchor) = empty_anchor();
     let local = anchor.join(".claude/settings.local.json");
-    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
     let prior = json!({
         "permissions": {
             "deny": ["Edit(//r/secret/**)"],
@@ -820,7 +848,8 @@ fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
         }
     });
     system
-        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .write(&local, prior.to_string().as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     apply_rules(
@@ -852,7 +881,10 @@ fn apply_rules_does_not_duplicate_legacy_double_slash_rules() {
 fn revert_rules_strips_legacy_double_slash_rule() {
     let (system, anchor) = empty_anchor();
     let local = anchor.join(".claude/settings.local.json");
-    system.create_dir_all(local.parent().unwrap()).unwrap();
+    system
+        .create_dir_all(local.parent().unwrap())
+        .wait()
+        .unwrap();
     let prior = json!({
         "permissions": {
             "deny": ["Edit(//r/secret/**)", "Write(//r/secret/**)"],
@@ -860,7 +892,8 @@ fn revert_rules_strips_legacy_double_slash_rule() {
         }
     });
     system
-        .write(&local, prior.to_string().as_bytes(), WriteMode::Replace)
+        .write(&local, prior.to_string().as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let rules = small_rule_set();

@@ -16,6 +16,7 @@ use crate::operations::{
     edit_comment, projections, react, sandbox as sandbox_ops, sign,
 };
 use crate::parser::{self, AuthorType};
+use crate::wait::Wait as _;
 use crate::writer::{FORBIDDEN_TARGETS, InsertPosition};
 
 const DOC_WITH_WIDE_GAP: &str =
@@ -255,7 +256,10 @@ fn create_simple_comment() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let comments = doc.comments();
     assert_eq!(comments.len(), 1);
@@ -287,7 +291,10 @@ fn create_comment_with_sandbox_stages_and_writes_together() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(
         content.contains("sandbox:"),
         "sandbox frontmatter key should be set after atomic comment+sandbox write: {content}",
@@ -338,7 +345,10 @@ Body.
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(
         !content.contains("eduardo@2026-04-11T10:00:00+00:00"),
         "stale timestamp should have been refreshed, doc was:\n{content}"
@@ -378,7 +388,10 @@ fn create_with_attachment() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment(&new_id).unwrap();
     assert_eq!(cm.attachments.len(), 1);
@@ -408,7 +421,10 @@ fn create_reply_auto_thread() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(reply.reply_to.as_deref(), Some("abc"));
@@ -429,7 +445,10 @@ fn ack_single_comment() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert_eq!(cm.ack.len(), 1);
@@ -451,7 +470,10 @@ fn react_add_emoji() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     let entries = &cm.reactions["thumbsup"];
@@ -494,7 +516,10 @@ Content.
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(
@@ -510,7 +535,10 @@ fn delete_simple_comment() {
 
     delete_comments(&system, Path::new("/docs/test.md"), &config, &["abc"]).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
 }
@@ -526,7 +554,10 @@ fn delete_comment_with_children_is_refused() {
         "deleting a comment that has children must be refused"
     );
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(
         doc.find_comment("child1").is_some(),
@@ -551,7 +582,10 @@ fn delete_leaf_comment_with_no_children_is_allowed() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(doc.find_comment("grandchild").is_none());
     assert!(doc.find_comment("child1").is_some());
@@ -570,7 +604,10 @@ fn delete_whole_thread_at_once_is_allowed() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
 }
@@ -611,7 +648,10 @@ Original content.
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert_eq!(cm.content, "Updated content.");
@@ -654,7 +694,10 @@ Original.
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(cm.edited_at.is_some(), "edit must stamp edited_at");
@@ -715,7 +758,10 @@ fn edit_cascade_clears_acks() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
 
     let root = doc.find_comment("root").unwrap();
@@ -754,7 +800,10 @@ fn preservation_invariant() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let comments = doc.comments();
     assert_eq!(comments.len(), 2);
@@ -779,12 +828,18 @@ fn delete_leaves_blank_lines_away_from_the_deleted_comment_alone() {
     let system = system_with_doc(DOC_WITH_WIDE_GAP);
     let config = open_config();
     let id = seed_comment_under_second_section(&system, &config);
-    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(before.contains("x\n\n\n\ny\n"), "{before}");
 
     delete_comments(&system, Path::new("/docs/test.md"), &config, &[id.as_str()]).unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(after.contains("x\n\n\n\ny\n"), "{after}");
 }
 
@@ -847,7 +902,10 @@ More text here.
     )
     .unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     assert!(
         !after.contains("\n\n\n"),
@@ -896,7 +954,10 @@ Some body text.
     )
     .unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     assert!(
         !after.contains("\n\n\n"),
@@ -945,7 +1006,10 @@ Some text.
     )
     .unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     assert!(
         !after.contains("\n\n\n"),
@@ -1027,7 +1091,10 @@ Some body text.
     )
     .unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     assert!(
         !after.contains("\n\n\n"),
@@ -1101,7 +1168,10 @@ Some body text.
     )
     .unwrap();
 
-    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     delete_comments(
         &system,
@@ -1111,7 +1181,10 @@ Some body text.
     )
     .unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&after).unwrap();
 
     assert_eq!(doc.comments().len(), 2);
@@ -1182,7 +1255,10 @@ A comment at the end.
 
     delete_comments(&system, Path::new("/docs/test.md"), &config, &["xyz"]).unwrap();
 
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     assert!(
         after.contains("Text in section one.\n\n## Section Two"),
@@ -1220,7 +1296,10 @@ fn ack_remove_clears_identity_ack() {
     .unwrap();
     ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(
@@ -1264,7 +1343,10 @@ fn ack_remove_preserves_other_acks() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     let authors: Vec<&str> = cm.ack.iter().map(|a| a.author.as_str()).collect();
@@ -1278,7 +1360,10 @@ fn ack_remove_is_idempotent_when_not_acked() {
 
     ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(cm.ack.is_empty());
@@ -1298,7 +1383,10 @@ fn ack_twice_is_idempotent() {
     )
     .unwrap();
 
-    let content_after_first = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content_after_first = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let first_doc = parser::parse(&content_after_first).unwrap();
     let first_cm = first_doc.find_comment("abc").unwrap();
     assert_eq!(first_cm.ack.len(), 1);
@@ -1313,7 +1401,10 @@ fn ack_twice_is_idempotent() {
     )
     .unwrap();
 
-    let content_after_second = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content_after_second = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let second_doc = parser::parse(&content_after_second).unwrap();
     let second_cm = second_doc.find_comment("abc").unwrap();
     assert_eq!(
@@ -1365,7 +1456,10 @@ First comment.
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     let alice_acks: Vec<_> = cm.ack.iter().filter(|a| a.author == "alice").collect();
@@ -1405,7 +1499,10 @@ fn ack_noop_rewrites_file() {
     )
     .unwrap();
 
-    let second_content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let second_content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     assert!(second_content.contains("remargin_last_activity"));
     let doc = parser::parse(&second_content).unwrap();
@@ -1444,7 +1541,10 @@ First comment.
 
     ack_comments(&system, Path::new("/docs/test.md"), &config, &["abc"], true).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment("abc").unwrap();
     assert!(
@@ -1507,7 +1607,10 @@ fn auto_ack_on_reply() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert_eq!(parent.ack.len(), 1);
@@ -1556,7 +1659,10 @@ fn auto_ack_reply_delete_reply_does_not_double_ack_parent() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert_eq!(
@@ -1590,7 +1696,10 @@ fn auto_ack_preserves_reply_to() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&reply_id).unwrap();
     assert_eq!(reply.reply_to.as_deref(), Some("abc"));
@@ -1620,7 +1729,10 @@ fn auto_ack_false_does_not_ack() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert!(parent.ack.is_empty(), "parent should not be acked");
@@ -1661,7 +1773,10 @@ fn auto_ack_without_reply_to_no_file_modification() {
     let config = open_config();
     let position = InsertPosition::Append;
 
-    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let result = create_comment(
         &system,
@@ -1680,7 +1795,10 @@ fn auto_ack_without_reply_to_no_file_modification() {
     );
 
     result.unwrap_err();
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(before, after, "file should not be modified on error");
 }
 
@@ -1708,7 +1826,10 @@ fn auto_ack_none_replying_to_other_author_acks_parent() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert!(
@@ -1741,7 +1862,10 @@ fn auto_ack_none_replying_to_own_comment_does_not_ack() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert!(
@@ -1774,7 +1898,10 @@ fn auto_ack_none_without_reply_to_is_noop() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(
         doc.find_comment(&new_id).is_some(),
@@ -1806,7 +1933,10 @@ fn auto_ack_some_false_replying_to_other_author_skips_ack() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let parent = doc.find_comment("abc").unwrap();
     assert!(
@@ -1839,7 +1969,10 @@ fn reply_auto_populates_to() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(
@@ -1872,7 +2005,10 @@ fn reply_explicit_to_prepends_parent_author() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(
@@ -1905,7 +2041,10 @@ fn reply_dedupes_parent_when_caller_includes_it() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(
@@ -1938,7 +2077,10 @@ fn reply_with_multiple_extras_prepends_parent() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(
@@ -1975,7 +2117,10 @@ fn root_comment_preserves_explicit_to() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment(&new_id).unwrap();
     assert_eq!(cm.to, vec![String::from("bob")]);
@@ -2004,7 +2149,10 @@ fn root_comment_no_auto_to() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let cm = doc.find_comment(&new_id).unwrap();
     assert!(cm.to.is_empty(), "root comment should have empty to");
@@ -2033,7 +2181,10 @@ fn reply_auto_populates_to_different_author() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     let reply = doc.find_comment(&new_id).unwrap();
     assert_eq!(
@@ -2048,7 +2199,10 @@ fn project_ack_adds_ack_without_mutating_disk() {
     let seeded = doc_with_comment();
     let system = system_with_doc(&seeded);
     let config = open_config();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let (before, after) = projections::project_ack(
         &system,
@@ -2066,7 +2220,10 @@ fn project_ack_adds_ack_without_mutating_disk() {
     assert_eq!(after_comment.ack.len(), 1);
     assert_eq!(after_comment.ack[0].author, "eduardo");
 
-    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_disk = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(before_bytes, after_disk, "project_ack must not mutate disk");
 }
 
@@ -2096,7 +2253,10 @@ fn project_delete_removes_comment_without_mutating_disk() {
     let seeded = doc_with_comment();
     let system = system_with_doc(&seeded);
     let config = open_config();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let (before, after) =
         projections::project_delete(&system, Path::new("/docs/test.md"), &config, &["abc"])
@@ -2105,7 +2265,10 @@ fn project_delete_removes_comment_without_mutating_disk() {
     assert_eq!(before.comments().len(), 1);
     assert_eq!(after.comments().len(), 0);
 
-    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_disk = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before_bytes, after_disk,
         "project_delete must not mutate disk"
@@ -2137,7 +2300,10 @@ fn project_react_adds_reaction_without_mutating_disk() {
     let seeded = doc_with_comment();
     let system = system_with_doc(&seeded);
     let config = open_config();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let (before, after) = projections::project_react(
         &system,
@@ -2157,7 +2323,10 @@ fn project_react_adds_reaction_without_mutating_disk() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].author, "eduardo");
 
-    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_disk = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before_bytes, after_disk,
         "project_react must not mutate disk"
@@ -2200,6 +2369,7 @@ fn project_ack_matches_real_ack_comments_after_output() {
     let real_doc = parser::parse(
         &system_real
             .read_to_string(Path::new("/docs/test.md"))
+            .wait()
             .unwrap(),
     )
     .unwrap();
@@ -2226,7 +2396,10 @@ fn project_comment_appends_without_mutating_disk() {
     let seeded = doc_with_comment();
     let system = system_with_doc(&seeded);
     let config = open_config();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let params = projections::ProjectCommentParams::new("Projected body.", &InsertPosition::Append);
     let (before, after) =
@@ -2246,7 +2419,10 @@ fn project_comment_appends_without_mutating_disk() {
     assert!(new_cm.ack.is_empty());
     assert!(new_cm.signature.is_none());
 
-    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_disk = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before_bytes, after_disk,
         "project_comment must not mutate disk"
@@ -2339,12 +2515,16 @@ fn project_comment_attachments_are_not_copied() {
     assert_eq!(new_cm.attachments, vec![String::from("assets/photo.png")]);
 
     assert!(
-        !system.exists(Path::new("/docs/assets")).unwrap_or(false),
+        !system
+            .exists(Path::new("/docs/assets"))
+            .wait()
+            .unwrap_or(false),
         "project_comment must not create the assets directory"
     );
     assert!(
         !system
             .exists(Path::new("/docs/assets/photo.png"))
+            .wait()
             .unwrap_or(false),
         "project_comment must not copy attachment bytes"
     );
@@ -2355,7 +2535,10 @@ fn project_edit_recomputes_checksum_and_clears_ack() {
     let seeded = "---\ntitle: Test\nauthor: eduardo\n---\n\n# Body\n\n```remargin\n---\nid: abc\nauthor: eduardo\ntype: human\nts: 2026-04-06T12:00:00-04:00\nchecksum: sha256:0a1b103c177bc33566af5d168667a855f3ffa3c3fd9748424bfa3b3512e6bfdb\nack:\n  - alice@2026-04-06T13:00:00-04:00\n---\nFirst comment.\n```\n";
     let system = system_with_doc(seeded);
     let config = open_config();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let (before, after) = projections::project_edit(
         &system,
@@ -2380,7 +2563,10 @@ fn project_edit_recomputes_checksum_and_clears_ack() {
         "edit must clear signature on the target"
     );
 
-    let after_disk = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_disk = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before_bytes, after_disk,
         "project_edit must not mutate disk"
@@ -2473,7 +2659,10 @@ fn seed_with_comment() -> (MemorySystem, ResolvedConfig, String) {
 #[test]
 fn project_batch_applies_sub_ops_in_order_without_mutating_disk() {
     let (system, config, _first) = seed_with_comment();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let ops = vec![
         projections::ProjectBatchOp::new(String::from("Second.")),
@@ -2485,7 +2674,10 @@ fn project_batch_applies_sub_ops_in_order_without_mutating_disk() {
     assert_eq!(before.comments().len(), 1);
     assert_eq!(after.comments().len(), 3);
 
-    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(before_bytes, after_bytes, "plan batch must not write disk");
 }
 
@@ -2648,7 +2840,10 @@ fn project_batch_reply_auto_acks_parent() {
 #[test]
 fn project_purge_strips_every_comment_without_writing_disk() {
     let (system, config, _first, _second) = seed_two_comments();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let (before, after) =
         projections::project_purge(&system, Path::new("/docs/test.md"), &config).unwrap();
@@ -2659,14 +2854,20 @@ fn project_purge_strips_every_comment_without_writing_disk() {
         "project_purge must strip every comment"
     );
 
-    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
 }
 
 #[test]
 fn project_sandbox_add_projects_frontmatter_entry() {
     let (system, config, _first) = seed_with_comment();
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
 
     let (_before, after) =
         projections::project_sandbox_add(&system, Path::new("/docs/test.md"), &config).unwrap();
@@ -2675,7 +2876,10 @@ fn project_sandbox_add_projects_frontmatter_entry() {
         after.to_markdown().unwrap().contains("sandbox:"),
         "sandbox-add projection must rewrite the frontmatter"
     );
-    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before_bytes, after_bytes,
         "plan sandbox-add must not write disk"
@@ -2722,7 +2926,10 @@ fn project_sandbox_remove_clears_entry_without_writing_disk() {
     )
     .unwrap();
 
-    let before_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(before_bytes.contains("sandbox:"));
 
     let (before, after) =
@@ -2733,7 +2940,10 @@ fn project_sandbox_remove_clears_entry_without_writing_disk() {
         "sandbox-remove must strip the frontmatter key when it was the only entry"
     );
 
-    let after_bytes = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after_bytes = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before_bytes, after_bytes,
         "plan sandbox-remove must not write disk"
@@ -3173,11 +3383,7 @@ fn sandbox_remove_refuses_forbidden_targets() {
 }
 
 fn read_file(system: &MemorySystem, path: &Path) -> Vec<u8> {
-    use std::io::Read as _;
-    let mut reader = system.open(path).unwrap();
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).unwrap();
-    buf
+    system.read(path).wait().unwrap().0
 }
 
 fn doc_with_one_comment_for_guard() -> &'static str {
@@ -3460,7 +3666,10 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(MINIMAL_DOC, yaml);
     let config = open_config();
-    let before = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let before = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let ops = vec![
         BatchCommentOp {
             after_comment: None,
@@ -3501,7 +3710,10 @@ fn batch_atomic_refusal_leaves_doc_untouched() {
     ];
     let err = batch_comment(&system, Path::new("/docs/test.md"), &config, &ops).unwrap_err();
     assert_restrict_refusal(&err);
-    let after = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         before, after,
         "batch must not partially write outside trusted_roots"
@@ -3676,7 +3888,10 @@ fn read_ops_unaffected_by_restrict() {
     let yaml = "permissions:\n  trusted_roots:\n    - path: elsewhere\n";
     let system = system_with_doc_and_yaml(&doc_with_comment(), yaml);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(content.contains("# Test"));
 
     let parsed = parser::parse(&content).unwrap();

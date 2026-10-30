@@ -11,6 +11,7 @@ use crate::config::permissions::Permissions;
 use crate::config::permissions::op_name::OpName;
 use crate::config::permissions::{DenyOpsItem, DenyOpsItemFull};
 use crate::path::expand_path;
+use crate::wait::Wait as _;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
 
@@ -197,7 +198,7 @@ pub enum TrustedRootPath {
 }
 
 fn canonicalize_or_passthrough(system: &dyn System, path: PathBuf) -> PathBuf {
-    system.canonicalize(&path).unwrap_or(path)
+    system.canonicalize(&path).wait().unwrap_or(path)
 }
 
 fn extend_resolved(
@@ -351,11 +352,13 @@ pub fn find_trusted_root_escapes(
         let candidate = current.join(CONFIG_FILENAME);
         let exists = system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?;
 
         if exists {
             let raw = system
                 .read_to_string(&candidate)
+                .wait()
                 .with_context(|| format!("reading {}", candidate.display()))?;
             if let Ok(projection) = serde_yaml::from_str::<PermissionsOnly>(&raw) {
                 escapes.extend(block_trusted_root_escapes(
@@ -447,11 +450,13 @@ pub fn lint_permissions_in_parents(
         let candidate = current.join(CONFIG_FILENAME);
         let exists = system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?;
 
         if exists {
             let raw = system
                 .read_to_string(&candidate)
+                .wait()
                 .with_context(|| format!("reading {}", candidate.display()))?;
             collect_legacy_to_findings(&raw, &candidate, &mut findings);
             match serde_yaml::from_str::<PermissionsOnly>(&raw) {
@@ -535,11 +540,13 @@ pub fn resolve_permissions(system: &dyn System, start_dir: &Path) -> Result<Reso
         let candidate = current.join(CONFIG_FILENAME);
         let exists = system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?;
 
         if exists {
             let raw = system
                 .read_to_string(&candidate)
+                .wait()
                 .with_context(|| format!("reading {}", candidate.display()))?;
             let block = parse_permissions_block(&raw, &candidate)?;
             extend_resolved(&mut acc, system, &block, &candidate)?;

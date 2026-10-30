@@ -15,8 +15,11 @@
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_json::{Map, Value};
+
+use crate::wait::Wait as _;
 
 /// What a settings file says about one installer's hook command.
 #[derive(Debug, PartialEq, Eq)]
@@ -60,7 +63,7 @@ pub fn command_state(
     if !Path::new(binary).is_absolute() {
         return Ok(CommandState::PathRelative(String::from(declared)));
     }
-    if system.exists(Path::new(binary))? {
+    if system.exists(Path::new(binary)).wait()? {
         Ok(CommandState::Live)
     } else {
         Ok(CommandState::StaleBinary(String::from(binary)))
@@ -96,7 +99,7 @@ pub fn owns(command: &str, subcommand: &str) -> bool {
 /// `true` when the settings file is readable. Existence is proxied through
 /// a successful read so the mock and real systems agree.
 pub fn path_exists(system: &dyn System, path: &Path) -> bool {
-    system.read_to_string(path).is_ok()
+    system.read_to_string(path).wait().is_ok()
 }
 
 /// Parse the settings file into a JSON value, treating a missing or empty
@@ -106,7 +109,10 @@ pub fn path_exists(system: &dyn System, path: &Path) -> bool {
 ///
 /// Returns an error when the file is present but not valid JSON.
 pub fn load_or_default(system: &dyn System, settings_file: &Path) -> Result<Value> {
-    let body = system.read_to_string(settings_file).unwrap_or_default();
+    let body = system
+        .read_to_string(settings_file)
+        .wait()
+        .unwrap_or_default();
     if body.trim().is_empty() {
         return Ok(Value::Object(Map::new()));
     }
@@ -125,12 +131,15 @@ pub fn write_settings(system: &dyn System, settings_file: &Path, value: &Value) 
     if let Some(parent) = settings_file.parent() {
         system
             .create_dir_all(parent)
+            .wait()
             .with_context(|| format!("creating settings directory {}", parent.display()))?;
     }
     let body = serde_json::to_string_pretty(value).context("serializing settings JSON")?;
     let mut bytes = body.into_bytes();
     bytes.push(b'\n');
     system
-        .write(settings_file, &bytes, WriteMode::Replace)
-        .with_context(|| format!("writing settings to {}", settings_file.display()))
+        .write(settings_file, &bytes, Condition::None)
+        .wait()
+        .with_context(|| format!("writing settings to {}", settings_file.display()))?;
+    Ok(())
 }

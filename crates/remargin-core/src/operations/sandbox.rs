@@ -28,7 +28,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use chrono::{DateTime, FixedOffset, Utc};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde::Serialize;
 use serde_json::Value;
 use tixschema::model_schema;
@@ -39,6 +40,7 @@ use crate::frontmatter;
 use crate::operations::verify::commit_with_verify;
 use crate::parser::{self, SandboxEntry};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
+use crate::wait::Wait as _;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Outcome of a bulk `sandbox add` or `sandbox remove` invocation.
@@ -314,6 +316,7 @@ pub fn list_for_identity(
 pub fn scan_all_entries(system: &dyn System, root: &Path) -> Result<Vec<SandboxScanEntry>> {
     let entries = system
         .walk_dir(root, false, false)
+        .wait()
         .with_context(|| format!("walking directory {}", root.display()))?;
 
     let mut out = Vec::new();
@@ -329,7 +332,7 @@ pub fn scan_all_entries(system: &dyn System, root: &Path) -> Result<Vec<SandboxS
             continue;
         }
 
-        let Ok(content) = system.read_to_string(&entry.path) else {
+        let Ok(content) = system.read_to_string(&entry.path).wait() else {
             continue;
         };
         let Ok(doc) = parser::parse(&content) else {
@@ -370,8 +373,10 @@ fn add_one(
         commit_with_verify(system, &doc, config, file, |verified_doc| {
             let markdown = verified_doc.to_markdown()?;
             system
-                .write(file, markdown.as_bytes(), WriteMode::Replace)
-                .with_context(|| format!("writing {}", file.display()))
+                .write(file, markdown.as_bytes(), Condition::None)
+                .wait()
+                .with_context(|| format!("writing {}", file.display()))?;
+            Ok(())
         })?;
     }
     Ok(added)
@@ -397,8 +402,10 @@ fn remove_one(
         commit_with_verify(system, &doc, config, file, |verified_doc| {
             let markdown = verified_doc.to_markdown()?;
             system
-                .write(file, markdown.as_bytes(), WriteMode::Replace)
-                .with_context(|| format!("writing {}", file.display()))
+                .write(file, markdown.as_bytes(), Condition::None)
+                .wait()
+                .with_context(|| format!("writing {}", file.display()))?;
+            Ok(())
         })?;
     }
     Ok(removed)

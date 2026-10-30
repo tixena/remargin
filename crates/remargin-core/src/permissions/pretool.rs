@@ -27,6 +27,7 @@ use crate::config::permissions::resolve::{
     ResolvedPermissions, TrustedRootPath, resolve_permissions, trusted_root_anchor,
 };
 use crate::permissions::op_guard::dot_folder_reallowed;
+use crate::wait::Wait as _;
 
 /// Verbs that destroy or relocate a subtree when aimed at or above a trusted root. Every other
 /// verb reads or edits one named file; shell redirect writes are detected separately.
@@ -813,7 +814,7 @@ fn canonicalize_existing_prefix(system: &dyn System, absolute: &Path) -> PathBuf
     let mut tail: Vec<&OsStr> = Vec::new();
     let mut current = absolute;
     loop {
-        if let Ok(canonical) = system.canonicalize(current) {
+        if let Ok(canonical) = system.canonicalize(current).wait() {
             let mut resolved = canonical;
             for component in tail.iter().rev() {
                 resolved.push(component);

@@ -22,7 +22,8 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
@@ -31,6 +32,7 @@ use crate::document::allowlist;
 use crate::frontmatter;
 use crate::parser::{self, Segment};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
+use crate::wait::Wait as _;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Which copy path ran. Carried in [`CpOutcome`] so callers can distinguish
@@ -152,7 +154,7 @@ pub fn cp(
     pre_mutate_check_for_caller(system, "cp", &src_resolved, &caller)?;
     config.ensure_can_read(system, &src_resolved)?;
 
-    let dst_pre_existed = system.exists(&dst_resolved).unwrap_or(false);
+    let dst_pre_existed = system.exists(&dst_resolved).wait().unwrap_or(false);
     if dst_pre_existed && !args.force {
         bail!(
             "destination exists: {} (pass --force to overwrite)",
@@ -186,16 +188,16 @@ fn resolve_endpoints(
     let src_lexical = lexical_join(base_dir, &args.src);
     let dst_lexical = lexical_join(base_dir, &args.dst);
 
-    if !system.exists(&src_lexical).unwrap_or(false) {
+    if !system.exists(&src_lexical).wait().unwrap_or(false) {
         bail!("source not found: {}", args.src.display());
     }
-    if system.is_dir(&src_lexical).unwrap_or(false) {
+    if system.is_dir(&src_lexical).wait().unwrap_or(false) {
         bail!(
             "source is a directory: {} (recursive copy is not supported in v1; pass an explicit file path)",
             args.src.display()
         );
     }
-    if system.is_dir(&dst_lexical).unwrap_or(false) {
+    if system.is_dir(&dst_lexical).wait().unwrap_or(false) {
         bail!(
             "destination is a directory: {} (this op copies a single file; pass an explicit destination path)",
             args.dst.display()
@@ -237,6 +239,7 @@ fn perform_copy(
     if !is_markdown_extension(src) {
         system
             .copy(src, dst)
+            .wait()
             .with_context(|| format!("copying {} -> {}", src.display(), dst.display()))?;
         return Ok(CpOutcome {
             bytes_copied,
@@ -251,6 +254,7 @@ fn perform_copy(
 
     let src_content = system
         .read_to_string(src)
+        .wait()
         .with_context(|| format!("reading {}", src.display()))?;
     let parsed = parser::parse(&src_content)
         .with_context(|| format!("parsing source document {}", src.display()))?;
@@ -314,14 +318,16 @@ fn write_markdown_copy(
         .to_markdown()
         .with_context(|| format!("serializing markdown for {}", dst.display()))?;
     system
-        .write(dst, serialized.as_bytes(), WriteMode::Replace)
-        .with_context(|| format!("writing {}", dst.display()))
+        .write(dst, serialized.as_bytes(), Condition::None)
+        .wait()
+        .with_context(|| format!("writing {}", dst.display()))?;
+    Ok(())
 }
 
 /// Read the file at `path` and return its size in bytes, or `0` when
 /// the read fails (informational; failure here doesn't affect the copy).
 fn file_size(system: &dyn System, path: &Path) -> u64 {
-    let Ok(content) = system.read_to_string(path) else {
+    let Ok(content) = system.read_to_string(path).wait() else {
         return 0;
     };
     u64::try_from(content.len()).unwrap_or(0)

@@ -23,7 +23,7 @@ serde_yaml = "0.9"
 serde_json = "1.0"
 
 # System abstraction (filesystem, env, temp dirs)
-os-shim = "0.1.1"
+os-shim = "0.2.0"
 
 # TypeScript type + Zod schema generation from Rust models
 tixschema = { version = "0.2.0", features = ["chrono"] }
@@ -67,6 +67,7 @@ webpki-roots = "1.0.10"
 
 # Test-only crates
 assert_cmd = "2"
+futures-io = "0.3.34"
 predicates = "3"
 
 [profile.release]

@@ -7,13 +7,14 @@
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 
 use crate::permissions::sidecar::{
     SIDECAR_GITIGNORE_ENTRY, SIDECAR_RELATIVE_PATH, SIDECAR_VERSION, Sidecar, SidecarEntry,
     add_entry, load, remove_entry, save, sidecar_path,
 };
+use crate::wait::Wait as _;
 
 fn empty_anchor() -> (MemorySystem, PathBuf) {
     let anchor = PathBuf::from("/r");
@@ -106,9 +107,13 @@ fn load_rejects_unknown_version() {
     let (system, anchor) = empty_anchor();
     let body = "{\"version\":99,\"entries\":{}}\n";
     let path = sidecar_path(&anchor);
-    system.create_dir_all(path.parent().unwrap()).unwrap();
     system
-        .write(&path, body.as_bytes(), WriteMode::Replace)
+        .create_dir_all(path.parent().unwrap())
+        .wait()
+        .unwrap();
+    system
+        .write(&path, body.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let err = load(&system, &anchor).unwrap_err();
@@ -123,9 +128,13 @@ fn load_rejects_unknown_version() {
 fn load_rejects_malformed_json() {
     let (system, anchor) = empty_anchor();
     let path = sidecar_path(&anchor);
-    system.create_dir_all(path.parent().unwrap()).unwrap();
     system
-        .write(&path, b"{not json", WriteMode::Replace)
+        .create_dir_all(path.parent().unwrap())
+        .wait()
+        .unwrap();
+    system
+        .write(&path, b"{not json", Condition::None)
+        .wait()
         .unwrap();
 
     let err = load(&system, &anchor).unwrap_err();
@@ -141,7 +150,10 @@ fn save_creates_gitignore_when_absent() {
     let (system, anchor) = empty_anchor();
     save(&system, &anchor, &Sidecar::new()).unwrap();
 
-    let gitignore = system.read_to_string(&anchor.join(".gitignore")).unwrap();
+    let gitignore = system
+        .read_to_string(&anchor.join(".gitignore"))
+        .wait()
+        .unwrap();
     assert!(
         gitignore.contains(SIDECAR_GITIGNORE_ENTRY),
         "missing entry in gitignore: {gitignore}"
@@ -154,7 +166,10 @@ fn save_does_not_duplicate_gitignore_entry() {
     save(&system, &anchor, &Sidecar::new()).unwrap();
     save(&system, &anchor, &Sidecar::new()).unwrap();
 
-    let gitignore = system.read_to_string(&anchor.join(".gitignore")).unwrap();
+    let gitignore = system
+        .read_to_string(&anchor.join(".gitignore"))
+        .wait()
+        .unwrap();
     let count = gitignore
         .lines()
         .filter(|line| line.trim() == SIDECAR_GITIGNORE_ENTRY)
@@ -170,11 +185,15 @@ fn save_preserves_existing_gitignore_entry() {
         .write(
             &anchor.join(".gitignore"),
             original.as_bytes(),
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
     save(&system, &anchor, &Sidecar::new()).unwrap();
-    let updated = system.read_to_string(&anchor.join(".gitignore")).unwrap();
+    let updated = system
+        .read_to_string(&anchor.join(".gitignore"))
+        .wait()
+        .unwrap();
     assert_eq!(updated, original);
 }
 
@@ -186,11 +205,15 @@ fn save_appends_to_existing_gitignore_without_clobbering() {
         .write(
             &anchor.join(".gitignore"),
             original.as_bytes(),
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
     save(&system, &anchor, &Sidecar::new()).unwrap();
-    let updated = system.read_to_string(&anchor.join(".gitignore")).unwrap();
+    let updated = system
+        .read_to_string(&anchor.join(".gitignore"))
+        .wait()
+        .unwrap();
     assert!(updated.starts_with(original));
     assert!(updated.contains(SIDECAR_GITIGNORE_ENTRY));
 }
@@ -199,7 +222,10 @@ fn save_appends_to_existing_gitignore_without_clobbering() {
 fn saved_json_is_pretty_printed() {
     let (system, anchor) = empty_anchor();
     add_entry(&system, &anchor, "/r/secret", sample_entry()).unwrap();
-    let body = system.read_to_string(&sidecar_path(&anchor)).unwrap();
+    let body = system
+        .read_to_string(&sidecar_path(&anchor))
+        .wait()
+        .unwrap();
     assert!(
         body.contains("\n  \""),
         "sidecar JSON should be pretty-printed, got: {body}"

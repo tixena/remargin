@@ -12,13 +12,13 @@ mod tests;
 
 use core::cmp::Reverse;
 use std::collections::HashSet;
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -31,6 +31,7 @@ use crate::operations::links::{self, Link};
 use crate::operations::verify::commit_with_verify;
 use crate::parser;
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
+use crate::wait::Wait as _;
 use crate::writer::ensure_not_forbidden_target;
 
 /// Bytes + mime + size for a binary file read.
@@ -395,6 +396,7 @@ pub fn ls(
 
     let entries = system
         .read_dir(&resolved)
+        .wait()
         .with_context(|| format!("reading directory {}", resolved.display()))?;
 
     let ignore_set: HashSet<&str> = config.ignore.iter().map(String::as_str).collect();
@@ -410,7 +412,7 @@ pub fn ls(
             continue;
         }
 
-        let is_dir = system.is_dir(entry_path).unwrap_or(false);
+        let is_dir = system.is_dir(entry_path).wait().unwrap_or(false);
 
         if !allowlist::is_visible(entry_path, is_dir) {
             continue;
@@ -419,7 +421,7 @@ pub fn ls(
         let size = if is_dir {
             None
         } else {
-            system.metadata(entry_path).ok().map(|m| m.len)
+            system.metadata(entry_path).wait().ok().map(|m| m.len)
         };
 
         let has_md_extension = is_markdown_extension(Path::new(filename));
@@ -489,6 +491,7 @@ pub fn get(
 
     let content = system
         .read_to_string(&resolved)
+        .wait()
         .with_context(|| format!("reading {}", resolved.display()))?;
 
     match lines {
@@ -585,6 +588,7 @@ pub fn get_with_links(
 
     let full = system
         .read_to_string(&resolved)
+        .wait()
         .with_context(|| format!("reading {}", resolved.display()))?;
     let total_lines = full.split('\n').count();
 
@@ -699,15 +703,13 @@ pub fn read_binary(
 
     let size_bytes = system
         .metadata(&resolved)
+        .wait()
         .with_context(|| format!("stat {}", resolved.display()))?
         .len;
 
-    let mut reader = system
-        .open(&resolved)
-        .with_context(|| format!("opening {}", resolved.display()))?;
-    let mut bytes = Vec::with_capacity(usize::try_from(size_bytes).unwrap_or(0));
-    reader
-        .read_to_end(&mut bytes)
+    let (bytes, _revision) = system
+        .read(&resolved)
+        .wait()
         .with_context(|| format!("reading {}", resolved.display()))?;
 
     let mime = mime::mime_for_extension(&resolved);
@@ -774,7 +776,7 @@ pub fn rm(
     )?;
     ensure_not_forbidden_target(&resolved)?;
 
-    if system.is_dir(&resolved).unwrap_or(false) {
+    if system.is_dir(&resolved).wait().unwrap_or(false) {
         return rm_directory(system, &resolved).map(RmOutcome::Directory);
     }
 
@@ -783,12 +785,13 @@ pub fn rm(
     }
 
     // Existence is a filesystem fact: `read_to_string` fails on binary files, so it cannot decide it.
-    let existed = system.exists(&resolved).unwrap_or(false);
+    let existed = system.exists(&resolved).wait().unwrap_or(false);
 
     if existed {
         ensure_no_comments(system, &resolved)?;
         system
             .remove_file(&resolved)
+            .wait()
             .with_context(|| format!("removing {}", resolved.display()))?;
     }
 
@@ -808,6 +811,7 @@ fn ensure_no_comments(system: &dyn System, resolved: &Path) -> Result<()> {
     }
     let content = system
         .read_to_string(resolved)
+        .wait()
         .with_context(|| format!("reading {}", resolved.display()))?;
     let doc = parser::parse(&content).with_context(|| format!("parsing {}", resolved.display()))?;
     if !doc.comments().is_empty() {
@@ -835,6 +839,7 @@ fn ensure_no_comments(system: &dyn System, resolved: &Path) -> Result<()> {
 fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
     let entries = system
         .walk_dir(resolved, false, false)
+        .wait()
         .with_context(|| format!("walking {}", resolved.display()))?;
 
     let mut visible_files: Vec<PathBuf> = Vec::new();
@@ -853,12 +858,13 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
     // Readability is an actual open: a `stat`-only check passes for a `000`-mode file.
     for file in &visible_files {
         ensure_not_forbidden_target(file)?;
-        if system.open(file).is_err() {
+        if system.open(file).wait().is_err() {
             bail!("cannot read {}: aborting, nothing deleted", file.display());
         }
         if is_markdown_extension(file) {
             let content = system
                 .read_to_string(file)
+                .wait()
                 .with_context(|| format!("reading {}", file.display()))?;
             let doc =
                 parser::parse(&content).with_context(|| format!("parsing {}", file.display()))?;
@@ -878,6 +884,7 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
     for file in visible_files {
         system
             .remove_file(&file)
+            .wait()
             .with_context(|| format!("removing {}", file.display()))?;
         report.files_deleted.push(file);
     }
@@ -903,8 +910,8 @@ fn rm_directory(system: &dyn System, resolved: &Path) -> Result<RmDirReport> {
 /// files, a nested `.remargin.yaml`) is reported back as `false` and left
 /// in place — no error.
 fn remove_dir_no_force(system: &dyn System, dir: &Path) -> bool {
-    match system.read_dir(dir) {
-        Ok(entries) if entries.is_empty() => system.remove_dir_all(dir).is_ok(),
+    match system.read_dir(dir).wait() {
+        Ok(entries) if entries.is_empty() => system.remove_dir_all(dir).wait().is_ok(),
         _ => false,
     }
 }
@@ -990,7 +997,7 @@ fn write_content(
             config.unrestricted,
             &config.trusted_roots,
         )?;
-        if system.read_to_string(&target).is_ok() {
+        if system.read_to_string(&target).wait().is_ok() {
             bail!(
                 "file already exists (use write without --create): {}",
                 path.display()
@@ -1020,7 +1027,8 @@ fn write_content(
             return Ok(WriteOutcome::new(true));
         }
         system
-            .write(&resolved, &bytes, WriteMode::Replace)
+            .write(&resolved, &bytes, Condition::None)
+            .wait()
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(WriteOutcome::new(false));
     }
@@ -1030,7 +1038,8 @@ fn write_content(
             return Ok(WriteOutcome::new(true));
         }
         system
-            .write(&resolved, content.as_bytes(), WriteMode::Replace)
+            .write(&resolved, content.as_bytes(), Condition::None)
+            .wait()
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(WriteOutcome::new(false));
     }
@@ -1040,6 +1049,7 @@ fn write_content(
         let bytes: Vec<u8> = if let Some((start, end)) = opts.lines {
             let existing = system
                 .read_to_string(&resolved)
+                .wait()
                 .with_context(|| format!("reading {} for partial write", resolved.display()))?;
             splice_lines(&existing, start, end, content).into_bytes()
         } else {
@@ -1049,7 +1059,8 @@ fn write_content(
             return Ok(WriteOutcome::new(true));
         }
         system
-            .write(&resolved, &bytes, WriteMode::Replace)
+            .write(&resolved, &bytes, Condition::None)
+            .wait()
             .with_context(|| format!("writing {}", resolved.display()))?;
         return Ok(WriteOutcome::new(false));
     }
@@ -1059,6 +1070,7 @@ fn write_content(
     let content_to_parse: String = if let Some((start, end)) = opts.lines {
         let existing = system
             .read_to_string(&resolved)
+            .wait()
             .with_context(|| format!("reading {} for partial write", resolved.display()))?;
         splice_lines(&existing, start, end, content)
     } else {
@@ -1101,7 +1113,7 @@ pub(crate) fn commit_markdown(
 
     let old_author = if create {
         None
-    } else if let Ok(old_content) = system.read_to_string(resolved) {
+    } else if let Ok(old_content) = system.read_to_string(resolved).wait() {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
         check_comment_preservation(&old_doc, &new_doc)?;
         frontmatter::read_author(&old_doc)?
@@ -1127,8 +1139,10 @@ pub(crate) fn commit_markdown(
     commit_with_verify(system, &final_doc, &realm_cfg, resolved, |verified_doc| {
         let serialized = verified_doc.to_markdown()?;
         system
-            .write(resolved, serialized.as_bytes(), WriteMode::Replace)
-            .with_context(|| format!("writing {}", resolved.display()))
+            .write(resolved, serialized.as_bytes(), Condition::None)
+            .wait()
+            .with_context(|| format!("writing {}", resolved.display()))?;
+        Ok(())
     })?;
 
     Ok(WriteOutcome::new(false))
@@ -1161,7 +1175,7 @@ pub(crate) fn project_commit_markdown(
 
     let realm_cfg = config.escalate_for_doc(system, resolved)?;
 
-    let old_author = if let Ok(old_content) = system.read_to_string(resolved) {
+    let old_author = if let Ok(old_content) = system.read_to_string(resolved).wait() {
         let old_doc = parser::parse(&old_content).context("parsing existing document")?;
         check_comment_preservation(&old_doc, &new_doc)?;
         frontmatter::read_author(&old_doc)?
@@ -1225,7 +1239,7 @@ pub fn project_write(
             config.unrestricted,
             &config.trusted_roots,
         )?;
-        if system.read_to_string(&target).is_ok() {
+        if system.read_to_string(&target).wait().is_ok() {
             bail!(
                 "file already exists (use write without --create): {}",
                 path.display()
@@ -1261,6 +1275,7 @@ pub fn project_write(
     let content_to_parse: String = if let Some((start, end)) = opts.lines {
         let existing = system
             .read_to_string(&resolved)
+            .wait()
             .with_context(|| format!("reading {} for partial write", resolved.display()))?;
         splice_lines(&existing, start, end, content)
     } else {
@@ -1277,7 +1292,7 @@ pub fn project_write(
             None,
         )
     } else {
-        match system.read_to_string(&resolved) {
+        match system.read_to_string(&resolved).wait() {
             Ok(existing) => {
                 let old_doc = parser::parse(&existing).context("parsing existing document")?;
                 check_comment_preservation(&old_doc, &new_doc)?;
@@ -1327,6 +1342,7 @@ fn is_markdown_extension(path: &Path) -> bool {
 fn is_byte_identical(system: &dyn System, path: &Path, new_bytes: &[u8]) -> bool {
     system
         .read_to_string(path)
+        .wait()
         .is_ok_and(|existing| existing.as_bytes() == new_bytes)
 }
 
@@ -1456,6 +1472,7 @@ pub fn metadata(
 
     let size_bytes = system
         .metadata(&resolved)
+        .wait()
         .with_context(|| format!("stat {}", resolved.display()))?
         .len;
 
@@ -1476,6 +1493,7 @@ pub fn metadata(
 
     let content = system
         .read_to_string(&resolved)
+        .wait()
         .with_context(|| format!("reading {}", resolved.display()))?;
 
     let line_count = content.split('\n').count();
@@ -1540,7 +1558,7 @@ fn extract_frontmatter(content: &str) -> Option<serde_yaml::Value> {
 }
 
 fn get_remargin_metadata(system: &dyn System, path: &Path) -> (Option<u32>, Option<String>) {
-    let Ok(content) = system.read_to_string(path) else {
+    let Ok(content) = system.read_to_string(path).wait() else {
         return (None, None);
     };
 

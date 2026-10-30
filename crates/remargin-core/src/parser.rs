@@ -18,6 +18,7 @@ use tixschema::model_schema;
 use crate::kind::validate_kinds;
 use crate::on_disk_comment::{OnDiskComment, comment_from_on_disk};
 use crate::reactions::{ReactionEntry, reaction_entry_schema};
+use crate::wait::Wait as _;
 use crate::writer::serialize_comment;
 
 /// An acknowledgment of a comment by another participant.
@@ -342,6 +343,7 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
 pub fn parse_file(system: &dyn System, path: &Path) -> Result<ParsedDocument> {
     let content = system
         .read_to_string(path)
+        .wait()
         .with_context(|| format!("failed to read {}", path.display()))?;
     parse(&content)
 }

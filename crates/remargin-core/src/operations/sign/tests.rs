@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 
 use crate::config::registry::Registry;
@@ -33,6 +33,7 @@ use crate::operations::sign::{
 };
 use crate::parser::{self, AuthorType, Comment, Segment};
 use crate::reactions::Reactions;
+use crate::wait::Wait as _;
 use crate::writer::write_document;
 
 const TEST_PRIVATE_KEY: &str = "\
@@ -284,7 +285,7 @@ fn sign_ids_foreign_author_is_hard_error() {
         "must name both the comment's author and the caller, got: {msg}"
     );
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(after, before, "forgery-guard refusal must not touch disk");
 }
 
@@ -309,7 +310,7 @@ fn sign_ids_missing_id_is_hard_error() {
         "missing id must produce a clear diagnosis, got: {msg}"
     );
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(after, before);
 }
 
@@ -394,7 +395,7 @@ fn sign_without_resolvable_key_is_hard_error() {
         "error must mention the missing key, got: {msg}"
     );
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(after, before, "no-key refusal must not touch disk");
 }
 
@@ -487,7 +488,10 @@ signature: {sig}
     let empty: HashSet<String> = HashSet::new();
     write_document(&system, Path::new("/d/legacy.md"), &before, &empty, &empty).unwrap();
 
-    let rewritten = system.read_to_string(Path::new("/d/legacy.md")).unwrap();
+    let rewritten = system
+        .read_to_string(Path::new("/d/legacy.md"))
+        .wait()
+        .unwrap();
     assert!(
         rewritten.contains("ts: 2026-04-06T12:00:00Z")
             && rewritten.contains("- bob@2026-04-06T13:00:00Z"),
@@ -519,15 +523,12 @@ fn sign_on_tampered_content_without_repair_checksum_lands_signature() {
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    let before = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let before = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     let tampered = edit_fence_content_in_place(&before, "alice's note", "alice's NOTE (edited)");
     assert_ne!(before, tampered, "tamper must actually change bytes");
     system
-        .write(
-            Path::new("/d/a.md"),
-            tampered.as_bytes(),
-            WriteMode::Replace,
-        )
+        .write(Path::new("/d/a.md"), tampered.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     sign_comments(
@@ -552,14 +553,11 @@ fn sign_with_repair_checksum_rewrites_stale_checksum_and_signs() {
     let system = mock_with(&two_author_doc());
     let cfg = make_config(Mode::Registered, "alice", Some("/keys/ed25519"));
 
-    let before = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let before = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     let tampered = edit_fence_content_in_place(&before, "alice's note", "alice's NOTE (edited)");
     system
-        .write(
-            Path::new("/d/a.md"),
-            tampered.as_bytes(),
-            WriteMode::Replace,
-        )
+        .write(Path::new("/d/a.md"), tampered.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let pre_sign = parser::parse_file(&system, Path::new("/d/a.md")).unwrap();
@@ -647,11 +645,8 @@ fn sign_with_repair_checksum_overwrites_stale_signature_on_tampered_comment() {
     let tampered =
         edit_fence_content_in_place(&pre_signed, "alice's note", "alice's NOTE (edited)");
     system
-        .write(
-            Path::new("/d/a.md"),
-            tampered.as_bytes(),
-            WriteMode::Replace,
-        )
+        .write(Path::new("/d/a.md"), tampered.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let baseline = sign_comments(
@@ -715,11 +710,8 @@ fn sign_forgery_guard_blocks_repair_on_foreign_comment() {
 
     let tampered = edit_fence_content_in_place(&before, "bob's note", "bob's NOTE (edited)");
     system
-        .write(
-            Path::new("/d/a.md"),
-            tampered.as_bytes(),
-            WriteMode::Replace,
-        )
+        .write(Path::new("/d/a.md"), tampered.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 
     let err = sign_comments(
@@ -738,7 +730,7 @@ fn sign_forgery_guard_blocks_repair_on_foreign_comment() {
         "forgery guard must still fire with --repair-checksum, got: {msg}"
     );
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(
         after, tampered,
         "forgery-guard refusal must not touch disk even when repair was requested"

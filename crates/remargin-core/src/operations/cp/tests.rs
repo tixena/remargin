@@ -10,13 +10,14 @@ extern crate alloc;
 use std::path::{Path, PathBuf};
 
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
 use crate::operations::cp::{CpArgs, CpKind, CpOutcome, cp, render_cp_outcome};
 use crate::parser::{self, AuthorType};
+use crate::wait::Wait as _;
 
 const TEST_PRIVATE_KEY: &str = "\
 -----BEGIN OPENSSH PRIVATE KEY-----
@@ -64,9 +65,12 @@ fn non_markdown_copies_verbatim() {
     assert_eq!(outcome.kind, CpKind::Verbatim);
     assert_eq!(outcome.comments_dropped, 0);
     assert_eq!(outcome.bytes_copied, 9);
-    assert!(system.exists(&base().join("photo.png")).unwrap());
+    assert!(system.exists(&base().join("photo.png")).wait().unwrap());
     assert_eq!(
-        system.read_to_string(&base().join("photo2.png")).unwrap(),
+        system
+            .read_to_string(&base().join("photo2.png"))
+            .wait()
+            .unwrap(),
         "PNG_BYTES"
     );
 }
@@ -80,8 +84,11 @@ fn comment_free_markdown_copies_verbatim() {
 
     assert_eq!(outcome.kind, CpKind::Verbatim);
     assert_eq!(outcome.comments_dropped, 0);
-    assert_eq!(system.read_to_string(&base().join("a.md")).unwrap(), src);
-    assert!(system.exists(&base().join("b.md")).unwrap());
+    assert_eq!(
+        system.read_to_string(&base().join("a.md")).wait().unwrap(),
+        src
+    );
+    assert!(system.exists(&base().join("b.md")).wait().unwrap());
 }
 
 /// Build a comment-bearing markdown string with `n` comment blocks.
@@ -112,10 +119,19 @@ fn comment_bearing_markdown_copies_body_only() {
     assert_eq!(outcome.comments_dropped, 3);
     assert!(outcome.bytes_copied > 0);
 
-    let dst_content = system.read_to_string(&base().join("dst.md")).unwrap();
+    let dst_content = system
+        .read_to_string(&base().join("dst.md"))
+        .wait()
+        .unwrap();
     let dst_parsed = parser::parse(&dst_content).unwrap();
     assert_eq!(dst_parsed.comments().len(), 0);
-    assert_eq!(system.read_to_string(&base().join("src.md")).unwrap(), src);
+    assert_eq!(
+        system
+            .read_to_string(&base().join("src.md"))
+            .wait()
+            .unwrap(),
+        src
+    );
 }
 
 #[test]
@@ -124,7 +140,10 @@ fn source_bytes_unchanged_after_copy() {
     let system = realm_with("src.md", src.as_bytes());
     let args = CpArgs::new(PathBuf::from("src.md"), PathBuf::from("dst.md"));
     cp(&system, base(), &open_config(), &args).unwrap();
-    let after = system.read_to_string(&base().join("src.md")).unwrap();
+    let after = system
+        .read_to_string(&base().join("src.md"))
+        .wait()
+        .unwrap();
     assert_eq!(after, src, "source must be byte-for-byte unchanged");
 }
 
@@ -146,14 +165,21 @@ fn source_signatures_intact_after_copy() {
         .write(
             base().join("src.md").as_path(),
             src.as_bytes(),
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
 
     let args = CpArgs::new(PathBuf::from("src.md"), PathBuf::from("dst.md"));
     cp(&system, base(), &open_config(), &args).unwrap();
 
-    assert_eq!(system.read_to_string(&base().join("src.md")).unwrap(), src);
+    assert_eq!(
+        system
+            .read_to_string(&base().join("src.md"))
+            .wait()
+            .unwrap(),
+        src
+    );
 }
 
 #[test]
@@ -167,7 +193,10 @@ fn copy_resets_frontmatter_pending_and_sandbox() {
     let args = CpArgs::new(PathBuf::from("src.md"), PathBuf::from("dst.md"));
     cp(&system, base(), &open_config(), &args).unwrap();
 
-    let dst_content = system.read_to_string(&base().join("dst.md")).unwrap();
+    let dst_content = system
+        .read_to_string(&base().join("dst.md"))
+        .wait()
+        .unwrap();
     assert!(
         !dst_content.contains("remargin_pending"),
         "copy should not inherit pending count: {dst_content}"
@@ -202,8 +231,14 @@ fn dst_exists_without_force_errors() {
     let args = CpArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md"));
     let err = cp(&system, base(), &open_config(), &args).unwrap_err();
     assert!(format!("{err}").contains("destination exists"), "{err}");
-    assert_eq!(system.read_to_string(&base().join("a.md")).unwrap(), "src");
-    assert_eq!(system.read_to_string(&base().join("b.md")).unwrap(), "dst");
+    assert_eq!(
+        system.read_to_string(&base().join("a.md")).wait().unwrap(),
+        "src"
+    );
+    assert_eq!(
+        system.read_to_string(&base().join("b.md")).wait().unwrap(),
+        "dst"
+    );
 }
 
 #[test]
@@ -219,7 +254,7 @@ fn dst_exists_with_force_overwrites() {
     let args = CpArgs::new(PathBuf::from("a.md"), PathBuf::from("b.md")).with_force(true);
     let outcome = cp(&system, base(), &open_config(), &args).unwrap();
     assert!(outcome.overwritten);
-    assert!(system.exists(&base().join("a.md")).unwrap());
+    assert!(system.exists(&base().join("a.md")).wait().unwrap());
 }
 
 #[test]

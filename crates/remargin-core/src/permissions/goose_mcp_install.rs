@@ -45,10 +45,13 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_yaml::{Mapping, Value};
 
 use self::config_splice::Edit;
+
+use crate::wait::Wait as _;
 
 /// goose discovers no project-scoped config on its own, so a `--local` install reaches a
 /// session only through this variable.
@@ -421,7 +424,7 @@ fn entry_state(system: &dyn System, path: &Path) -> Result<EntryState> {
         .as_mapping()
         .and_then(entry_command)
         .unwrap_or_default();
-    if system.exists(Path::new(command))? {
+    if system.exists(Path::new(command)).wait()? {
         Ok(EntryState::Wired)
     } else {
         Ok(EntryState::CommandMissing(String::from(command)))
@@ -450,7 +453,7 @@ fn insert(map: &mut Mapping, key: &str, value: Value) {
 }
 
 fn load_config(system: &dyn System, path: &Path) -> ConfigState {
-    let Ok(body) = system.read_to_string(path) else {
+    let Ok(body) = system.read_to_string(path).wait() else {
         return ConfigState::Absent;
     };
     match serde_yaml::from_str::<Value>(&body) {
@@ -479,14 +482,17 @@ fn write_config(system: &dyn System, path: &Path, body: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         system
             .create_dir_all(parent)
+            .wait()
             .with_context(|| format!("creating goose config directory {}", parent.display()))?;
     }
     let temp = temp_path(path);
     system
-        .write(&temp, body.as_bytes(), WriteMode::Replace)
+        .write(&temp, body.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing goose config {}", temp.display()))?;
     system
         .rename(&temp, path)
+        .wait()
         .with_context(|| format!("replacing goose config {}", path.display()))
 }
 

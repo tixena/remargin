@@ -11,6 +11,7 @@ use super::{
     InstallOutcome, LEGACY_SESSION_HOOK_COMMAND, SESSION_HOOK_SUBCOMMAND, TestOutcome,
     UninstallOutcome, install, test, uninstall,
 };
+use crate::wait::Wait as _;
 
 const EXE: &str = "/opt/bin/remargin";
 
@@ -34,7 +35,7 @@ fn hook_command() -> String {
 }
 
 fn read_json(system: &dyn System, path: &Path) -> Value {
-    let body = system.read_to_string(path).unwrap();
+    let body = system.read_to_string(path).wait().unwrap();
     serde_json::from_str(&body).unwrap()
 }
 
@@ -293,7 +294,7 @@ fn test_reports_path_relative_legacy_entry_without_rewriting_it() {
         test(&system, &path).unwrap(),
         TestOutcome::PathRelative(String::from(LEGACY_SESSION_HOOK_COMMAND)),
     );
-    assert_eq!(system.read_to_string(&path).unwrap(), body);
+    assert_eq!(system.read_to_string(&path).wait().unwrap(), body);
 }
 
 #[test]

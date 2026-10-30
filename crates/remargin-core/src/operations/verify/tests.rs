@@ -25,6 +25,7 @@ use crate::operations::{
 };
 use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
 use crate::reactions::Reactions;
+use crate::wait::Wait as _;
 use crate::writer::InsertPosition;
 
 /// A directed comment with a partial ack, carrying frontmatter the current `is_pending` rule
@@ -649,7 +650,7 @@ fn comment_op_open_mode_unknown_author_succeeds_and_writes() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let content = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(content.contains(&new_id), "new id must be present on disk");
     assert!(
         content.contains("charlie"),
@@ -682,7 +683,7 @@ fn comment_op_registered_mode_unregistered_author_file_byte_identical() {
     );
 
     result.unwrap_err();
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(
         after, before,
         "file must be byte-identical after blocked op"
@@ -696,7 +697,7 @@ fn ack_op_open_mode_identity_not_in_registry_succeeds() {
 
     ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false).unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         after.contains("charlie@"),
         "open-mode ack from unregistered author must land: {after}"
@@ -728,7 +729,7 @@ alice's note
 
     ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false).unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         after.contains("alice@"),
         "open-mode ack should land even with pre-existing bad checksum: {after}"
@@ -770,7 +771,7 @@ fn create_comment_strict_registered_active_no_key_file_byte_identical() {
 
     result.unwrap_err();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(
         after, before,
         "file must be byte-identical when the verify gate trips",
@@ -807,7 +808,7 @@ fn create_comment_strict_unregistered_author_file_byte_identical() {
 
     result.unwrap_err();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(after, before, "file must be byte-identical");
 }
 
@@ -834,7 +835,7 @@ fn create_comment_open_mode_no_key_still_writes_unsigned() {
     )
     .unwrap();
 
-    let content = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let content = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(content.contains(&new_id));
     assert!(
         content.contains("open mode reply"),
@@ -858,7 +859,7 @@ fn edit_comment_strict_registered_active_no_key_passes_under_subset_gate() {
     )
     .unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         after.contains("new content that lands under subset gate"),
         "edit must land under subset gate when no new anomalies are introduced"
@@ -879,7 +880,7 @@ fn batch_comment_strict_registered_active_no_key_file_byte_identical() {
     let result = batch_comment(&system, Path::new("/d/a.md"), &cfg, &ops);
     result.unwrap_err();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert_eq!(
         after, before,
         "file must be byte-identical when the verify gate trips on a batch",
@@ -922,7 +923,7 @@ surviving corrupt row
 
     delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]).unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         !after.contains("alice's note"),
         "delete must remove alc; file: {after}"
@@ -941,7 +942,7 @@ fn verify_and_refresh_rewrites_stale_frontmatter() {
     let report = verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
     assert!(report.ok, "open mode + good checksum must report ok");
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         after.contains("remargin_pending: 1"),
         "stale frontmatter must self-heal under verify; got:\n{after}"
@@ -958,10 +959,10 @@ fn verify_and_refresh_is_a_no_op_when_frontmatter_is_already_current() {
     let cfg = open_cfg_as("alice");
 
     verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
-    let after_first = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after_first = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
 
     verify_and_refresh(&system, Path::new("/d/a.md"), &cfg).unwrap();
-    let after_second = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after_second = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
 
     assert_eq!(
         after_first, after_second,
@@ -1201,7 +1202,7 @@ fn ack_allowed_under_realm_strict_when_no_new_anomalies() {
 
     ack_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"], false).unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         after.contains("alice@"),
         "ack must land under subset gate: {after}"
@@ -1217,7 +1218,7 @@ fn react_allowed_under_realm_strict_when_no_new_anomalies() {
 
     react(&system, Path::new("/d/a.md"), &cfg, "alc", "+1", false).unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         after.contains("+1"),
         "reaction must land under subset gate: {after}"
@@ -1267,7 +1268,7 @@ checksum: {cksum2}
 
     delete_comments(&system, Path::new("/d/a.md"), &cfg, &["alc"]).unwrap();
 
-    let after = system.read_to_string(Path::new("/d/a.md")).unwrap();
+    let after = system.read_to_string(Path::new("/d/a.md")).wait().unwrap();
     assert!(
         !after.contains(content1),
         "deleted comment must be gone: {after}"

@@ -23,6 +23,7 @@ use crate::config::{
     load_config_filtered_with_path,
 };
 use crate::path::expand_path;
+use crate::wait::Wait as _;
 
 /// Resolve the fleet for one launch: the named session's entries (when a
 /// `sessions:` manifest governs `cwd`) unioned with downward discovery.
@@ -218,12 +219,14 @@ fn read_own_config(system: &dyn System, folder: &Path) -> Result<Option<Config>>
     let candidate = folder.join(CONFIG_FILENAME);
     if !system
         .exists(&candidate)
+        .wait()
         .with_context(|| format!("checking existence of {}", candidate.display()))?
     {
         return Ok(None);
     }
     let content = system
         .read_to_string(&candidate)
+        .wait()
         .with_context(|| format!("reading {}", candidate.display()))?;
     let config: Config = serde_yaml::from_str(&content)
         .with_context(|| format!("parsing {}", candidate.display()))?;

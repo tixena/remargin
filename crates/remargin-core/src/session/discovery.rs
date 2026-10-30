@@ -15,6 +15,7 @@ use os_shim::System;
 
 use crate::config::system_prompt::{ResolvedSystemPrompt, resolve_system_prompt};
 use crate::config::{CONFIG_FILENAME, Config, SessionConfig};
+use crate::wait::Wait as _;
 
 /// One launchable session found by [`discover_sessions`].
 #[derive(Debug, Clone)]
@@ -104,6 +105,7 @@ fn visit(
     let mut children = Vec::new();
     for entry in system
         .read_dir(dir)
+        .wait()
         .with_context(|| format!("reading directory {}", dir.display()))?
     {
         // Dot-directories (.git, .obsidian, …) never host a remargin realm;
@@ -117,6 +119,7 @@ fn visit(
         }
         if system
             .is_dir(&entry)
+            .wait()
             .with_context(|| format!("checking whether {} is a directory", entry.display()))?
         {
             children.push(entry);
@@ -173,12 +176,14 @@ fn read_dir_config(system: &dyn System, dir: &Path) -> Result<Option<Config>> {
     let candidate = dir.join(CONFIG_FILENAME);
     if !system
         .exists(&candidate)
+        .wait()
         .with_context(|| format!("checking existence of {}", candidate.display()))?
     {
         return Ok(None);
     }
     let content = system
         .read_to_string(&candidate)
+        .wait()
         .with_context(|| format!("reading {}", candidate.display()))?;
     let config: Config = serde_yaml::from_str(&content)
         .with_context(|| format!("parsing {}", candidate.display()))?;

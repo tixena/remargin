@@ -39,6 +39,7 @@ use crate::parser::{self, ParsedDocument};
 use crate::permissions::claude_sync::rule_shape::OverlapKind;
 use crate::permissions::restrict::{RestrictArgs, RestrictEntryProjection};
 use crate::permissions::unprotect::UnprotectArgs;
+use crate::wait::Wait as _;
 
 /// Serialization-friendly mirror of one row of a [`VerifyReport`].
 ///
@@ -1062,7 +1063,7 @@ fn project_cp(
 
     let (src_resolved, dst_resolved) = plan_cp_resolve_endpoints(system, base_dir, cfg, src, dst)?;
 
-    let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
+    let dst_exists = system.exists(&dst_resolved).wait().unwrap_or(false);
 
     if src_resolved == dst_resolved {
         return Ok(CpDiff {
@@ -1113,16 +1114,16 @@ fn plan_cp_resolve_endpoints(
         base_dir.join(dst)
     };
 
-    if !system.exists(&src_lexical).unwrap_or(false) {
+    if !system.exists(&src_lexical).wait().unwrap_or(false) {
         anyhow::bail!("source not found: {}", src.display());
     }
-    if system.is_dir(&src_lexical).unwrap_or(false) {
+    if system.is_dir(&src_lexical).wait().unwrap_or(false) {
         anyhow::bail!(
             "source is a directory: {} (recursive copy is not supported in v1)",
             src.display()
         );
     }
-    if system.is_dir(&dst_lexical).unwrap_or(false) {
+    if system.is_dir(&dst_lexical).wait().unwrap_or(false) {
         anyhow::bail!(
             "destination is a directory: {} (pass an explicit destination path)",
             dst.display()
@@ -1173,6 +1174,7 @@ fn plan_cp_diff_kind(
 
     let src_content = system
         .read_to_string(&src_resolved)
+        .wait()
         .with_context(|| format!("reading {}", src_resolved.display()))?;
     let parsed = parser::parse(&src_content)
         .with_context(|| format!("parsing {}", src_resolved.display()))?;
@@ -1250,17 +1252,17 @@ fn project_mv(
     ensure_not_forbidden_target(dst)?;
 
     let (src_lexical, dst_lexical) = mv_lexical_paths(base_dir, src, dst);
-    let src_is_dir = system.is_dir(&src_lexical).unwrap_or(false);
-    let dst_is_existing_dir = system.is_dir(&dst_lexical).unwrap_or(false);
+    let src_is_dir = system.is_dir(&src_lexical).wait().unwrap_or(false);
+    let dst_is_existing_dir = system.is_dir(&dst_lexical).wait().unwrap_or(false);
 
     check_mv_dst_directory_ambiguity(src_is_dir, dst_is_existing_dir, dst)?;
 
-    let src_exists = system.exists(&src_lexical).unwrap_or(false);
+    let src_exists = system.exists(&src_lexical).wait().unwrap_or(false);
     let (src_resolved, dst_resolved) =
         resolve_mv_paths(system, base_dir, cfg, src, dst, src_exists)?;
     ensure_not_forbidden_target(&dst_resolved)?;
 
-    let dst_exists = system.exists(&dst_resolved).unwrap_or(false);
+    let dst_exists = system.exists(&dst_resolved).wait().unwrap_or(false);
     let noop_same_path = src_exists && src_resolved == dst_resolved;
     let idempotent_already_settled = !src_exists && dst_exists;
 
@@ -1398,6 +1400,7 @@ fn check_mv_dst_overwrite(
 fn mv_directory_size(system: &dyn System, dir: &Path) -> usize {
     system
         .walk_dir(dir, false, false)
+        .wait()
         .map_or(0, |entries| entries.iter().filter(|e| e.is_file).count())
 }
 
@@ -1424,12 +1427,12 @@ fn dispatch_purge_dir(
     let empty = parser::parse("").context("parsing empty before-document for plan purge")?;
     let mut report = project_report("purge", &empty, &empty, cfg, identity)?;
 
-    if !system.exists(dir).unwrap_or(false) {
+    if !system.exists(dir).wait().unwrap_or(false) {
         report.reject_reason = Some(format!("directory does not exist: {}", dir.display()));
         report.would_commit = false;
         return Ok(report);
     }
-    if !system.is_dir(dir).unwrap_or(false) {
+    if !system.is_dir(dir).wait().unwrap_or(false) {
         report.reject_reason = Some(format!("not a directory: {}", dir.display()));
         report.would_commit = false;
         return Ok(report);
@@ -1437,6 +1440,7 @@ fn dispatch_purge_dir(
 
     let entries = system
         .walk_dir(dir, false, false)
+        .wait()
         .with_context(|| format!("walking directory {}", dir.display()))?;
 
     // Reuse the same candidate filter the live op uses so plan and

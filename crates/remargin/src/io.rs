@@ -6,10 +6,13 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_json::{Value, json};
 
 use remargin_core::path::expand_path;
+
+use remargin_core::wait::Wait as _;
 
 /// Global start time captured before argument parsing in `main`.
 pub static START_TIME: OnceLock<Instant> = OnceLock::new();
@@ -121,6 +124,7 @@ pub fn resolve_comment_content(
             } else {
                 system
                     .read_to_string(&cwd.join(path))
+                    .wait()
                     .with_context(|| format!("reading comment body from {path_str}"))
             }
         }
@@ -141,7 +145,8 @@ pub fn resolve_doc_path(system: &dyn System, cwd: &Path, file: &str) -> Result<P
             .unwrap_or_else(|_err| String::from("/tmp"));
         let temp_path = PathBuf::from(temp_root).join("remargin-stdin.md");
         system
-            .write(&temp_path, input.as_bytes(), WriteMode::Replace)
+            .write(&temp_path, input.as_bytes(), Condition::None)
+            .wait()
             .context("writing stdin to temp file")?;
         Ok(temp_path)
     } else {

@@ -55,8 +55,8 @@ fn seed(tmp: &TempDir, filename: &str) {
 /// `.remargin.yaml` the CLI walk discovers. This guarantees both
 /// surfaces operate on byte-identical config — any difference in the
 /// resulting plan report is adapter drift, not config drift.
-fn parity_config(system: RealSystem, cwd: &Path) -> ResolvedConfig {
-    ResolvedConfig::resolve(&system, cwd, &IdentityFlags::default(), None).unwrap()
+fn parity_config(system: &RealSystem, cwd: &Path) -> ResolvedConfig {
+    ResolvedConfig::resolve(system, cwd, &IdentityFlags::default(), None).unwrap()
 }
 
 /// Run the CLI binary in `--json` mode with the given subcommand
@@ -103,7 +103,7 @@ fn run_cli(cwd: &Path, args: &[&str], stdin: &str) -> Value {
 /// JSON-RPC `tools/call` envelope.
 fn run_mcp(base_dir: &Path, op: &str, mut arguments: serde_json::Map<String, Value>) -> Value {
     let system = RealSystem::new();
-    let config = parity_config(system, base_dir);
+    let config = parity_config(&system, base_dir);
 
     arguments.insert(String::from("op"), Value::String(String::from(op)));
 

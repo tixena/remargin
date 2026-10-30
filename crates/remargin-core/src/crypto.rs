@@ -19,6 +19,7 @@ use crate::crypto::ssh::{PrivateKey, PublicKey, SshSig};
 use crate::kind::canonical_kinds;
 use crate::parser::Comment;
 use crate::reactions::{Reactions, ReactionsExt as _};
+use crate::wait::Wait as _;
 
 const SIGNATURE_NAMESPACE: &str = "remargin";
 
@@ -93,6 +94,7 @@ pub fn compute_signature(
 ) -> Result<String> {
     let key_data = system
         .read_to_string(private_key_path)
+        .wait()
         .with_context(|| format!("reading private key from {}", private_key_path.display()))?;
     let private_key = PrivateKey::from_openssh(&key_data)
         .map_err(|err| anyhow::anyhow!("failed to parse private key: {err}"))?;

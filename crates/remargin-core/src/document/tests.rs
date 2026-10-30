@@ -1,6 +1,5 @@
 //! Tests for the document access layer.
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
@@ -15,6 +14,7 @@ use crate::document::{
 use crate::operations::links::Link;
 use crate::operations::purge::{purge, purge_dir};
 use crate::parser::AuthorType;
+use crate::wait::Wait as _;
 use crate::writer::FORBIDDEN_TARGETS;
 
 const DOC_WITH_COMMENTS: &str = "\
@@ -100,10 +100,7 @@ fn config_with_ignore(patterns: Vec<String>) -> ResolvedConfig {
 }
 
 fn read_bytes(system: &MemorySystem, path: &Path) -> Vec<u8> {
-    let mut reader = system.open(path).unwrap();
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).unwrap();
-    buf
+    system.read(path).wait().unwrap().0
 }
 
 fn open_config() -> ResolvedConfig {
@@ -835,7 +832,10 @@ fn write_preserves_comments() {
     )
     .unwrap();
 
-    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let result = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(result.contains("Updated Test"));
 }
 
@@ -907,6 +907,7 @@ fn write_create_new_file() {
 
     let result = system
         .read_to_string(Path::new("/project/docs/new.md"))
+        .wait()
         .unwrap();
     assert!(result.contains("New Document"));
 }
@@ -937,6 +938,7 @@ fn write_skips_frontmatter_injection_for_non_md_extensions() {
 
     let result = system
         .read_to_string(Path::new("/project/design.pen"))
+        .wait()
         .unwrap();
     assert_eq!(
         result, content,
@@ -999,11 +1001,17 @@ fn write_create_auto_creates_parent_dirs() {
 
     let result = system
         .read_to_string(Path::new("/project/newdir/subdir/file.md"))
+        .wait()
         .unwrap();
     assert!(result.contains("Nested Document"));
 
-    assert!(system.is_dir(Path::new("/project/newdir")).unwrap());
-    assert!(system.is_dir(Path::new("/project/newdir/subdir")).unwrap());
+    assert!(system.is_dir(Path::new("/project/newdir")).wait().unwrap());
+    assert!(
+        system
+            .is_dir(Path::new("/project/newdir/subdir"))
+            .wait()
+            .unwrap()
+    );
 }
 
 #[test]
@@ -1032,13 +1040,14 @@ fn write_create_deeply_nested() {
 
     let result = system
         .read_to_string(Path::new("/project/a/b/c/d/file.md"))
+        .wait()
         .unwrap();
     assert!(result.contains("Deep Document"));
 
-    assert!(system.is_dir(Path::new("/project/a")).unwrap());
-    assert!(system.is_dir(Path::new("/project/a/b")).unwrap());
-    assert!(system.is_dir(Path::new("/project/a/b/c")).unwrap());
-    assert!(system.is_dir(Path::new("/project/a/b/c/d")).unwrap());
+    assert!(system.is_dir(Path::new("/project/a")).wait().unwrap());
+    assert!(system.is_dir(Path::new("/project/a/b")).wait().unwrap());
+    assert!(system.is_dir(Path::new("/project/a/b/c")).wait().unwrap());
+    assert!(system.is_dir(Path::new("/project/a/b/c/d")).wait().unwrap());
 }
 
 #[test]
@@ -1069,6 +1078,7 @@ fn write_create_existing_parent_unchanged() {
 
     let result = system
         .read_to_string(Path::new("/project/docs/new.md"))
+        .wait()
         .unwrap();
     assert!(result.contains("Existing Parent"));
 }
@@ -1150,9 +1160,9 @@ fn write_create_rejects_dotfile() {
 #[test]
 fn write_create_parent_outside_sandbox() {
     let system = MemorySystem::new()
-        .with_current_dir("/project")
+        .with_current_dir("/work/project")
         .unwrap()
-        .with_dir(Path::new("/project"))
+        .with_dir(Path::new("/work/project"))
         .unwrap()
         .with_dir(Path::new("/"))
         .unwrap();
@@ -1161,7 +1171,7 @@ fn write_create_parent_outside_sandbox() {
 
     let result = document::write(
         &system,
-        Path::new("/project"),
+        Path::new("/work/project"),
         Path::new("../../outside/file.md"),
         "# Escape",
         &config,
@@ -1223,6 +1233,7 @@ fn write_raw_pen_file() {
 
     let result = system
         .read_to_string(Path::new("/project/design.pen"))
+        .wait()
         .unwrap();
     assert_eq!(result, raw_json);
 }
@@ -1252,6 +1263,7 @@ fn write_raw_json_file() {
 
     let result = system
         .read_to_string(Path::new("/project/data.json"))
+        .wait()
         .unwrap();
     assert_eq!(result, raw_content);
 }
@@ -1282,6 +1294,7 @@ fn write_raw_create_new_file() {
 
     let result = system
         .read_to_string(Path::new("/project/new.json"))
+        .wait()
         .unwrap();
     assert_eq!(result, raw_content);
 }
@@ -1312,6 +1325,7 @@ fn write_raw_create_terraform_file() {
 
     let result = system
         .read_to_string(Path::new("/project/terraform/main.tf"))
+        .wait()
         .unwrap();
     assert_eq!(result, raw_content);
 }
@@ -1344,6 +1358,7 @@ fn write_raw_overwrites_without_comment_check() {
 
     let result = system
         .read_to_string(Path::new("/project/design.pen"))
+        .wait()
         .unwrap();
     assert_eq!(result, raw_content);
 }
@@ -1577,7 +1592,10 @@ fn write_non_binary_still_text() {
     )
     .unwrap();
 
-    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let result = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(
         result.contains("---"),
         "expected frontmatter, got: {result}"
@@ -2063,6 +2081,7 @@ fn rm_deletes_existing_file() {
     assert!(rm_file(&outcome).unwrap().existed);
     system
         .read_to_string(Path::new("/project/notes.md"))
+        .wait()
         .unwrap_err();
 }
 
@@ -2147,7 +2166,7 @@ fn rm_removes_empty_directory() {
         vec![PathBuf::from("/project/subdir")]
     );
     assert_eq!(report.folders_left_behind, [] as [PathBuf; 0]);
-    assert!(!system.exists(Path::new("/project/subdir")).unwrap());
+    assert!(!system.exists(Path::new("/project/subdir")).wait().unwrap());
 }
 
 #[test]
@@ -2188,6 +2207,7 @@ fn rm_deletes_non_markdown_binary_file() {
     assert!(
         !system
             .exists(Path::new("/project/assets/probe.png"))
+            .wait()
             .unwrap(),
         "the file must be gone from disk after rm"
     );
@@ -2223,6 +2243,7 @@ fn rm_can_delete_anything_the_read_layer_sees() {
     assert!(
         !system
             .exists(Path::new("/project/assets/figure.png"))
+            .wait()
             .unwrap(),
         "read-visible file must be deletable"
     );
@@ -2247,7 +2268,7 @@ fn rm_dir_removes_all_visible_files_and_reports_them() {
     assert_eq!(report.files_deleted.len(), 3, "all three files reported");
     assert_eq!(report.folders_removed, vec![PathBuf::from("/project/docs")]);
     assert_eq!(report.folders_left_behind, [] as [PathBuf; 0]);
-    assert!(!system.exists(Path::new("/project/docs")).unwrap());
+    assert!(!system.exists(Path::new("/project/docs")).wait().unwrap());
 }
 
 #[test]
@@ -2276,7 +2297,7 @@ fn rm_dir_removes_nested_subdirs_bottom_up() {
         ]
     );
     assert_eq!(report.folders_left_behind, [] as [PathBuf; 0]);
-    assert!(!system.exists(Path::new("/project/tree")).unwrap());
+    assert!(!system.exists(Path::new("/project/tree")).wait().unwrap());
 }
 
 #[test]
@@ -2302,8 +2323,18 @@ fn rm_dir_with_only_hidden_file_leaves_folder_behind() {
         report.folders_left_behind,
         vec![PathBuf::from("/project/box")]
     );
-    assert!(!system.exists(Path::new("/project/box/visible.md")).unwrap());
-    assert!(system.exists(Path::new("/project/box/.secret")).unwrap());
+    assert!(
+        !system
+            .exists(Path::new("/project/box/visible.md"))
+            .wait()
+            .unwrap()
+    );
+    assert!(
+        system
+            .exists(Path::new("/project/box/.secret"))
+            .wait()
+            .unwrap()
+    );
 }
 
 #[test]
@@ -2349,6 +2380,7 @@ fn rm_dir_with_nested_realm_config_leaves_realm_folder_intact() {
     assert!(
         system
             .exists(Path::new("/project/outer/realm/.remargin.yaml"))
+            .wait()
             .unwrap(),
         "nested realm config must survive"
     );
@@ -2438,7 +2470,7 @@ fn rm_refuses_commented_markdown_file() {
     );
     assert!(err.contains("purge"), "error points at purge: {err}");
     assert!(
-        system.exists(Path::new("/project/note.md")).unwrap(),
+        system.exists(Path::new("/project/note.md")).wait().unwrap(),
         "commented file must survive a refused rm"
     );
 }
@@ -2464,7 +2496,12 @@ fn rm_deletes_comment_free_markdown_file() {
     .unwrap();
 
     assert!(rm_file(&outcome).unwrap().existed);
-    assert!(!system.exists(Path::new("/project/plain.md")).unwrap());
+    assert!(
+        !system
+            .exists(Path::new("/project/plain.md"))
+            .wait()
+            .unwrap()
+    );
 }
 
 #[test]
@@ -2486,7 +2523,7 @@ fn rm_purge_then_rm_deletes_previously_commented_file() {
     )
     .unwrap();
     assert!(rm_file(&outcome).unwrap().existed);
-    assert!(!system.exists(Path::new("/project/note.md")).unwrap());
+    assert!(!system.exists(Path::new("/project/note.md")).wait().unwrap());
 }
 
 #[test]
@@ -2515,12 +2552,16 @@ fn rm_dir_aborts_when_any_nested_file_has_comments() {
         "all-or-nothing wording: {err}"
     );
     assert!(
-        system.exists(Path::new("/project/tree/top.md")).unwrap(),
+        system
+            .exists(Path::new("/project/tree/top.md"))
+            .wait()
+            .unwrap(),
         "sibling file must survive an aborted dir rm"
     );
     assert!(
         system
             .exists(Path::new("/project/tree/mid/deep/commented.md"))
+            .wait()
             .unwrap(),
         "commented file must survive an aborted dir rm"
     );
@@ -2542,7 +2583,7 @@ fn rm_dir_deletes_tree_with_no_commented_files() {
 
     let report = rm_dir(&outcome).unwrap();
     assert_eq!(report.files_deleted.len(), 2);
-    assert!(!system.exists(Path::new("/project/clean")).unwrap());
+    assert!(!system.exists(Path::new("/project/clean")).wait().unwrap());
 }
 
 #[test]
@@ -2564,7 +2605,7 @@ fn rm_purge_dir_then_rm_dir_deletes_tree() {
     let outcome = document::rm(&system, Path::new("/project"), Path::new("tree"), &config).unwrap();
     let report = rm_dir(&outcome).unwrap();
     assert_eq!(report.files_deleted.len(), 2);
-    assert!(!system.exists(Path::new("/project/tree")).unwrap());
+    assert!(!system.exists(Path::new("/project/tree")).wait().unwrap());
 }
 
 #[test]
@@ -2655,7 +2696,10 @@ more content here
     )
     .unwrap();
 
-    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let result = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(
         result.contains("\n\nLINE 10 NEW\nline 11\nline 12\n"),
         "unexpected slice around line 13: {result}"
@@ -2724,7 +2768,10 @@ First comment.
     )
     .unwrap();
 
-    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let result = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(result.contains("id: abc"));
     assert!(result.contains("id: def"));
 }
@@ -2840,7 +2887,10 @@ fn write_whole_file_unchanged_when_lines_omitted() {
     )
     .unwrap();
 
-    let result = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let result = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(result.contains("# Still Test"));
     assert!(result.contains("id: abc"));
     assert!(result.contains("id: def"));
@@ -2864,7 +2914,10 @@ fn write_noop_when_identical_bytes_back_to_back() {
         WriteOptions::default(),
     )
     .unwrap();
-    let after_first = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let after_first = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
 
     let second = document::write(
         &system,
@@ -2880,7 +2933,10 @@ fn write_noop_when_identical_bytes_back_to_back() {
         second.noop,
         "expected second write of canonical content to be a no-op"
     );
-    let after_second = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let after_second = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert_eq!(
         after_first, after_second,
         "no-op write must not touch the file bytes"
@@ -2908,7 +2964,10 @@ fn write_noop_reports_false_when_content_differs() {
     )
     .unwrap();
     assert!(!outcome.noop, "content change must report noop=false");
-    let after = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(after.contains("# Changed Test"));
 }
 
@@ -3133,7 +3192,10 @@ fn project_write_detects_noop_when_content_matches() {
     )
     .unwrap();
 
-    let canonical = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let canonical = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     let before_bytes = canonical.clone().into_bytes();
 
     let projection = document::project_write(
@@ -3222,7 +3284,10 @@ fn project_write_create_returns_empty_before_and_leaves_disk_untouched() {
     assert!(!noop);
 
     assert!(
-        system.read_to_string(Path::new("/project/new.md")).is_err(),
+        system
+            .read_to_string(Path::new("/project/new.md"))
+            .wait()
+            .is_err(),
         "project_write(--create) must not touch disk"
     );
 }
@@ -3381,7 +3446,10 @@ fn write_create_stamps_caller_identity_ignoring_spoof() {
     )
     .unwrap();
 
-    let disk = system.read_to_string(Path::new("/project/new.md")).unwrap();
+    let disk = system
+        .read_to_string(Path::new("/project/new.md"))
+        .wait()
+        .unwrap();
     assert!(disk.contains("author: eduardo"), "got:\n{disk}");
     assert!(
         !disk.contains("someone_else"),
@@ -3411,7 +3479,10 @@ fn write_edit_author_change_to_unregistered_rejected_in_registered_realm() {
         "got: {err:#}"
     );
     assert_eq!(
-        system.read_to_string(Path::new("/project/doc.md")).unwrap(),
+        system
+            .read_to_string(Path::new("/project/doc.md"))
+            .wait()
+            .unwrap(),
         doc,
         "rejected write must not mutate disk"
     );
@@ -3433,7 +3504,10 @@ fn write_edit_author_change_to_active_allowed_in_registered_realm() {
     )
     .unwrap();
 
-    let disk = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let disk = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(disk.contains("author: eduardo-burgos"), "got:\n{disk}");
 }
 
@@ -3459,7 +3533,10 @@ fn write_edit_existing_author_immutable_in_strict_realm() {
         "got: {err}"
     );
     assert_eq!(
-        system.read_to_string(Path::new("/project/doc.md")).unwrap(),
+        system
+            .read_to_string(Path::new("/project/doc.md"))
+            .wait()
+            .unwrap(),
         doc,
         "rejected write must not mutate disk"
     );
@@ -3481,7 +3558,10 @@ fn write_edit_first_author_matching_caller_allowed_in_strict_realm() {
     )
     .unwrap();
 
-    let disk = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let disk = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(disk.contains("author: eduardo-burgos"), "got:\n{disk}");
 }
 
@@ -3507,7 +3587,10 @@ fn write_edit_first_author_mismatch_rejected_in_strict_realm() {
         "got: {err}"
     );
     assert_eq!(
-        system.read_to_string(Path::new("/project/doc.md")).unwrap(),
+        system
+            .read_to_string(Path::new("/project/doc.md"))
+            .wait()
+            .unwrap(),
         doc,
         "rejected write must not mutate disk"
     );
@@ -3578,7 +3661,10 @@ fn commit_markdown_body_only_preserves_author_in_registered_realm() {
     .unwrap();
 
     assert!(!outcome.noop);
-    let disk = system.read_to_string(Path::new("/project/doc.md")).unwrap();
+    let disk = system
+        .read_to_string(Path::new("/project/doc.md"))
+        .wait()
+        .unwrap();
     assert!(disk.contains("author: alice"), "got:\n{disk}");
     assert!(disk.contains("New body."), "got:\n{disk}");
 }
@@ -3698,6 +3784,7 @@ fn write_create_refuses_forbidden_targets() {
         assert!(
             system
                 .read_to_string(&Path::new("/project").join(basename))
+                .wait()
                 .is_err(),
             "file must not be created after refusal",
         );
@@ -3720,7 +3807,7 @@ fn rm_refuses_forbidden_targets() {
 
         assert_forbidden_error(&err, basename);
 
-        system.read_to_string(Path::new(&path)).unwrap();
+        system.read_to_string(Path::new(&path)).wait().unwrap();
     }
 }
 
@@ -3785,6 +3872,7 @@ fn write_advises_on_hard_wrapped_prose_without_blocking() {
 
     let written = system
         .read_to_string(Path::new("/project/wrapped.md"))
+        .wait()
         .unwrap();
     assert!(
         written.contains("Accept and\nManual Edit"),

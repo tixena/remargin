@@ -22,6 +22,7 @@ use serde::Serialize;
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::config::{Config, Mode, ResolvedConfig, parse_author_type, resolve_key_path};
 use crate::parser::AuthorType;
+use crate::wait::Wait as _;
 
 const CONFIG_FILENAME: &str = ".remargin.yaml";
 
@@ -317,6 +318,7 @@ fn resolve_from_walk(
         let candidate = current.join(CONFIG_FILENAME);
         if system
             .exists(&candidate)
+            .wait()
             .with_context(|| format!("checking existence of {}", candidate.display()))?
         {
             let config = read_and_parse_config(system, &candidate)?;
@@ -346,6 +348,7 @@ fn resolve_from_walk(
 fn read_and_parse_config(system: &dyn System, path: &Path) -> Result<Config> {
     let content = system
         .read_to_string(path)
+        .wait()
         .with_context(|| format!("reading {}", path.display()))?;
     let config: Config =
         serde_yaml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;

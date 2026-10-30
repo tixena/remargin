@@ -12,7 +12,7 @@ use image::codecs::gif::GifEncoder;
 use image::codecs::png::PngEncoder;
 use image::{Frame, Rgb, RgbImage, Rgba, RgbaImage};
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 use serde_json::{Value, json};
 
@@ -25,6 +25,7 @@ use crate::operations::projections::PLAN_OP_FIELDS;
 use crate::operations::{CreateCommentParams, create_comment};
 use crate::parser::{self, AuthorType};
 use crate::permissions::pretool_install::{HOOK_MATCHER, HOOK_SUBCOMMAND};
+use crate::wait::Wait as _;
 use crate::writer::InsertPosition;
 
 const DOC_EXPANDED: &str = "\
@@ -620,7 +621,7 @@ fn batch_refuses_an_invalid_kind_before_writing() {
     assert!(is_tool_error(&response));
     assert!(tool_error_text(&response).contains("batch op[1]"));
     assert_eq!(
-        system.read_to_string(&base.join("doc.md")).unwrap(),
+        system.read_to_string(&base.join("doc.md")).wait().unwrap(),
         "# Hello\n\nBody text.\n"
     );
 }
@@ -720,7 +721,7 @@ fn batch_refuses_an_unknown_field_before_writing() {
     assert!(is_tool_error(&response));
     assert!(tool_error_text(&response).contains("batch op[1]: unknown field `after_headng`"));
     assert_eq!(
-        system.read_to_string(&base.join("doc.md")).unwrap(),
+        system.read_to_string(&base.join("doc.md")).wait().unwrap(),
         "# Hello\n\nBody text.\n"
     );
 }
@@ -1076,7 +1077,10 @@ fn replace_rewrites_body_via_mcp() {
     assert_eq!(result["files_failed"], 0_i32);
     assert_eq!(result["dry_run"], false);
 
-    let after = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/doc.md"))
+        .wait()
+        .unwrap();
     assert!(after.contains("The bar system."));
 }
 
@@ -1105,7 +1109,10 @@ fn replace_requires_explicit_path() {
     );
 
     assert!(is_tool_error(&response));
-    let after = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
+    let after = system
+        .read_to_string(Path::new("/docs/doc.md"))
+        .wait()
+        .unwrap();
     assert_eq!(after, "foo\n");
 }
 
@@ -2636,7 +2643,7 @@ fn mcp_query_file_base_path_joins_to_result_path() {
     assert_eq!(results.len(), 1_usize);
     let joined = Path::new(base_path).join(results[0]["path"].as_str().unwrap());
     assert_eq!(joined, Path::new("notes/nested.md"));
-    assert!(system.is_file(&base.join(&joined)).unwrap());
+    assert!(system.is_file(&base.join(&joined)).wait().unwrap());
 }
 
 #[test]
@@ -3166,7 +3173,7 @@ fn mcp_comment_auto_ack() {
     let result = extract_tool_text(&response);
     assert!(result["id"].is_string());
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert_eq!(parent.ack.len(), 1);
@@ -3198,7 +3205,7 @@ fn mcp_comment_auto_ack_omitted_acks_other_author() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert!(
@@ -3234,7 +3241,7 @@ fn mcp_comment_auto_ack_omitted_skips_self_authored_parent() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert!(
@@ -3311,7 +3318,7 @@ fn mcp_batch_auto_ack_per_op() {
     let ids = result["ids"].as_array().unwrap();
     assert_eq!(ids.len(), 3_usize);
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert_eq!(parent.ack.len(), 1);
@@ -3348,6 +3355,7 @@ fn mcp_rm_deletes_file() {
     assert!(result["existed"].as_bool().unwrap());
     system
         .read_to_string(Path::new("/docs/target.md"))
+        .wait()
         .unwrap_err();
 }
 
@@ -3436,6 +3444,7 @@ fn mcp_write_raw_param() {
 
     let on_disk = system
         .read_to_string(Path::new("/docs/design.pen"))
+        .wait()
         .unwrap();
     assert_eq!(on_disk, raw_content);
 }
@@ -3505,6 +3514,7 @@ fn mcp_write_binary_param() {
 
     let on_disk = system
         .read_to_string(Path::new("/docs/output.png"))
+        .wait()
         .unwrap();
     assert_eq!(on_disk.as_bytes(), content_bytes);
 }
@@ -3584,7 +3594,10 @@ body C
     let result = extract_tool_text(&response);
     assert_eq!(result["written"].as_str().unwrap(), "doc.md");
 
-    let on_disk = system.read_to_string(Path::new("/docs/doc.md")).unwrap();
+    let on_disk = system
+        .read_to_string(Path::new("/docs/doc.md"))
+        .wait()
+        .unwrap();
     assert!(
         on_disk.contains("body A\nBODY B NEW\nbody C"),
         "partial write did not splice correctly: {on_disk}"
@@ -3713,7 +3726,7 @@ fn mcp_reply_prepends_parent_author_to_list() {
     let result = extract_tool_text(&response);
     let new_id = result["id"].as_str().unwrap();
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let reply = doc.find_comment(new_id).unwrap();
     assert_eq!(
@@ -3747,7 +3760,7 @@ fn mcp_plan_ack_returns_report_without_touching_disk() {
     let base = Path::new("/docs");
     let (system, config, id) = seed_real_comment(base, "doc.md");
 
-    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let before_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
 
     let response = call(
         &system,
@@ -3777,7 +3790,7 @@ fn mcp_plan_ack_returns_report_without_touching_disk() {
     assert_ne!(report["checksum_before"], report["checksum_after"]);
     assert_eq!(report["comments"]["preserved"].as_array().unwrap().len(), 1);
 
-    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let after_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert_eq!(before_bytes, after_bytes);
 }
 
@@ -3918,7 +3931,7 @@ fn mcp_plan_write_markdown_create_projects_without_writing_disk() {
     assert!(!report["noop"].as_bool().unwrap());
 
     assert!(
-        system.read_to_string(&base.join("new.md")).is_err(),
+        system.read_to_string(&base.join("new.md")).wait().is_err(),
         "plan write must not write disk"
     );
 }
@@ -3966,7 +3979,7 @@ fn mcp_plan_write_raw_non_markdown_returns_unsupported_reject_reason() {
 fn mcp_plan_comment_projects_new_comment() {
     let base = Path::new("/docs");
     let (system, config, _id) = seed_real_comment(base, "doc.md");
-    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let before_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
 
     let response = call(
         &system,
@@ -3995,7 +4008,7 @@ fn mcp_plan_comment_projects_new_comment() {
         "expected 1 added comment, got report: {report:#}"
     );
 
-    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let after_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert_eq!(before_bytes, after_bytes);
 }
 
@@ -4098,7 +4111,7 @@ fn mcp_plan_edit_missing_comment_errors() {
 fn mcp_plan_batch_projects_two_sub_ops() {
     let base = Path::new("/docs");
     let (system, config, _id) = seed_real_comment(base, "doc.md");
-    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let before_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
 
     let response = call(
         &system,
@@ -4135,7 +4148,7 @@ fn mcp_plan_batch_projects_two_sub_ops() {
         "two sub-ops must produce two added comment ids"
     );
 
-    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let after_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert_eq!(before_bytes, after_bytes, "plan batch must not write disk");
 }
 
@@ -4171,7 +4184,7 @@ fn mcp_plan_batch_requires_ops_array() {
 fn mcp_plan_purge_destroys_every_comment_id() {
     let base = Path::new("/docs");
     let (system, config, id) = seed_real_comment(base, "doc.md");
-    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let before_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
 
     let response = call(
         &system,
@@ -4206,7 +4219,7 @@ fn mcp_plan_purge_destroys_every_comment_id() {
         "purge must destroy the seeded comment: {destroyed:?}"
     );
 
-    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let after_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert_eq!(before_bytes, after_bytes, "plan purge must not write disk");
 }
 
@@ -4313,7 +4326,7 @@ fn mcp_plan_purge_recursive_emits_purge_dir_diff() {
         &CreateCommentParams::new("seed a", &InsertPosition::Append),
     )
     .unwrap();
-    let before_bytes = system.read_to_string(&path_a).unwrap();
+    let before_bytes = system.read_to_string(&path_a).wait().unwrap();
 
     let response = call(
         &system,
@@ -4344,7 +4357,7 @@ fn mcp_plan_purge_recursive_emits_purge_dir_diff() {
     assert_eq!(files[0]["outcome"], "would_purge");
     assert_eq!(files[0]["comments_removed"], 1_u64);
 
-    let after_bytes = system.read_to_string(&path_a).unwrap();
+    let after_bytes = system.read_to_string(&path_a).wait().unwrap();
     assert_eq!(before_bytes, after_bytes);
 }
 
@@ -4352,7 +4365,7 @@ fn mcp_plan_purge_recursive_emits_purge_dir_diff() {
 fn mcp_plan_sandbox_add_rewrites_frontmatter() {
     let base = Path::new("/docs");
     let (system, config, _id) = seed_real_comment(base, "doc.md");
-    let before_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let before_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
 
     let response = call(
         &system,
@@ -4381,7 +4394,7 @@ fn mcp_plan_sandbox_add_rewrites_frontmatter() {
         "sandbox-add against a clean doc must land a non-noop plan"
     );
 
-    let after_bytes = system.read_to_string(&base.join("doc.md")).unwrap();
+    let after_bytes = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert_eq!(
         before_bytes, after_bytes,
         "plan sandbox-add must not write disk"
@@ -5293,7 +5306,7 @@ fn mcp_comment_accepts_remargin_kind_and_persists_to_yaml() {
         .unwrap()
         .to_owned();
 
-    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let raw = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert!(raw.contains(&format!("id: {id}")));
     assert!(
         raw.contains("remargin_kind: [question, todo]"),
@@ -5463,7 +5476,7 @@ fn mcp_edit_with_kind_replaces_stored_list() {
     );
     assert!(!is_tool_error(&edit));
 
-    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let raw = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert!(raw.contains("remargin_kind: [todo]"));
     assert!(!raw.contains("remargin_kind: [question]"));
 }
@@ -5495,7 +5508,7 @@ fn mcp_comment_after_heading_resolves_section_path() {
     assert!(!is_tool_error(&resp), "{resp:?}");
     let new_id = String::from(extract_tool_text(&resp)["id"].as_str().unwrap());
 
-    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let raw = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let lines: Vec<&str> = raw.lines().collect();
     let p3_line = lines
         .iter()
@@ -5538,7 +5551,7 @@ fn mcp_comment_after_heading_path_disambiguates_duplicate_subheadings() {
     assert!(!is_tool_error(&resp), "{resp:?}");
     let new_id = String::from(extract_tool_text(&resp)["id"].as_str().unwrap());
 
-    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let raw = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let lines: Vec<&str> = raw.lines().collect();
     let a10_line = lines
         .iter()
@@ -5562,7 +5575,7 @@ fn mcp_comment_after_heading_no_match_errors_without_writing() {
     let system = system_with_doc(base, "doc.md", DOC_WITH_HEADINGS);
     let config = test_config();
 
-    let before = system.read_to_string(&base.join("doc.md")).unwrap();
+    let before = system.read_to_string(&base.join("doc.md")).wait().unwrap();
 
     let resp = call(
         &system,
@@ -5583,7 +5596,7 @@ fn mcp_comment_after_heading_no_match_errors_without_writing() {
         }),
     );
     assert!(is_tool_error(&resp));
-    let after = system.read_to_string(&base.join("doc.md")).unwrap();
+    let after = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert_eq!(before, after, "doc must be unchanged on resolver failure");
 }
 
@@ -5624,7 +5637,7 @@ fn mcp_batch_after_heading_inserts_each_op_at_its_anchor() {
         .collect::<Vec<_>>();
     assert_eq!(ids.len(), 2);
 
-    let raw = system.read_to_string(&base.join("doc.md")).unwrap();
+    let raw = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let lines: Vec<&str> = raw.lines().collect();
     let position_of_id = |id: &str| {
         lines
@@ -5931,8 +5944,8 @@ fn mcp_mv_renames_directory() {
     let result = extract_tool_text(&response);
     assert!(result["is_directory"].as_bool().unwrap());
     assert_eq!(result["nested_files_moved"].as_u64().unwrap(), 2_u64);
-    assert!(!system.exists(&base.join("notes")).unwrap());
-    assert!(system.is_dir(&base.join("archive")).unwrap());
+    assert!(!system.exists(&base.join("notes")).wait().unwrap());
+    assert!(system.is_dir(&base.join("archive")).wait().unwrap());
 }
 
 #[test]
@@ -5976,8 +5989,8 @@ fn mcp_plan_mv_directory_emits_is_directory() {
     assert!(mv_diff["src_exists"].as_bool().unwrap());
     assert!(!mv_diff["dst_exists"].as_bool().unwrap());
 
-    assert!(system.is_dir(&base.join("src")).unwrap());
-    assert!(!system.exists(&base.join("dst")).unwrap());
+    assert!(system.is_dir(&base.join("src")).wait().unwrap());
+    assert!(!system.exists(&base.join("dst")).wait().unwrap());
 }
 
 /// The subset gate admits an anomaly that was already on disk before the op.
@@ -6269,7 +6282,7 @@ fn mcp_reply_acks_parent_when_authors_differ() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert!(
@@ -6305,7 +6318,7 @@ fn mcp_reply_skips_ack_for_self_authored_parent() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert!(
@@ -6342,7 +6355,7 @@ fn mcp_reply_auto_ack_true_forces_ack_on_self_authored() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert!(
@@ -6378,7 +6391,7 @@ fn mcp_reply_auto_ack_false_skips_other_author() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     let doc = parser::parse(&doc_content).unwrap();
     let parent = doc.find_comment("aaa").unwrap();
     assert!(
@@ -6469,7 +6482,7 @@ fn mcp_reply_sandbox_flag_stages_file() {
         }),
     );
 
-    let doc_content = system.read_to_string(&base.join("doc.md")).unwrap();
+    let doc_content = system.read_to_string(&base.join("doc.md")).wait().unwrap();
     assert!(
         doc_content.contains("sandbox:") && doc_content.contains("tester"),
         "expected sandbox marker for caller in frontmatter; doc = {doc_content}",
@@ -7322,8 +7335,9 @@ fn query_pages_rows_across_files_and_regroups_them() {
         .write(
             &base.join("other.md"),
             b"# Other\n\nBody.\n",
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
     let response = call(
         &system,
@@ -7371,8 +7385,9 @@ fn activity_reports_total_and_pages_changes() {
         .write(
             &base.join(".remargin.yaml"),
             b"identity: tester\ntype: human\n",
-            WriteMode::Replace,
+            Condition::None,
         )
+        .wait()
         .unwrap();
     let response = call(
         &system,

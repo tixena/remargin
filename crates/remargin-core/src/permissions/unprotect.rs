@@ -20,6 +20,7 @@ use serde_yaml::Value;
 use crate::permissions::claude_sync::{RevertReport, revert_rules};
 use crate::permissions::restrict::{find_claude_anchor, write_remargin_yaml};
 use crate::permissions::sidecar;
+use crate::wait::Wait as _;
 
 const RESTRICT_WILDCARD: &str = "*";
 
@@ -101,7 +102,7 @@ pub fn unprotect(
         anchor.clone()
     } else {
         let candidate = anchor.join(&args.path);
-        system.canonicalize(&candidate).unwrap_or(candidate)
+        system.canonicalize(&candidate).wait().unwrap_or(candidate)
     };
 
     let yaml_entry_removed = remove_yaml_entry(system, &anchor, &args.path)?;
@@ -159,7 +160,7 @@ pub fn unprotect(
 /// earlier sessions are scrubbed on the next unprotect call.
 fn remove_yaml_entry(system: &dyn System, anchor: &Path, path_on_disk: &str) -> Result<bool> {
     let yaml_path = anchor.join(".remargin.yaml");
-    let body = match system.read_to_string(&yaml_path) {
+    let body = match system.read_to_string(&yaml_path).wait() {
         Ok(body) => body,
         Err(_err) => return Ok(false),
     };

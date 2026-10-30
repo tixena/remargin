@@ -45,6 +45,7 @@ use crate::permissions::doctor as permissions_doctor;
 use crate::permissions::inspect as permissions_inspect;
 use crate::permissions::op_guard::{CallerInfo, check_against_resolved_for_caller};
 use crate::responses;
+use crate::wait::Wait as _;
 use crate::writer::InsertPosition;
 
 const INVALID_PARAMS: i64 = -32602;
@@ -1555,6 +1556,7 @@ fn check_one_path(
     if permissions.trusted_roots_unconstrained() {
         let canonical_base = system
             .canonicalize(base_dir)
+            .wait()
             .unwrap_or_else(|_err| base_dir.to_path_buf());
         if canonical == canonical_base || canonical.starts_with(&canonical_base) {
             return Ok(());
@@ -1576,7 +1578,7 @@ fn check_one_path(
 /// writes to not-yet-existing files inside a covered root while still
 /// rejecting paths outside it.
 fn canonicalize_or_lexical(system: &dyn System, target: &Path) -> Result<PathBuf> {
-    if let Ok(canonical) = system.canonicalize(target) {
+    if let Ok(canonical) = system.canonicalize(target).wait() {
         return Ok(canonical);
     }
     let mut suffix = PathBuf::new();
@@ -1590,7 +1592,7 @@ fn canonicalize_or_lexical(system: &dyn System, target: &Path) -> Result<PathBuf
             .map(PathBuf::from)
             .with_context(|| format!("path missing file component: {}", target.display()))?;
         suffix = tail.join(&suffix);
-        if let Ok(canonical_parent) = system.canonicalize(&parent) {
+        if let Ok(canonical_parent) = system.canonicalize(&parent).wait() {
             return Ok(canonical_parent.join(suffix));
         }
         cursor = parent;
@@ -2572,7 +2574,7 @@ fn handle_purge(
         return Ok(result.to_json(base_dir));
     }
 
-    if system.is_dir(&path).unwrap_or(false) {
+    if system.is_dir(&path).wait().unwrap_or(false) {
         bail!(
             "target is a directory: {file} (pass `recursive: true` to purge every .md file under it)"
         );
@@ -2593,7 +2595,7 @@ fn handle_query(
     let include_integrity = optional_bool(params, "include_integrity");
     let filter = build_query_filter_from_params(params, config.identity.clone())?;
     let target = base_dir.join(path_str);
-    let is_file = system.is_file(&target).unwrap_or(false);
+    let is_file = system.is_file(&target).wait().unwrap_or(false);
     let results = query::query(system, &target, &filter, config)?;
 
     let compact: Vec<Value> = results
@@ -3142,7 +3144,7 @@ fn handle_verify(
     let target = base_dir.join(path_str);
 
     // A directory sweeps the tree and returns the folder report; a file returns the single report.
-    if system.is_dir(&target).unwrap_or(false) {
+    if system.is_dir(&target).wait().unwrap_or(false) {
         let report = operations::verify::verify_path(system, base_dir, &target, config)?;
         return Ok(report.to_json());
     }

@@ -8,6 +8,7 @@ use os_shim::mock::MemorySystem;
 use crate::config::{Mode, ResolvedConfig};
 use crate::operations::purge::{purge, purge_dir};
 use crate::parser::{self, AuthorType};
+use crate::wait::Wait as _;
 
 fn open_config() -> ResolvedConfig {
     ResolvedConfig {
@@ -77,7 +78,10 @@ fn simple_purge() {
 
     assert_eq!(result.comments_removed, 2);
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&content).unwrap();
     assert!(doc.comments().is_empty());
 }
@@ -91,7 +95,10 @@ fn body_text_preserved() {
     let config = open_config();
     purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(content.contains("Some text before."));
     assert!(content.contains("More text between."));
     assert!(content.contains("Text after."));
@@ -106,7 +113,10 @@ fn frontmatter_cleanup() {
     let config = open_config();
     purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(content.contains("title: Test"));
     assert!(!content.contains("remargin_pending"));
     assert!(!content.contains("remargin_pending_for"));
@@ -181,7 +191,10 @@ fn no_excessive_blank_lines() {
     let config = open_config();
     purge(&system, Path::new("/docs/test.md"), &config).unwrap();
 
-    let content = system.read_to_string(Path::new("/docs/test.md")).unwrap();
+    let content = system
+        .read_to_string(Path::new("/docs/test.md"))
+        .wait()
+        .unwrap();
     assert!(
         !content.contains("\n\n\n"),
         "should not have triple newlines after purge"
@@ -209,7 +222,7 @@ fn purge_dir_purges_every_md_file() {
 
     for name in ["a.md", "b.md", "c.md"] {
         let path = Path::new("/realm").join(name);
-        let content = system.read_to_string(&path).unwrap();
+        let content = system.read_to_string(&path).wait().unwrap();
         let doc = parser::parse(&content).unwrap();
         assert!(
             doc.comments().is_empty(),
@@ -232,7 +245,10 @@ fn purge_dir_skips_non_markdown_files() {
 
     assert_eq!(result.purged.len(), 1, "only a.md is markdown");
     assert_eq!(result.purged[0].path, Path::new("/realm/a.md"));
-    let txt = system.read_to_string(Path::new("/realm/keep.txt")).unwrap();
+    let txt = system
+        .read_to_string(Path::new("/realm/keep.txt"))
+        .wait()
+        .unwrap();
     assert_eq!(txt, "plain text body");
 }
 
@@ -356,7 +372,10 @@ fn purge_dir_deny_ops_on_parent_blocks_every_file() {
             failure.reason
         );
     }
-    let a = system.read_to_string(Path::new("/realm/a.md")).unwrap();
+    let a = system
+        .read_to_string(Path::new("/realm/a.md"))
+        .wait()
+        .unwrap();
     let doc = parser::parse(&a).unwrap();
     assert_eq!(doc.comments().len(), 2);
 }
@@ -382,6 +401,7 @@ fn purge_dir_skips_dot_folders() {
     assert_eq!(result.purged[0].path, Path::new("/realm/keep.md"));
     let log_content = system
         .read_to_string(Path::new("/realm/.git/log.md"))
+        .wait()
         .unwrap();
     let log_doc = parser::parse(&log_content).unwrap();
     assert_eq!(log_doc.comments().len(), 2, ".git/log.md should be ignored");

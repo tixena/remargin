@@ -6,7 +6,7 @@ use std::thread;
 
 use chrono::DateTime;
 use os_shim::System as _;
-use os_shim::WriteMode;
+use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
 
 use crate::config::{Mode, ResolvedConfig};
@@ -16,6 +16,7 @@ use crate::operations::sandbox::{
     scan_all_entries,
 };
 use crate::parser::{self, AuthorType};
+use crate::wait::Wait as _;
 
 /// Open-mode config used by every sandbox test that doesn't care about
 /// verify-gate severity. Sandbox ops mutate frontmatter only, so the
@@ -86,15 +87,16 @@ Hello.
 
 fn write_file(system: &MemorySystem, path: &str, content: &str) {
     if let Some(parent) = Path::new(path).parent() {
-        system.create_dir_all(parent).unwrap();
+        system.create_dir_all(parent).wait().unwrap();
     }
     system
-        .write(Path::new(path), content.as_bytes(), WriteMode::Replace)
+        .write(Path::new(path), content.as_bytes(), Condition::None)
+        .wait()
         .unwrap();
 }
 
 fn read_file(system: &MemorySystem, path: &str) -> String {
-    system.read_to_string(Path::new(path)).unwrap()
+    system.read_to_string(Path::new(path)).wait().unwrap()
 }
 
 #[test]

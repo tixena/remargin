@@ -49,6 +49,7 @@ use crate::crypto;
 use crate::document::allowlist;
 use crate::frontmatter;
 use crate::parser::{self, Comment, ParsedDocument};
+use crate::wait::Wait as _;
 use crate::writer;
 
 const SUMMARY_LINE_LIMIT: usize = 5;
@@ -678,9 +679,10 @@ pub fn verify_path(
 
     let mut files: Vec<FileVerifyOutcome> = Vec::new();
 
-    if system.is_dir(&resolved_target).unwrap_or(false) {
+    if system.is_dir(&resolved_target).wait().unwrap_or(false) {
         let entries = system
             .walk_dir(&resolved_target, false, false)
+            .wait()
             .with_context(|| format!("walking directory {}", resolved_target.display()))?;
         let mut gate = config.read_gate();
         for entry in &entries {
@@ -1073,7 +1075,7 @@ fn is_registered_active(cm: &Comment, registry: Option<&Registry>) -> bool {
 /// or unparsable files yield an empty set so fresh writes don't hit a
 /// spurious gate.
 fn pre_anomalies(system: &dyn System, path: &Path, cfg: &ResolvedConfig) -> HashSet<Anomaly> {
-    let Ok(existing) = system.read_to_string(path) else {
+    let Ok(existing) = system.read_to_string(path).wait() else {
         return HashSet::new();
     };
     let Ok(existing_doc) = parser::parse(&existing) else {

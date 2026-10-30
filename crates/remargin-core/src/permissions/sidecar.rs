@@ -17,8 +17,11 @@ use alloc::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde::{Deserialize, Serialize};
+
+use crate::wait::Wait as _;
 
 /// Bumped only on incompatible shape changes; loaders refuse a version they do not recognise.
 pub const SIDECAR_VERSION: u32 = 1;
@@ -94,7 +97,7 @@ pub fn add_entry(
 /// - Version mismatch.
 pub fn load(system: &dyn System, anchor: &Path) -> Result<Sidecar> {
     let path = sidecar_path(anchor);
-    let body = match system.read_to_string(&path) {
+    let body = match system.read_to_string(&path).wait() {
         Ok(body) => body,
         Err(_err) => return Ok(Sidecar::new()),
     };
@@ -143,11 +146,13 @@ pub fn save(system: &dyn System, anchor: &Path, sidecar: &Sidecar) -> Result<()>
     if let Some(parent) = path.parent() {
         system
             .create_dir_all(parent)
+            .wait()
             .with_context(|| format!("creating sidecar directory {}", parent.display()))?;
     }
     let body = serde_json::to_string_pretty(sidecar).context("serializing sidecar JSON")?;
     system
-        .write(&path, body.as_bytes(), WriteMode::Replace)
+        .write(&path, body.as_bytes(), Condition::None)
+        .wait()
         .with_context(|| format!("writing sidecar to {}", path.display()))?;
     ensure_gitignored(system, anchor)?;
     Ok(())
@@ -163,7 +168,7 @@ pub fn sidecar_path(anchor: &Path) -> PathBuf {
 /// Creates `.gitignore` if missing.
 fn ensure_gitignored(system: &dyn System, anchor: &Path) -> Result<()> {
     let gitignore = anchor.join(".gitignore");
-    let existing = system.read_to_string(&gitignore).unwrap_or_default();
+    let existing = system.read_to_string(&gitignore).wait().unwrap_or_default();
     if existing
         .lines()
         .any(|line| line.trim() == SIDECAR_GITIGNORE_ENTRY)
@@ -177,6 +182,8 @@ fn ensure_gitignored(system: &dyn System, anchor: &Path) -> Result<()> {
     updated.push_str(SIDECAR_GITIGNORE_ENTRY);
     updated.push('\n');
     system
-        .write(&gitignore, updated.as_bytes(), WriteMode::Replace)
-        .with_context(|| format!("updating {}", gitignore.display()))
+        .write(&gitignore, updated.as_bytes(), Condition::None)
+        .wait()
+        .with_context(|| format!("updating {}", gitignore.display()))?;
+    Ok(())
 }

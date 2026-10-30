@@ -14,6 +14,8 @@ use remargin_core::mcp;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use remargin_core::wait::Wait as _;
+
 /// Mirror of one `allow_dot_folders` entry in `permissions show --json`.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -260,7 +262,7 @@ fn mcp_permissions_show_matches_cli_json() {
 
     let system = RealSystem::new();
     // Canonical, so the MCP resolver's parent walk matches the CLI's canonicalised cwd.
-    let base = system.canonicalize(realm.path()).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
     let result = mcp_call(&base, &config, "permissions_show", &json!({}));
     let mcp_body = mcp_payload(&result);
@@ -282,7 +284,7 @@ fn mcp_permissions_check_matches_cli_json() {
     fs::write(realm.path().join("src/public/foo.md"), "x").unwrap();
 
     let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
     let cli_hit = run_in(
@@ -516,7 +518,7 @@ fn mcp_sandbox_allows_path_under_spawn_cwd() {
     let inner = realm.path().join("note.md");
     fs::write(&inner, b"# hi\n").unwrap();
     let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
     let result = mcp_call(&base, &config, "get", &json!({ "path": "note.md" }));
     assert!(!is_tool_error(&result), "{result:#?}");
@@ -533,8 +535,8 @@ fn mcp_sandbox_rejects_path_outside_root() {
     fs::write(&outsider_file, b"# leak\n").unwrap();
 
     let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
-    let outsider_canonical = system.canonicalize(&outsider_file).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
+    let outsider_canonical = system.canonicalize(&outsider_file).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
     let result = mcp_call(
         &base,
@@ -555,7 +557,7 @@ fn mcp_sandbox_rejects_path_outside_root() {
 fn mcp_sandbox_lets_permissions_show_through() {
     let realm = TempDir::new().unwrap();
     let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
     let result = mcp_call(&base, &config, "permissions_show", &json!({}));
     assert!(!is_tool_error(&result), "{result:#?}");
@@ -581,7 +583,7 @@ fn mcp_ls_without_path_rejects_when_cwd_outside_trusted_roots() {
     .unwrap();
 
     let system = RealSystem::new();
-    let base = system.canonicalize(&cwd).unwrap();
+    let base = system.canonicalize(&cwd).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
     let result = mcp_call(&base, &config, "ls", &json!({}));
@@ -608,7 +610,7 @@ fn mcp_ls_without_path_succeeds_when_cwd_inside_trusted_roots() {
     let realm = TempDir::new().unwrap();
     let cwd = realm.path();
     fs::write(cwd.join("note.md"), b"# hi\n").unwrap();
-    let canonical_cwd = RealSystem::new().canonicalize(cwd).unwrap();
+    let canonical_cwd = RealSystem::new().canonicalize(cwd).wait().unwrap();
     fs::write(
         cwd.join(".remargin.yaml"),
         format!(

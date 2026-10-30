@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
 use crate::frontmatter;
+use crate::wait::Wait as _;
 
 /// The only frontmatter keys whose values count as links.
 const RELATION_PROPERTIES: &[&str] = &["up", "related"];
@@ -192,7 +193,7 @@ fn resolve_internal(target: &str, base_dir: &Path, system: &dyn System) -> Optio
     };
 
     let candidate = base_dir.join(&relative);
-    if !system.exists(&candidate).unwrap_or(false) {
+    if !system.exists(&candidate).wait().unwrap_or(false) {
         return None;
     }
 
@@ -207,7 +208,7 @@ fn resolve_internal(target: &str, base_dir: &Path, system: &dyn System) -> Optio
 /// field, fall back to the first `# heading`. Returns `None` for
 /// non-markdown targets or when neither is present.
 fn read_target_title(system: &dyn System, path: &Path) -> Option<String> {
-    let content = system.read_to_string(path).ok()?;
+    let content = system.read_to_string(path).wait().ok()?;
 
     if let Some(title) = frontmatter_title(&content) {
         return Some(title);

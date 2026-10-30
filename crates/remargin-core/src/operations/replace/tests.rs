@@ -15,6 +15,7 @@ use super::{ReplaceOptions, replace};
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto::compute_checksum;
 use crate::parser::AuthorType;
+use crate::wait::Wait as _;
 
 /// Open-mode config rooted at `/project` for a `human` identity.
 fn open_config() -> ResolvedConfig {
@@ -60,7 +61,7 @@ fn system_with(path: &str, body: &str) -> MemorySystem {
 }
 
 fn read(system: &MemorySystem, path: &str) -> String {
-    system.read_to_string(Path::new(path)).unwrap()
+    system.read_to_string(Path::new(path)).wait().unwrap()
 }
 
 fn opts(pattern: &str, replacement: &str) -> ReplaceOptions {
@@ -301,7 +302,10 @@ fn deny_ops_governs_replace() {
         .unwrap()
         .with_file(Path::new("/r/doc.md"), b"foo here\n")
         .unwrap();
-    let before = system.read_to_string(Path::new("/r/doc.md")).unwrap();
+    let before = system
+        .read_to_string(Path::new("/r/doc.md"))
+        .wait()
+        .unwrap();
 
     let report = replace(
         &system,
@@ -319,7 +323,10 @@ fn deny_ops_governs_replace() {
         "denial must cite the canonical replace deny_ops wording; got: {err}"
     );
     assert_eq!(
-        system.read_to_string(Path::new("/r/doc.md")).unwrap(),
+        system
+            .read_to_string(Path::new("/r/doc.md"))
+            .wait()
+            .unwrap(),
         before
     );
 }
@@ -344,6 +351,7 @@ fn trusted_roots_governs_replace() {
         .unwrap();
     let before = system
         .read_to_string(Path::new("/r/src/public/doc.md"))
+        .wait()
         .unwrap();
 
     let report = replace(
@@ -364,6 +372,7 @@ fn trusted_roots_governs_replace() {
     assert_eq!(
         system
             .read_to_string(Path::new("/r/src/public/doc.md"))
+            .wait()
             .unwrap(),
         before
     );

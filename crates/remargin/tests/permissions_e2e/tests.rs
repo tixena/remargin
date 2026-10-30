@@ -14,6 +14,8 @@ use remargin_core::mcp;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use remargin_core::wait::Wait as _;
+
 fn realm_with_claude() -> TempDir {
     let realm = TempDir::new().unwrap();
     fs::create_dir_all(realm.path().join(".claude")).unwrap();
@@ -88,7 +90,7 @@ fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
     let mcp_user_settings = user_settings(&realm);
 
     let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
     let request = json!({
         "jsonrpc": "2.0",

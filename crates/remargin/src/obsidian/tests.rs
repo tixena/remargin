@@ -9,7 +9,7 @@ const STUB_MAIN_JS: &[u8] = b"// stub main.js\nconsole.log('remargin');\n";
 const STUB_MANIFEST: &[u8] = br#"{"id":"remargin","name":"Remargin","version":"0.0.0-test"}"#;
 
 fn seed_vault(fs: &MemorySystem, vault: &Path) {
-    fs.create_dir_all(&vault.join(".obsidian")).unwrap();
+    fs.create_dir_all(&vault.join(".obsidian")).wait().unwrap();
 }
 
 fn install_stub(
@@ -31,8 +31,16 @@ fn install_creates_plugin_dir_with_artifacts() {
     assert!(report.preserved_data_bytes.is_none());
     assert_eq!(report.main_js_bytes, STUB_MAIN_JS.len());
     assert_eq!(report.manifest_bytes, STUB_MANIFEST.len());
-    assert!(fs.exists(&report.plugin_dir.join("main.js")).unwrap());
-    assert!(fs.exists(&report.plugin_dir.join("manifest.json")).unwrap());
+    assert!(
+        fs.exists(&report.plugin_dir.join("main.js"))
+            .wait()
+            .unwrap()
+    );
+    assert!(
+        fs.exists(&report.plugin_dir.join("manifest.json"))
+            .wait()
+            .unwrap()
+    );
 }
 
 #[test]
@@ -44,9 +52,11 @@ fn install_writes_exact_bytes() {
     let report = install_stub(&fs, &vault, None).unwrap();
     let main_js = fs
         .read_to_string(&report.plugin_dir.join("main.js"))
+        .wait()
         .unwrap();
     let manifest = fs
         .read_to_string(&report.plugin_dir.join("manifest.json"))
+        .wait()
         .unwrap();
     assert_eq!(main_js.as_bytes(), STUB_MAIN_JS);
     assert_eq!(manifest.as_bytes(), STUB_MANIFEST);
@@ -56,7 +66,7 @@ fn install_writes_exact_bytes() {
 fn install_errors_when_not_a_vault() {
     let fs = MemorySystem::new();
     let cwd = Path::new("/home/user/docs");
-    fs.create_dir_all(cwd).unwrap();
+    fs.create_dir_all(cwd).wait().unwrap();
 
     let err = install_stub(&fs, cwd, None).unwrap_err();
     assert!(err.to_string().contains("not an Obsidian vault"));
@@ -70,7 +80,11 @@ fn install_is_idempotent() {
 
     install_stub(&fs, &vault, None).unwrap();
     let second = install_stub(&fs, &vault, None).unwrap();
-    assert!(fs.exists(&second.plugin_dir.join("main.js")).unwrap());
+    assert!(
+        fs.exists(&second.plugin_dir.join("main.js"))
+            .wait()
+            .unwrap()
+    );
 }
 
 #[test]
@@ -80,14 +94,16 @@ fn install_preserves_data_json() {
     seed_vault(&fs, &vault);
 
     let plugin_dir = vault.join(PLUGIN_REL_PATH);
-    fs.create_dir_all(&plugin_dir).unwrap();
+    fs.create_dir_all(&plugin_dir).wait().unwrap();
     let data_json = plugin_dir.join("data.json");
     let payload = br#"{"identity":"alice","sidebarSide":"left"}"#;
-    fs.write(&data_json, payload, WriteMode::Replace).unwrap();
+    fs.write(&data_json, payload, Condition::None)
+        .wait()
+        .unwrap();
 
     let report = install_stub(&fs, &vault, None).unwrap();
     assert_eq!(report.preserved_data_bytes, Some(payload.len()));
-    let preserved = fs.read_to_string(&data_json).unwrap();
+    let preserved = fs.read_to_string(&data_json).wait().unwrap();
     assert_eq!(preserved.as_bytes(), payload);
 }
 
@@ -96,7 +112,7 @@ fn install_with_explicit_vault_path() {
     let fs = MemorySystem::new();
     let cwd = PathBuf::from("/tmp/anywhere");
     let vault = PathBuf::from("/home/user/other-vault");
-    fs.create_dir_all(&cwd).unwrap();
+    fs.create_dir_all(&cwd).wait().unwrap();
     seed_vault(&fs, &vault);
 
     let report = install_stub(&fs, &cwd, Some(&vault)).unwrap();
@@ -107,7 +123,7 @@ fn install_with_explicit_vault_path() {
 fn uninstall_errors_when_not_a_vault() {
     let fs = MemorySystem::new();
     let cwd = Path::new("/home/user/docs");
-    fs.create_dir_all(cwd).unwrap();
+    fs.create_dir_all(cwd).wait().unwrap();
 
     let err = uninstall(&fs, cwd, None).unwrap_err();
     assert!(err.to_string().contains("not an Obsidian vault"));
@@ -136,6 +152,6 @@ fn uninstall_removes_plugin_dir() {
     let status = uninstall(&fs, &vault, None).unwrap();
     assert!(matches!(status, UninstallStatus::Removed { plugin_dir: _ }));
     if let UninstallStatus::Removed { plugin_dir } = status {
-        assert!(!fs.exists(&plugin_dir).unwrap());
+        assert!(!fs.exists(&plugin_dir).wait().unwrap());
     }
 }

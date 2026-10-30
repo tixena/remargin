@@ -23,12 +23,14 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::config::permissions::resolve::{ResolvedTrustedRoot, TrustedRootPath};
 use crate::permissions::sidecar::{self, SidecarEntry};
+use crate::wait::Wait as _;
 
 /// The editor-side tools the path denies cover: the same tools the `PreToolUse` hook gates.
 const EDITOR_TOOLS: &[&str] = &["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"];
@@ -348,7 +350,7 @@ fn simulate_settings_file(
     settings_file: &Path,
     rules: &RuleSet,
 ) -> Result<SettingsFileSim> {
-    let body_opt = system.read_to_string(settings_file).ok();
+    let body_opt = system.read_to_string(settings_file).wait().ok();
     let will_be_created = body_opt.is_none();
     let body = body_opt.unwrap_or_default();
     let value: Value = if body.trim().is_empty() {
@@ -494,7 +496,7 @@ pub fn revert_rules(system: &dyn System, anchor: &Path, target_path: &str) -> Re
 
     for settings_file in &entry.added_to_files {
         report.touched_files.push(settings_file.clone());
-        let body = match system.read_to_string(settings_file) {
+        let body = match system.read_to_string(settings_file).wait() {
             Ok(body) => body,
             Err(_err) => {
                 report.warnings.push(format!(
@@ -550,9 +552,13 @@ fn merge_rules_into_settings(
     if let Some(parent) = settings_file.parent() {
         system
             .create_dir_all(parent)
+            .wait()
             .with_context(|| format!("creating settings directory {}", parent.display()))?;
     }
-    let body = system.read_to_string(settings_file).unwrap_or_default();
+    let body = system
+        .read_to_string(settings_file)
+        .wait()
+        .unwrap_or_default();
     let mut value: Value = if body.trim().is_empty() {
         Value::Object(Map::new())
     } else {
@@ -627,6 +633,8 @@ fn write_settings(system: &dyn System, settings_file: &Path, value: &Value) -> R
     let mut bytes = body.into_bytes();
     bytes.push(b'\n');
     system
-        .write(settings_file, &bytes, WriteMode::Replace)
-        .with_context(|| format!("writing settings to {}", settings_file.display()))
+        .write(settings_file, &bytes, Condition::None)
+        .wait()
+        .with_context(|| format!("writing settings to {}", settings_file.display()))?;
+    Ok(())
 }

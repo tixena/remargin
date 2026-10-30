@@ -8,6 +8,8 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Result, bail};
 use os_shim::System;
 
+use crate::wait::Wait as _;
+
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "md", "txt", "csv", "xml", "json", "yaml", "yml", "toml", "ini", "env", "conf", "base", "pen",
     "html", "htm", "css", "scss", "sass", "less", "vue", "svelte", "js", "mjs", "cjs", "jsx", "ts",
@@ -104,9 +106,9 @@ pub fn resolve_sandboxed(
 ) -> Result<PathBuf> {
     if unrestricted {
         let resolved = if requested.is_absolute() {
-            system.canonicalize(requested)?
+            system.canonicalize(requested).wait()?
         } else {
-            system.canonicalize(&base.join(requested))?
+            system.canonicalize(&base.join(requested)).wait()?
         };
         return Ok(resolved);
     }
@@ -114,11 +116,11 @@ pub fn resolve_sandboxed(
     // An absolute request resolves against itself; the sandbox check below still gates it, so a
     // trusted-root caller need not spell a relative path out of the tree.
     let resolved = if requested.is_absolute() {
-        system.canonicalize(requested)?
+        system.canonicalize(requested).wait()?
     } else {
-        system.canonicalize(&base.join(requested))?
+        system.canonicalize(&base.join(requested)).wait()?
     };
-    let canonical_base = system.canonicalize(base)?;
+    let canonical_base = system.canonicalize(base).wait()?;
 
     if path_under(&resolved, &canonical_base) {
         return Ok(resolved);
@@ -166,15 +168,15 @@ pub fn resolve_sandboxed_create(
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("path has no filename: {}", requested.display()))?;
 
-    let parent_exists = system.exists(parent).unwrap_or(false);
+    let parent_exists = system.exists(parent).wait().unwrap_or(false);
 
     if !parent_exists {
         // Sandbox-check the nearest existing ancestor before creating any directory.
         let nearest = find_existing_ancestor(system, parent)?;
-        let canonical_nearest = system.canonicalize(&nearest)?;
+        let canonical_nearest = system.canonicalize(&nearest).wait()?;
 
         if !unrestricted {
-            let canonical_base = system.canonicalize(base)?;
+            let canonical_base = system.canonicalize(base).wait()?;
             if !path_under(&canonical_nearest, &canonical_base)
                 && !any_trusted_root_covers(system, trusted_roots, &canonical_nearest)
             {
@@ -182,7 +184,7 @@ pub fn resolve_sandboxed_create(
             }
         }
 
-        system.create_dir_all(parent).map_err(|source| {
+        system.create_dir_all(parent).wait().map_err(|source| {
             anyhow::anyhow!(
                 "failed to create parent directories: {}: {source}",
                 parent.display()
@@ -190,7 +192,7 @@ pub fn resolve_sandboxed_create(
         })?;
     }
 
-    let canonical_parent = system.canonicalize(parent).map_err(|source| {
+    let canonical_parent = system.canonicalize(parent).wait().map_err(|source| {
         anyhow::anyhow!(
             "parent directory does not exist: {}: {source}",
             parent.display()
@@ -198,7 +200,7 @@ pub fn resolve_sandboxed_create(
     })?;
 
     if !unrestricted {
-        let canonical_base = system.canonicalize(base)?;
+        let canonical_base = system.canonicalize(base).wait()?;
         if !path_under(&canonical_parent, &canonical_base)
             && !any_trusted_root_covers(system, trusted_roots, &canonical_parent)
         {
@@ -220,7 +222,10 @@ fn path_under(target: &Path, anchor: &Path) -> bool {
 /// trusted root that does not exist on disk yet still matches.
 fn any_trusted_root_covers(system: &dyn System, trusted_roots: &[PathBuf], target: &Path) -> bool {
     trusted_roots.iter().any(|root| {
-        let canonical = system.canonicalize(root).unwrap_or_else(|_| root.clone());
+        let canonical = system
+            .canonicalize(root)
+            .wait()
+            .unwrap_or_else(|_| root.clone());
         path_under(target, &canonical)
     })
 }
@@ -234,7 +239,7 @@ fn any_trusted_root_covers(system: &dyn System, trusted_roots: &[PathBuf], targe
 fn find_existing_ancestor(system: &dyn System, path: &Path) -> Result<PathBuf> {
     let mut current = path;
     loop {
-        if system.exists(current).unwrap_or(false) {
+        if system.exists(current).wait().unwrap_or(false) {
             return Ok(current.to_path_buf());
         }
         current = current

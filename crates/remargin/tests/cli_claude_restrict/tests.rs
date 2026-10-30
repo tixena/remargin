@@ -14,6 +14,8 @@ use remargin_core::mcp;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use remargin_core::wait::Wait as _;
+
 fn realm_with_claude() -> TempDir {
     let realm = TempDir::new().unwrap();
     fs::create_dir_all(realm.path().join(".claude")).unwrap();
@@ -219,7 +221,7 @@ fn restrict_absent_from_mcp_surface() {
     let realm = realm_with_claude();
 
     let system = RealSystem::new();
-    let base = system.canonicalize(realm.path()).unwrap();
+    let base = system.canonicalize(realm.path()).wait().unwrap();
     let config = ResolvedConfig::resolve(&system, &base, &IdentityFlags::default(), None).unwrap();
 
     let list_request = json!({

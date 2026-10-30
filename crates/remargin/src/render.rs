@@ -8,7 +8,8 @@ use std::path::Path;
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use os_shim::{System, WriteMode};
+use os_shim::System;
+use os_shim::bucket::Condition;
 use serde_json::{Value, json};
 
 use remargin_core::activity;
@@ -31,6 +32,7 @@ use remargin_core::permissions::unprotect as permissions_unprotect;
 
 use crate::io::{IoSinks, out_json, out_raw, print_output};
 use crate::params::{QueryOutputMode, QueryParams};
+use remargin_core::wait::Wait as _;
 
 pub fn render_identity_report(
     sinks: &mut IoSinks<'_>,
@@ -240,7 +242,8 @@ pub fn render_get_image_result(
 ) -> Result<()> {
     if let Some(dest) = out_path {
         system
-            .write(dest, &result.bytes, WriteMode::Replace)
+            .write(dest, &result.bytes, Condition::None)
+            .wait()
             .with_context(|| format!("writing {}", dest.display()))?;
         let mut summary = result.to_json_without_content();
         summary["out"] = json!(dest);
