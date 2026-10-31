@@ -10,6 +10,8 @@ mod io;
 mod params;
 mod render;
 
+#[cfg(feature = "obsidian")]
+pub(crate) use cli::ObsidianAction;
 #[cfg(feature = "session")]
 pub(crate) use cli::SessionAction;
 pub(crate) use cli::{
@@ -23,7 +25,7 @@ pub(crate) use cli::{
 };
 pub(crate) use cli::{
     AssetsArgs, ClaudeAction, Cli, Commands, GooseAction, GooseMcpAction, GoosePretoolAction,
-    GooseSessionGuardAction, IdentityAction, IdentityArgs, McpAction, ObsidianAction, OutputArgs,
+    GooseSessionGuardAction, IdentityAction, IdentityArgs, McpAction, OutputArgs,
     PermissionsAction, PlanAction, PlanClaudeAction, PluginAction, PretoolAction, PromptAction,
     RegistryAction, SandboxAction, SessionGuardAction, UnrestrictedArgs,
 };
