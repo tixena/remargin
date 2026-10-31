@@ -6,9 +6,9 @@ default-members = ["crates/remargin", "crates/remargin-core"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.18"
+version = "0.1.19"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.91.1"
 authors = ["Eduardo Burgos <eduardo@tixena.com>"]
 license = "MIT"
 repository = "https://github.com/tixena/remargin"
@@ -23,10 +23,10 @@ serde_yaml = "0.9"
 serde_json = "1.0"
 
 # System abstraction (filesystem, env, temp dirs)
-os-shim = "0.2.0"
+os-shim = "0.2.1"
 
 # TypeScript type + Zod schema generation from Rust models
-tixschema = { version = "0.2.0", features = ["chrono"] }
+tixschema = { version = "0.3.0", features = ["chrono"] }
 
 # Cryptography (checksums, signatures)
 sha2 = "0.11"
@@ -59,16 +59,20 @@ tracing-subscriber = { version = ">=0.3.23", features = ["env-filter", "fmt"] }
 
 # HTTP client (sync, minimal, pure-Rust TLS). Used by the `obsidian` feature
 # to fetch plugin assets from GitHub releases at install time.
-ureq = { version = "3.4.2" }
+ureq = { version = "3.5.0" }
 # Floors for ureq's TLS stack, which ureq itself does not require: the first releases that drop
 # trust in distrusted certificate intermediates (RUSTSEC-2026-0382, RUSTSEC-2026-0381).
 rustls-webpki = "0.103.16"
-webpki-roots = "1.0.10"
+webpki-roots = "1.0.11"
 
 # Test-only crates
 assert_cmd = "2"
 futures-io = "0.3.34"
 predicates = "3"
+# crates/remargin/tests/adapter_loc_cap.rs parses main.rs and mcp.rs; `span-locations` exposes
+# `Span::start()` / `Span::end()`, which measure each function's physical line span.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "3", features = ["full", "parsing"] }
 
 [profile.release]
 lto = true

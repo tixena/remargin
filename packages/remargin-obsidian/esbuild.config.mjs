@@ -65,7 +65,7 @@ const context = await esbuild.context({
     "@lezer/lr",
   ],
   format: "cjs",
-  target: "es2018",
+  target: "es2020",
   outfile: resolve(__dirname, "main.js"),
   platform: "browser",
   sourcemap: prod ? false : "inline",
