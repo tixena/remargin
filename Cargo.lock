@@ -776,9 +776,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "os-shim"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "097042832796a6ad28b05ccb38a2614eb35dd8084f1b5d08554e9b59b34451a9"
+checksum = "3f3a9f54dbf8c7dad7f65ec94a6b31ca852451c9b5bfbad286fb71fc688670ce"
 dependencies = [
  "futures-io",
  "ignore",
