@@ -222,3 +222,19 @@ fn single_file_rm_json_shape_unchanged_via_cli() {
     );
     assert!(!realm.path().join("a.md").exists());
 }
+
+/// A sibling that carries the corrupted spelling of the folder's name must survive.
+#[test]
+fn removes_the_named_file_under_a_non_ascii_folder() {
+    let realm = TempDir::new().unwrap();
+    fs::create_dir_all(realm.path().join("caf\u{e9}")).unwrap();
+    fs::create_dir_all(realm.path().join("caf\u{c3}\u{a9}")).unwrap();
+    fs::write(realm.path().join("caf\u{e9}/shared.pdf"), b"real").unwrap();
+    fs::write(realm.path().join("caf\u{c3}\u{a9}/shared.pdf"), b"other").unwrap();
+
+    let out = run_in(realm.path(), &["rm", "caf\u{e9}/shared.pdf"]);
+
+    assert_status(&out, 0_i32);
+    assert!(!realm.path().join("caf\u{e9}/shared.pdf").exists());
+    assert!(realm.path().join("caf\u{c3}\u{a9}/shared.pdf").exists());
+}

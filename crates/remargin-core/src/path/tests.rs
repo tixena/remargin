@@ -281,3 +281,39 @@ fn adapter_parity_table() {
         assert_eq!(got, PathBuf::from(*want), "input: {input:?}");
     }
 }
+
+#[test]
+fn non_ascii_path_passthrough() {
+    let system = MemorySystem::new();
+    let result = expand_path(&system, "caf\u{e9}/\u{65e5}\u{672c}\u{8a9e}/\u{1f600}.md").unwrap();
+    assert_eq!(
+        result,
+        PathBuf::from("caf\u{e9}/\u{65e5}\u{672c}\u{8a9e}/\u{1f600}.md")
+    );
+}
+
+#[test]
+fn non_ascii_text_around_a_variable_is_preserved() {
+    let system = MemorySystem::new().with_env("FOO", "bar").unwrap();
+    for (input, want) in [
+        ("caf\u{e9}/$FOO/\u{f1}", "caf\u{e9}/bar/\u{f1}"),
+        ("${FOO}/caf\u{e9}", "bar/caf\u{e9}"),
+        ("$FOO\u{e9}", "bar\u{e9}"),
+    ] {
+        let got = expand_path(&system, input).unwrap();
+        assert_eq!(got, PathBuf::from(want), "input: {input:?}");
+    }
+}
+
+#[test]
+fn dollar_before_non_ascii_is_literal() {
+    let system = MemorySystem::new();
+    let result = expand_path(&system, "$\u{e9}").unwrap();
+    assert_eq!(result, PathBuf::from("$\u{e9}"));
+}
+
+#[test]
+fn tilde_expands_a_non_ascii_home() {
+    let result = expand_with_home("/home/jos\u{e9}", "~/caf\u{e9}").unwrap();
+    assert_eq!(result, PathBuf::from("/home/jos\u{e9}/caf\u{e9}"));
+}

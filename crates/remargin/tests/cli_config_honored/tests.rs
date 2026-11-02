@@ -586,3 +586,26 @@ fn mcp_startup_config_sets_default_identity_for_tool_calls() {
         "walker-agent must not leak in, doc was:\n{body}"
     );
 }
+
+#[test]
+fn write_create_keeps_a_non_ascii_folder_name() {
+    let (_tmp, walker, flag_config) = two_realms();
+    let flag_path = String::from(flag_config.to_string_lossy());
+    let new_doc = walker.join("nuevo-caf\u{e9}/new.md");
+    run_ok(
+        &walker,
+        &[
+            "write",
+            &new_doc.to_string_lossy(),
+            "# New Doc\n\nBody.\n",
+            "--create",
+            "--config",
+            &flag_path,
+        ],
+    );
+    assert!(
+        new_doc.exists(),
+        "write --create must use the name it was given"
+    );
+    assert!(!walker.join("nuevo-caf\u{c3}\u{a9}").exists());
+}

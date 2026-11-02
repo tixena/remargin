@@ -588,3 +588,23 @@ fn bare_pretool_still_runs_the_dispatcher() {
         json!("deny"),
     );
 }
+
+/// A restriction on a folder with a non-ASCII name applies to that folder.
+#[test]
+fn hook_denies_a_read_inside_a_restricted_non_ascii_folder() {
+    let realm = realm_with_claude();
+    fs::create_dir_all(realm.path().join("caf\u{e9}/secret")).unwrap();
+    let user_settings = realm.path().join("hermetic-user-settings.json");
+    restrict_in(realm.path(), "caf\u{e9}/secret", &user_settings);
+
+    let target = realm.path().join("caf\u{e9}/secret/doc.md");
+    let stdin = envelope("Read", realm.path(), &json!({ "file_path": target }));
+
+    let out = run_pretool(&stdin);
+    assert_eq!(out.status.code(), Some(0_i32));
+    let payload: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        payload["hookSpecificOutput"]["permissionDecision"],
+        json!("deny")
+    );
+}

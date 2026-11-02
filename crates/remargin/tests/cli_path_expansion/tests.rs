@@ -189,3 +189,63 @@ fn cli_and_mcp_expand_identically_over_representative_inputs() {
         assert_eq!(a, b, "non-deterministic expansion: {input:?}");
     }
 }
+
+#[test]
+fn cli_get_reads_a_non_ascii_path() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("caf\u{e9}")).unwrap();
+    fs::write(tmp.path().join("caf\u{e9}/note.md"), "# Hi\n").unwrap();
+
+    let output = Command::cargo_bin("remargin")
+        .unwrap()
+        .current_dir(tmp.path())
+        .env("HOME", tmp.path())
+        .arg("get")
+        .arg("caf\u{e9}/note.md")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    let stderr = str::from_utf8(&output.stderr).unwrap();
+    assert!(output.status.success(), "command failed: stderr={stderr:?}");
+    let parsed: Value = serde_json::from_str(str::from_utf8(&output.stdout).unwrap()).unwrap();
+    assert_eq!(parsed["content"].as_str().unwrap(), "# Hi\n");
+}
+
+#[test]
+fn mcp_get_reads_a_non_ascii_path() {
+    let (system, home) = make_mock_home_with_note();
+    system
+        .create_dir_all(Path::new("/home/alice/caf\u{e9}"))
+        .wait()
+        .unwrap();
+    system
+        .write(
+            Path::new("/home/alice/caf\u{e9}/note.md"),
+            b"# Hello\n\nBody.\n",
+            Condition::None,
+        )
+        .wait()
+        .unwrap();
+    let base = PathBuf::from(&home);
+    let config = mcp_test_config(&system, &base);
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1_i32,
+        "method": "tools/call",
+        "params": { "name": "get", "arguments": { "path": "caf\u{e9}/note.md" } }
+    });
+    let request_str = serde_json::to_string(&request).unwrap();
+
+    let response = mcp::process_request(&system, &base, &config, &request_str)
+        .unwrap()
+        .unwrap();
+
+    let parsed: Value = serde_json::from_str(&response).unwrap();
+    let content = parsed["result"]["content"].as_array().unwrap();
+    let text = content[0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("# Hello"),
+        "expected file contents, got: {text}"
+    );
+}

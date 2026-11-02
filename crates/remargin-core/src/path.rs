@@ -122,8 +122,12 @@ fn expand_env_vars(system: &dyn System, raw: &str) -> Result<String, ExpandPathE
                 idx = consume_percent(system, raw, bytes, idx, &mut out)?;
                 continue;
             }
-            out.push(ch as char);
-            idx += 1;
+            let literal_end = bytes[idx..]
+                .iter()
+                .position(|byte| is_sigil_byte(*byte))
+                .map_or(bytes.len(), |rel| idx + rel);
+            out.push_str(&raw[idx..literal_end]);
+            idx = literal_end;
         }
     }
 
@@ -213,6 +217,12 @@ fn consume_percent(
         .map_err(|_err| ExpandPathError::UndefinedVariable(name.to_owned()))?;
     out.push_str(&value);
     Ok(close_idx + 1)
+}
+
+/// Bytes that open a variable reference. They are ASCII, so slicing `raw` at one always lands on
+/// a character boundary.
+const fn is_sigil_byte(byte: u8) -> bool {
+    byte == b'$' || (cfg!(windows) && byte == b'%')
 }
 
 /// Bytes allowed in a `$VAR` bare name: ASCII letters, digits, and `_`.
