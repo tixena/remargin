@@ -55,7 +55,7 @@ The CLI sorts a CSV by a column...`} />
   gap: 48px;
   align-items: start;
 }
-@media (max-width: 900px) { .problem { grid-template-columns: 1fr; gap: 32px; } }
+@media (max-width: 900px) { .problem { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
 
 .problem__copy :global(p) { color: var(--color-text-muted); max-width: 50ch; }
 .problem__copy :global(p + p) { margin-top: 12px; }
