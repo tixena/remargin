@@ -3,6 +3,8 @@
 //! Implements the Model Context Protocol (MCP) over stdio transport using
 //! JSON-RPC 2.0. Each tool maps 1:1 to a library function.
 
+pub mod args;
+
 #[cfg(test)]
 mod tests;
 
