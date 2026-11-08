@@ -53,7 +53,7 @@ pub struct BinaryPayload {
 /// A single entry from a directory listing.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct ListEntry {
     pub is_dir: bool,
     pub path: PathBuf,

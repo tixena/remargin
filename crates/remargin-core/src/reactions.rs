@@ -46,7 +46,7 @@ use crate::parser::{Acknowledgment, rfc3339_z};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct ReactionEntry {
     pub author: String,
     pub ts: DateTime<FixedOffset>,

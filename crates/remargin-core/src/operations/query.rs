@@ -22,8 +22,8 @@ use tixschema::model_schema;
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::kind::matches_kind_filter;
-use crate::parser::{self, Acknowledgment, AuthorType};
-use crate::reactions::ReactionEntry;
+use crate::parser::{self, Acknowledgment, AuthorType, author_type_schema};
+use crate::reactions::{ReactionEntry, reaction_entry_schema};
 use crate::wait::Wait as _;
 
 /// Column names of a compact comment row, `content` last; `checksum`, `signature` and `file`
@@ -294,7 +294,7 @@ pub struct QueryResult {
 /// compact to `author@ts` strings; `author_type` keeps its verbose
 /// serialization; `reactions` stays a map. Nullable columns (`reply_to`,
 /// `thread`, `remargin_kind`, `edited_at`) serialize as `null`.
-#[model_schema(name = "CompactCommentRow")]
+#[model_schema(name = "CompactCommentRow", enable = ["jsonschema"])]
 pub type CompactCommentRow = (
     String,
     usize,
@@ -309,6 +309,28 @@ pub type CompactCommentRow = (
     Option<Vec<String>>,
     Option<DateTime<FixedOffset>>,
     Vec<String>,
+    String,
+);
+
+/// [`CompactCommentRow`] widened with `checksum` and `signature` before
+/// `content`, the row `include_integrity: true` asks for.
+#[model_schema(name = "CompactCommentRowWithIntegrity", enable = ["jsonschema"])]
+pub type CompactCommentRowWithIntegrity = (
+    String,
+    usize,
+    String,
+    AuthorType,
+    DateTime<FixedOffset>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Vec<String>,
+    BTreeMap<String, Vec<ReactionEntry>>,
+    Option<Vec<String>>,
+    Option<DateTime<FixedOffset>>,
+    Vec<String>,
+    String,
+    Option<String>,
     String,
 );
 
@@ -373,38 +395,70 @@ pub fn display_base_path(raw: &str, is_file: bool) -> String {
     }
 }
 
+fn ack_cells(comment: &ExpandedComment) -> Vec<String> {
+    comment
+        .ack
+        .iter()
+        .map(|a| format!("{}@{}", a.author, parser::rfc3339_z(&a.ts)))
+        .collect()
+}
+
+/// Project one verbose [`ExpandedComment`] onto its 14-column compact row;
+/// the redundant `file` is dropped.
+#[must_use]
+pub fn compact_row(comment: &ExpandedComment) -> CompactCommentRow {
+    (
+        comment.id.clone(),
+        comment.line,
+        comment.author.clone(),
+        comment.author_type.clone(),
+        comment.ts,
+        comment.reply_to.clone(),
+        comment.thread.clone(),
+        comment.to.clone(),
+        ack_cells(comment),
+        comment.reactions.clone(),
+        comment.remargin_kind.clone(),
+        comment.edited_at,
+        comment.attachments.clone(),
+        comment.content.clone(),
+    )
+}
+
+/// [`compact_row`] with `checksum` and `signature` before `content`.
+#[must_use]
+pub fn compact_row_with_integrity(comment: &ExpandedComment) -> CompactCommentRowWithIntegrity {
+    (
+        comment.id.clone(),
+        comment.line,
+        comment.author.clone(),
+        comment.author_type.clone(),
+        comment.ts,
+        comment.reply_to.clone(),
+        comment.thread.clone(),
+        comment.to.clone(),
+        ack_cells(comment),
+        comment.reactions.clone(),
+        comment.remargin_kind.clone(),
+        comment.edited_at,
+        comment.attachments.clone(),
+        comment.checksum.clone(),
+        comment.signature.clone(),
+        comment.content.clone(),
+    )
+}
+
 /// Project one verbose [`ExpandedComment`] onto its compact positional row.
 ///
 /// `checksum` / `signature` are added before `content` only when
 /// `include_integrity` is set; the redundant `file` is always dropped.
 #[must_use]
 pub fn to_compact_row(comment: &ExpandedComment, include_integrity: bool) -> Value {
-    let ack: Vec<String> = comment
-        .ack
-        .iter()
-        .map(|a| format!("{}@{}", a.author, parser::rfc3339_z(&a.ts)))
-        .collect();
-    let mut row = vec![
-        json!(comment.id),
-        json!(comment.line),
-        json!(comment.author),
-        json!(comment.author_type),
-        json!(comment.ts),
-        json!(comment.reply_to),
-        json!(comment.thread),
-        json!(comment.to),
-        json!(ack),
-        json!(comment.reactions),
-        json!(comment.remargin_kind),
-        json!(comment.edited_at),
-        json!(comment.attachments),
-    ];
     if include_integrity {
-        row.push(json!(comment.checksum));
-        row.push(json!(comment.signature));
+        json!(compact_row_with_integrity(comment))
+    } else {
+        json!(compact_row(comment))
     }
-    row.push(json!(comment.content));
-    Value::Array(row)
 }
 
 /// Project one verbose [`QueryResult`] onto the compact per-file shape:
@@ -434,18 +488,17 @@ pub fn to_compact_result(result: &QueryResult, include_integrity: bool) -> Value
 }
 
 /// The comments of one parsed document that pass `filter`, in document
-/// order, as compact rows named by [`comment_cols`].
+/// order.
 #[must_use]
-pub fn compact_rows_for(
+pub fn comments_matching(
     doc: &parser::ParsedDocument,
     file: &Path,
     filter: &QueryFilter,
-    include_integrity: bool,
-) -> Vec<Value> {
+) -> Vec<ExpandedComment> {
     doc.comments()
         .into_iter()
         .filter(|cm| comment_matches_filters(cm, filter))
-        .map(|cm| to_compact_row(&expanded_from_comment(cm, file), include_integrity))
+        .map(|cm| expanded_from_comment(cm, file))
         .collect()
 }
 

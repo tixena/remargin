@@ -190,7 +190,7 @@ pub struct ActivityResult {
 /// (even an empty broadcast list), `None` for acks / sandboxes — so the
 /// broadcast signal survives against not-applicable. `kind` keeps the
 /// serde tag values `ack` / `comment` / `sandbox`.
-#[model_schema(name = "CompactChangeRow")]
+#[model_schema(name = "CompactChangeRow", enable = ["jsonschema"])]
 pub type CompactChangeRow = (
     DateTime<FixedOffset>,
     String,
@@ -210,7 +210,7 @@ pub type CompactChangeRow = (
 /// LLM consumer reads; the runtime builds the shape in [`to_compact_activity`]
 /// and the enclosing envelope (`cutoff_explicit`, `newest_ts_overall`,
 /// `change_cols`, `files`) is assembled there too.
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct CompactFileChanges {
@@ -294,21 +294,21 @@ pub fn to_compact_activity(result: &ActivityResult) -> Value {
     })
 }
 
+fn to_compact_file(file: &FileChanges) -> Value {
+    json!(compact_file(file))
+}
+
 /// One compact per-file record: `path` stays named, `newest_ts` /
 /// `cutoff_applied` stay named when present (absent when unset, never
 /// `null`), `changes` become positional rows.
-fn to_compact_file(file: &FileChanges) -> Value {
-    let changes: Vec<CompactChangeRow> = file.changes.iter().map(to_compact_row).collect();
-    let mut obj = serde_json::Map::new();
-    obj.insert(String::from("path"), json!(file.path));
-    if let Some(newest) = file.newest_ts {
-        obj.insert(String::from("newest_ts"), json!(newest));
+#[must_use]
+pub fn compact_file(file: &FileChanges) -> CompactFileChanges {
+    CompactFileChanges {
+        changes: file.changes.iter().map(to_compact_row).collect(),
+        cutoff_applied: file.cutoff_applied,
+        newest_ts: file.newest_ts,
+        path: file.path.clone(),
     }
-    if let Some(cutoff) = file.cutoff_applied {
-        obj.insert(String::from("cutoff_applied"), json!(cutoff));
-    }
-    obj.insert(String::from("changes"), json!(changes));
-    Value::Object(obj)
 }
 
 /// Gathers the changes under `path` (a file or a directory) since `since`.

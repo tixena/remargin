@@ -51,7 +51,7 @@ pub enum MatchLocation {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub enum SearchHitLocation {
     Body,
     Comment,
@@ -109,8 +109,20 @@ pub struct SearchResults {
 /// `match_cols` header covers the widened shape. `location` keeps the MCP
 /// lowercase convention (`body` / `comment`), NOT the CLI's `PascalCase`;
 /// `comment_id` serializes `null` for body matches.
-#[model_schema(name = "CompactMatchRow")]
+#[model_schema(name = "CompactMatchRow", enable = ["jsonschema"])]
 pub type CompactMatchRow = (usize, SearchHitLocation, String, Option<String>);
+
+/// [`CompactMatchRow`] widened with the `before` and `after` context lines,
+/// the row a search with context asks for.
+#[model_schema(name = "CompactMatchRowWithContext", enable = ["jsonschema"])]
+pub type CompactMatchRowWithContext = (
+    usize,
+    SearchHitLocation,
+    String,
+    Option<String>,
+    Vec<String>,
+    Vec<String>,
+);
 
 /// Schema anchor for one compact per-file match group.
 ///
@@ -219,6 +231,37 @@ pub const fn match_cols(with_context: bool) -> &'static [&'static str] {
     }
 }
 
+const fn hit_location(m: &SearchMatch) -> SearchHitLocation {
+    match m.location {
+        MatchLocation::Body => SearchHitLocation::Body,
+        MatchLocation::Comment => SearchHitLocation::Comment,
+    }
+}
+
+/// Project one verbose [`SearchMatch`] onto its 4-column compact row.
+#[must_use]
+pub fn compact_row(m: &SearchMatch) -> CompactMatchRow {
+    (
+        m.line,
+        hit_location(m),
+        m.text.clone(),
+        m.comment_id.clone(),
+    )
+}
+
+/// [`compact_row`] with the `before` / `after` context lines appended.
+#[must_use]
+pub fn compact_row_with_context(m: &SearchMatch) -> CompactMatchRowWithContext {
+    (
+        m.line,
+        hit_location(m),
+        m.text.clone(),
+        m.comment_id.clone(),
+        m.before.clone(),
+        m.after.clone(),
+    )
+}
+
 /// Project one verbose [`SearchMatch`] onto its compact positional row.
 ///
 /// `before` / `after` are appended only when context lines were requested;
@@ -226,21 +269,11 @@ pub const fn match_cols(with_context: bool) -> &'static [&'static str] {
 /// serializes `null` for body matches.
 #[must_use]
 pub fn to_compact_row(m: &SearchMatch, with_context: bool) -> Value {
-    let location = match m.location {
-        MatchLocation::Body => SearchHitLocation::Body,
-        MatchLocation::Comment => SearchHitLocation::Comment,
-    };
-    let mut row = vec![
-        json!(m.line),
-        json!(location),
-        json!(m.text),
-        json!(m.comment_id),
-    ];
     if with_context {
-        row.push(json!(m.before));
-        row.push(json!(m.after));
+        json!(compact_row_with_context(m))
+    } else {
+        json!(compact_row(m))
     }
-    Value::Array(row)
 }
 
 /// Group a page of matches by file into the compact `files` array.

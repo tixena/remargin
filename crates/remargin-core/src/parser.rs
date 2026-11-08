@@ -48,7 +48,7 @@ pub struct SandboxEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub enum AuthorType {
     Agent,
     Human,

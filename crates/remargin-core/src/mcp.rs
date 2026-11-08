@@ -3,6 +3,7 @@
 //! Implements the Model Context Protocol (MCP) over stdio transport using
 //! JSON-RPC 2.0. Each tool maps 1:1 to a library function.
 
+pub mod answers;
 pub mod args;
 
 #[cfg(test)]
@@ -17,10 +18,10 @@ use anyhow::{Context as _, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use os_shim::System;
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::activity;
-use crate::advice;
+use crate::activity::{self, CompactFileChanges};
 use crate::comment_style;
 use crate::config::identity::{IdentityFlags, resolve_identity_report};
 use crate::config::permissions::resolve::{ResolvedPermissions, resolve_permissions};
@@ -37,10 +38,10 @@ use crate::operations::plan as plan_ops;
 use crate::operations::projections;
 use crate::operations::prompt as prompt_ops;
 use crate::operations::purge;
-use crate::operations::query::{self, QueryFilter};
+use crate::operations::query::{self, QueryFilter, QueryResult};
 use crate::operations::replace;
 use crate::operations::sandbox as sandbox_ops;
-use crate::operations::search;
+use crate::operations::search::{self, SearchResults};
 use crate::parser;
 use crate::path::expand_path;
 use crate::permissions::doctor as permissions_doctor;
@@ -49,6 +50,12 @@ use crate::permissions::op_guard::{CallerInfo, check_against_resolved_for_caller
 use crate::responses;
 use crate::wait::Wait as _;
 use crate::writer::InsertPosition;
+
+use self::answers::{
+    ActivityPage, CommentRow, CommentsPage, GetAnswer, GetContent, GetLines, IdentityCreated,
+    LsAnswer, MatchRow, QueryFile, QueryPage, ReportSpillAnswer, SandboxListAnswer, SearchFile,
+    SearchPage,
+};
 
 const INVALID_PARAMS: i64 = -32602;
 
@@ -139,12 +146,24 @@ struct PlanCommentStaging {
     to_owned: Vec<String>,
 }
 
+/// A group of positional rows that a page cuts to fit, such as one file of
+/// a `query` answer.
+trait RowGroup: Serialize {
+    type Row: Serialize;
+
+    fn push_row(&mut self, row: Self::Row);
+
+    /// Takes the rows out, leaving the group empty; `None` when the group
+    /// has no rows to take.
+    fn take_rows(&mut self) -> Option<Vec<Self::Row>>;
+}
+
 /// One page of a grouped columnar payload.
-struct GroupedPage {
+struct GroupedPage<G> {
     effective_limit: Option<usize>,
     /// The groups that have at least one item on this page, in their
     /// original order, each holding only its rows on this page.
-    groups: Vec<Value>,
+    groups: Vec<G>,
     /// Items across every group before paging: one per row, or one for a
     /// group that has no rows.
     total: usize,
@@ -182,6 +201,32 @@ impl Default for SessionState {
             last_response_size: 0,
             spill_cap: DEFAULT_SPILL_CAP,
         }
+    }
+}
+
+impl RowGroup for CompactFileChanges {
+    type Row = activity::CompactChangeRow;
+
+    fn push_row(&mut self, row: Self::Row) {
+        self.changes.push(row);
+    }
+
+    fn take_rows(&mut self) -> Option<Vec<Self::Row>> {
+        Some(mem::take(&mut self.changes))
+    }
+}
+
+impl RowGroup for QueryFile {
+    type Row = CommentRow;
+
+    fn push_row(&mut self, row: Self::Row) {
+        if let Some(comments) = &mut self.comments {
+            comments.push(row);
+        }
+    }
+
+    fn take_rows(&mut self) -> Option<Vec<Self::Row>> {
+        self.comments.as_mut().map(mem::take)
     }
 }
 
@@ -1687,7 +1732,7 @@ fn dispatch_tool(
         "react" => handle_react(system, base_dir, config, p),
         "replace" => handle_replace(system, base_dir, config, p),
         "reply" => handle_reply(system, base_dir, config, p),
-        "report_spill" => Ok(handle_report_spill(session, p)),
+        "report_spill" => handle_report_spill(session, p),
         "claude_restrict" => {
             return tool_result_error(
                 "tool 'claude_restrict' is not available via MCP - use the CLI: 'remargin claude \
@@ -1763,19 +1808,16 @@ fn handle_activity(
         None => None,
     };
     let result = activity::gather_activity(system, &target, cutoff, config)?;
-    let mut envelope = activity::to_compact_activity(&result);
-    let files = envelope
-        .get_mut("files")
-        .and_then(Value::as_array_mut)
-        .map(mem::take)
-        .unwrap_or_default();
-    let page = page_grouped(&files, "changes", params, spill_cap);
-    if let Some(obj) = envelope.as_object_mut() {
-        obj.insert(String::from("total"), Value::from(page.total));
-        obj.insert(String::from("files"), Value::Array(page.groups));
-    }
-    insert_effective_limit(&mut envelope, page.effective_limit);
-    Ok(envelope)
+    let files: Vec<CompactFileChanges> = result.files.iter().map(activity::compact_file).collect();
+    let page = page_grouped(files, params, spill_cap);
+    answer(&ActivityPage {
+        change_cols: column_names(&activity::CHANGE_COLS),
+        cutoff_explicit: result.cutoff_explicit,
+        effective_limit: page.effective_limit,
+        files: page.groups,
+        newest_ts_overall: result.newest_ts_overall,
+        total: page.total,
+    })
 }
 
 fn handle_ack(
@@ -1817,7 +1859,7 @@ fn handle_ack(
         }
     }
 
-    Ok(responses::ack(&ids, remove))
+    answer(&responses::ack(&ids, remove))
 }
 
 /// MCP-only gate: a reply that explicitly opts out of acking *another author's*
@@ -2013,9 +2055,7 @@ fn handle_batch(
 
     let path = base_dir.join(file);
     let outcome = operations::batch::batch_comment(system, &path, cfg, &batch_ops)?;
-    let mut result = responses::batch(&outcome.ids);
-    advice::attach_op_notes(&mut result, &outcome.warnings);
-    Ok(result)
+    answer(&responses::batch(&outcome.ids, outcome.warnings))
 }
 
 fn handle_comment(
@@ -2056,9 +2096,10 @@ fn handle_comment(
     let new_id = operations::create_comment(system, &path, cfg, &create_params)?;
     // `reply` funnels through here too, so both comment surfaces get the
     // same advisory pass over the body the caller wrote.
-    let mut result = responses::comment_created(&new_id);
-    advice::attach_notes(&mut result, &comment_style::notes(content));
-    Ok(result)
+    answer(&responses::comment_created(
+        &new_id,
+        comment_style::notes(content),
+    ))
 }
 
 fn handle_comments(
@@ -2075,17 +2116,20 @@ fn handle_comments(
     let path = base_dir.join(file);
     config.ensure_can_read(system, &path)?;
     let doc = parser::parse_file(system, &path)?;
-    let rows = query::compact_rows_for(&doc, &path, &filter, include_integrity);
+    let matching = query::comments_matching(&doc, &path, &filter);
 
-    let total = rows.len();
-    let (page, effective_limit) = size_page(page_window(rows, params), spill_cap);
-    let mut envelope = json!({
-        "total": total,
-        "comment_cols": query::comment_cols(include_integrity),
-        "comments": page,
-    });
-    insert_effective_limit(&mut envelope, effective_limit);
-    Ok(envelope)
+    let total = matching.len();
+    let rows: Vec<CommentRow> = page_window(matching, params)
+        .iter()
+        .map(|comment| comment_row(comment, include_integrity))
+        .collect();
+    let (page, effective_limit) = size_page(rows, spill_cap);
+    answer(&CommentsPage {
+        comment_cols: column_names(query::comment_cols(include_integrity)),
+        comments: page,
+        effective_limit,
+        total,
+    })
 }
 
 fn handle_delete(
@@ -2101,7 +2145,7 @@ fn handle_delete(
 
     let path = base_dir.join(file);
     operations::delete_comments(system, &path, cfg, &id_refs)?;
-    Ok(responses::comments_deleted(&ids))
+    answer(&responses::comments_deleted(&ids))
 }
 
 fn handle_edit(
@@ -2134,9 +2178,10 @@ fn handle_edit(
         new_content,
         new_kinds.as_deref(),
     )?;
-    let mut result = responses::comment_edited(comment_id);
-    advice::attach_notes(&mut result, &comment_style::notes(new_content));
-    Ok(result)
+    answer(&responses::comment_edited(
+        comment_id,
+        comment_style::notes(new_content),
+    ))
 }
 
 /// Build the MCP content array for a binary `get`: an embedded resource block
@@ -2196,7 +2241,7 @@ fn handle_get(
     let lines = document::resolve_line_window(start_line, end_line);
     let (result, effective_end_line) =
         read_get_window(system, base_dir, target, lines, spill_cap, config)?;
-    Ok(get_envelope(
+    answer(&get_envelope(
         result,
         lines.map_or(1, |(s, _)| s),
         line_numbers,
@@ -2218,7 +2263,7 @@ fn read_get_window(
 ) -> Result<(document::GetResult, Option<usize>)> {
     let result = document::get_with_links(system, base_dir, target, lines, false, config)?;
     let start_num = lines.map_or(1, |(s, _)| s);
-    let line_values: Vec<Value> = result.content.split('\n').map(Value::from).collect();
+    let line_values: Vec<&str> = result.content.split('\n').collect();
     let kept = rows_within_cap(&line_values, spill_cap);
     if kept >= line_values.len() {
         return Ok((result, None));
@@ -2241,33 +2286,30 @@ fn get_envelope(
     start_num: usize,
     line_numbers: bool,
     effective_end_line: Option<usize>,
-) -> Value {
+) -> GetAnswer {
     // Link rows are positional `[alias, lines, target, title]`; `count` and `path` are derivable.
-    let rows = operations::links::to_compact_rows(result.links);
-    let mut envelope = if line_numbers {
+    let links = operations::links::to_compact_rows(result.links);
+    let links_cols = column_names(&operations::links::LINK_COLS);
+    if line_numbers {
         // Line numbers are contiguous, so state the start once and drop the
         // per-line objects: line i's number is `start_line + i`.
-        let body_lines: Vec<&str> = result.content.split('\n').collect();
-        json!({
-            "start_line": start_num,
-            "lines": body_lines,
-            "links_cols": operations::links::LINK_COLS,
-            "links": rows,
+        GetAnswer::Lines(GetLines {
+            effective_end_line,
+            lines: result.content.split('\n').map(String::from).collect(),
+            links,
+            links_cols,
+            start_line: start_num,
+            total_lines: result.total_lines,
         })
     } else {
-        json!({
-            "content": result.content,
-            "links_cols": operations::links::LINK_COLS,
-            "links": rows,
+        GetAnswer::Content(GetContent {
+            content: result.content,
+            effective_end_line,
+            links,
+            links_cols,
+            total_lines: result.total_lines,
         })
-    };
-    if let Some(obj) = envelope.as_object_mut() {
-        obj.insert(String::from("total_lines"), Value::from(result.total_lines));
-        if let Some(end) = effective_end_line {
-            obj.insert(String::from("effective_end_line"), Value::from(end));
-        }
     }
-    envelope
 }
 
 /// Handle the `identity_create` tool.
@@ -2288,12 +2330,12 @@ fn handle_identity_create(params: &Map<String, Value>) -> Result<Value> {
         use core::fmt::Write as _;
         let _ = writeln!(yaml, "key: {k}");
     }
-    Ok(json!({
-        "identity": identity,
-        "type": author_type,
-        "key": key,
-        "yaml": yaml,
-    }))
+    answer(&IdentityCreated {
+        identity: String::from(identity),
+        key: key.map(String::from),
+        author_type: String::from(author_type),
+        yaml,
+    })
 }
 
 fn handle_lint(
@@ -2318,7 +2360,7 @@ fn handle_ls(
 
     let entries = document::ls(system, base_dir, target, config)?;
 
-    Ok(json!({ "entries": entries }))
+    answer(&LsAnswer { entries })
 }
 
 fn handle_metadata(
@@ -2600,19 +2642,18 @@ fn handle_query(
     let is_file = system.is_file(&target).wait().unwrap_or(false);
     let results = query::query(system, &target, &filter, config)?;
 
-    let compact: Vec<Value> = results
+    let files: Vec<QueryFile> = results
         .iter()
-        .map(|result| query::to_compact_result(result, include_integrity))
+        .map(|result| query_file(result, include_integrity))
         .collect();
-    let page = page_grouped(&compact, "comments", params, spill_cap);
-    let mut envelope = json!({
-        "base_path": query::display_base_path(path_str, is_file),
-        "total": page.total,
-        "comment_cols": query::comment_cols(include_integrity),
-        "results": page.groups,
-    });
-    insert_effective_limit(&mut envelope, page.effective_limit);
-    Ok(envelope)
+    let page = page_grouped(files, params, spill_cap);
+    answer(&QueryPage {
+        base_path: query::display_base_path(path_str, is_file),
+        comment_cols: column_names(query::comment_cols(include_integrity)),
+        effective_limit: page.effective_limit,
+        results: page.groups,
+        total: page.total,
+    })
 }
 
 fn build_query_filter_from_params(
@@ -2715,7 +2756,7 @@ fn handle_react(
 
     let path = base_dir.join(file);
     operations::react(system, &path, cfg, comment_id, emoji, remove)?;
-    Ok(responses::react(emoji, comment_id, remove))
+    answer(&responses::react(emoji, comment_id, remove))
 }
 
 /// Handle the `reply` tool: translate `parent_id` into `reply_to` and
@@ -2865,7 +2906,7 @@ fn handle_sandbox_list(
         .iter()
         .map(|l| sandbox_ops::SandboxListEntry::from_listing(l, &root, false))
         .collect();
-    Ok(json!({ "files": files }))
+    answer(&SandboxListAnswer { files })
 }
 
 fn handle_search(
@@ -2891,7 +2932,7 @@ fn handle_search(
         .scope(scope);
 
     let results = search::search(system, base_dir, &target, &options, config)?;
-    Ok(search_compact_envelope(
+    answer(&search_compact_envelope(
         &results,
         spill_cap,
         options.context_lines > 0,
@@ -2907,29 +2948,40 @@ fn handle_search(
 /// its presence tells the agent to advance `offset` for the rest, and `total`
 /// says how many remain.
 fn search_compact_envelope(
-    results: &search::SearchResults,
+    results: &SearchResults,
     spill_cap: usize,
     with_context: bool,
-) -> Value {
-    let rows: Vec<Value> = results
+) -> SearchPage {
+    let rows: Vec<MatchRow> = results
         .matches
         .iter()
-        .map(|m| search::to_compact_row(m, with_context))
+        .map(|m| {
+            if with_context {
+                MatchRow::WithContext(search::compact_row_with_context(m))
+            } else {
+                MatchRow::Plain(search::compact_row(m))
+            }
+        })
         .collect();
     let (kept, effective_limit) = size_page(rows, spill_cap);
-    let files = search::group_compact(&results.matches[..kept.len()], with_context);
 
-    let mut envelope = json!({
-        "total": results.total,
-        "match_cols": search::match_cols(with_context),
-        "files": files,
-    });
-    if let Some(effective) = effective_limit
-        && let Some(obj) = envelope.as_object_mut()
-    {
-        obj.insert(String::from("effective_limit"), Value::from(effective));
+    let mut files: Vec<SearchFile> = Vec::new();
+    for (m, row) in results.matches.iter().zip(kept) {
+        let path = m.path.display().to_string();
+        match files.last_mut() {
+            Some(file) if file.path == path => file.matches.push(row),
+            _ => files.push(SearchFile {
+                matches: vec![row],
+                path,
+            }),
+        }
     }
-    envelope
+    SearchPage {
+        effective_limit,
+        files,
+        match_cols: column_names(search::match_cols(with_context)),
+        total: results.total,
+    }
 }
 
 /// Trim a page so its emitted size stays under `spill_cap`.
@@ -2941,7 +2993,10 @@ fn search_compact_envelope(
 /// the window carried — the signal to advance `offset` for the rest.
 /// `spill_cap` is a self-consistent byte proxy for the client's token limit,
 /// not an equivalent.
-fn size_page(window: Vec<Value>, spill_cap: usize) -> (Vec<Value>, Option<usize>) {
+fn size_page<T>(window: Vec<T>, spill_cap: usize) -> (Vec<T>, Option<usize>)
+where
+    T: Serialize,
+{
     let kept = rows_within_cap(&window, spill_cap);
     if kept >= window.len() {
         (window, None)
@@ -2954,12 +3009,18 @@ fn size_page(window: Vec<Value>, spill_cap: usize) -> (Vec<Value>, Option<usize>
 
 /// How many leading `rows` fit under `spill_cap`, admitting the first row
 /// unconditionally.
-fn rows_within_cap(rows: &[Value], spill_cap: usize) -> usize {
+fn rows_within_cap<T>(rows: &[T], spill_cap: usize) -> usize
+where
+    T: Serialize,
+{
+    kept_within_cap(rows.iter().map(emitted_len), spill_cap)
+}
+
+fn kept_within_cap(sizes: impl Iterator<Item = usize>, spill_cap: usize) -> usize {
     let budget = spill_cap.saturating_sub(spill_cap / SPILL_MARGIN_DIVISOR);
     let mut running = 0_usize;
     let mut kept = 0_usize;
-    for row in rows {
-        let size = serde_json::to_string(row).map_or(usize::MAX, |s| s.len());
+    for size in sizes {
         if kept > 0 && running.saturating_add(size) > budget {
             break;
         }
@@ -2967,6 +3028,13 @@ fn rows_within_cap(rows: &[Value], spill_cap: usize) -> usize {
         kept = kept.saturating_add(1);
     }
     kept
+}
+
+fn emitted_len<T>(item: &T) -> usize
+where
+    T: Serialize,
+{
+    serde_json::to_string(item).map_or(usize::MAX, |text| text.len())
 }
 
 /// Apply the caller's `offset` / `limit` window to `items`.
@@ -2980,69 +3048,92 @@ fn page_window<T>(items: Vec<T>, params: &Map<String, Value>) -> Vec<T> {
     }
 }
 
-/// Add `effective_limit` to a paged envelope when the size cap trimmed it.
-fn insert_effective_limit(envelope: &mut Value, effective_limit: Option<usize>) {
-    if let Some(effective) = effective_limit
-        && let Some(obj) = envelope.as_object_mut()
-    {
-        obj.insert(String::from("effective_limit"), Value::from(effective));
-    }
-}
-
-/// Page a grouped columnar payload (per-file objects holding positional rows
-/// under `rows_key`) by rows across all groups, then regroup the survivors.
-fn page_grouped(
-    groups: &[Value],
-    rows_key: &str,
+/// Page a grouped columnar payload (per-file groups holding positional rows)
+/// by rows across all groups, then regroup the survivors.
+fn page_grouped<G>(
+    mut heads: Vec<G>,
     params: &Map<String, Value>,
     spill_cap: usize,
-) -> GroupedPage {
+) -> GroupedPage<G>
+where
+    G: RowGroup,
+{
     // Each item is (group index, row); a group without rows is one item
     // so it still lists.
-    let mut items: Vec<(usize, Option<Value>)> = Vec::new();
-    for (index, group) in groups.iter().enumerate() {
-        match group.get(rows_key).and_then(Value::as_array) {
+    let mut items: Vec<(usize, Option<G::Row>)> = Vec::new();
+    for (index, head) in heads.iter_mut().enumerate() {
+        match head.take_rows() {
             Some(rows) if !rows.is_empty() => {
-                items.extend(rows.iter().map(|row| (index, Some(row.clone()))));
+                items.extend(rows.into_iter().map(|row| (index, Some(row))));
             }
             _ => items.push((index, None)),
         }
     }
     let total = items.len();
     let window = page_window(items, params);
-    let sizes: Vec<Value> = window
-        .iter()
-        .map(|(index, row)| row.clone().unwrap_or_else(|| groups[*index].clone()))
-        .collect();
-    let kept = rows_within_cap(&sizes, spill_cap);
+    let sizes = window.iter().map(|(index, row)| {
+        row.as_ref()
+            .map_or_else(|| emitted_len(&heads[*index]), emitted_len)
+    });
+    let kept = kept_within_cap(sizes, spill_cap);
     let effective_limit = (kept < window.len()).then_some(kept);
 
-    let mut paged: Vec<Value> = Vec::new();
+    let mut slots: Vec<Option<G>> = heads.into_iter().map(Some).collect();
+    let mut paged: Vec<G> = Vec::new();
     let mut current: Option<usize> = None;
     for (index, row) in window.into_iter().take(kept) {
         if current != Some(index) {
-            let mut head = groups[index].clone();
-            if let Some(obj) = head.as_object_mut()
-                && obj.contains_key(rows_key)
-            {
-                obj.insert(String::from(rows_key), Value::Array(Vec::new()));
-            }
-            paged.push(head);
+            paged.extend(slots[index].take());
             current = Some(index);
         }
         if let Some(cells) = row
-            && let Some(rows) = paged
-                .last_mut()
-                .and_then(|group| group.get_mut(rows_key))
-                .and_then(Value::as_array_mut)
+            && let Some(group) = paged.last_mut()
         {
-            rows.push(cells);
+            group.push_row(cells);
         }
     }
     GroupedPage {
         effective_limit,
         groups: paged,
         total,
+    }
+}
+
+fn answer<T>(typed: &T) -> Result<Value>
+where
+    T: Serialize,
+{
+    serde_json::to_value(typed).context("serializing the tool answer")
+}
+
+fn column_names(cols: &[&str]) -> Vec<String> {
+    cols.iter().map(|col| String::from(*col)).collect()
+}
+
+fn comment_row(comment: &query::ExpandedComment, include_integrity: bool) -> CommentRow {
+    if include_integrity {
+        CommentRow::WithIntegrity(query::compact_row_with_integrity(comment))
+    } else {
+        CommentRow::Plain(query::compact_row(comment))
+    }
+}
+
+/// One file of a `query` answer: the summary fields stay named, comments
+/// become positional rows, and a summary query carries none.
+fn query_file(result: &QueryResult, include_integrity: bool) -> QueryFile {
+    QueryFile {
+        comment_count: result.comment_count,
+        comments: result.comments.as_ref().map(|comments| {
+            comments
+                .iter()
+                .map(|comment| comment_row(comment, include_integrity))
+                .collect()
+        }),
+        last_activity: result.last_activity,
+        matched_count: result.matched_count,
+        path: result.path.clone(),
+        pending_count: result.pending_count,
+        pending_for: result.pending_for.clone(),
     }
 }
 
@@ -3053,18 +3144,18 @@ fn page_grouped(
 /// result it emitted); an explicit `size` supersedes that inference. The cap
 /// only ever falls — a report can never raise it — and a reported size of 0
 /// is a no-op (nothing meaningful was measured).
-fn handle_report_spill(session: &mut SessionState, params: &Map<String, Value>) -> Value {
+fn handle_report_spill(session: &mut SessionState, params: &Map<String, Value>) -> Result<Value> {
     let explicit = optional_usize(params, "size");
     let reported = explicit.unwrap_or(session.last_response_size);
     let previous_cap = session.spill_cap;
     if reported > 0 {
         session.spill_cap = session.spill_cap.min(reported);
     }
-    json!({
-        "inferred": explicit.is_none(),
-        "previous_cap": previous_cap,
-        "reported_size": reported,
-        "spill_cap": session.spill_cap,
+    answer(&ReportSpillAnswer {
+        inferred: explicit.is_none(),
+        previous_cap,
+        reported_size: reported,
+        spill_cap: session.spill_cap,
     })
 }
 

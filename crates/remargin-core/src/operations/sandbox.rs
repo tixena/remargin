@@ -119,7 +119,7 @@ pub struct SandboxRemoveReport {
 /// A single entry in a `sandbox list` report.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxListEntry {
     pub path: String,
     pub since: String,

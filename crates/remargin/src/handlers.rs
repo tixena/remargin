@@ -753,7 +753,9 @@ pub fn cmd_ack(
             }
         }
     }
-    print_output(sinks, json_mode, &responses::ack(ids, remove))
+    let answer =
+        serde_json::to_value(responses::ack(ids, remove)).context("serializing ack output")?;
+    print_output(sinks, json_mode, &answer)
 }
 
 pub fn cmd_batch(
@@ -781,15 +783,17 @@ pub fn cmd_batch(
 
     // Advisory only: stderr in text mode, the payload in `--json` mode, never the exit code. Every
     // comment is already on disk.
-    let mut result = responses::batch(&outcome.ids);
-    if json_mode {
-        advice::attach_op_notes(&mut result, &outcome.warnings);
+    let notes = if json_mode {
+        outcome.warnings
     } else {
         let text = advice::format_op_text(&outcome.warnings);
         if !text.is_empty() {
             write!(sinks.stderr, "{text}").context("writing advice to stderr")?;
         }
-    }
+        Vec::new()
+    };
+    let result = serde_json::to_value(responses::batch(&outcome.ids, notes))
+        .context("serializing batch output")?;
     print_output(sinks, json_mode, &result)
 }
 
@@ -831,16 +835,18 @@ pub fn cmd_comment(
 
     // Advisory only: stderr in text mode, the payload in `--json` mode, never the exit code. The
     // comment is already on disk.
-    let mut result = responses::comment_created(&new_id);
-    let notes = comment_style::notes(cp.content);
-    if cp.json_mode {
-        advice::attach_notes(&mut result, &notes);
+    let found = comment_style::notes(cp.content);
+    let notes = if cp.json_mode {
+        found
     } else {
-        let text = advice::format_text(&notes);
+        let text = advice::format_text(&found);
         if !text.is_empty() {
             write!(sinks.stderr, "{text}").context("writing advice to stderr")?;
         }
-    }
+        Vec::new()
+    };
+    let result = serde_json::to_value(responses::comment_created(&new_id, notes))
+        .context("serializing comment output")?;
 
     if cp.file == "-" {
         let updated = system.read_to_string(&path).wait()?;
@@ -913,7 +919,9 @@ pub fn cmd_delete(
     let path = resolve_doc_path(system, cwd, file)?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     operations::delete_comments(system, &path, config, &id_refs)?;
-    print_output(sinks, json_mode, &responses::comments_deleted(ids))
+    let answer = serde_json::to_value(responses::comments_deleted(ids))
+        .context("serializing delete output")?;
+    print_output(sinks, json_mode, &answer)
 }
 
 pub fn cmd_edit(
@@ -928,16 +936,18 @@ pub fn cmd_edit(
 
     // Advisory only: stderr in text mode, the payload in `--json` mode, never the exit code. The
     // edit is already on disk.
-    let mut result = responses::comment_edited(p.id);
-    let notes = comment_style::notes(p.content);
-    if p.json_mode {
-        advice::attach_notes(&mut result, &notes);
+    let found = comment_style::notes(p.content);
+    let notes = if p.json_mode {
+        found
     } else {
-        let text = advice::format_text(&notes);
+        let text = advice::format_text(&found);
         if !text.is_empty() {
             write!(sinks.stderr, "{text}").context("writing advice to stderr")?;
         }
-    }
+        Vec::new()
+    };
+    let result = serde_json::to_value(responses::comment_edited(p.id, notes))
+        .context("serializing edit output")?;
 
     print_output(sinks, p.json_mode, &result)
 }
@@ -2356,11 +2366,9 @@ pub fn cmd_react(
         params.emoji,
         params.remove,
     )?;
-    print_output(
-        sinks,
-        params.json_mode,
-        &responses::react(params.emoji, params.id, params.remove),
-    )
+    let answer = serde_json::to_value(responses::react(params.emoji, params.id, params.remove))
+        .context("serializing react output")?;
+    print_output(sinks, params.json_mode, &answer)
 }
 
 /// Render a single registry participant as a JSON object for

@@ -69,7 +69,7 @@ pub struct Link {
 /// `count` is `lines.len()` and `path` is derivable from `target`
 /// (verbatim when it has an extension, else `target + ".md"`), so
 /// neither is carried.
-#[model_schema(name = "CompactLinkRow")]
+#[model_schema(name = "CompactLinkRow", enable = ["jsonschema"])]
 pub type CompactLinkRow = (Option<String>, Vec<usize>, String, Option<String>);
 
 /// Schema anchor for the compact links payload.

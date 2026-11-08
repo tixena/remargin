@@ -17,6 +17,7 @@ use core::fmt::Write as _;
 
 use serde::Serialize;
 use serde_json::{Value, json};
+use tixschema::model_schema;
 
 /// One advisory note about authored content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,6 +39,46 @@ pub struct Advice {
 pub struct OpAdvice {
     pub note: Advice,
     pub op: usize,
+}
+
+/// One advisory note as an answer's `warnings` carries it.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct Warning {
+    /// 1-indexed.
+    pub line: usize,
+    pub message: String,
+}
+
+/// One advisory note of a batch, with the index of the operation that earned
+/// it.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct OpWarning {
+    pub line: usize,
+    pub message: String,
+    pub op: usize,
+}
+
+impl From<Advice> for Warning {
+    fn from(note: Advice) -> Self {
+        Self {
+            line: note.line,
+            message: note.message,
+        }
+    }
+}
+
+impl From<OpAdvice> for OpWarning {
+    fn from(entry: OpAdvice) -> Self {
+        Self {
+            line: entry.note.line,
+            message: entry.note.message,
+            op: entry.op,
+        }
+    }
 }
 
 impl OpAdvice {
