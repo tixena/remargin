@@ -372,6 +372,30 @@ impl VerifyFailure {
         out
     }
 
+    /// The typed form of [`Self::to_json`].
+    #[must_use]
+    pub fn payload(&self) -> VerifyFailurePayload {
+        let failures = self
+            .failures
+            .iter()
+            .map(|row| VerifyFailureRow {
+                checksum_ok: row.checksum_ok,
+                id: row.id.clone(),
+                recipients: row.recipients.as_str().to_owned(),
+                signature: row.signature.as_str().to_owned(),
+            })
+            .collect();
+        VerifyFailurePayload {
+            elapsed_ms: None,
+            error_kind: VerifyErrorKind::VerifyFailed,
+            failures,
+            headline: self.headline(),
+            hint: self.hint(),
+            mode: self.mode.as_str().to_owned(),
+            path: self.path.display().to_string(),
+        }
+    }
+
     /// Per-failure summary, grouped by signature status, capped at
     /// [`SUMMARY_LINE_LIMIT`] lines with an "and N more" tail when
     /// truncated.
@@ -414,42 +438,23 @@ impl VerifyFailure {
     /// errors.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        let failures = self
-            .failures
-            .iter()
-            .map(|row| VerifyFailureRow {
-                checksum_ok: row.checksum_ok,
-                id: row.id.clone(),
-                recipients: row.recipients.as_str().to_owned(),
-                signature: row.signature.as_str().to_owned(),
-            })
-            .collect();
-        serde_json::to_value(VerifyFailurePayload {
-            elapsed_ms: None,
-            error_kind: VerifyErrorKind::VerifyFailed,
-            failures,
-            headline: self.headline(),
-            hint: self.hint(),
-            mode: self.mode.as_str().to_owned(),
-            path: self.path.display().to_string(),
-        })
-        .unwrap_or(Value::Null)
+        serde_json::to_value(self.payload()).unwrap_or(Value::Null)
     }
 }
 
 /// `error_kind` discriminant for the verify-gate refusal payload.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub enum VerifyErrorKind {
     #[serde(rename = "verify_failed")]
     VerifyFailed,
 }
 
 /// One failing row in a [`VerifyFailure`] JSON payload.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct VerifyFailureRow {
     pub checksum_ok: bool,
     pub id: String,
@@ -458,9 +463,9 @@ pub struct VerifyFailureRow {
 }
 
 /// JSON projection of a [`VerifyFailure`] verify-gate refusal.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct VerifyFailurePayload {
     /// Milliseconds the call took, written by the io layer on the way out. Part
     /// of the contract because the plugin parses this payload strictly.
@@ -527,22 +532,35 @@ pub struct SubsetGateFailure {
     pub path: PathBuf,
 }
 
+/// `error_kind` discriminant for the subset-gate refusal payload.
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+#[model_schema(enable = ["jsonschema"])]
+pub enum SubsetGateErrorKind {
+    #[serde(rename = "subset_gate_failed")]
+    SubsetGateFailed,
+}
+
 /// JSON form of one introduced [`Anomaly`].
-#[derive(Serialize)]
-struct Introduced {
-    id: String,
-    kind: &'static str,
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+#[model_schema(enable = ["jsonschema"])]
+pub struct IntroducedAnomaly {
+    pub id: String,
+    pub kind: String,
 }
 
 /// JSON form of a [`SubsetGateFailure`].
-#[derive(Serialize)]
-struct SubsetGate {
-    error_kind: &'static str,
-    headline: String,
-    hint: String,
-    introduced: Vec<Introduced>,
-    mode: &'static str,
-    path: String,
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+#[model_schema(enable = ["jsonschema"])]
+pub struct SubsetGateFailurePayload {
+    pub error_kind: SubsetGateErrorKind,
+    pub headline: String,
+    pub hint: String,
+    pub introduced: Vec<IntroducedAnomaly>,
+    pub mode: String,
+    pub path: String,
 }
 
 impl SubsetGateFailure {
@@ -577,24 +595,23 @@ impl SubsetGateFailure {
 
     /// JSON shape for `--json` / MCP tool errors.
     #[must_use]
-    pub fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> SubsetGateFailurePayload {
         let introduced = self
             .introduced
             .iter()
-            .map(|a| Introduced {
+            .map(|a| IntroducedAnomaly {
                 id: a.id.clone(),
-                kind: a.kind.as_str(),
+                kind: a.kind.as_str().to_owned(),
             })
             .collect();
-        serde_json::to_value(SubsetGate {
-            error_kind: "subset_gate_failed",
+        SubsetGateFailurePayload {
+            error_kind: SubsetGateErrorKind::SubsetGateFailed,
             headline: self.headline(),
             hint: self.hint(),
             introduced,
-            mode: self.mode.as_str(),
+            mode: self.mode.as_str().to_owned(),
             path: self.path.display().to_string(),
-        })
-        .unwrap_or(Value::Null)
+        }
     }
 }
 

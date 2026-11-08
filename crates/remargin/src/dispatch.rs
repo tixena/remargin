@@ -515,7 +515,9 @@ pub fn run(cli: &Cli, system: &dyn System, cwd: &Path, sinks: &mut IoSinks<'_>) 
                 let _ = writeln!(sinks.stderr, "{reason}");
             } else if json_mode {
                 let payload = subset_failure
-                    .map(operations::verify::SubsetGateFailure::to_json)
+                    .map(|failure| {
+                        serde_json::to_value(failure.to_json()).unwrap_or(serde_json::Value::Null)
+                    })
                     .or_else(|| verify_failure.map(operations::verify::VerifyFailure::to_json))
                     .unwrap_or_else(|| json!({ "error": err_msg }));
                 let error_json = inject_elapsed_ms(&payload);

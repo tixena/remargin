@@ -5,6 +5,7 @@
 
 pub mod answers;
 pub mod args;
+pub mod errors;
 
 #[cfg(test)]
 mod tests;
@@ -56,6 +57,7 @@ use self::answers::{
     LsAnswer, MatchRow, QueryFile, QueryPage, ReportSpillAnswer, SandboxListAnswer, SearchFile,
     SearchPage,
 };
+use self::errors::HumanIdentityRejected;
 
 const INVALID_PARAMS: i64 = -32602;
 
@@ -121,18 +123,6 @@ struct ToolDesc {
 #[non_exhaustive]
 pub struct McpIdentityFlagRejected {
     pub flag: String,
-    pub tool: String,
-}
-
-/// Structured MCP human-identity rejection.
-///
-/// Hosts branch on `error_kind == "mcp_human_identity_rejected"` (via
-/// [`McpHumanIdentityRejected::to_json`]) to detect this class without
-/// regex-matching the free-form message.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct McpHumanIdentityRejected {
-    pub identity: String,
     pub tool: String,
 }
 
@@ -248,31 +238,6 @@ impl McpIdentityFlagRejected {
             "error_kind": "mcp_identity_flag_rejected",
             "flag": self.flag,
             "headline": self.headline(),
-            "tool": self.tool,
-        })
-    }
-}
-
-impl McpHumanIdentityRejected {
-    /// One-line plain-English summary carrying the recovery path.
-    #[must_use]
-    pub fn headline(&self) -> String {
-        format!(
-            "MCP tool '{}' refused: this server resolved to '{}', a human identity, and an \
-             agent must not act as a human. Ask the user for permission to create an agent \
-             identity for this realm, then call 'identity_create' to render the \
-             `.remargin.yaml` block for them.",
-            self.tool, self.identity,
-        )
-    }
-
-    /// JSON shape used by [`tool_result_error_json`].
-    #[must_use]
-    pub fn to_json(&self) -> Value {
-        json!({
-            "error_kind": "mcp_human_identity_rejected",
-            "headline": self.headline(),
-            "identity": self.identity,
             "tool": self.tool,
         })
     }
@@ -1689,14 +1654,11 @@ fn dispatch_tool(
         && !HUMAN_IDENTITY_EXEMPT_TOOLS.contains(&tool_name)
     {
         return tool_result_error_json(
-            &McpHumanIdentityRejected {
-                identity: config
-                    .identity
-                    .clone()
-                    .unwrap_or_else(|| String::from("<unknown>")),
-                tool: String::from(tool_name),
-            }
-            .to_json(),
+            &serde_json::to_value(HumanIdentityRejected::new(
+                config.identity.as_deref().unwrap_or("<unknown>"),
+                tool_name,
+            ))
+            .unwrap_or(Value::Null),
         );
     }
 
@@ -1770,7 +1732,7 @@ fn dispatch_tool(
         }
         Err(err) => err
             .downcast_ref::<operations::verify::SubsetGateFailure>()
-            .map(operations::verify::SubsetGateFailure::to_json)
+            .and_then(|failure| serde_json::to_value(failure.to_json()).ok())
             .or_else(|| {
                 err.downcast_ref::<operations::verify::VerifyFailure>()
                     .map(operations::verify::VerifyFailure::to_json)
