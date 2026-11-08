@@ -26,8 +26,9 @@ use anyhow::{Context as _, Result};
 use os_shim::System;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
+use tixschema::model_schema;
 
-use crate::advice::OpAdvice;
+use crate::advice::{OpAdvice, op_advice_schema};
 use crate::comment_style;
 use crate::config::{Mode, ResolvedConfig};
 use crate::document::allowlist;
@@ -36,8 +37,10 @@ use crate::operations::projections::{self, ProjectBatchOp, ProjectCommentParams}
 use crate::operations::sign::SignSelection;
 use crate::operations::verify::{Anomaly, VerifyReport, anomalies_for_doc, verify_document};
 use crate::parser::{self, ParsedDocument};
-use crate::permissions::claude_sync::rule_shape::OverlapKind;
-use crate::permissions::restrict::{RestrictArgs, RestrictEntryProjection};
+use crate::permissions::claude_sync::rule_shape::{OverlapKind, overlap_kind_schema};
+use crate::permissions::restrict::{
+    RestrictArgs, RestrictEntryProjection, restrict_entry_projection_schema,
+};
 use crate::permissions::unprotect::UnprotectArgs;
 use crate::wait::Wait as _;
 
@@ -48,6 +51,7 @@ use crate::wait::Wait as _;
 /// the CLI / MCP layer); `plan` produces JSON directly from
 /// [`PlanReport`] so we mirror the fields here with the field names the
 /// plan payload documents.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanVerifyRow {
@@ -58,6 +62,7 @@ pub struct PlanVerifyRow {
 }
 
 /// Serialization-friendly mirror of [`VerifyReport`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanVerifyReport {
@@ -85,6 +90,7 @@ impl PlanVerifyReport {
 }
 
 /// One `(comment_id, anomaly_kind)` pair surfaced by [`PlanSubsetGate`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanAnomaly {
@@ -99,6 +105,7 @@ pub struct PlanAnomaly {
 /// `plan` reports and live `commit_with_verify` errors render
 /// identically. `would_commit` is `false` whenever this field is
 /// `Some`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanSubsetGate {
@@ -147,6 +154,7 @@ impl PlanSubsetGate {
 /// - `preserved`: present in both with an unchanged content checksum.
 ///
 /// Newly-created comment ids (present only in `after`) land in `added`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct CommentDiff {
@@ -158,10 +166,13 @@ pub struct CommentDiff {
 
 /// Identity block for a plan report. The core projection helper treats it as opaque data the
 /// caller owns.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanIdentity {
+    #[model_schema_prop(nullable)]
     pub author_type: Option<String>,
+    #[model_schema_prop(nullable)]
     pub name: Option<String>,
     /// `false` means the op would still commit under the active mode, but unsigned.
     pub would_sign: bool,
@@ -197,6 +208,7 @@ impl PlanIdentity {
 /// Populated by [`project_report`] for the in-memory diff fields;
 /// per-op wiring layers on top to populate [`PlanReport::identity`]
 /// and any op-specific metadata.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanReport {
@@ -224,6 +236,7 @@ pub struct PlanReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub purge_dir_diff: Option<PurgeDirDiff>,
     /// `None` when the projection would commit cleanly.
+    #[model_schema_prop(nullable)]
     pub reject_reason: Option<String>,
     /// Set alongside `reject_reason` when the op would introduce new anomalies; `None` when the
     /// refusal came from elsewhere.
@@ -250,6 +263,7 @@ pub struct PlanReport {
 /// every file, every entry that would be added vs. left alone, and
 /// every detectable conflict, so callers can preview the full mutation
 /// before committing.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct ConfigPlanDiff {
@@ -267,13 +281,16 @@ pub struct ConfigPlanDiff {
 
 /// Projection of the `<anchor>/.remargin.yaml` write performed by
 /// `restrict`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct RemarginYamlDiff {
     pub entry_action: EntryAction,
     pub path: PathBuf,
     /// The on-disk entry for this path; `None` when none matches.
+    #[model_schema_prop(nullable)]
     pub previous_entry: Option<RestrictEntryProjection>,
+    #[model_schema_prop(nullable)]
     pub projected_entry: Option<RestrictEntryProjection>,
     pub will_be_created: bool,
 }
@@ -282,6 +299,7 @@ pub struct RemarginYamlDiff {
 /// (`.claude/settings.local.json` for the project scope or
 /// `~/.claude/settings.json` for the user scope) that
 /// `restrict` would write into.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SettingsFileDiff {
@@ -294,6 +312,7 @@ pub struct SettingsFileDiff {
 }
 
 /// Projection of `<anchor>/.claude/.remargin-restrictions.json`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SidecarDiff {
@@ -308,6 +327,7 @@ pub struct SidecarDiff {
 /// not flip `would_commit` to false. Callers decide whether to apply
 /// the projection anyway. Strict / fail-closed modes can branch on
 /// the variant in a wrapper.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -333,6 +353,7 @@ pub enum ConfigConflict {
 
 /// What [`RemarginYamlDiff`] / [`SidecarDiff`] would do to its target
 /// entry. Mirrors a write-versus-skip decision.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -353,6 +374,7 @@ pub enum EntryAction {
 /// every entry that would be removed vs. left alone, and every
 /// detectable drift conflict, so callers can preview the full
 /// reversal before committing.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectConfigDiff {
@@ -371,12 +393,14 @@ pub struct UnprotectConfigDiff {
 /// Projection of the `<anchor>/.remargin.yaml` write performed by
 /// `unprotect` — mirror of [`RemarginYamlDiff`] for the reverse
 /// direction.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectYamlDiff {
     pub entry_action: UnprotectEntryAction,
     pub path: PathBuf,
     /// `None` when no existing entry matches the path.
+    #[model_schema_prop(nullable)]
     pub previous_entry: Option<RestrictEntryProjection>,
 }
 
@@ -387,6 +411,7 @@ pub struct UnprotectYamlDiff {
 /// the user-scope `~/.claude/settings.json`. The actual list of
 /// targets is sourced from the sidecar's `added_to_files` array
 /// captured at apply time.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectSettingsDiff {
@@ -399,6 +424,7 @@ pub struct UnprotectSettingsDiff {
 
 /// Projection of `<anchor>/.claude/.remargin-restrictions.json` —
 /// mirror of [`SidecarDiff`] for the reverse direction.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct UnprotectSidecarDiff {
@@ -408,6 +434,7 @@ pub struct UnprotectSidecarDiff {
 
 /// What [`UnprotectYamlDiff`] / [`UnprotectSidecarDiff`] would do to
 /// its target entry. Mirrors a remove-versus-skip decision.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -422,6 +449,7 @@ pub enum UnprotectEntryAction {
 /// All variants are advisory — a non-empty `conflicts` array does
 /// not flip `would_commit` to false. Callers decide whether to
 /// apply the projection anyway.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -454,6 +482,7 @@ pub enum UnprotectConflict {
 /// stay vacuously empty because each per-file projection here carries
 /// its own counters; the directory case has no single before/after
 /// document to diff against.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PurgeDirDiff {
@@ -464,6 +493,7 @@ pub struct PurgeDirDiff {
 }
 
 /// One per-file outcome inside a [`PurgeDirDiff`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PurgeDirFileDiff {
@@ -480,6 +510,7 @@ pub struct PurgeDirFileDiff {
 /// [`PurgeDirDiff`]. Mirrors [`PurgeBulkResult`]'s three buckets.
 ///
 /// [`PurgeBulkResult`]: crate::operations::purge::PurgeBulkResult
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -504,6 +535,7 @@ pub enum PurgeDirFileOutcome {
 /// (`MvExistence`, `MvState`) so the canonical JSON output stays a
 /// flat object — every key visible to consumers stays unchanged —
 /// while no single struct holds more than three bools.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvDiff {
@@ -520,6 +552,7 @@ pub struct MvDiff {
 
 /// What `src` and `dst` resolve to on disk, plus whether the source
 /// is a directory. Flattened into [`MvDiff`]'s JSON output.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvExistence {
@@ -530,6 +563,7 @@ pub struct MvExistence {
 
 /// Terminal-no-work-needed indicators for the move. Flattened into
 /// [`MvDiff`]'s JSON output.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvState {
@@ -542,6 +576,7 @@ pub struct MvState {
 /// Projection of the `cp` op — what a live `cp` would do.
 ///
 /// Emitted in [`PlanReport::cp_diff`] when `op = cp`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct CpDiff {

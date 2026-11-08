@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use serde::Serialize;
+use tixschema::model_schema;
 
 use crate::config::{CONFIG_FILENAME, Config};
 use crate::wait::Wait as _;
@@ -22,6 +23,7 @@ pub const DEFAULT_PROMPT_BODY: &str =
 ///
 /// `source` is `None` and `is_default` is `true` only when the walk found no `system_prompt:`
 /// block at all.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct ResolvedSystemPrompt {
@@ -30,8 +32,10 @@ pub struct ResolvedSystemPrompt {
     pub name: String,
     pub prompt: String,
     /// `None` means the caller's default runner.
+    #[model_schema_prop(nullable)]
     pub runner: Option<String>,
     /// `None` for the fallback.
+    #[model_schema_prop(nullable)]
     pub source: Option<PathBuf>,
 }
 

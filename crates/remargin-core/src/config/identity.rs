@@ -18,6 +18,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 
 use serde::Serialize;
+use tixschema::model_schema;
 
 use crate::config::registry::{Registry, RegistryParticipantStatus};
 use crate::config::{Config, Mode, ResolvedConfig, parse_author_type, resolve_key_path};
@@ -121,6 +122,7 @@ impl fmt::Display for IdentitySource {
 /// `found: false` is a soft miss (no config + empty flags, or walk
 /// exhausted) — every other resolver error propagates as `Err` from
 /// [`resolve_identity_report`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct IdentityReport {

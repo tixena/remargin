@@ -80,7 +80,9 @@ impl RecipientStatus {
 /// Per-comment signature resolution status. Produced by
 /// [`verify_document`] and rendered verbatim in the `signature` column of
 /// `remargin verify` / the MCP `verify` tool.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SignatureStatus {
     /// Present, but matching none of the author's active pubkeys.
@@ -129,40 +131,60 @@ pub struct VerifyReport {
     pub results: Vec<RowStatus>,
 }
 
-/// JSON form of a row's recipient status.
+/// A row's recipient status.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
-enum Recipients {
+#[non_exhaustive]
+pub enum Recipients {
     Ok,
     Unknown { unresolved: Vec<String> },
 }
 
-/// JSON form of one [`RowStatus`].
+/// One comment's row in a `verify` answer.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Serialize)]
-struct VerifyRow {
-    author: String,
-    checksum_ok: bool,
-    id: String,
-    line: usize,
-    recipients: Recipients,
-    signature: &'static str,
+#[non_exhaustive]
+pub struct VerifyRow {
+    pub author: String,
+    pub checksum_ok: bool,
+    pub id: String,
+    pub line: usize,
+    pub recipients: Recipients,
+    pub signature: SignatureStatus,
 }
 
-/// JSON form of a [`VerifyReport`].
+/// What `verify` answers for a file.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Serialize)]
-struct VerifyReportView {
-    ok: bool,
-    results: Vec<VerifyRow>,
+#[non_exhaustive]
+pub struct VerifyReportView {
+    pub ok: bool,
+    pub results: Vec<VerifyRow>,
+}
+
+/// What `verify` answers: a file's report, or a folder's failures.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum VerifyAnswer {
+    File(VerifyReportView),
+    Folder(FolderVerifySummaryView),
 }
 
 impl VerifyReport {
     #[must_use]
-    pub fn to_json(&self) -> Value {
-        serde_json::to_value(VerifyReportView {
+    pub fn answer(&self) -> VerifyReportView {
+        VerifyReportView {
             ok: self.ok,
             results: verify_rows_json(self),
-        })
-        .unwrap_or(Value::Null)
+        }
+    }
+
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        serde_json::to_value(self.answer()).unwrap_or(Value::Null)
     }
 }
 
@@ -193,25 +215,29 @@ pub struct FolderVerifyReport {
 }
 
 /// One failing file in the folder summary: its not-clean rows, or the read or parse error.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Serialize)]
-struct VerifyFailureFile {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    bad: Vec<VerifyRow>,
+#[non_exhaustive]
+pub struct VerifyFailureFile {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bad: Vec<VerifyRow>,
     /// `None` for a file that failed to read or parse.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    comments: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub path: String,
 }
 
-/// JSON form of a [`FolderVerifyReport`] that enumerates only the failing files.
+/// What `verify` answers for a folder: only the failing files are enumerated.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Serialize)]
-struct FolderVerifySummaryView {
-    failures: Vec<VerifyFailureFile>,
-    files_passed: usize,
-    files_verified: usize,
-    ok: bool,
+#[non_exhaustive]
+pub struct FolderVerifySummaryView {
+    pub failures: Vec<VerifyFailureFile>,
+    pub files_passed: usize,
+    pub files_verified: usize,
+    pub ok: bool,
 }
 
 impl FolderVerifyReport {
@@ -222,7 +248,7 @@ impl FolderVerifyReport {
     /// read/parse carries `error`. Keeps whole-vault directory verify
     /// within the MCP token budget.
     #[must_use]
-    pub fn to_json(&self) -> Value {
+    pub fn answer(&self) -> FolderVerifySummaryView {
         let files_verified = self.files.len();
         let files_passed = self
             .files
@@ -255,13 +281,17 @@ impl FolderVerifyReport {
             })
             .collect();
 
-        serde_json::to_value(FolderVerifySummaryView {
+        FolderVerifySummaryView {
             failures,
             files_passed,
             files_verified,
             ok: self.ok,
-        })
-        .unwrap_or(Value::Null)
+        }
+    }
+
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        serde_json::to_value(self.answer()).unwrap_or(Value::Null)
     }
 }
 
@@ -627,7 +657,7 @@ fn row_to_json(row: &RowStatus) -> VerifyRow {
                 unresolved: bad.clone(),
             },
         },
-        signature: row.signature.as_str(),
+        signature: row.signature,
     }
 }
 

@@ -14,11 +14,14 @@
 //! `/**` as the recursive-everything sentinel and cross-tool pairs kept
 //! distinct.
 
+use tixschema::model_schema;
+
 /// Relationship between a projected deny and an existing allow.
 ///
 /// Surfaced on
 /// [`crate::operations::plan::ConfigConflict::AllowDenyOverlap`] so
 /// the CLI / MCP can render a kind-specific message.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

@@ -39,7 +39,8 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 use os_shim::System;
-use serde_json::{Value, json};
+use serde::Serialize;
+use tixschema::model_schema;
 
 use crate::config::ResolvedConfig;
 use crate::crypto::{compute_checksum, compute_signature};
@@ -67,7 +68,8 @@ pub enum SignSelection {
 
 /// One entry in [`SignResult::signed`] — a comment the op added a
 /// signature to.
-#[derive(Debug, Clone)]
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SignedEntry {
     pub id: String,
@@ -76,7 +78,8 @@ pub struct SignedEntry {
 }
 
 /// One entry in [`SignResult::skipped`] — a comment the op left alone.
-#[derive(Debug, Clone)]
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SkippedEntry {
     pub id: String,
@@ -89,7 +92,8 @@ pub struct SkippedEntry {
 /// Both lists are empty when the op selected no candidates (for example
 /// `--all-mine` on a fully signed document); the caller renders the
 /// combined shape without branching.
-#[derive(Debug, Clone, Default)]
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Clone, Default, Serialize)]
 #[non_exhaustive]
 pub struct SignResult {
     /// Set only under [`SignOptions::repair_checksum`], for comments whose stored checksum was
@@ -99,38 +103,11 @@ pub struct SignResult {
     pub skipped: Vec<SkippedEntry>,
 }
 
-impl SignResult {
-    #[must_use]
-    pub fn to_json(&self) -> Value {
-        let signed: Vec<Value> = self
-            .signed
-            .iter()
-            .map(|e| json!({ "id": e.id, "ts": e.ts }))
-            .collect();
-        let skipped: Vec<Value> = self
-            .skipped
-            .iter()
-            .map(|e| json!({ "id": e.id, "reason": e.reason }))
-            .collect();
-        let repaired: Vec<Value> = self
-            .repaired
-            .iter()
-            .map(|e| {
-                json!({
-                    "id": e.id,
-                    "old_checksum": e.old_checksum,
-                    "new_checksum": e.new_checksum,
-                })
-            })
-            .collect();
-        json!({ "repaired": repaired, "signed": signed, "skipped": skipped })
-    }
-}
-
 /// One entry in [`SignResult::repaired`] — a comment whose stored
 /// checksum the op recomputed from the current content because the
 /// caller passed `--repair-checksum`.
-#[derive(Debug, Clone)]
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct RepairedChecksumEntry {
     pub id: String,

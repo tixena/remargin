@@ -19,8 +19,9 @@ use core::mem;
 use anyhow::{Context as _, Result, bail};
 use os_shim::bucket::Condition;
 use os_shim::{System, WalkEntry};
-use serde_json::{Value as JsonValue, json};
+use serde::Serialize;
 use serde_yaml::Value;
+use tixschema::model_schema;
 
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
@@ -38,13 +39,63 @@ pub struct PurgeResult {
     pub comments_removed: usize,
 }
 
+/// What `purge` answers for one file.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct PurgeFileAnswer {
+    pub attachments_cleaned: usize,
+    pub comments_removed: usize,
+}
+
+/// One file a directory purge cleaned.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct PurgedFile {
+    pub attachments_cleaned: usize,
+    pub comments_removed: usize,
+    pub path: String,
+}
+
+/// One file a directory purge refused.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct PurgeFailure {
+    pub path: String,
+    pub reason: String,
+}
+
+/// What `purge` answers for a directory.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct PurgeDirAnswer {
+    pub attachments_cleaned: usize,
+    pub comments_removed: usize,
+    pub failed: Vec<PurgeFailure>,
+    pub purged: Vec<PurgedFile>,
+    pub skipped: Vec<String>,
+}
+
+/// What `purge` answers: the counts of one file, or the per-file report of a directory.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum PurgeAnswer {
+    Directory(PurgeDirAnswer),
+    File(PurgeFileAnswer),
+}
+
 impl PurgeResult {
     #[must_use]
-    pub fn to_json(&self) -> JsonValue {
-        json!({
-            "comments_removed": self.comments_removed,
-            "attachments_cleaned": self.attachments_cleaned,
-        })
+    pub const fn answer(&self) -> PurgeFileAnswer {
+        PurgeFileAnswer {
+            attachments_cleaned: self.attachments_cleaned,
+            comments_removed: self.comments_removed,
+        }
     }
 }
 
@@ -67,6 +118,36 @@ pub struct PurgeBulkResult {
 }
 
 impl PurgeBulkResult {
+    /// `base_dir` is stripped from each path so the answer uses caller-friendly relative paths.
+    #[must_use]
+    pub fn answer(&self, base_dir: &Path) -> PurgeDirAnswer {
+        PurgeDirAnswer {
+            attachments_cleaned: self.attachments_cleaned_total(),
+            comments_removed: self.comments_removed_total(),
+            failed: self
+                .failed
+                .iter()
+                .map(|f| PurgeFailure {
+                    path: strip_prefix_display(&f.path, base_dir),
+                    reason: f.reason.clone(),
+                })
+                .collect(),
+            purged: self
+                .purged
+                .iter()
+                .map(|f| PurgedFile {
+                    attachments_cleaned: f.attachments_cleaned,
+                    comments_removed: f.comments_removed,
+                    path: strip_prefix_display(&f.path, base_dir),
+                })
+                .collect(),
+            skipped: self
+                .skipped
+                .iter()
+                .map(|p| strip_prefix_display(p, base_dir))
+                .collect(),
+        }
+    }
     /// Sum of per-file `attachments_cleaned` across every entry in `purged`.
     #[must_use]
     pub fn attachments_cleaned_total(&self) -> usize {
@@ -77,46 +158,6 @@ impl PurgeBulkResult {
     #[must_use]
     pub fn comments_removed_total(&self) -> usize {
         self.purged.iter().map(|f| f.comments_removed).sum()
-    }
-
-    /// Render the result as the canonical JSON shape used by both the
-    /// CLI and MCP adapters. `base_dir` is stripped from each path so
-    /// the response uses caller-friendly relative paths.
-    #[must_use]
-    pub fn to_json(&self, base_dir: &Path) -> JsonValue {
-        let purged: Vec<JsonValue> = self
-            .purged
-            .iter()
-            .map(|f| {
-                json!({
-                    "path": strip_prefix_display(&f.path, base_dir),
-                    "comments_removed": f.comments_removed,
-                    "attachments_cleaned": f.attachments_cleaned,
-                })
-            })
-            .collect();
-        let skipped: Vec<String> = self
-            .skipped
-            .iter()
-            .map(|p| strip_prefix_display(p, base_dir))
-            .collect();
-        let failed: Vec<JsonValue> = self
-            .failed
-            .iter()
-            .map(|f| {
-                json!({
-                    "path": strip_prefix_display(&f.path, base_dir),
-                    "reason": f.reason,
-                })
-            })
-            .collect();
-        json!({
-            "purged": purged,
-            "skipped": skipped,
-            "failed": failed,
-            "comments_removed": self.comments_removed_total(),
-            "attachments_cleaned": self.attachments_cleaned_total(),
-        })
     }
 }
 

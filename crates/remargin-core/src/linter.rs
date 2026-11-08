@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, anyhow};
 use os_shim::System;
 use serde::Serialize;
+use tixschema::model_schema;
 
 use crate::config::permissions::resolve::lint_permissions_in_parents;
 use crate::config::{Mode, ResolvedConfig, load_registry, resolve_mode};
@@ -32,6 +33,7 @@ pub struct LintError {
 /// Per-doc serialised view of a [`LintError`].
 ///
 /// Shared by the CLI's `--json` mode and the MCP `lint` tool result.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LintErrorView {
@@ -44,7 +46,7 @@ pub struct LintErrorView {
 ///
 /// Structural findings AND permissions-config findings discovered by
 /// walking parents from the doc's directory. Consumers can render to
-/// text or JSON; see [`LintReport::to_json`] and
+/// text or JSON; see [`LintReport::answer`] and
 /// [`LintReport::format_text`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -59,19 +61,43 @@ pub struct LintReport {
     pub recipients: Vec<LintErrorView>,
 }
 
+/// What `lint` answers.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct LintAnswer {
+    pub errors: Vec<LintErrorView>,
+    pub ok: bool,
+    pub permissions: Vec<PermissionsLintErrorView>,
+    pub recipients: Vec<LintErrorView>,
+}
+
 /// Per-config serialised view of a [`crate::config::permissions::resolve::PermissionsLintError`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PermissionsLintErrorView {
     /// 1-indexed; `None` when `serde_yaml` gave no location.
+    #[model_schema_prop(nullable)]
     pub column: Option<usize>,
     /// 1-indexed; `None` when `serde_yaml` gave no location.
+    #[model_schema_prop(nullable)]
     pub line: Option<usize>,
     pub message: String,
     pub source_file: PathBuf,
 }
 
 impl LintReport {
+    #[must_use]
+    pub fn answer(&self) -> LintAnswer {
+        LintAnswer {
+            errors: self.errors.clone(),
+            ok: self.is_clean(),
+            permissions: self.permissions.clone(),
+            recipients: self.recipients.clone(),
+        }
+    }
+
     /// Render the report as the human-facing CLI text.
     ///
     /// Returns the "no errors" placeholder when clean.
@@ -108,15 +134,9 @@ impl LintReport {
         self.errors.is_empty() && self.permissions.is_empty() && self.recipients.is_empty()
     }
 
-    /// Render the report as the canonical `lint` JSON payload.
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "errors": self.errors,
-            "ok": self.is_clean(),
-            "permissions": self.permissions,
-            "recipients": self.recipients,
-        })
+        serde_json::to_value(self.answer()).unwrap_or(serde_json::Value::Null)
     }
 }
 

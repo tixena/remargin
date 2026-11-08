@@ -38,7 +38,7 @@ use crate::operations::mv as mv_op;
 use crate::operations::plan as plan_ops;
 use crate::operations::projections;
 use crate::operations::prompt as prompt_ops;
-use crate::operations::purge;
+use crate::operations::purge::{self, PurgeAnswer};
 use crate::operations::query::{self, QueryFilter, QueryResult};
 use crate::operations::replace;
 use crate::operations::sandbox as sandbox_ops;
@@ -2308,7 +2308,7 @@ fn handle_lint(
 ) -> Result<Value> {
     let file = required_str(params, "file")?;
     let path = base_dir.join(file);
-    Ok(linter::lint_doc(system, &path, config)?.to_json())
+    answer(&linter::lint_doc(system, &path, config)?.answer())
 }
 
 fn handle_ls(
@@ -2445,7 +2445,7 @@ fn handle_plan(
     };
 
     let report = plan_ops::dispatch(system, base_dir, cfg, &request)?;
-    serde_json::to_value(&report).context("serializing plan report")
+    answer(&report)
 }
 
 /// Parse `src`, `dst`, and `force` from a plan-tool param map.
@@ -2511,7 +2511,7 @@ fn handle_prompt_resolve(
         base_dir.join(candidate)
     };
     let resolved = resolve_system_prompt(system, &absolute)?;
-    serde_json::to_value(&resolved).context("serializing prompt_resolve output")
+    answer(&resolved)
 }
 
 fn resolve_folder_param(base_dir: &Path, params: &Map<String, Value>) -> PathBuf {
@@ -2536,7 +2536,7 @@ fn handle_prompt_set(
     let runner = optional_str(params, "runner");
     let cfg = config;
     let outcome = prompt_ops::set(system, &folder, Some(name), prompt, runner, cfg)?;
-    serde_json::to_value(&outcome).context("serializing prompt_set output")
+    answer(&outcome)
 }
 
 fn handle_prompt_delete(
@@ -2548,7 +2548,7 @@ fn handle_prompt_delete(
     let folder = resolve_folder_param(base_dir, params);
     let cfg = config;
     let outcome = prompt_ops::delete(system, &folder, cfg)?;
-    serde_json::to_value(&outcome).context("serializing prompt_delete output")
+    answer(&outcome)
 }
 
 fn handle_prompt_list(
@@ -2558,9 +2558,7 @@ fn handle_prompt_list(
 ) -> Result<Value> {
     let folder = resolve_folder_param(base_dir, params);
     let entries = prompt_ops::list(system, &folder)?;
-    let entries_value =
-        serde_json::to_value(&entries).context("serializing prompt_list entries")?;
-    Ok(json!({ "entries": entries_value }))
+    answer(&prompt_ops::PromptListAnswer { entries })
 }
 
 fn handle_purge(
@@ -2577,7 +2575,7 @@ fn handle_purge(
 
     if recursive {
         let result = purge::purge_dir(system, &path, cfg)?;
-        return Ok(result.to_json(base_dir));
+        return answer(&PurgeAnswer::Directory(result.answer(base_dir)));
     }
 
     if system.is_dir(&path).wait().unwrap_or(false) {
@@ -2587,7 +2585,7 @@ fn handle_purge(
     }
 
     let result = purge::purge(system, &path, cfg)?;
-    Ok(result.to_json())
+    answer(&PurgeAnswer::File(result.answer()))
 }
 
 fn handle_query(
@@ -2679,7 +2677,7 @@ fn handle_doctor(
 /// config load.
 fn handle_permissions_show(system: &dyn System, base_dir: &Path) -> Result<Value> {
     let report = permissions_inspect::show(system, base_dir)?;
-    serde_json::to_value(&report).context("serializing permissions show output")
+    answer(&report)
 }
 
 /// Handle the `permissions_check` tool.
@@ -2701,7 +2699,7 @@ fn handle_permissions_check(
         base_dir.join(candidate)
     };
     let report = permissions_inspect::check(system, base_dir, &absolute, why)?;
-    serde_json::to_value(&report).context("serializing permissions check output")
+    answer(&report)
 }
 
 fn handle_react(
@@ -2745,7 +2743,7 @@ fn handle_rm(
     let path_str = required_str(params, "path")?;
     let target = Path::new(path_str);
     let result = document::rm(system, base_dir, target, config)?;
-    Ok(result.to_json(path_str))
+    answer(&result.answer(path_str))
 }
 
 fn handle_mv(
@@ -2760,7 +2758,7 @@ fn handle_mv(
 
     let args = mv_op::MvArgs::new(PathBuf::from(src), PathBuf::from(dst)).with_force(force);
     let outcome = mv_op::mv(system, base_dir, config, &args)?;
-    Ok(outcome.to_json())
+    answer(&outcome.answer())
 }
 
 fn handle_cp(
@@ -2827,7 +2825,7 @@ fn handle_sandbox_add(
         .context("identity is required for sandbox_add")?;
 
     let result = sandbox_ops::add_to_files(system, &files, identity, cfg)?;
-    Ok(result.to_json(base_dir, "added"))
+    answer(&result.add_report(base_dir))
 }
 
 fn handle_sandbox_remove(
@@ -2846,7 +2844,7 @@ fn handle_sandbox_remove(
         .context("identity is required for sandbox_remove")?;
 
     let result = sandbox_ops::remove_from_files(system, &files, identity, cfg)?;
-    Ok(result.to_json(base_dir, "removed"))
+    answer(&result.remove_report(base_dir))
 }
 
 fn handle_sandbox_list(
@@ -3183,7 +3181,7 @@ fn handle_sign(
     let path = base_dir.join(file);
     let options = operations::sign::SignOptions { repair_checksum };
     let result = operations::sign::sign_comments(system, &path, cfg, &selection, options)?;
-    Ok(result.to_json())
+    answer(&result)
 }
 
 fn handle_verify(
@@ -3201,10 +3199,10 @@ fn handle_verify(
     // A directory sweeps the tree and returns the folder report; a file returns the single report.
     if system.is_dir(&target).wait().unwrap_or(false) {
         let report = operations::verify::verify_path(system, base_dir, &target, config)?;
-        return Ok(report.to_json());
+        return answer(&operations::verify::VerifyAnswer::Folder(report.answer()));
     }
     let report = operations::verify::verify_and_refresh(system, &target, config)?;
-    Ok(report.to_json())
+    answer(&operations::verify::VerifyAnswer::File(report.answer()))
 }
 
 /// Handle the `whoami` tool. Returns the MCP server's startup
@@ -3213,7 +3211,7 @@ fn handle_verify(
 /// missing-config so polling clients don't see a hard error.
 fn handle_whoami(system: &dyn System, base_dir: &Path) -> Result<Value> {
     let report = resolve_identity_report(system, base_dir, &IdentityFlags::default())?;
-    serde_json::to_value(&report).context("serializing whoami report")
+    answer(&report)
 }
 
 fn handle_write(
@@ -3253,7 +3251,7 @@ fn handle_write(
     let target = Path::new(path_str);
     let outcome = document::write(system, base_dir, target, content, cfg, opts)?;
 
-    Ok(outcome.to_json(path_str, binary, raw))
+    answer(&outcome.answer(path_str, binary, raw))
 }
 
 /// Inject `elapsed_ms` into the first content block whose `text` parses as a

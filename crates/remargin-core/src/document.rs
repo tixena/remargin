@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 
 use tixschema::model_schema;
 
-use crate::advice::{self, Advice};
+use crate::advice::{self, Advice, Warning, warning_schema};
 use crate::config::ResolvedConfig;
 use crate::frontmatter;
 use crate::operations::links::{self, Link};
@@ -76,15 +76,59 @@ pub struct RmResult {
     pub path: PathBuf,
 }
 
+/// What `rm` answers for a file.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct RmFileAnswer {
+    pub deleted: String,
+    pub existed: bool,
+}
+
+/// What `rm` answers for a directory.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct RmDirAnswer {
+    pub deleted: String,
+    pub files_deleted: Vec<String>,
+    pub folders_left_behind: Vec<String>,
+    pub folders_removed: Vec<String>,
+    pub is_directory: bool,
+}
+
+/// What `rm` answers: a file's outcome, or a directory's report.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum RmAnswer {
+    Directory(RmDirAnswer),
+    File(RmFileAnswer),
+}
+
+/// What `write` answers; `warnings` appears only when there is something to say.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct WriteAnswer {
+    pub binary: bool,
+    pub noop: bool,
+    pub raw: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<Warning>,
+    pub written: String,
+}
+
 impl RmResult {
     /// `deleted` echoes the caller-supplied path verbatim so the
     /// response round-trips through the same surface.
     #[must_use]
-    pub fn to_json(&self, requested_path: &str) -> Value {
-        json!({
-            "deleted": requested_path,
-            "existed": self.existed,
-        })
+    pub fn answer(&self, requested_path: &str) -> RmFileAnswer {
+        RmFileAnswer {
+            deleted: String::from(requested_path),
+            existed: self.existed,
+        }
     }
 }
 
@@ -112,6 +156,16 @@ pub struct RmDirReport {
 }
 
 impl RmDirReport {
+    fn answer(&self, requested_path: &str) -> RmDirAnswer {
+        RmDirAnswer {
+            deleted: String::from(requested_path),
+            files_deleted: display_paths(&self.files_deleted),
+            folders_left_behind: display_paths(&self.folders_left_behind),
+            folders_removed: display_paths(&self.folders_removed),
+            is_directory: true,
+        }
+    }
+
     fn render_text(&self, requested_path: &str) -> String {
         use core::fmt::Write as _;
 
@@ -132,16 +186,6 @@ impl RmDirReport {
         }
         out
     }
-
-    fn to_json(&self, requested_path: &str) -> Value {
-        json!({
-            "deleted": requested_path,
-            "is_directory": true,
-            "files_deleted": display_paths(&self.files_deleted),
-            "folders_left_behind": display_paths(&self.folders_left_behind),
-            "folders_removed": display_paths(&self.folders_removed),
-        })
-    }
 }
 
 /// Outcome of an [`rm`] call.
@@ -156,6 +200,16 @@ pub enum RmOutcome {
 }
 
 impl RmOutcome {
+    /// `requested_path` echoes the caller-supplied path verbatim so the
+    /// response round-trips through the same surface.
+    #[must_use]
+    pub fn answer(&self, requested_path: &str) -> RmAnswer {
+        match self {
+            Self::Directory(report) => RmAnswer::Directory(report.answer(requested_path)),
+            Self::File(result) => RmAnswer::File(result.answer(requested_path)),
+        }
+    }
+
     /// Human-readable one-or-more-line summary for non-JSON output.
     #[must_use]
     pub fn render_text(&self, requested_path: &str) -> String {
@@ -171,15 +225,9 @@ impl RmOutcome {
         }
     }
 
-    /// `requested_path` echoes the caller-supplied path verbatim so the
-    /// response round-trips through the same surface. The `File` variant
-    /// emits `{deleted, existed}`.
     #[must_use]
     pub fn to_json(&self, requested_path: &str) -> Value {
-        match self {
-            Self::Directory(report) => report.to_json(requested_path),
-            Self::File(result) => result.to_json(requested_path),
-        }
+        serde_json::to_value(self.answer(requested_path)).unwrap_or(Value::Null)
     }
 }
 
@@ -198,6 +246,19 @@ pub struct WriteOutcome {
 }
 
 impl WriteOutcome {
+    /// `raw` is forced true for binary writes (they skip the frontmatter
+    /// / comment-preservation pass), so callers don't need to OR it in.
+    #[must_use]
+    pub fn answer(self, written: &str, binary: bool, raw: bool) -> WriteAnswer {
+        WriteAnswer {
+            binary,
+            noop: self.noop,
+            raw: raw || binary,
+            warnings: self.warnings.into_iter().map(Warning::from).collect(),
+            written: String::from(written),
+        }
+    }
+
     /// A completed write carrying no advice yet; [`write`] attaches any.
     #[must_use]
     const fn new(noop: bool) -> Self {
@@ -207,22 +268,9 @@ impl WriteOutcome {
         }
     }
 
-    /// `raw` is forced true for binary writes (they skip the frontmatter
-    /// / comment-preservation pass), so callers don't need to OR it in.
-    ///
-    /// `warnings` appears only when there is something to say.
     #[must_use]
     pub fn to_json(self, written: &str, binary: bool, raw: bool) -> Value {
-        let mut payload = json!({
-            "written": written,
-            "binary": binary,
-            "raw": raw || binary,
-            "noop": self.noop,
-        });
-        if !self.warnings.is_empty() {
-            payload["warnings"] = advice::to_json(&self.warnings);
-        }
-        payload
+        serde_json::to_value(self.answer(written, binary, raw)).unwrap_or(Value::Null)
     }
 }
 

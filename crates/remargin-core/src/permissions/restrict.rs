@@ -17,6 +17,7 @@ use chrono::Utc;
 use os_shim::System;
 use os_shim::bucket::Condition;
 use serde_yaml::{Mapping, Value};
+use tixschema::model_schema;
 
 use crate::parser::rfc3339_z;
 use crate::permissions::claude_sync::{RuleSet, apply_rules, residual_rules};
@@ -72,6 +73,7 @@ pub struct RemarginYamlSim {
 /// Used by [`simulate_upsert_remargin_yaml`] (and the `plan restrict`
 /// projection in [`crate::operations::projections`]) to describe an
 /// existing entry that would be overwritten.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct RestrictEntryProjection {

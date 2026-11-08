@@ -1631,7 +1631,8 @@ pub fn cmd_lint(
     let report = linter::lint_doc(system, &path, config)?;
 
     if json_mode {
-        print_output(sinks, true, &report.to_json())?;
+        let value = serde_json::to_value(report.answer()).context("serializing lint output")?;
+        print_output(sinks, true, &value)?;
     } else {
         write!(sinks.stderr, "{}", report.format_text()).context("writing to stderr")?;
     }
@@ -2160,7 +2161,8 @@ pub fn cmd_purge(
 
     if recursive {
         let result = purge::purge_dir(system, &path, config)?;
-        return print_output(sinks, json_mode, &result.to_json(cwd));
+        let value = serde_json::to_value(result.answer(cwd)).context("serializing purge output")?;
+        return print_output(sinks, json_mode, &value);
     }
 
     if system.is_dir(&path).wait().unwrap_or(false) {
@@ -2169,7 +2171,8 @@ pub fn cmd_purge(
         );
     }
     let result = purge::purge(system, &path, config)?;
-    print_output(sinks, json_mode, &result.to_json())
+    let value = serde_json::to_value(result.answer()).context("serializing purge output")?;
+    print_output(sinks, json_mode, &value)
 }
 
 pub fn cmd_query(
@@ -2540,7 +2543,8 @@ pub fn cmd_mv(
     let outcome = mv_op::mv(system, cwd, config, &args)?;
 
     if params.json_mode {
-        out_json(sinks, &outcome.to_json())
+        let value = serde_json::to_value(outcome.answer()).context("serializing mv output")?;
+        out_json(sinks, &value)
     } else {
         out(
             sinks,
@@ -2561,7 +2565,8 @@ pub fn cmd_rm(
     let outcome = document::rm(system, cwd, &target, config)?;
 
     if json_mode {
-        out_json(sinks, &outcome.to_json(file))
+        let value = serde_json::to_value(outcome.answer(file)).context("serializing rm output")?;
+        out_json(sinks, &value)
     } else {
         out(sinks, &outcome.render_text(file))
     }
@@ -2687,7 +2692,8 @@ pub fn cmd_sign(
     options.repair_checksum = repair_checksum;
     let result = operations::sign::sign_comments(system, &path, config, &selection, options)?;
     if json_mode {
-        print_output(sinks, true, &result.to_json())
+        let value = serde_json::to_value(&result).context("serializing sign output")?;
+        print_output(sinks, true, &value)
     } else {
         render::render_sign_result_text(sinks, &result)
     }
@@ -3276,7 +3282,8 @@ pub fn cmd_verify(
     let report = operations::verify::verify_and_refresh(system, &path, config)?;
 
     if json_mode {
-        print_output(sinks, true, &report.to_json())?;
+        let value = serde_json::to_value(report.answer()).context("serializing verify output")?;
+        print_output(sinks, true, &value)?;
     } else {
         for row in &report.results {
             let chk = if row.checksum_ok { "ok" } else { "FAIL" };
@@ -3337,7 +3344,8 @@ fn cmd_verify_folder(
     let report = operations::verify::verify_path(system, cwd, target, config)?;
 
     if json_mode {
-        print_output(sinks, true, &report.to_json())?;
+        let value = serde_json::to_value(report.answer()).context("serializing verify output")?;
+        print_output(sinks, true, &value)?;
         return if report.ok {
             Ok(())
         } else {
@@ -3446,9 +3454,7 @@ pub fn cmd_write(
         );
     }
 
-    print_output(
-        sinks,
-        wp.json_mode,
-        &outcome.to_json(wp.path, wp.opts.binary, wp.opts.raw),
-    )
+    let value = serde_json::to_value(outcome.answer(wp.path, wp.opts.binary, wp.opts.raw))
+        .context("serializing write output")?;
+    print_output(sinks, wp.json_mode, &value)
 }

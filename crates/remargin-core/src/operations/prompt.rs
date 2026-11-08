@@ -21,12 +21,14 @@ use os_shim::System;
 use os_shim::bucket::Condition;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tixschema::model_schema;
 
 use crate::config::ResolvedConfig;
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::wait::Wait as _;
 
 /// Result of a successful `delete` write.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PromptDeleteOutcome {
@@ -38,19 +40,31 @@ pub struct PromptDeleteOutcome {
 }
 
 /// One entry from a recursive `list` walk.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PromptListEntry {
     pub folder: PathBuf,
     /// `None` leaves the display name to the caller, which falls back to the folder basename.
+    #[model_schema_prop(nullable)]
     pub name: Option<String>,
     pub prompt: String,
     /// `None` means the caller's default runner.
+    #[model_schema_prop(nullable)]
     pub runner: Option<String>,
     pub source: PathBuf,
 }
 
+/// What `prompt_list` answers.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct PromptListAnswer {
+    pub entries: Vec<PromptListEntry>,
+}
+
 /// Result of a successful `set` write.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PromptSetOutcome {

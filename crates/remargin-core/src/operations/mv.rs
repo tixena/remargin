@@ -36,6 +36,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use os_shim::error::StorageError;
 use serde::Serialize;
+use tixschema::model_schema;
 
 use crate::config::ResolvedConfig;
 use crate::document::allowlist;
@@ -97,24 +98,38 @@ pub struct MvOutcome {
     pub topology: MvTopology,
 }
 
+/// What `mv` answers.
+#[model_schema(enable = ["jsonschema"])]
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct MvAnswer {
+    #[serde(flatten)]
+    pub action: MvAction,
+    pub bytes_moved: u64,
+    pub dst_absolute: String,
+    pub nested_files_moved: usize,
+    pub src_absolute: String,
+    #[serde(flatten)]
+    pub topology: MvTopology,
+}
+
 impl MvOutcome {
     #[must_use]
-    pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "bytes_moved": self.bytes_moved,
-            "dst_absolute": self.dst_absolute.display().to_string(),
-            "fallback_copy": self.action.fallback_copy,
-            "is_directory": self.topology.is_directory,
-            "nested_files_moved": self.nested_files_moved,
-            "noop_same_path": self.topology.noop_same_path,
-            "overwritten": self.action.overwritten,
-            "src_absolute": self.src_absolute.display().to_string(),
-        })
+    pub fn answer(&self) -> MvAnswer {
+        MvAnswer {
+            action: self.action.clone(),
+            bytes_moved: self.bytes_moved,
+            dst_absolute: self.dst_absolute.display().to_string(),
+            nested_files_moved: self.nested_files_moved,
+            src_absolute: self.src_absolute.display().to_string(),
+            topology: self.topology.clone(),
+        }
     }
 }
 
 /// Topology of the move's source and how src/dst aligned. Flattened
 /// into [`MvOutcome`]'s JSON output.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvTopology {
@@ -124,6 +139,7 @@ pub struct MvTopology {
 
 /// What the rename actually did at the filesystem level. Flattened
 /// into [`MvOutcome`]'s JSON output.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct MvAction {

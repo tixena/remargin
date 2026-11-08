@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use os_shim::System;
 use serde::Serialize;
+use tixschema::model_schema;
 
 use crate::config::permissions::resolve::{
     ResolvedDenyOpsItem, ResolvedPermissions, TrustedRootPath, resolve_permissions,
@@ -18,6 +19,7 @@ use crate::permissions::op_guard::target_is_sanctioned;
 use crate::wait::Wait as _;
 
 /// Serialised view of a single `allow_dot_folders` declaration.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AllowDotFoldersView {
@@ -26,10 +28,12 @@ pub struct AllowDotFoldersView {
 }
 
 /// Serialised view of a `check()` result.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CheckOutput {
     /// Set when the caller asked `--why` AND the path is restricted.
+    #[model_schema_prop(nullable)]
     pub matching_rule: Option<MatchingRule>,
     pub path: PathBuf,
     /// Outside the `trusted_roots` allow-list, or covered by a `deny_ops` rule.
@@ -37,6 +41,7 @@ pub struct CheckOutput {
 }
 
 /// Serialised view of a single `deny_ops` declaration.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DenyOpsView {
@@ -46,6 +51,7 @@ pub struct DenyOpsView {
 }
 
 /// Serialised view of one denied op and the identities exempt from it.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DenyOpsItemView {
@@ -56,31 +62,36 @@ pub struct DenyOpsItemView {
 /// Description of the rule that caused a `check()` to report
 /// `restricted = true`. Present only when `--why` was passed and a
 /// match was found.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MatchingRule {
-    /// Either `"restrict"` or `"deny_ops"`.
-    pub kind: &'static str,
+    /// Either `"trusted_roots"` or `"deny_ops"`.
+    pub kind: String,
     pub rule_text: String,
     pub source_file: PathBuf,
 }
 
 /// Serialised view of a single `trusted_roots` declaration.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TrustedRootView {
     /// Canonical absolute path; `None` for wildcard entries.
+    #[model_schema_prop(nullable)]
     pub absolute_path: Option<PathBuf>,
     pub also_deny_bash: Vec<String>,
     pub cli_allowed: bool,
     /// On-disk text — `"src/secret"`, `"*"`, etc.
     pub path_text: String,
     /// Anchor directory for wildcard entries; `None` otherwise.
+    #[model_schema_prop(nullable)]
     pub realm_root: Option<PathBuf>,
     pub source_file: PathBuf,
 }
 
 /// Serialised view of the permissions resolved for a directory.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ShowOutput {
@@ -143,7 +154,7 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
     {
         let rendered: Vec<String> = entry.ops.iter().map(render_deny_ops_item).collect();
         return Some(MatchingRule {
-            kind: "deny_ops",
+            kind: String::from("deny_ops"),
             rule_text: format!(
                 "deny_ops {{ path: {}, ops: [{}] }}",
                 entry.path.display(),
@@ -164,7 +175,7 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
                 .or_else(|| resolved.trusted_roots_lock.clone())
         {
             return Some(MatchingRule {
-                kind: "trusted_roots",
+                kind: String::from("trusted_roots"),
                 rule_text: format!(
                     "outside trusted_roots (target {} is not inside any entry)",
                     canonical.display(),

@@ -54,31 +54,41 @@ pub struct SandboxBulkResult {
 }
 
 impl SandboxBulkResult {
-    /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for remove.
     #[must_use]
-    pub fn to_json(&self, base_dir: &Path, changed_key: &str) -> Value {
-        let changed = display_paths(&self.changed, base_dir);
-        let skipped = display_paths(&self.skipped, base_dir);
-        let failed = self
-            .failed
+    pub fn add_report(&self, base_dir: &Path) -> SandboxAddReport {
+        SandboxAddReport {
+            added: display_paths(&self.changed, base_dir),
+            failed: self.failure_entries(base_dir),
+            skipped: display_paths(&self.skipped, base_dir),
+        }
+    }
+
+    fn failure_entries(&self, base_dir: &Path) -> Vec<SandboxFailureEntry> {
+        self.failed
             .iter()
             .map(|f| SandboxFailureEntry {
                 path: strip_prefix_display(&f.path, base_dir),
                 reason: f.reason.clone(),
             })
-            .collect();
+            .collect()
+    }
+
+    #[must_use]
+    pub fn remove_report(&self, base_dir: &Path) -> SandboxRemoveReport {
+        SandboxRemoveReport {
+            elapsed_ms: None,
+            failed: self.failure_entries(base_dir),
+            removed: display_paths(&self.changed, base_dir),
+            skipped: display_paths(&self.skipped, base_dir),
+        }
+    }
+
+    /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for remove.
+    #[must_use]
+    pub fn to_json(&self, base_dir: &Path, changed_key: &str) -> Value {
         let report = match changed_key {
-            "added" => serde_json::to_value(SandboxAddReport {
-                added: changed,
-                failed,
-                skipped,
-            }),
-            _ => serde_json::to_value(SandboxRemoveReport {
-                elapsed_ms: None,
-                failed,
-                removed: changed,
-                skipped,
-            }),
+            "added" => serde_json::to_value(self.add_report(base_dir)),
+            _ => serde_json::to_value(self.remove_report(base_dir)),
         };
         report.unwrap_or(Value::Null)
     }
@@ -87,7 +97,7 @@ impl SandboxBulkResult {
 /// A per-file failure entry in a sandbox bulk report.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxFailureEntry {
     pub path: String,
     pub reason: String,
@@ -96,7 +106,7 @@ pub struct SandboxFailureEntry {
 /// JSON report for `sandbox add`.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxAddReport {
     pub added: Vec<String>,
     pub failed: Vec<SandboxFailureEntry>,
@@ -106,7 +116,7 @@ pub struct SandboxAddReport {
 /// JSON report for `sandbox remove`.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxRemoveReport {
     /// Milliseconds the call took, written by the io layer on the way out.
     #[serde(default, skip_serializing_if = "Option::is_none")]

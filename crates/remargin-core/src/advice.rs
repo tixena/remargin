@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use tixschema::model_schema;
 
 /// One advisory note about authored content.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct Advice {
@@ -34,6 +35,7 @@ pub struct Advice {
 /// `op` is the zero-based index into the request's operations array — the
 /// one handle the caller holds for every operation, including the ones
 /// that produced no id.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct OpAdvice {
