@@ -23,8 +23,7 @@ use crate::config::ResolvedConfig;
 use crate::document::allowlist;
 use crate::kind::matches_kind_filter;
 use crate::parser::{self, Acknowledgment, AuthorType};
-use crate::parser::{acknowledgment_schema, author_type_schema};
-use crate::reactions::{ReactionEntry, reaction_entry_schema};
+use crate::reactions::ReactionEntry;
 use crate::wait::Wait as _;
 
 /// Column names of a compact comment row, `content` last; `checksum`, `signature` and `file`

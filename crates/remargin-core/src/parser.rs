@@ -17,7 +17,7 @@ use tixschema::model_schema;
 
 use crate::kind::validate_kinds;
 use crate::on_disk_comment::{OnDiskComment, comment_from_on_disk};
-use crate::reactions::{ReactionEntry, reaction_entry_schema};
+use crate::reactions::ReactionEntry;
 use crate::wait::Wait as _;
 use crate::writer::serialize_comment;
 
