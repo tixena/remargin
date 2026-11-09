@@ -20,7 +20,7 @@ pub enum RemarginError {
     Failed(Failure),
     HumanIdentity(HumanIdentityRejected),
     SubsetGate(SubsetGateFailurePayload),
-    Verify(VerifyFailurePayload),
+    Verify(Box<VerifyFailurePayload>),
 }
 
 /// `error_kind` discriminant of [`HumanIdentityRejected`].
@@ -84,7 +84,7 @@ impl From<anyhow::Error> for RemarginError {
             return Self::SubsetGate(failure.to_json());
         }
         if let Some(failure) = err.downcast_ref::<VerifyFailure>() {
-            return Self::Verify(failure.payload());
+            return Self::Verify(Box::new(failure.payload()));
         }
         Self::Failed(Failure {
             error_kind: FailureKind::Failed,

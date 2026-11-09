@@ -40,7 +40,7 @@ use crate::writer::ensure_not_forbidden_target;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub enum CpKind {
     /// Comment-bearing markdown: body + frontmatter copied, comments
     /// dropped so the duplicate starts a clean history.
@@ -55,7 +55,7 @@ pub enum CpKind {
 /// Outcome of a successful [`cp`] call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct CpOutcome {
     /// Size of the source file in bytes. `0` for [`CpKind::Noop`].
     pub bytes_copied: u64,

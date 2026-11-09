@@ -20,6 +20,7 @@ pub mod id;
 pub mod kind;
 pub mod linter;
 pub mod mcp;
+pub mod mcp_server;
 pub mod on_disk_comment;
 pub mod operations;
 pub mod parser;
@@ -31,3 +32,5 @@ pub mod responses;
 pub mod session;
 pub mod wait;
 pub mod writer;
+
+use mcp_server::service::{Remargin, RemarginSchema, remargin_schema};

@@ -83,7 +83,7 @@ impl ReplaceOptions {
 /// Per-file outcome of a replace operation.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct ReplaceFileOutcome {
     /// `true` when this file's body was (or would be) modified.
     pub changed: bool,
@@ -101,7 +101,7 @@ pub struct ReplaceFileOutcome {
 /// Aggregate report for a replace operation over a file or folder.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct ReplaceReport {
     /// `true` when no byte was written (a `--dry-run` preview).
     pub dry_run: bool,

@@ -39,7 +39,7 @@ use crate::wait::Wait as _;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub enum Severity {
     /// No enforcement at all — blocks every other meaningful check.
     Critical,
@@ -51,7 +51,7 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub enum FindingKind {
     /// An agent identity whose resolved key path lives under the user's
     /// primary SSH directory (`~/.ssh`) — the agent can read and sign
@@ -147,7 +147,7 @@ pub enum FindingKind {
 /// A single diagnostic finding from a doctor check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct DoctorFinding {
     /// What the finding is.
     pub kind: FindingKind,
@@ -165,7 +165,7 @@ pub struct DoctorFinding {
 /// Output of a `remargin doctor` run.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-#[model_schema]
+#[model_schema(enable = ["jsonschema"])]
 pub struct DoctorReport {
     /// Milliseconds the call took, written by the io layer on the way out.
     #[serde(default, skip_serializing_if = "Option::is_none")]

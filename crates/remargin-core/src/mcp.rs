@@ -104,7 +104,7 @@ const REJECTED_IDENTITY_FLAGS: &[&str] = &["config_path", "identity", "key", "ty
 
 /// Callable under a human identity, which the MCP surface otherwise refuses: `whoami` to
 /// diagnose the refusal and `identity_create` to render the agent identity it asks for.
-const HUMAN_IDENTITY_EXEMPT_TOOLS: &[&str] = &["identity_create", "whoami"];
+pub(crate) const HUMAN_IDENTITY_EXEMPT_TOOLS: &[&str] = &["identity_create", "whoami"];
 
 /// Description of a single MCP tool.
 struct ToolDesc {
@@ -138,7 +138,7 @@ struct PlanCommentStaging {
 
 /// A group of positional rows that a page cuts to fit, such as one file of
 /// a `query` answer.
-trait RowGroup: Serialize {
+pub(crate) trait RowGroup: Serialize {
     type Row: Serialize;
 
     fn push_row(&mut self, row: Self::Row);
@@ -149,7 +149,7 @@ trait RowGroup: Serialize {
 }
 
 /// One page of a grouped columnar payload.
-struct GroupedPage<G> {
+pub(crate) struct GroupedPage<G> {
     effective_limit: Option<usize>,
     /// The groups that have at least one item on this page, in their
     /// original order, each holding only its rows on this page.
@@ -157,6 +157,13 @@ struct GroupedPage<G> {
     /// Items across every group before paging: one per row, or one for a
     /// group that has no rows.
     total: usize,
+}
+
+impl<G> GroupedPage<G> {
+    /// The effective limit when the size cap trimmed the page, the groups kept, and the total.
+    pub(crate) fn into_parts(self) -> (Option<usize>, Vec<G>, usize) {
+        (self.effective_limit, self.groups, self.total)
+    }
 }
 
 /// Per-session adaptive state owned by the stdio run loop.
@@ -169,7 +176,7 @@ struct GroupedPage<G> {
 /// `last_response_size` is the byte size of the most recently emitted tool
 /// result — what `report_spill` infers the offending size from.
 #[derive(Debug)]
-struct SessionState {
+pub(crate) struct SessionState {
     last_response_size: usize,
     spill_cap: usize,
 }
@@ -191,6 +198,32 @@ impl Default for SessionState {
             last_response_size: 0,
             spill_cap: DEFAULT_SPILL_CAP,
         }
+    }
+}
+
+impl SessionState {
+    pub(crate) const fn record_response_size(&mut self, size: usize) {
+        self.last_response_size = size;
+    }
+
+    /// Lowers the cap to the size the client reported, or to the last answer's size when none was
+    /// given; the cap never rises and a size of 0 changes nothing.
+    pub(crate) fn report_spill(&mut self, explicit: Option<usize>) -> ReportSpillAnswer {
+        let reported = explicit.unwrap_or(self.last_response_size);
+        let previous_cap = self.spill_cap;
+        if reported > 0 {
+            self.spill_cap = self.spill_cap.min(reported);
+        }
+        ReportSpillAnswer {
+            inferred: explicit.is_none(),
+            previous_cap,
+            reported_size: reported,
+            spill_cap: self.spill_cap,
+        }
+    }
+
+    pub(crate) const fn spill_cap(&self) -> usize {
+        self.spill_cap
     }
 }
 
@@ -1550,7 +1583,7 @@ fn ensure_path_in_scope(
 /// Boundary check for a single path. In an unconstrained session the path must canonicalise
 /// under `base_dir`; a constrained or locked session goes through `op_guard`, so a violation
 /// carries the canonical `trusted_roots` / `deny_ops` wording.
-fn check_one_path(
+pub(crate) fn check_one_path(
     system: &dyn System,
     base_dir: &Path,
     permissions: &ResolvedPermissions,
@@ -1771,14 +1804,20 @@ fn handle_activity(
     };
     let result = activity::gather_activity(system, &target, cutoff, config)?;
     let files: Vec<CompactFileChanges> = result.files.iter().map(activity::compact_file).collect();
-    let page = page_grouped(files, params, spill_cap);
+    let page = page_grouped(
+        files,
+        optional_usize(params, "offset").unwrap_or(0),
+        optional_usize(params, "limit"),
+        spill_cap,
+    );
+    let (effective_limit, groups, total) = page.into_parts();
     answer(&ActivityPage {
         change_cols: column_names(&activity::CHANGE_COLS),
         cutoff_explicit: result.cutoff_explicit,
-        effective_limit: page.effective_limit,
-        files: page.groups,
+        effective_limit,
+        files: groups,
         newest_ts_overall: result.newest_ts_overall,
-        total: page.total,
+        total,
     })
 }
 
@@ -1855,7 +1894,7 @@ fn check_ack_skip_reason(
 /// `ops` is `(reply_to, auto_ack, ack_skip_reason)` per op. The document is
 /// parsed once, and only when at least one op opts out, so the common path
 /// stays free. Parse/identity failures defer to the live op's canonical error.
-fn enforce_ack_skip_reasons(
+pub(crate) fn enforce_ack_skip_reasons(
     system: &dyn System,
     base_dir: &Path,
     config: &ResolvedConfig,
@@ -2081,10 +2120,14 @@ fn handle_comments(
     let matching = query::comments_matching(&doc, &path, &filter);
 
     let total = matching.len();
-    let rows: Vec<CommentRow> = page_window(matching, params)
-        .iter()
-        .map(|comment| comment_row(comment, include_integrity))
-        .collect();
+    let rows: Vec<CommentRow> = page_window(
+        matching,
+        optional_usize(params, "offset").unwrap_or(0),
+        optional_usize(params, "limit"),
+    )
+    .iter()
+    .map(|comment| comment_row(comment, include_integrity))
+    .collect();
     let (page, effective_limit) = size_page(rows, spill_cap);
     answer(&CommentsPage {
         comment_cols: column_names(query::comment_cols(include_integrity)),
@@ -2215,7 +2258,7 @@ fn handle_get(
 /// read again when narrowed, so the links describe exactly the lines
 /// returned. The second value is the last line returned when the cap cut
 /// the window.
-fn read_get_window(
+pub(crate) fn read_get_window(
     system: &dyn System,
     base_dir: &Path,
     target: &Path,
@@ -2243,7 +2286,7 @@ fn read_get_window(
 }
 
 /// The compact `get` text payload for one window.
-fn get_envelope(
+pub(crate) fn get_envelope(
     result: document::GetResult,
     start_num: usize,
     line_numbers: bool,
@@ -2606,13 +2649,19 @@ fn handle_query(
         .iter()
         .map(|result| query_file(result, include_integrity))
         .collect();
-    let page = page_grouped(files, params, spill_cap);
+    let page = page_grouped(
+        files,
+        optional_usize(params, "offset").unwrap_or(0),
+        optional_usize(params, "limit"),
+        spill_cap,
+    );
+    let (effective_limit, groups, total) = page.into_parts();
     answer(&QueryPage {
         base_path: query::display_base_path(path_str, is_file),
         comment_cols: column_names(query::comment_cols(include_integrity)),
-        effective_limit: page.effective_limit,
-        results: page.groups,
-        total: page.total,
+        effective_limit,
+        results: groups,
+        total,
     })
 }
 
@@ -2907,7 +2956,7 @@ fn handle_search(
 /// further. `effective_limit` is added only when the clamp trimmed the page —
 /// its presence tells the agent to advance `offset` for the rest, and `total`
 /// says how many remain.
-fn search_compact_envelope(
+pub(crate) fn search_compact_envelope(
     results: &SearchResults,
     spill_cap: usize,
     with_context: bool,
@@ -2953,7 +3002,7 @@ fn search_compact_envelope(
 /// the window carried — the signal to advance `offset` for the rest.
 /// `spill_cap` is a self-consistent byte proxy for the client's token limit,
 /// not an equivalent.
-fn size_page<T>(window: Vec<T>, spill_cap: usize) -> (Vec<T>, Option<usize>)
+pub(crate) fn size_page<T>(window: Vec<T>, spill_cap: usize) -> (Vec<T>, Option<usize>)
 where
     T: Serialize,
 {
@@ -2998,11 +3047,9 @@ where
 }
 
 /// Apply the caller's `offset` / `limit` window to `items`.
-fn page_window<T>(items: Vec<T>, params: &Map<String, Value>) -> Vec<T> {
-    let rest = items
-        .into_iter()
-        .skip(optional_usize(params, "offset").unwrap_or(0));
-    match optional_usize(params, "limit") {
+pub(crate) fn page_window<T>(items: Vec<T>, offset: usize, max_items: Option<usize>) -> Vec<T> {
+    let rest = items.into_iter().skip(offset);
+    match max_items {
         Some(limit) => rest.take(limit).collect(),
         None => rest.collect(),
     }
@@ -3010,9 +3057,10 @@ fn page_window<T>(items: Vec<T>, params: &Map<String, Value>) -> Vec<T> {
 
 /// Page a grouped columnar payload (per-file groups holding positional rows)
 /// by rows across all groups, then regroup the survivors.
-fn page_grouped<G>(
+pub(crate) fn page_grouped<G>(
     mut heads: Vec<G>,
-    params: &Map<String, Value>,
+    offset: usize,
+    limit: Option<usize>,
     spill_cap: usize,
 ) -> GroupedPage<G>
 where
@@ -3030,7 +3078,7 @@ where
         }
     }
     let total = items.len();
-    let window = page_window(items, params);
+    let window = page_window(items, offset, limit);
     let sizes = window.iter().map(|(index, row)| {
         row.as_ref()
             .map_or_else(|| emitted_len(&heads[*index]), emitted_len)
@@ -3066,11 +3114,11 @@ where
     serde_json::to_value(typed).context("serializing the tool answer")
 }
 
-fn column_names(cols: &[&str]) -> Vec<String> {
+pub(crate) fn column_names(cols: &[&str]) -> Vec<String> {
     cols.iter().map(|col| String::from(*col)).collect()
 }
 
-fn comment_row(comment: &query::ExpandedComment, include_integrity: bool) -> CommentRow {
+pub(crate) fn comment_row(comment: &query::ExpandedComment, include_integrity: bool) -> CommentRow {
     if include_integrity {
         CommentRow::WithIntegrity(query::compact_row_with_integrity(comment))
     } else {
@@ -3080,7 +3128,7 @@ fn comment_row(comment: &query::ExpandedComment, include_integrity: bool) -> Com
 
 /// One file of a `query` answer: the summary fields stay named, comments
 /// become positional rows, and a summary query carries none.
-fn query_file(result: &QueryResult, include_integrity: bool) -> QueryFile {
+pub(crate) fn query_file(result: &QueryResult, include_integrity: bool) -> QueryFile {
     QueryFile {
         comment_count: result.comment_count,
         comments: result.comments.as_ref().map(|comments| {
@@ -3105,18 +3153,7 @@ fn query_file(result: &QueryResult, include_integrity: bool) -> QueryFile {
 /// only ever falls — a report can never raise it — and a reported size of 0
 /// is a no-op (nothing meaningful was measured).
 fn handle_report_spill(session: &mut SessionState, params: &Map<String, Value>) -> Result<Value> {
-    let explicit = optional_usize(params, "size");
-    let reported = explicit.unwrap_or(session.last_response_size);
-    let previous_cap = session.spill_cap;
-    if reported > 0 {
-        session.spill_cap = session.spill_cap.min(reported);
-    }
-    answer(&ReportSpillAnswer {
-        inferred: explicit.is_none(),
-        previous_cap,
-        reported_size: reported,
-        spill_cap: session.spill_cap,
-    })
+    answer(&session.report_spill(optional_usize(params, "size")))
 }
 
 /// Handle the `replace` tool: body-only find/replace over a file or
