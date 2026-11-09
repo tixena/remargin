@@ -93,6 +93,21 @@ fn compare(
 ) {
     let today_schema = resolve(today, today_root);
     let args_schema = resolve(args, args_root);
+    // doc_markdown forces backticks into rustdoc that today's text sometimes lacks.
+    let args_description = args
+        .get("description")
+        .or_else(|| args_schema.get("description"))
+        .and_then(Value::as_str)
+        .map(|text| text.replace('`', ""));
+    let today_description = today_schema
+        .get("description")
+        .and_then(Value::as_str)
+        .map(|text| text.replace('`', ""));
+    if today_description != args_description {
+        faults.push(format!(
+            "{path}: `description` is {today_description:?} today, {args_description:?} in the struct"
+        ));
+    }
 
     for key in ["type", "minimum"] {
         if today_schema.get(key) != args_schema.get(key) {
