@@ -1,0 +1,1321 @@
+[
+  {
+    "description": "Acknowledge one or more comments (or remove this identity's ack with remove=true). Omit file to resolve by ID across the folder tree.",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the document (omit to resolve by ID across the folder tree)",
+          "type": "string"
+        },
+        "ids": {
+          "description": "Comment IDs to acknowledge",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "default": ".",
+          "description": "Base directory to search when resolving by ID (default: .)",
+          "type": "string"
+        },
+        "remove": {
+          "default": false,
+          "description": "Remove this identity's ack instead of adding one",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "name": "ack"
+  },
+  {
+    "description": "Call this BEFORE processing pending comments on a file or workspace you haven't acted on recently: it surfaces new comments, reactions, acks and sandbox adds you would otherwise miss. Walks `path` (a file or directory; defaults to the MCP server's working directory) and returns a compact, minified columnar payload: `{cutoff_explicit, newest_ts_overall, total, change_cols, files, effective_limit?}`. Each file is `{path, newest_ts, cutoff_applied?, changes}`, and every change is a positional row named by `change_cols`, `[ts, kind, author, author_type, comment_id, line_start, line_end, reply_to, to]`. Here `kind` is the kind of change, `ack`, `comment` or `sandbox` (not a comment's classification tags). Columns a change kind lacks are null: acks and sandbox adds null the comment-only columns, sandbox adds also null `comment_id`, and `to` is null for acks and sandbox adds but `[]` for a broadcast comment. Rows sort by `ts`. With `since` omitted, each file's cutoff is the caller's last action in that file, and files where the caller never acted return everything. Paging: `total` counts every change across all files; one call returns at most `limit` changes starting at `offset` (default 0), then cuts the page further so the response stays under the size budget, and says so with `effective_limit` (the number of changes actually returned). To read everything, call again with `offset` increased by the changes received until it reaches `total`. A file split across pages repeats its `path` on each page.",
+    "inputSchema": {
+      "properties": {
+        "limit": {
+          "description": "Return at most this many changes. Omit for as many as fit the size budget.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Number of changes to skip before this page.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "File or directory to scan; defaults to the MCP server's working directory.",
+          "type": "string"
+        },
+        "since": {
+          "description": "ISO 8601 cutoff. Omit to derive per-file from caller's last action.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "activity"
+  },
+  {
+    "description": "PREFERRED for any time you'll post more than one comment on a file. Atomic across the set; correctly tracks line shifts between insertions. Each sub-op has the same fields as a single `comment`; an unknown field refuses the whole batch. Comments are rendered as markdown; record observed state, not future-tense announcements.",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "operations": {
+          "description": "List of comment operations",
+          "items": {
+            "properties": {
+              "ack_skip_reason": {
+                "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default.",
+                "type": "string"
+              },
+              "after_comment": {
+                "type": "string"
+              },
+              "after_heading": {
+                "description": "ATX heading path; resolved at write time. Mutually exclusive with after_line/after_comment.",
+                "type": "string"
+              },
+              "after_line": {
+                "type": "integer"
+              },
+              "attachments": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "auto_ack": {
+                "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it.",
+                "type": "boolean"
+              },
+              "content": {
+                "description": "Comment body text in markdown (bold/italic/links/code-blocks/lists render). Record observed or completed state - not future-tense announcements (\"I'll do X\"). Write it the way you'd want to re-read it in three months.",
+                "type": "string"
+              },
+              "kind": {
+                "default": [],
+                "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reply_to": {
+                "type": "string"
+              },
+              "sandbox": {
+                "default": false,
+                "description": "Atomically stage the file in the caller's sandbox (see sandbox_add). The file is staged once when any operation sets it.",
+                "type": "boolean"
+              },
+              "to": {
+                "default": [],
+                "description": "Names from the registry who must see this in their pending queue. Omit for a non-actionable note. Use a parent author's name only when your reply requires their response - replies do NOT auto-include the parent's author.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "name": "batch"
+  },
+  {
+    "description": "Create a single comment in a document. For two or more comments on the same file in one turn, use `batch` - `comment` doesn't track line shifts between insertions, so a loop of `comment` calls will misplace later entries. Use `reply` (not this tool) when responding to an existing comment. Comments record observed/done state and are rendered as markdown; do not post future-tense announcements (\"I'll do X\").",
+    "inputSchema": {
+      "properties": {
+        "ack_skip_reason": {
+          "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default.",
+          "type": "string"
+        },
+        "after_comment": {
+          "description": "Insert after this comment ID",
+          "type": "string"
+        },
+        "after_heading": {
+          "description": "Insert after the ATX heading addressed by this `>`-separated path. Mutually exclusive with after_line/after_comment.",
+          "type": "string"
+        },
+        "after_line": {
+          "description": "Insert after this line number (1-indexed)",
+          "type": "integer"
+        },
+        "attachments": {
+          "default": [],
+          "description": "File paths to upload. Each file is copied beside the document and listed in the comment's `attachments` header - this stores the file, it does not display it. To show an image inline, also write `![alt](assets/<filename>)` in the comment body.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auto_ack": {
+          "description": "Acknowledge the parent comment when replying. If omitted, the parent is auto-acked iff its author differs from the caller (replies to your own comment don't auto-ack). Pass true to force the ack, false to skip it.",
+          "type": "boolean"
+        },
+        "content": {
+          "description": "Comment body text in markdown (bold/italic/links/code-blocks/lists render). Record observed or completed state - not future-tense announcements (\"I'll do X\"). Write it the way you'd want to re-read it in three months.",
+          "type": "string"
+        },
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "kind": {
+          "default": [],
+          "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reply_to": {
+          "description": "ID of the comment to reply to",
+          "type": "string"
+        },
+        "sandbox": {
+          "default": false,
+          "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)",
+          "type": "boolean"
+        },
+        "to": {
+          "default": [],
+          "description": "Names from the registry who must see this in their pending queue. Omit for a non-actionable note. Use a parent author's name only when your reply requires their response - replies do NOT auto-include the parent's author.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "comment"
+  },
+  {
+    "description": "List the comments of one file in document order, as a compact, minified columnar payload: `{total, comment_cols, comments, effective_limit?}`. `comment_cols` names the columns once; every entry of `comments` is one comment as a positional row in that order, `[id, line, author, author_type, ts, reply_to, thread, to, ack, reactions, kind, edited_at, attachments, content]`. Columns: `id` the comment id; `line` the first line of its block in the file; `author` the author identity; `author_type` `human` or `agent`; `ts` creation time (RFC 3339); `reply_to` the parent comment id, or null for a root; `thread` the id of the thread's root comment, or null for a root; `to` the recipient identities (empty means a broadcast); `ack` one `author@ts` string per acknowledgement, the identity and the RFC 3339 time joined by `@`; `reactions` an object from each emoji to the list of `{author, ts}` that reacted with it; `kind` the classification tags, or null; `edited_at` the last edit time, or null if never edited; `attachments` stored attachment paths; `content` the markdown body, always last. With `include_integrity: true`, `checksum` and `signature` columns are inserted immediately before `content`. Filters: `kind` keeps comments carrying any of the given tags; `pending`, `pending_for` and `pending_for_me` keep unacknowledged comments with the same meaning as in `query`, and combine as a union. Reads the named file even when it is gitignored. Paging: `total` counts every comment that matched; one call returns at most `limit` comments starting at `offset` (default 0), then cuts the page further so the response stays under the size budget, and says so with `effective_limit` (the number of comments actually returned). To read everything, call again with `offset` increased by the comments received until it reaches `total`.",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "include_integrity": {
+          "default": false,
+          "description": "Add the checksum and signature columns immediately before content.",
+          "type": "boolean"
+        },
+        "kind": {
+          "default": [],
+          "description": "Keep only comments whose kind tags include at least one of these values. Empty = no filter.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "Return at most this many comments. Omit for as many as fit the size budget.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Number of matching comments to skip before this page.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pending": {
+          "default": false,
+          "description": "Keep only pending comments: directed comments some recipient has not acknowledged, and broadcast comments nobody has acknowledged.",
+          "type": "boolean"
+        },
+        "pending_for": {
+          "description": "Keep only comments addressed to this identity that it has not acknowledged.",
+          "type": "string"
+        },
+        "pending_for_me": {
+          "default": false,
+          "description": "Same as pending_for set to the MCP server's own identity.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "name": "comments"
+  },
+  {
+    "description": "Copy a tracked file. The SOURCE is never modified. Non-markdown and comment-free markdown copy verbatim; a comment-bearing markdown file is copied BODY-ONLY (the duplicate carries no comment blocks) so it introduces no duplicate comment IDs and no broken signatures. Reports kind + comments_dropped. Use plan op=cp to preview.",
+    "inputSchema": {
+      "properties": {
+        "dst": {
+          "description": "Destination path.",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "Overwrite destination if it exists.",
+          "type": "boolean"
+        },
+        "src": {
+          "description": "Source path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "dst"
+      ],
+      "type": "object"
+    },
+    "name": "cp"
+  },
+  {
+    "description": "Delete one or more comments",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "ids": {
+          "description": "Comment IDs to delete",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "ids"
+      ],
+      "type": "object"
+    },
+    "name": "delete"
+  },
+  {
+    "description": "Run health checks on the remargin permission stack. Checks (in order): (1) hook-installed - verifies the PreToolUse hook is wired into Claude settings; when absent from both scopes, all other checks are skipped. Returns a structured DoctorReport.",
+    "inputSchema": {
+      "properties": {
+        "check": {
+          "description": "Comma-separated check names to run (default: all). e.g. \"hook,trusted-root-escape\". The hook-installed gate always runs regardless of this selection and still skips every later check when the hook is missing, but a hook_missing finding is reported only when \"hook\" is selected.",
+          "type": "string"
+        },
+        "user_settings_file": {
+          "description": "Path to the user-scope Claude settings file (default: ~/.claude/settings.json).",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "doctor"
+  },
+  {
+    "description": "Edit a comment (cascading ack clear)",
+    "inputSchema": {
+      "properties": {
+        "content": {
+          "description": "New comment body",
+          "type": "string"
+        },
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "id": {
+          "description": "Comment ID to edit",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Replacement classification tags. Omit to preserve the stored list; pass [] to clear. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "id",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "edit"
+  },
+  {
+    "description": "Read a file's contents. Text mode (default) returns a compact, minified payload. With `line_numbers: false` (default): `{content, total_lines, links_cols, links, effective_end_line?}`. With `line_numbers: true`: `{start_line, lines, total_lines, links_cols, links, effective_end_line?}`, where `lines` is an array of bare strings and line i's number is `start_line + i`. `total_lines` is the whole file's line count. `links` lists the local links found in the returned lines (comment blocks excluded), one positional row per target named by `links_cols`, `[alias, lines, target, title]`: `alias` the link text or null, `lines` the line numbers where it appears, `target` the link target, `title` the target document's title or null. A link's file is `target` itself when it has an extension, otherwise `target` plus `.md`. Paging: `start_line` / `end_line` choose the window; when the window does not fit the size budget, it is cut and `effective_end_line` gives the last line returned, so call again with `start_line` set to `effective_end_line + 1`. Pass `binary: true` to fetch a non-markdown file as bytes: the result is an embedded resource block (a file:// uri, mimeType and base64 blob) plus a text block `{binary, mime, path, size_bytes}`; `.md` files are refused in binary mode, and `metadata` gives the size before pulling a large blob.",
+    "inputSchema": {
+      "properties": {
+        "binary": {
+          "default": false,
+          "description": "Return raw bytes base64-encoded; rejects .md",
+          "type": "boolean"
+        },
+        "end_line": {
+          "description": "End line (1-indexed). Text mode only.",
+          "type": "integer"
+        },
+        "line_numbers": {
+          "default": false,
+          "description": "Prefix each line with its 1-indexed line number. Text mode only.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Path to the file",
+          "type": "string"
+        },
+        "start_line": {
+          "description": "Start line (1-indexed). Text mode only.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "get"
+  },
+  {
+    "description": "Return a downscaled / cropped raster image sized to fit the MCP token budget. Use this when `get --binary` would exceed the inline limit. Accepts PNG / JPEG / GIF / WebP; rejects SVG, PDF, audio, video. Returns a content array: an image block the harness renders as vision input, plus a text block with `{format, width, height, mime, size_bytes, source}` where `source` echoes the original mime / dimensions / size. Defaults: max_dimension=1024, max_bytes=262144 (256 KiB), format=jpeg for photographic source formats / png for lossless ones.",
+    "inputSchema": {
+      "properties": {
+        "crop": {
+          "description": "Optional pixel crop applied before scaling, formatted X,Y,W,H (origin top-left). Clamped to the image bounds; an origin outside the image is rejected.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Output format. Defaults to jpeg for photographic source images (JPEG / WebP) and png for lossless source images (PNG / GIF).",
+          "enum": [
+            "jpeg",
+            "jpg",
+            "png"
+          ],
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 262144,
+          "description": "Target ceiling on the encoded output size in bytes. JPEG quality is stepped down (and then the dimension cap halved) until this fits. Defaults to 256 KiB.",
+          "minimum": 1024,
+          "type": "integer"
+        },
+        "max_dimension": {
+          "default": 1024,
+          "description": "Upper bound (in pixels) on the longer edge of the output. Defaults to 1024.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Path to the image attachment.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "get_image"
+  },
+  {
+    "description": "Render a ready-to-use identity YAML block for `.remargin.yaml`. Returns the YAML text; the caller writes it themselves. `mode:` is never emitted (mode is a tree property, not identity-scoped).",
+    "inputSchema": {
+      "properties": {
+        "identity": {
+          "description": "Identity (author name) to record.",
+          "type": "string"
+        },
+        "key": {
+          "description": "Optional path to the signing key (emitted verbatim; no existence check).",
+          "type": "string"
+        },
+        "type": {
+          "description": "Author type.",
+          "enum": [
+            "human",
+            "agent"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "type"
+      ],
+      "type": "object"
+    },
+    "name": "identity_create"
+  },
+  {
+    "description": "Run structural lint checks",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "name": "lint"
+  },
+  {
+    "description": "List files and directories",
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "default": ".",
+          "description": "Directory path to list",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "ls"
+  },
+  {
+    "description": "Get file metadata. Always returns size_bytes, mime, binary, path. Markdown files additionally return comment_count, line_count, pending_count, pending_for, last_activity, frontmatter. Use before `get --binary` to avoid pulling large blobs.",
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "description": "Path to the file (any allowlisted extension)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "metadata"
+  },
+  {
+    "description": "Move or rename a tracked file or directory. Auto-detects a directory source and renames the directory + every nested file as an atomic unit; comments / threads / acks survive because the path of every nested file changes consistently. Atomic same-FS rename, copy+remove fallback on cross-filesystem (EXDEV) for files. Both endpoints flow through the same sandbox / forbidden-target / `trusted_roots` checks every other mutating op uses. Idempotent: same-path no-op; src missing AND dst already in place returns success with bytes_moved=0.",
+    "inputSchema": {
+      "properties": {
+        "dst": {
+          "description": "Destination path.",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "Overwrite an existing destination (for directories: removes the existing destination subtree before the rename).",
+          "type": "boolean"
+        },
+        "src": {
+          "description": "Source path (file or directory).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "dst"
+      ],
+      "type": "object"
+    },
+    "name": "mv"
+  },
+  {
+    "description": "Gitignore-style: returns `restricted=true` when the path is outside the `trusted_roots` allow-list or covered by a `deny_ops` rule from the parent-walked `.remargin.yaml`. With `why=true`, the matching rule's kind, source file, and rule text are included. Read-only; no identity flags.",
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "description": "Absolute or relative path to test.",
+          "type": "string"
+        },
+        "why": {
+          "default": false,
+          "description": "Include the matching rule details when restricted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "permissions_check"
+  },
+  {
+    "description": "Print the resolved permissions for the MCP server's working directory (parent-walk of `.remargin.yaml`). Includes recursive expansion of `trusted_roots` that are themselves realms (bounded depth, cycle-safe). Read-only; no identity flags.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "permissions_show"
+  },
+  {
+    "description": "Dry-run projection for mutating ops. Returns a PlanReport (noop/would_commit/reject_reason/subset_gate/checksums/changed_line_ranges/comment diff) without touching disk. Document ops: ack, batch, comment, reply, delete, edit, purge, react, sandbox-add, sandbox-remove, sign, write. `reply` is a synonym for `comment` with required `parent_id` (translated to `reply_to`). The subset_gate field mirrors SubsetGateFailure when the projected op would introduce a new anomaly not present in the on-disk pre-state - the same shape commit_with_verify would return. File-relocation op: mv - surfaces an `mv_diff` describing canonical src/dst, dst_exists, noop_same_path, idempotent_already_settled. File-copy op: cp - surfaces a `cp_diff` describing canonical src/dst, dst_exists, kind (verbatim/body_only/noop), and comments_to_drop. Config ops (claude_restrict / claude_unrestrict) are CLI-only - use `remargin plan claude restrict` / `remargin plan claude unrestrict`.",
+    "inputSchema": {
+      "properties": {
+        "ack_skip_reason": {
+          "description": "For comment/reply: required when auto_ack:false skips acking another author's comment. Mirrors the live reply gate.",
+          "type": "string"
+        },
+        "after_comment": {
+          "description": "Insert after this comment ID (used by comment)",
+          "type": "string"
+        },
+        "after_heading": {
+          "description": "Insert after the ATX heading addressed by this `>`-separated path (used by comment)",
+          "type": "string"
+        },
+        "after_line": {
+          "description": "Insert after this 1-indexed line (used by comment)",
+          "type": "integer"
+        },
+        "all_mine": {
+          "default": false,
+          "description": "For sign: project signing every unsigned comment authored by the current identity. Mutually exclusive with `ids`.",
+          "type": "boolean"
+        },
+        "attach_names": {
+          "description": "Attachment basenames to record on the projected comment. Bytes are NOT copied by plan.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auto_ack": {
+          "description": "For comment replies: auto-ack the parent. If omitted, the parent is auto-acked iff its author differs from the caller. Pass true to force the ack, false to skip it.",
+          "type": "boolean"
+        },
+        "binary": {
+          "default": false,
+          "description": "For write: content is base64 binary (implies raw)",
+          "type": "boolean"
+        },
+        "content": {
+          "description": "Body text (used by comment / edit)",
+          "type": "string"
+        },
+        "create": {
+          "default": false,
+          "description": "For write: create the file if missing",
+          "type": "boolean"
+        },
+        "dst": {
+          "description": "For mv: destination path.",
+          "type": "string"
+        },
+        "emoji": {
+          "description": "Emoji for react op",
+          "type": "string"
+        },
+        "file": {
+          "description": "Path to the document (required for wired document ops)",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "For mv: project the --force overwrite semantics.",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Single comment ID (used by edit / react)",
+          "type": "string"
+        },
+        "ids": {
+          "description": "Comment IDs (used by ack / delete / sign)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lines": {
+          "description": "For write: partial-write line range as START-END (1-indexed inclusive)",
+          "type": "string"
+        },
+        "op": {
+          "description": "Op to project: ack | batch | comment | reply | delete | edit | react | cp | mv | purge | sandbox-add | sandbox-remove | sign | write",
+          "type": "string"
+        },
+        "ops": {
+          "description": "Sub-ops for the batch projection. Each entry has the same shape as a `batch` sub-op: content (required), reply_to, after_comment, after_heading, after_line, attach_names, auto_ack, ack_skip_reason, kind, sandbox, to. An unknown field refuses the projection.",
+          "items": {
+            "properties": {
+              "ack_skip_reason": {
+                "type": "string"
+              },
+              "after_comment": {
+                "type": "string"
+              },
+              "after_heading": {
+                "type": "string"
+              },
+              "after_line": {
+                "type": "integer"
+              },
+              "attach_names": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "auto_ack": {
+                "type": "boolean"
+              },
+              "content": {
+                "type": "string"
+              },
+              "kind": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reply_to": {
+                "type": "string"
+              },
+              "sandbox": {
+                "type": "boolean"
+              },
+              "to": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "parent_id": {
+          "description": "For reply: the comment being replied to (required for op=reply; the same as reply_to)",
+          "type": "string"
+        },
+        "raw": {
+          "default": false,
+          "description": "For write: treat content as raw bytes; plan returns a non-Markdown reject_reason",
+          "type": "boolean"
+        },
+        "recursive": {
+          "default": false,
+          "description": "For purge: project a directory-level purge of every document under `file`",
+          "type": "boolean"
+        },
+        "remove": {
+          "default": false,
+          "description": "For ack / react: remove instead of add",
+          "type": "boolean"
+        },
+        "reply_to": {
+          "description": "Parent comment ID (used by comment)",
+          "type": "string"
+        },
+        "sandbox": {
+          "default": false,
+          "description": "For comment: atomically project a sandbox entry",
+          "type": "boolean"
+        },
+        "src": {
+          "description": "For mv: source path.",
+          "type": "string"
+        },
+        "to": {
+          "description": "Addressees (used by comment)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "type": "object"
+    },
+    "name": "plan"
+  },
+  {
+    "description": "Strip the `system_prompt:` block from `<folder>/.remargin.yaml`. Idempotent: a missing block (or missing file) succeeds. The .remargin.yaml is preserved even if it ends up empty. Folder defaults to the MCP root.",
+    "inputSchema": {
+      "properties": {
+        "folder": {
+          "description": "Folder containing the `.remargin.yaml`. Defaults to the MCP root.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "prompt_delete"
+  },
+  {
+    "description": "Recursively list every `.remargin.yaml` under `folder` that declares a `system_prompt:` block. Read-only. Folder defaults to the MCP root.",
+    "inputSchema": {
+      "properties": {
+        "folder": {
+          "description": "Root folder. Defaults to the MCP root.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "prompt_list"
+  },
+  {
+    "description": "Resolve the nearest folder-scoped system prompt for a file or directory. Walks `.remargin.yaml` files upward; first one declaring a `system_prompt:` block wins. Falls through to a locked Default body when the walk exhausts. Read-only.",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the file (or directory) to resolve a prompt for.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "name": "prompt_resolve"
+  },
+  {
+    "description": "Create or replace the `system_prompt:` block in `<folder>/.remargin.yaml`. Other fields in the file are preserved byte-for-byte. The post-write diff refuses any change outside the system_prompt mapping. Folder defaults to the MCP root when omitted.",
+    "inputSchema": {
+      "properties": {
+        "folder": {
+          "description": "Folder containing the `.remargin.yaml`. Defaults to the MCP root.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Human-readable display label. Required.",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Prompt body text. Required.",
+          "type": "string"
+        },
+        "runner": {
+          "description": "Single-line command the composed prompt is piped into. Omitting it clears any existing runner.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "name": "prompt_set"
+  },
+  {
+    "description": "Strip all comments from a document, or every .md file in a directory when `recursive` is true. To preview without writing, use `plan` with op=\"purge\".",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Path to the document (or directory when `recursive` is true)",
+          "type": "string"
+        },
+        "recursive": {
+          "description": "Recursively purge every visible .md file under `file` (treats `file` as a directory).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "name": "purge"
+  },
+  {
+    "description": "Search comments across documents. Returns a compact, minified columnar payload: `{base_path, total, comment_cols, results, effective_limit?}`. `base_path` is the searched directory (or a file's folder), ending in `/`, and every result `path` is relative to it. Each result is one file: `{path, comment_count, matched_count, pending_count, pending_for?, last_activity?, comments}`, where `comment_count`, `pending_count`, `pending_for` and `last_activity` describe the whole file and `matched_count` counts the comments that passed the filters. `comments` holds this page's matching comments as positional rows named by `comment_cols`, `[id, line, author, author_type, ts, reply_to, thread, to, ack, reactions, kind, edited_at, attachments, content]`. Columns: `id` the comment id; `line` the first line of its block in the file; `author` the author identity; `author_type` `human` or `agent`; `ts` creation time (RFC 3339); `reply_to` the parent comment id, or null for a root; `thread` the id of the thread's root comment, or null for a root; `to` the recipient identities (empty means a broadcast); `ack` one `author@ts` string per acknowledgement, the identity and the RFC 3339 time joined by `@`; `reactions` an object from each emoji to the list of `{author, ts}` that reacted with it; `kind` the classification tags, or null; `edited_at` the last edit time, or null if never edited; `attachments` stored attachment paths; `content` the markdown body, always last. With `include_integrity: true`, `checksum` and `signature` columns are inserted immediately before `content`. With `summary: true` the per-file `comments` arrays are left out. Filters: `kind`, `author`, `since`, `comment_id`, `content_regex`; the pending filters (`pending`, `pending_for`, `pending_for_me`, `pending_broadcast`) combine as a union. `pending` covers directed comments with an unacknowledged recipient and broadcast comments nobody acknowledged; `pending_for_me` and `pending_broadcast` use the MCP server's identity. A directory search skips gitignored files; naming a file reads it regardless. Paging: `total` counts every matching comment across all files (every listed file in summary mode); one call returns at most `limit` comments starting at `offset` (default 0), then cuts the page further so the response stays under the size budget, and says so with `effective_limit` (the number of comments actually returned). To read everything, call again with `offset` increased by the comments received until it reaches `total`. A file split across pages repeats its summary fields on each page.",
+    "inputSchema": {
+      "properties": {
+        "author": {
+          "description": "Only documents with comments by this author",
+          "type": "string"
+        },
+        "comment_id": {
+          "description": "Only documents containing a comment with this structural ID",
+          "type": "string"
+        },
+        "content_regex": {
+          "description": "Regex applied to comment content; composes with metadata filters",
+          "type": "string"
+        },
+        "expanded": {
+          "default": false,
+          "description": "Include individual matching comments in each result (default: true via non-summary mode)",
+          "type": "boolean"
+        },
+        "ignore_case": {
+          "default": false,
+          "description": "Case-insensitive match for content_regex",
+          "type": "boolean"
+        },
+        "include_integrity": {
+          "default": false,
+          "description": "Add checksum + signature columns to each comment row, immediately before content.",
+          "type": "boolean"
+        },
+        "kind": {
+          "default": [],
+          "description": "Keep only comments whose kind tags include at least one of these values. Empty = no filter.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "Return at most this many comments (files in summary mode). Omit for as many as fit the size budget.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Number of matching comments (files in summary mode) to skip before this page.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "default": ".",
+          "description": "Base directory to search",
+          "type": "string"
+        },
+        "pending": {
+          "default": false,
+          "description": "Only documents with pending (unacked) comments. Matches both directed and broadcast shapes.",
+          "type": "boolean"
+        },
+        "pending_broadcast": {
+          "default": false,
+          "description": "Only surface broadcast (no-`to`) comments the server identity has not acked yet.",
+          "type": "boolean"
+        },
+        "pending_for": {
+          "description": "Only pending for this recipient",
+          "type": "string"
+        },
+        "pending_for_me": {
+          "default": false,
+          "description": "Sugar for pending_for=<server identity>. Surfaces directed comments addressed to the caller and not yet acked.",
+          "type": "boolean"
+        },
+        "since": {
+          "description": "Only activity after this ISO 8601 timestamp",
+          "type": "string"
+        },
+        "summary": {
+          "default": false,
+          "description": "Return only counts/summary, suppress comment data",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "query"
+  },
+  {
+    "description": "Add or remove an emoji reaction",
+    "inputSchema": {
+      "properties": {
+        "emoji": {
+          "description": "Emoji to add/remove",
+          "type": "string"
+        },
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "id": {
+          "description": "Comment ID",
+          "type": "string"
+        },
+        "remove": {
+          "default": false,
+          "description": "Remove instead of add",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file",
+        "id",
+        "emoji"
+      ],
+      "type": "object"
+    },
+    "name": "react"
+  },
+  {
+    "description": "Find/replace across document BODY text only (never inside comments), over a file or folder. Integrity-gated: each file flows through comment-preservation plus the post-verify subset gate, so a comment can never be corrupted. A pattern that occurs only inside comments is a no-op. In a folder, every visible `.md` file is rewritten; a file the gate refuses is skipped, recorded, and the run continues. `path` is required (no silent cwd fan-out). To preview without writing, use the CLI `remargin replace --dry-run`.",
+    "inputSchema": {
+      "properties": {
+        "ignore_case": {
+          "default": false,
+          "description": "Case-insensitive matching",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Target file or directory (required)",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "Text or regex to find",
+          "type": "string"
+        },
+        "regex": {
+          "default": false,
+          "description": "Treat pattern as a regex",
+          "type": "boolean"
+        },
+        "replacement": {
+          "description": "Replacement text ($1/${name} in regex mode; literal otherwise)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern",
+        "replacement",
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "replace"
+  },
+  {
+    "description": "PREFERRED way to respond to a comment. Wraps `comment` with required `parent_id`; the parent must live in the named `file`. Smart auto-ack default: if `auto_ack` is omitted, the parent is acked iff its author differs from the caller (replies to your own comments don't ack). Set `auto_ack: true` to force the ack, `auto_ack: false` to skip it. Comments render as markdown; record observed state, not future-tense announcements.",
+    "inputSchema": {
+      "properties": {
+        "ack_skip_reason": {
+          "description": "Required when auto_ack:false skips acking another author's comment: explain why you are not acknowledging it. Not needed for self-replies or the smart default.",
+          "type": "string"
+        },
+        "attachments": {
+          "default": [],
+          "description": "File paths to upload. Each file is copied beside the document and listed in the comment's `attachments` header - this stores the file, it does not display it. To show an image inline, also write `![alt](assets/<filename>)` in the comment body.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auto_ack": {
+          "description": "Force the smart default off. true = always ack the parent; false = never ack. Omit for the smart default: ack iff parent.author differs from caller.",
+          "type": "boolean"
+        },
+        "content": {
+          "description": "Reply body text in markdown. Past-tense / observed-state only - no future-tense promises.",
+          "type": "string"
+        },
+        "file": {
+          "description": "Path to the document containing the parent comment",
+          "type": "string"
+        },
+        "kind": {
+          "default": [],
+          "description": "Classification tags. Each entry must match [A-Za-z0-9_ \\-]{1,15}; at most 8 entries.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parent_id": {
+          "description": "ID of the comment you're replying to. Must exist in `file`.",
+          "type": "string"
+        },
+        "sandbox": {
+          "default": false,
+          "description": "Atomically stage the file in the caller's sandbox (see sandbox_add)",
+          "type": "boolean"
+        },
+        "to": {
+          "default": [],
+          "description": "Additional recipients beyond the parent's author. NOT auto-populated with the parent's author - be explicit if you want them paged.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "parent_id",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "reply"
+  },
+  {
+    "description": "Call this the moment your client spills a remargin tool result to a file (because it exceeded the client's output-token limit) - BEFORE you read that file. remargin infers the offending size from the last result it emitted and ratchets its per-session page cap down so future `search` pages stay under your client's limit. The cap only ever falls, never rises, and resets each session. Omit `size` for the inferred value; pass it only to force an explicit one.",
+    "inputSchema": {
+      "properties": {
+        "size": {
+          "description": "Optional explicit size (bytes) of the spilled result. Omit to let remargin infer it from the last emitted result.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "report_spill"
+  },
+  {
+    "description": "Remove a file from the managed document tree (idempotent). Pointed at a directory it removes the tree recursively (always recursive, no flag): it deletes everything remargin can see bottom-up, leaves behind only directories holding entries it cannot list (hidden files, a nested .remargin.yaml), and returns a report {files_deleted, folders_removed, folders_left_behind}. If any listed resource is unreadable the call fails and nothing is deleted. A markdown file carrying one or more comments is refused (single file or anywhere in a directory tree): purge the path first to strip its comments, then rm.",
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "description": "Path to the file or directory to delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "rm"
+  },
+  {
+    "description": "Stage one or more markdown files in the caller's sandbox. Idempotent per identity.",
+    "inputSchema": {
+      "properties": {
+        "files": {
+          "description": "Paths to markdown files to stage",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
+    "name": "sandbox_add"
+  },
+  {
+    "description": "Return all markdown files in the given path that are staged for the caller's identity.",
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "default": ".",
+          "description": "Base directory to walk (default: .)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sandbox_list"
+  },
+  {
+    "description": "Remove the caller's sandbox entry from one or more markdown files. Idempotent per identity.",
+    "inputSchema": {
+      "properties": {
+        "files": {
+          "description": "Paths to markdown files to unstage",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
+    "name": "sandbox_remove"
+  },
+  {
+    "description": "Search across documents for text matches. Returns a compact, minified columnar payload: `{total, match_cols, files}` (plus `effective_limit` when a page was clamped), where each file is `{path, matches}` and every match is a positional row named by `match_cols` (`[line, location, text, comment_id]`). Matches are grouped by file so `path` is stated once and files appear in first-match order. `location` is `body` / `comment`; `comment_id` is `null` for body matches. With `context` > 0 the rows widen to `[line, location, text, comment_id, before, after]` (before / after being string arrays) and `match_cols` reflects it. `total` is the exact corpus match count; a bounded page carries `effective_limit`, so advance `offset` to page for the rest.",
+    "inputSchema": {
+      "properties": {
+        "context": {
+          "default": 0,
+          "description": "Lines of context around matches",
+          "type": "integer"
+        },
+        "ignore_case": {
+          "default": false,
+          "description": "Case-insensitive matching",
+          "type": "boolean"
+        },
+        "limit": {
+          "description": "Page size: return at most this many matches. Omit for all matches. The response always carries the exact total, so a bounded page is never a silent truncation.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Number of matches to skip before the returned page",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "default": ".",
+          "description": "Base directory to search",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "Text or regex pattern to search for",
+          "type": "string"
+        },
+        "regex": {
+          "default": false,
+          "description": "Treat pattern as a regex",
+          "type": "boolean"
+        },
+        "scope": {
+          "default": "all",
+          "description": "Search scope: all, body, or comments",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "name": "search"
+  },
+  {
+    "description": "Back-sign missing-signature comments authored by the current identity. Refuses to sign comments authored by anyone else (forgery guard). Already-signed comments listed under `ids` are reported as skipped; `all_mine` silently excludes them. Pass exactly one of `ids` or `all_mine`. Pass `repair_checksum: true` to recompute the target comment's checksum from its current bytes before signing (useful when the content was edited out-of-band and the signer wants to re-vouch for the updated content). To preview without writing, use `plan` with op=\"sign\".",
+    "inputSchema": {
+      "properties": {
+        "all_mine": {
+          "default": false,
+          "description": "Sign every unsigned comment authored by the current identity.",
+          "type": "boolean"
+        },
+        "file": {
+          "description": "Path to the document",
+          "type": "string"
+        },
+        "ids": {
+          "description": "Comment ids to sign. Mutually exclusive with all_mine.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "repair_checksum": {
+          "default": false,
+          "description": "Recompute each target comment's checksum from its current content before signing. Scoped by the forgery guard: only the caller's own comments can be repaired.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "name": "sign"
+  },
+  {
+    "description": "Verify comment integrity (checksums and signatures) against the participant registry. Accepts a file or a directory: a directory walks every visible `.md` file recursively (honoring `.gitignore`) and returns a failures-only summary {ok, files_verified, files_passed, failures}: passing files are counted, never enumerated; each failing file lists only its not-clean rows (or a parse/read `error`). A file returns per-comment status plus an aggregate `ok` flag driven by the active mode.",
+    "inputSchema": {
+      "properties": {
+        "file": {
+          "description": "Backward-compatible alias for `path` (single document). Prefer `path`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to a document or a directory to verify recursively.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "verify"
+  },
+  {
+    "description": "Return the MCP server's startup-resolved identity. Returns `{found: false}` when no identity is configured (soft miss; never errors on missing config).",
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "name": "whoami"
+  },
+  {
+    "description": "Replace whole file OR a contiguous line range (via start_line/end_line - 1-indexed inclusive). For markdown files, existing remargin comment blocks are preserved automatically - do not pre-strip them, and do not regenerate the whole file when only a section changed. Pass start_line and end_line together for surgical edits.",
+    "inputSchema": {
+      "properties": {
+        "binary": {
+          "default": false,
+          "description": "Content is base64-encoded binary data. Implies raw mode. Not supported for markdown (.md) files.",
+          "type": "boolean"
+        },
+        "content": {
+          "description": "File content to write (base64-encoded when binary=true)",
+          "type": "string"
+        },
+        "create": {
+          "default": false,
+          "description": "Create a new file, creating any missing parent directories (within the sandbox); the file itself must not already exist",
+          "type": "boolean"
+        },
+        "end_line": {
+          "description": "Partial write: last line of the range to replace (1-indexed, inclusive). Must be paired with start_line. Incompatible with create/raw/binary.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Path to the file",
+          "type": "string"
+        },
+        "raw": {
+          "default": false,
+          "description": "Write content exactly as provided, skipping frontmatter injection and comment preservation. Not supported for markdown (.md) files.",
+          "type": "boolean"
+        },
+        "start_line": {
+          "description": "Partial write: first line of the range to replace (1-indexed, inclusive). Must be paired with end_line. Incompatible with create/raw/binary.",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "write"
+  }
+]

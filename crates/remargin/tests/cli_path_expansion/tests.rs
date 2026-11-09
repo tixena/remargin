@@ -109,6 +109,7 @@ fn mcp_get_expands_tilde() {
         "id": 1_i32,
         "method": "tools/call",
         "params": {
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}},
             "name": "get",
             "arguments": { "path": "~/note.md" }
         }
@@ -144,6 +145,7 @@ fn mcp_undefined_var_surfaces_named_error() {
         "id": 1_i32,
         "method": "tools/call",
         "params": {
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}},
             "name": "get",
             "arguments": { "path": "$DEFINITELY_UNSET_FOO/bar.md" }
         }
@@ -233,7 +235,7 @@ fn mcp_get_reads_a_non_ascii_path() {
         "jsonrpc": "2.0",
         "id": 1_i32,
         "method": "tools/call",
-        "params": { "name": "get", "arguments": { "path": "caf\u{e9}/note.md" } }
+        "params": { "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}, "name": "get", "arguments": { "path": "caf\u{e9}/note.md" } }
     });
     let request_str = serde_json::to_string(&request).unwrap();
 

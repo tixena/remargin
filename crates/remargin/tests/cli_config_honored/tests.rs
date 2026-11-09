@@ -541,13 +541,18 @@ fn mcp_startup_config_sets_default_identity_for_tool_calls() {
         .spawn()
         .unwrap();
 
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
     let init = json!({
-        "jsonrpc": "2.0", "id": 1_i32, "method": "initialize",
-        "params": {"protocolVersion": "2024-11-05", "capabilities": {}}
+        "jsonrpc": "2.0", "id": 1_i32, "method": "server/discover",
+        "params": {"_meta": meta}
     });
     let call = json!({
         "jsonrpc": "2.0", "id": 2_i32, "method": "tools/call",
         "params": {
+            "_meta": meta,
             "name": "comment",
             "arguments": {
                 "file": doc_str,

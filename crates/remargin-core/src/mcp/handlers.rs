@@ -28,14 +28,14 @@ use crate::mcp::args::{
     ReplyArgs, ReportSpillArgs, RmArgs, SandboxAddArgs, SandboxListArgs, SandboxRemoveArgs,
     SearchArgs, SignArgs, VerifyArgs, WriteArgs,
 };
+use crate::mcp::context::RequestContext;
 use crate::mcp::errors::RemarginError;
+use crate::mcp::service::Remargin;
+use crate::mcp::service::remargin_schema::{McpContent, McpResourceContents};
 use crate::mcp::{
     SessionState, column_names, comment_row, enforce_ack_skip_reasons, get_envelope, page_grouped,
     page_window, query_file, read_get_window, search_compact_envelope, size_page,
 };
-use crate::mcp_server::context::RequestContext;
-use crate::mcp_server::service::Remargin;
-use crate::mcp_server::service::remargin_schema::{McpContent, McpResourceContents};
 use crate::operations::batch::BatchCommentOp;
 use crate::operations::cp::{self as cp_op, CpOutcome};
 use crate::operations::mv::{self as mv_op, MvAnswer};

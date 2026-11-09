@@ -112,6 +112,7 @@ fn run_mcp(base_dir: &Path, op: &str, mut arguments: serde_json::Map<String, Val
         "id": 1_i32,
         "method": "tools/call",
         "params": {
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}},
             "name": "plan",
             "arguments": Value::Object(arguments),
         }

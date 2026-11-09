@@ -5,7 +5,6 @@ use alloc::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::mcp::tool_descriptors;
 
 fn schemas() -> Vec<(&'static str, Value)> {
     vec![
@@ -215,9 +214,13 @@ fn parity_faults(today: &[(String, Value)], args: &[(&str, Value)]) -> Vec<Strin
 }
 
 fn today_schemas() -> Vec<(String, Value)> {
-    tool_descriptors()
+    let tools: Vec<Value> = serde_json::from_str(include_str!("today_schemas.json")).unwrap();
+    tools
         .into_iter()
-        .map(|tool| (tool.name.to_owned(), tool.schema))
+        .map(|mut tool| {
+            let name = tool["name"].as_str().unwrap().to_owned();
+            (name, tool["inputSchema"].take())
+        })
         .collect()
 }
 

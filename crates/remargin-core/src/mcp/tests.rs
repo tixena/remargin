@@ -1,7 +1,7 @@
 //! MCP server tests.
 //!
 //! Tests use the `process_request` function to exercise the JSON-RPC layer
-//! without actual stdin/stdout I/O.
+//! without actual stdin/stdout I/O. Every request carries the `_meta` of revision 2026-07-28.
 
 use core::fmt::Write as _;
 use std::path::Path;
@@ -20,6 +20,8 @@ use crate::config::identity::IdentityFlags;
 use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::mcp;
+use crate::mcp::handlers::Server;
+use crate::mcp::host;
 use crate::operations::batch::OP_FIELDS;
 use crate::operations::projections::PLAN_OP_FIELDS;
 use crate::operations::{CreateCommentParams, create_comment};
@@ -184,34 +186,68 @@ fn system_with_doc(base: &Path, filename: &str, content: &str) -> MemorySystem {
         .unwrap()
 }
 
+/// A request of the 2026-07-28 revision: `params` with the `_meta` every request carries.
+fn request(method: &str, mut params: Value) -> Value {
+    params["_meta"] = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
+    json!({ "jsonrpc": "2.0", "id": 1_i32, "method": method, "params": params })
+}
+
+/// `message` with the `_meta` of the revision added to its params when it has none.
+fn with_meta(message: &Value) -> Value {
+    let mut carried = message.clone();
+    if carried["params"].get("_meta").is_none() {
+        carried["params"]["_meta"] = request("", json!({}))["params"]["_meta"].clone();
+    }
+    carried
+}
+
 fn call(
     system: &dyn os_shim::System,
     base_dir: &Path,
     config: &ResolvedConfig,
     request: &Value,
 ) -> Value {
-    let request_str = serde_json::to_string(request).unwrap();
-    let response_str = mcp::process_request(system, base_dir, config, &request_str)
-        .unwrap()
-        .unwrap();
-    serde_json::from_str(&response_str).unwrap()
+    call_session(system, base_dir, config, &Server::new(), request)
 }
 
-/// Drive a JSON-RPC request against a persistent [`super::SessionState`] so
-/// adaptive state (spill cap, last-response size) carries across calls.
+/// Drive a JSON-RPC request against a persistent [`Server`] so adaptive state (spill cap,
+/// last-response size) carries across calls.
 fn call_session(
     system: &dyn os_shim::System,
     base_dir: &Path,
     config: &ResolvedConfig,
-    session: &mut super::SessionState,
+    server: &Server,
     request: &Value,
 ) -> Value {
-    let request_str = serde_json::to_string(request).unwrap();
+    let request_str = serde_json::to_string(&with_meta(request)).unwrap();
     let response_str =
-        super::process_request_with_session(system, base_dir, config, session, &request_str)
+        host::process_request(server, system, base_dir, config.clone(), &request_str)
             .unwrap()
             .unwrap();
     serde_json::from_str(&response_str).unwrap()
+}
+
+/// The UTF-8 bytes of the text, data and blob members an answer's `content` carries.
+fn written_size(response: &Value) -> usize {
+    response["result"]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|item| {
+            [
+                item.get("text"),
+                item.get("data"),
+                item.get("resource")
+                    .and_then(|resource| resource.get("blob")),
+            ]
+        })
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::len)
+        .sum()
 }
 
 /// A `tools/call` request for `search` over `pattern`, with an optional page
@@ -280,7 +316,7 @@ fn is_tool_error(response: &Value) -> bool {
 }
 
 #[test]
-fn initialize_returns_capabilities() {
+fn server_discover_returns_capabilities() {
     let base = Path::new("/docs");
     let system = MemorySystem::new();
     let config = test_config();
@@ -289,21 +325,14 @@ fn initialize_returns_capabilities() {
         &system,
         base,
         &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1_i32,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": { "name": "test", "version": "1.0" }
-            }
-        }),
+        &request("server/discover", json!({})),
     );
 
-    assert_eq!(response["result"]["protocolVersion"], "2024-11-05");
+    assert_eq!(
+        response["result"]["supportedVersions"],
+        json!(["2026-07-28"])
+    );
     assert!(response["result"]["capabilities"]["tools"].is_object());
-    assert_eq!(response["result"]["serverInfo"]["name"], "remargin");
 }
 
 #[test]
@@ -619,7 +648,10 @@ fn batch_refuses_an_invalid_kind_before_writing() {
     );
 
     assert!(is_tool_error(&response));
-    assert!(tool_error_text(&response).contains("batch op[1]"));
+    let text = tool_error_text(&response);
+    assert!(text.contains("failed-validation"), "{text}");
+    assert!(text.contains("\"operation\":\"batch\""), "{text}");
+    assert!(text.contains("\"field\":\"operations.1.kind\""), "{text}");
     assert_eq!(
         system.read_to_string(&base.join("doc.md")).wait().unwrap(),
         "# Hello\n\nBody text.\n"
@@ -677,7 +709,12 @@ fn batch_op_schemas_declare_exactly_the_accepted_fields() {
             .find(|t| t["name"] == tool)
             .map(|t| t["inputSchema"].clone())
             .unwrap();
-        let mut keys: Vec<String> = schema["properties"][array]["items"]["properties"]
+        let property = &schema["properties"][array];
+        let list = property["anyOf"]
+            .as_array()
+            .and_then(|branches| branches.iter().find(|branch| branch["type"] == "array"))
+            .unwrap_or(property);
+        let mut keys: Vec<String> = list["items"]["properties"]
             .as_object()
             .unwrap()
             .keys()
@@ -719,7 +756,13 @@ fn batch_refuses_an_unknown_field_before_writing() {
     );
 
     assert!(is_tool_error(&response));
-    assert!(tool_error_text(&response).contains("batch op[1]: unknown field `after_headng`"));
+    let text = tool_error_text(&response);
+    assert!(text.contains("failed-validation"), "{text}");
+    assert!(
+        text.contains("\"field\":\"operations.1.after_headng\""),
+        "{text}"
+    );
+    assert!(text.contains("unknown field `after_headng`"), "{text}");
     assert_eq!(
         system.read_to_string(&base.join("doc.md")).wait().unwrap(),
         "# Hello\n\nBody text.\n"
@@ -822,20 +865,19 @@ fn report_spill_infers_size_from_last_result() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", &needle_doc(100));
     let config = test_config();
-    let mut session = super::SessionState::default();
-    assert_eq!(session.spill_cap, super::DEFAULT_SPILL_CAP);
+    let session = Server::new();
 
     let response = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &search_request("needle", None),
     );
     let result = extract_tool_text(&response);
     assert_eq!(compact_row_count(&result), 100_usize);
     assert!(result.get("effective_limit").is_none());
-    let learned = session.last_response_size;
+    let learned = written_size(&response);
     assert!(learned > 0);
     assert!(learned < super::DEFAULT_SPILL_CAP);
 
@@ -843,14 +885,13 @@ fn report_spill_infers_size_from_last_result() {
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &report_spill_request(None),
     );
     let spill_result = extract_tool_text(&spill);
     assert_eq!(spill_result["inferred"], true);
+    assert_eq!(spill_result["previous_cap"].as_u64().unwrap(), 40_000_u64);
     assert_eq!(spill_result["spill_cap"].as_u64().unwrap(), learned as u64);
-    assert_eq!(session.spill_cap, learned);
-    assert!(session.spill_cap < super::DEFAULT_SPILL_CAP);
 }
 
 #[test]
@@ -858,49 +899,50 @@ fn report_spill_lowers_the_cap_and_never_raises() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", &needle_doc(100));
     let config = test_config();
-    let mut session = super::SessionState::default();
+    let session = Server::new();
 
     let low = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &report_spill_request(Some(1000)),
     );
     assert_eq!(
         extract_tool_text(&low)["spill_cap"].as_u64().unwrap(),
         1000_u64
     );
-    assert_eq!(session.spill_cap, 1000_usize);
 
     let high = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &report_spill_request(Some(50_000)),
     );
     let high_result = extract_tool_text(&high);
     assert_eq!(high_result["reported_size"].as_u64().unwrap(), 50_000_u64);
     assert_eq!(high_result["spill_cap"].as_u64().unwrap(), 1000_u64);
-    assert_eq!(session.spill_cap, 1000_usize);
 
-    call_session(
+    let searched = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &search_request("needle", None),
     );
-    assert!(session.last_response_size > 1000);
-    call_session(
+    assert!(written_size(&searched) > 1000);
+    let inferred = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &report_spill_request(None),
     );
-    assert_eq!(session.spill_cap, 1000_usize);
+    assert_eq!(
+        extract_tool_text(&inferred)["spill_cap"].as_u64().unwrap(),
+        1000_u64
+    );
 }
 
 #[test]
@@ -909,19 +951,19 @@ fn search_page_sized_under_cap() {
     let system = system_with_doc(base, "doc.md", &needle_doc(100));
     let config = test_config();
 
-    let mut tight = super::SessionState::default();
+    let tight = Server::new();
     call_session(
         &system,
         base,
         &config,
-        &mut tight,
+        &tight,
         &report_spill_request(Some(1500)),
     );
     let tight_page = extract_tool_text(&call_session(
         &system,
         base,
         &config,
-        &mut tight,
+        &tight,
         &search_request("needle", None),
     ));
     let tight_n = compact_row_count(&tight_page);
@@ -932,31 +974,31 @@ fn search_page_sized_under_cap() {
         tight_n
     );
 
-    let mut loose = super::SessionState::default();
+    let loose = Server::new();
     call_session(
         &system,
         base,
         &config,
-        &mut loose,
+        &loose,
         &report_spill_request(Some(6000)),
     );
     let loose_page = extract_tool_text(&call_session(
         &system,
         base,
         &config,
-        &mut loose,
+        &loose,
         &search_request("needle", None),
     ));
     let loose_n = compact_row_count(&loose_page);
     assert_eq!(loose_page["total"].as_u64().unwrap(), 100_u64);
     assert!(loose_n > tight_n);
 
-    let mut caller = super::SessionState::default();
+    let caller = Server::new();
     let bounded = extract_tool_text(&call_session(
         &system,
         base,
         &config,
-        &mut caller,
+        &caller,
         &search_request("needle", Some(3)),
     ));
     assert_eq!(compact_row_count(&bounded), 3_usize);
@@ -1265,7 +1307,6 @@ fn get_compact_line_numbers_minified() {
     assert_eq!(row[2], "Target");
     assert_eq!(row[3], "The Target");
     assert!(result.get("content").is_none());
-    assert!(result["elapsed_ms"].is_number());
 }
 
 #[test]
@@ -1309,7 +1350,6 @@ fn get_compact_no_line_numbers_minified() {
     assert!(result.get("lines").is_none());
     let row = result["links"][0].as_array().unwrap();
     assert_eq!(row[2], "Target");
-    assert!(result["elapsed_ms"].is_number());
 }
 
 #[test]
@@ -1382,9 +1422,9 @@ fn get_lone_end_line_returns_head_not_whole_file() {
     );
 }
 
-/// A minified `get` stays minified and a pretty `metadata` stays pretty; both keep `elapsed_ms`.
+/// `get` answers as compact text and `metadata` as pretty text.
 #[test]
-fn injector_preserves_payload_style() {
+fn get_text_is_compact_and_metadata_text_is_pretty() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "notes.md", "Body one.\nBody two.\n");
     let config = test_config();
@@ -1393,37 +1433,19 @@ fn injector_preserves_payload_style() {
         &system,
         base,
         &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1_i32,
-            "method": "tools/call",
-            "params": { "name": "get", "arguments": { "path": "notes.md" } }
-        }),
+        &tool_request("get", &json!({ "path": "notes.md" })),
     );
     let get_raw = extract_tool_raw_text(&get_resp);
-    assert!(!get_raw.contains('\n'), "get stays minified: {get_raw}");
-    assert!(
-        get_raw.contains("\"elapsed_ms\":"),
-        "elapsed_ms injected without pretty spacing: {get_raw}"
-    );
+    assert!(!get_raw.contains('\n'), "get is compact: {get_raw}");
 
     let meta_resp = call(
         &system,
         base,
         &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 2_i32,
-            "method": "tools/call",
-            "params": { "name": "metadata", "arguments": { "path": "notes.md" } }
-        }),
+        &tool_request("metadata", &json!({ "path": "notes.md" })),
     );
     let meta_raw = extract_tool_raw_text(&meta_resp);
-    assert!(meta_raw.contains('\n'), "metadata stays pretty: {meta_raw}");
-    assert!(
-        meta_raw.contains("\"elapsed_ms\""),
-        "elapsed_ms injected into pretty payload: {meta_raw}"
-    );
+    assert!(meta_raw.contains('\n'), "metadata is pretty: {meta_raw}");
 }
 
 #[test]
@@ -1485,10 +1507,14 @@ fn unknown_tool_returns_error() {
         }),
     );
 
-    assert!(is_tool_error(&response));
+    assert_eq!(response["error"]["code"], -32_602_i32);
+    assert_eq!(
+        response["error"]["data"]["fault"]["kind"],
+        "unknown-operation"
+    );
 }
 
-/// The tool error points the caller at the CLI.
+/// The generated server has no such tool.
 #[test]
 fn claude_restrict_tool_dispatch_rejected() {
     let base = Path::new("/docs");
@@ -1510,17 +1536,18 @@ fn claude_restrict_tool_dispatch_rejected() {
         }),
     );
 
-    assert!(is_tool_error(&response));
-    let content = response["result"]["content"].as_array().unwrap();
-    let text = content[0]["text"].as_str().unwrap();
-    assert!(
-        text.contains("not available via MCP"),
-        "expected refusal pointing to CLI, got: {text}"
+    assert_eq!(response["error"]["code"], -32_602_i32);
+    assert_eq!(
+        response["error"]["data"]["fault"]["kind"],
+        "unknown-operation"
     );
-    assert!(text.contains("remargin claude restrict"), "got: {text}");
+    assert_eq!(
+        response["error"]["data"]["fault"]["operation"],
+        "claude_restrict"
+    );
 }
 
-/// The tool error points the caller at the CLI.
+/// The generated server has no such tool.
 #[test]
 fn claude_unrestrict_tool_dispatch_rejected() {
     let base = Path::new("/docs");
@@ -1542,14 +1569,15 @@ fn claude_unrestrict_tool_dispatch_rejected() {
         }),
     );
 
-    assert!(is_tool_error(&response));
-    let content = response["result"]["content"].as_array().unwrap();
-    let text = content[0]["text"].as_str().unwrap();
-    assert!(
-        text.contains("not available via MCP"),
-        "expected refusal pointing to CLI, got: {text}"
+    assert_eq!(response["error"]["code"], -32_602_i32);
+    assert_eq!(
+        response["error"]["data"]["fault"]["kind"],
+        "unknown-operation"
     );
-    assert!(text.contains("remargin claude unrestrict"), "got: {text}");
+    assert_eq!(
+        response["error"]["data"]["fault"]["operation"],
+        "claude_unrestrict"
+    );
 }
 
 /// The error points the caller at the CLI.
@@ -1688,7 +1716,7 @@ fn verify_checks_checksum_integrity() {
             "params": {
                 "name": "verify",
                 "arguments": {
-                    "file": "doc.md"
+                    "path": "doc.md"
                 }
             }
         }),
@@ -1780,7 +1808,7 @@ participants:
             "method": "tools/call",
             "params": {
                 "name": "verify",
-                "arguments": { "file": "realm/file.md" }
+                "arguments": { "path": "realm/file.md" }
             }
         }),
     );
@@ -1857,7 +1885,7 @@ participants:
             "method": "tools/call",
             "params": {
                 "name": "verify",
-                "arguments": { "file": "file.md" }
+                "arguments": { "path": "file.md" }
             }
         }),
     );
@@ -1964,8 +1992,6 @@ fn get_binary_returns_resource_block() {
     assert_eq!(metadata["mime"], "image/png");
     assert!(metadata["path"].is_string());
     assert!(metadata["size_bytes"].is_number());
-    assert!(metadata.get("elapsed_ms").is_some(), "elapsed_ms injected");
-    assert!(metadata["elapsed_ms"].is_u64());
 }
 
 #[test]
@@ -1974,13 +2000,13 @@ fn get_binary_records_nonzero_response_size() {
     let payload = "x".repeat(4096);
     let system = system_with_doc(base, "blob.png", &payload);
     let config = test_config();
-    let mut session = super::SessionState::default();
+    let session = Server::new();
 
     let response = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &json!({
             "jsonrpc": "2.0",
             "id": 1_i32,
@@ -1996,10 +2022,19 @@ fn get_binary_records_nonzero_response_size() {
         .as_str()
         .unwrap()
         .len();
+    let reported = call_session(
+        &system,
+        base,
+        &config,
+        &session,
+        &report_spill_request(None),
+    );
+    let size = extract_tool_text(&reported)["reported_size"]
+        .as_u64()
+        .unwrap();
     assert!(
-        session.last_response_size >= blob_len,
-        "size {} should include the base64 resource blob ({blob_len} bytes)",
-        session.last_response_size
+        size >= blob_len as u64,
+        "size {size} should include the base64 resource blob ({blob_len} bytes)",
     );
 }
 
@@ -2426,8 +2461,6 @@ fn get_image_returns_image_content_block() {
     assert_eq!(content[1]["type"], "text");
     let metadata: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
     assert_eq!(metadata["mime"], "image/png");
-    assert!(metadata.get("elapsed_ms").is_some(), "elapsed_ms injected");
-    assert!(metadata["elapsed_ms"].is_u64());
     assert!(metadata.get("content").is_none());
 }
 
@@ -2476,13 +2509,13 @@ fn get_image_records_nonzero_response_size() {
         .with_file(base.join("pic.png"), &png)
         .unwrap();
     let config = test_config();
-    let mut session = super::SessionState::default();
+    let session = Server::new();
 
     let response = call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &json!({
             "jsonrpc": "2.0",
             "id": 1_i32,
@@ -2498,10 +2531,19 @@ fn get_image_records_nonzero_response_size() {
         .as_str()
         .unwrap()
         .len();
+    let reported = call_session(
+        &system,
+        base,
+        &config,
+        &session,
+        &report_spill_request(None),
+    );
+    let size = extract_tool_text(&reported)["reported_size"]
+        .as_u64()
+        .unwrap();
     assert!(
-        session.last_response_size >= data_len,
-        "size {} should include the base64 image payload ({data_len} bytes)",
-        session.last_response_size
+        size >= data_len as u64,
+        "size {size} should include the base64 image payload ({data_len} bytes)",
     );
 }
 
@@ -4536,91 +4578,47 @@ fn no_mode_or_dry_run_in_any_schema() {
     }
 }
 
+/// The fault of a refused payload: its kind, the operation it names and the detail.
+fn payload_fault(response: &Value) -> Value {
+    assert!(is_tool_error(response), "{response}");
+    extract_tool_text(response)["fault"].clone()
+}
+
 #[test]
 fn every_mcp_tool_rejects_identity_flags() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Hello\n");
     let config = test_config();
+    let tools = call(&system, base, &config, &request("tools/list", json!({})));
 
-    let cases: &[(&str, Value)] = &[
-        ("ack", json!({"file": "doc.md", "ids": ["abc"]})),
-        ("activity", json!({})),
-        (
-            "batch",
-            json!({"file": "doc.md", "operations": [{"content": "x"}]}),
-        ),
-        ("comment", json!({"file": "doc.md", "content": "x"})),
-        ("comments", json!({"file": "doc.md"})),
-        ("delete", json!({"file": "doc.md", "ids": ["abc"]})),
-        (
-            "edit",
-            json!({"file": "doc.md", "id": "abc", "content": "y"}),
-        ),
-        ("get", json!({"path": "doc.md"})),
-        ("lint", json!({"path": "doc.md"})),
-        ("ls", json!({})),
-        ("metadata", json!({"path": "doc.md"})),
-        ("mv", json!({"file": "doc.md", "id": "abc", "to": "end"})),
-        ("permissions_check", json!({"op": "comment"})),
-        ("permissions_show", json!({})),
-        (
-            "plan",
-            json!({"op": "comment", "file": "doc.md", "content": "x"}),
-        ),
-        ("prompt_delete", json!({})),
-        ("prompt_list", json!({})),
-        ("prompt_resolve", json!({})),
-        ("prompt_set", json!({"name": "p", "prompt": "do thing"})),
-        ("purge", json!({"file": "doc.md"})),
-        ("query", json!({})),
-        (
-            "react",
-            json!({"file": "doc.md", "id": "abc", "emoji": "+1"}),
-        ),
-        (
-            "reply",
-            json!({"file": "doc.md", "parent_id": "abc", "content": "x"}),
-        ),
-        ("rm", json!({"path": "doc.md"})),
-        ("sandbox_add", json!({"files": ["doc.md"]})),
-        ("sandbox_list", json!({})),
-        ("sandbox_remove", json!({"files": ["doc.md"]})),
-        ("search", json!({"query": "x"})),
-        ("sign", json!({"file": "doc.md"})),
-        ("verify", json!({"file": "doc.md"})),
-        ("whoami", json!({})),
-        ("write", json!({"path": "doc.md", "content": "hi"})),
-    ];
-
-    for (tool, base_args) in cases {
+    for tool in tools["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        if name == "identity_create" {
+            continue;
+        }
         for flag in ["config_path", "identity", "key", "type"] {
-            let mut args = base_args.clone();
-            args[flag] = json!("anything");
             let response = call(
                 &system,
                 base,
                 &config,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "id": 1_i32,
-                    "method": "tools/call",
-                    "params": {"name": tool, "arguments": args}
-                }),
+                &tool_request(name, &json!({ flag: "anything" })),
             );
+            let fault = payload_fault(&response);
+            assert_eq!(fault["kind"], "failed-validation", "{name} {flag}");
+            assert_eq!(fault["operation"], name);
+            assert_eq!(fault["field"], flag, "{name} {flag}");
             assert!(
-                is_tool_error(&response),
-                "tool {tool} did not reject flag {flag}: {response}"
-            );
-            let msg = response["result"]["content"][0]["text"].as_str().unwrap();
-            assert!(
-                msg.contains("identity flag") && msg.contains(flag),
-                "tool {tool} returned wrong diagnostic for {flag}: {msg}"
+                fault["detail"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&format!("unknown field `{flag}`")),
+                "tool {name} returned wrong diagnostic for {flag}: {fault}"
             );
         }
     }
 }
 
-/// Hosts branch on `error_kind: "mcp_identity_flag_rejected"`, not on the message text.
+/// A refused identity flag is a structured fault naming the field.
 #[test]
 fn identity_flag_rejection_is_structured() {
     let base = Path::new("/docs");
@@ -4631,27 +4629,16 @@ fn identity_flag_rejection_is_structured() {
         &system,
         base,
         &config,
-        &json!({
-            "jsonrpc": "2.0",
-            "id": 1_i32,
-            "method": "tools/call",
-            "params": {
-                "name": "comment",
-                "arguments": {
-                    "file": "doc.md",
-                    "content": "x",
-                    "identity": "alice"
-                }
-            }
-        }),
+        &tool_request(
+            "comment",
+            &json!({ "file": "doc.md", "content": "x", "identity": "alice" }),
+        ),
     );
-    assert!(is_tool_error(&response));
-    let text = response["result"]["content"][0]["text"].as_str().unwrap();
-    let payload: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(payload["error_kind"], "mcp_identity_flag_rejected");
-    assert_eq!(payload["tool"], "comment");
-    assert_eq!(payload["flag"], "identity");
-    assert!(payload["headline"].as_str().unwrap().contains("identity"));
+    let fault = payload_fault(&response);
+    assert_eq!(fault["kind"], "failed-validation");
+    assert_eq!(fault["operation"], "comment");
+    assert_eq!(fault["field"], "identity");
+    assert!(fault["detail"].as_str().unwrap().contains("`identity`"));
 }
 
 /// A config whose resolved identity is `type: human`, as when the walk
@@ -7103,7 +7090,7 @@ fn anonymous_reads_in_a_strict_realm_are_tool_errors() {
         ("lint", json!({ "file": "doc.md" })),
         ("query", json!({ "path": "." })),
         ("ls", json!({ "path": "." })),
-        ("verify", json!({ "file": "doc.md" })),
+        ("verify", json!({ "path": "doc.md" })),
     ] {
         let response = call(
             &system,
@@ -7303,12 +7290,12 @@ fn comments_page_is_cut_to_the_size_cap_and_says_so() {
     let base = Path::new("/docs");
     let system = system_with_comments(base, 6);
     let config = test_config();
-    let mut session = super::SessionState::default();
+    let session = Server::new();
     assert!(!is_tool_error(&call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &report_spill_request(Some(400)),
     )));
 
@@ -7316,7 +7303,7 @@ fn comments_page_is_cut_to_the_size_cap_and_says_so() {
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &tool_request("comments", &json!({ "file": "doc.md" })),
     );
     let payload = extract_tool_text(&response);
@@ -7418,13 +7405,13 @@ fn get_reports_total_lines_and_cuts_the_window_to_the_size_cap() {
         .concat();
     let system = system_with_doc(base, "long.md", &body);
     let config = test_config();
-    let mut session = super::SessionState::default();
+    let session = Server::new();
 
     let whole = extract_tool_text(&call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &tool_request("get", &json!({ "path": "long.md" })),
     ));
     assert_eq!(whole["total_lines"], 41_i32);
@@ -7434,14 +7421,14 @@ fn get_reports_total_lines_and_cuts_the_window_to_the_size_cap() {
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &report_spill_request(Some(300)),
     )));
     let cut = extract_tool_text(&call_session(
         &system,
         base,
         &config,
-        &mut session,
+        &session,
         &tool_request("get", &json!({ "path": "long.md", "line_numbers": true })),
     ));
     let end = cut["effective_end_line"].as_u64().unwrap();
@@ -7457,12 +7444,7 @@ fn every_tool_refuses_an_argument_it_does_not_declare() {
     let base = Path::new("/docs");
     let system = system_with_doc(base, "doc.md", "# Notes\n\nBody text.\n");
     let config = test_config();
-    let tools = call(
-        &system,
-        base,
-        &config,
-        &json!({ "jsonrpc": "2.0", "id": 1_i32, "method": "tools/list", "params": {} }),
-    );
+    let tools = call(&system, base, &config, &request("tools/list", json!({})));
     for tool in tools["result"]["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();
         let response = call(
@@ -7471,11 +7453,15 @@ fn every_tool_refuses_an_argument_it_does_not_declare() {
             &config,
             &tool_request(name, &json!({ "not_an_argument": true })),
         );
-        assert!(is_tool_error(&response), "{name}: {response}");
+        let fault = payload_fault(&response);
+        assert_eq!(fault["kind"], "failed-validation", "{name}: {response}");
+        assert_eq!(fault["operation"], name);
+        assert_eq!(fault["field"], "not_an_argument", "{name}: {response}");
         assert!(
-            tool_error_text(&response).starts_with(&format!(
-                "{name}: unknown argument `not_an_argument`; accepted: "
-            )),
+            fault["detail"]
+                .as_str()
+                .unwrap()
+                .contains("unknown field `not_an_argument`"),
             "{name}: {response}"
         );
     }
@@ -7494,9 +7480,14 @@ fn comment_refuses_the_storage_name_remargin_kind() {
             &json!({ "file": "doc.md", "content": "Tagged.", "remargin_kind": ["todo"] }),
         ),
     );
-    assert!(is_tool_error(&response));
+    let fault = payload_fault(&response);
+    assert_eq!(fault["kind"], "failed-validation");
+    assert_eq!(fault["field"], "remargin_kind");
     assert!(
-        tool_error_text(&response).starts_with("comment: unknown argument `remargin_kind`"),
+        fault["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("'remargin_kind': unknown field `remargin_kind`"),
         "{response}"
     );
 }

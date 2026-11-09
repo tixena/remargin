@@ -10,10 +10,12 @@ use syn::{Item, ItemFn};
 /// Relative to the crate manifest directory.
 const ADAPTER_FILES: &[(&str, &str)] = &[
     ("CLI", "../remargin/src/main.rs"),
-    ("MCP", "../remargin-core/src/mcp.rs"),
+    ("MCP", "../remargin-core/src/mcp/handlers.rs"),
 ];
 
-const ADAPTER_PREFIXES: &[&str] = &["cmd_", "handle_"];
+const ADAPTER_PREFIXES: &[&str] = &["cmd_"];
+
+const ADAPTER_SUFFIXES: &[&str] = &["_now"];
 
 /// Physical lines per handler. Loose on purpose: the guard is against a new handler creeping in.
 const LOC_CAP: usize = 50;
@@ -67,13 +69,6 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
         ),
     );
     m.insert(
-        "handle_plan",
-        (
-            120,
-            "mirrors cmd_plan PlanAction dispatch (plan mv/cp each add a 4-line src/dst/force unwrap)",
-        ),
-    );
-    m.insert(
         "cmd_get",
         (
             60,
@@ -88,7 +83,7 @@ fn allowlist() -> HashMap<&'static str, (usize, &'static str)> {
         ),
     );
     m.insert(
-        "handle_get",
+        "get_now",
         (65, "binary vs text response split over read_binary/get"),
     );
     m
@@ -108,7 +103,9 @@ fn collect_fn_line_counts(src: &str) -> Result<Vec<(String, usize)>, syn::Error>
         }) = item
         {
             let name = sig.ident.to_string();
-            if !ADAPTER_PREFIXES.iter().any(|p| name.starts_with(p)) {
+            if !ADAPTER_PREFIXES.iter().any(|p| name.starts_with(p))
+                && !ADAPTER_SUFFIXES.iter().any(|p| name.ends_with(p))
+            {
                 continue;
             }
             // From the `fn` keyword to the closing `}`, so doc comments and attributes do not count.

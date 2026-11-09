@@ -228,7 +228,7 @@ fn restrict_absent_from_mcp_surface() {
         "jsonrpc": "2.0",
         "id": 1_i32,
         "method": "tools/list",
-        "params": {}
+        "params": { "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}} }
     });
     let list_response_str =
         mcp::process_request(&system, &base, &config, &list_request.to_string())
@@ -247,6 +247,7 @@ fn restrict_absent_from_mcp_surface() {
         "id": 2_i32,
         "method": "tools/call",
         "params": {
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}},
             "name": "claude_restrict",
             "arguments": { "path": "src/secret" }
         }
@@ -256,19 +257,11 @@ fn restrict_absent_from_mcp_surface() {
             .unwrap()
             .unwrap();
     let call_response: Value = serde_json::from_str(&call_response_str).unwrap();
+    assert_eq!(call_response["error"]["code"], -32_602_i32);
     assert_eq!(
-        call_response["result"]["isError"].as_bool(),
-        Some(true),
-        "claude_restrict dispatch must surface as a tool error"
+        call_response["error"]["data"]["fault"]["kind"], "unknown-operation",
+        "claude_restrict dispatch must be refused as an unknown operation"
     );
-    let text = call_response["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap();
-    assert!(
-        text.contains("not available via MCP"),
-        "expected refusal pointing to CLI, got: {text}"
-    );
-    assert!(text.contains("remargin claude restrict"), "got: {text}");
 }
 
 /// Runs `claude restrict src/secret` with the given `--also-deny-bash` argv and returns the

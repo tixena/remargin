@@ -13,9 +13,9 @@ use serde_json::Value;
 use crate::config::ResolvedConfig;
 use crate::config::identity::IdentityFlags;
 use crate::config::permissions::resolve::resolve_permissions;
-use crate::mcp_server::context::RequestContext;
-use crate::mcp_server::dispatcher::{self, McpClientGone, McpEventWriter, McpInFlight};
-use crate::mcp_server::handlers::Server;
+use crate::mcp::context::RequestContext;
+use crate::mcp::dispatcher::{self, McpClientGone, McpEventWriter, McpInFlight};
+use crate::mcp::handlers::Server;
 
 /// Writes each message the transport sends beside an answer as one line of stdout.
 #[derive(Debug, Default)]

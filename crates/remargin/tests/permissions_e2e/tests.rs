@@ -97,6 +97,7 @@ fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
         "id": 1_i32,
         "method": "tools/call",
         "params": {
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}},
             "name": "claude_restrict",
             "arguments": {
                 "path": "src/secret",
@@ -110,9 +111,8 @@ fn mcp_restrict_is_inert_and_leaves_realm_untouched() {
         .unwrap();
     let response: Value = serde_json::from_str(&response_str).unwrap();
     assert_eq!(
-        response["result"]["isError"].as_bool(),
-        Some(true),
-        "MCP claude_restrict must surface as a tool error"
+        response["error"]["code"], -32_602_i32,
+        "MCP claude_restrict must be refused as an unknown operation"
     );
 
     assert!(

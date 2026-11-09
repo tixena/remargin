@@ -79,9 +79,8 @@ fn run_cli(cwd: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// Call the in-process MCP `verify` tool with the given arguments and
-/// return the parsed JSON payload.
-fn run_mcp(base_dir: &Path, arguments: serde_json::Map<String, Value>) -> Value {
+/// Call the in-process MCP `verify` tool and return the raw JSON-RPC response.
+fn call_mcp(base_dir: &Path, arguments: serde_json::Map<String, Value>) -> Value {
     let system = RealSystem::new();
     let config =
         ResolvedConfig::resolve(&system, base_dir, &IdentityFlags::default(), None).unwrap();
@@ -90,6 +89,10 @@ fn run_mcp(base_dir: &Path, arguments: serde_json::Map<String, Value>) -> Value 
         "id": 1_i32,
         "method": "tools/call",
         "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+            },
             "name": "verify",
             "arguments": Value::Object(arguments),
         }
@@ -98,7 +101,13 @@ fn run_mcp(base_dir: &Path, arguments: serde_json::Map<String, Value>) -> Value 
     let response_str = mcp::process_request(&system, base_dir, &config, &request_str)
         .unwrap()
         .unwrap();
-    let response: Value = serde_json::from_str(&response_str).unwrap();
+    serde_json::from_str(&response_str).unwrap()
+}
+
+/// Call the in-process MCP `verify` tool with the given arguments and
+/// return the parsed JSON payload.
+fn run_mcp(base_dir: &Path, arguments: serde_json::Map<String, Value>) -> Value {
+    let response = call_mcp(base_dir, arguments);
     assert!(
         !response["result"]["isError"].as_bool().unwrap_or(false),
         "MCP verify failed: {response}",
@@ -244,15 +253,16 @@ fn cli_verify_dir_honors_gitignore() {
 }
 
 #[test]
-fn mcp_verify_legacy_file_alias_walks_directory() {
+fn mcp_verify_with_only_the_legacy_file_alias_is_refused_naming_path() {
     let tmp = build_workspace();
-    let mcp_json = run_mcp(
+    let response = call_mcp(
         tmp.path(),
         json!({ "file": "notes" }).as_object().unwrap().clone(),
     );
-    assert_eq!(mcp_json["ok"], Value::Bool(false));
-    assert_eq!(
-        mcp_json["files_verified"], 2_u64,
-        "legacy file=dir walks the directory"
-    );
+    assert_eq!(response["result"]["isError"], Value::Bool(true));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let fault: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(fault["fault"]["kind"], "failed-validation");
+    assert_eq!(fault["fault"]["operation"], "verify");
+    assert_eq!(fault["fault"]["field"], "path");
 }

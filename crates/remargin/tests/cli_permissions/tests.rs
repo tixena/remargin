@@ -211,7 +211,7 @@ fn mcp_call(base: &Path, config: &ResolvedConfig, tool_name: &str, arguments: &V
         "jsonrpc": "2.0",
         "id": 1_i32,
         "method": "tools/call",
-        "params": { "name": tool_name, "arguments": arguments }
+        "params": { "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}, "name": tool_name, "arguments": arguments }
     });
     let request_str = serde_json::to_string(&request).unwrap();
     let response = mcp::process_request(&system, base, config, &request_str)

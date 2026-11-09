@@ -316,7 +316,11 @@ remargin mcp install --user
 remargin mcp test
 ```
 
-Once installed, Claude Code gets these tools: `ls`, `get`, `get_image`, `write`, `replace`, `metadata`, `comment`, `comments`, `batch`, `edit`, `delete`, `ack`, `react`, `query`, `search`, `report_spill`, `activity`, `lint`, `verify`, `migrate`, `purge`, `plan`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `prompt_resolve`, `prompt_list`, `permissions_show`, `permissions_check`, `identity_create`, `whoami`, `cp`, `mv`, `rm`. (`get_image` returns an image content block for a referenced image; `report_spill` lowers the page size budget of the paged read tools after a client spilled an over-limit result. The read tools' payloads are described in [MCP read payloads](#mcp-read-payloads); every tool refuses an argument its schema does not declare.)
+The server speaks MCP revision 2026-07-28, the revision Claude Code 2.1.319 speaks. Every request carries the revision in its `_meta`, and `server/discover` answers `supportedVersions: ["2026-07-28"]`.
+
+Once installed, Claude Code gets these 38 tools: `ack`, `activity`, `batch`, `comment`, `comments`, `cp`, `delete`, `doctor`, `edit`, `get`, `get_image`, `identity_create`, `lint`, `ls`, `metadata`, `mv`, `permissions_check`, `permissions_show`, `plan`, `prompt_delete`, `prompt_list`, `prompt_resolve`, `prompt_set`, `purge`, `query`, `react`, `replace`, `reply`, `report_spill`, `rm`, `sandbox_add`, `sandbox_list`, `sandbox_remove`, `search`, `sign`, `verify`, `whoami`, `write`. (`get_image` returns an image content block for a referenced image; `report_spill` lowers the page size budget of the paged read tools after a client spilled an over-limit result. The read tools' payloads are described in [MCP read payloads](#mcp-read-payloads); every tool refuses an argument its schema does not declare.)
+
+Each tool but `get`, `get_image` and `metadata`, which answer with content blocks, declares an `outputSchema`. A success arrives as one compact JSON text block and as the same value in `structuredContent`.
 
 ### Plugin
 
@@ -966,7 +970,7 @@ The MCP read tools (`comments`, `query`, `activity`, `search`, `get`) return com
 
 **Paging.** `comments`, `query`, `activity` and `search` take `offset` (default 0) and `limit`, and every response carries `total`, the number of items that matched: comments for `comments` and `query` (files in `query`'s summary mode), changes for `activity`, matches for `search`. A page is cut further to stay under the session's size budget, and then carries `effective_limit`, the number of items actually returned. To read everything, call again with `offset` increased by the items received until it reaches `total`. A file split across pages repeats its own fields on each page. `get` pages by lines: `start_line` / `end_line` choose the window, every response carries `total_lines`, and a window cut to the budget carries `effective_end_line`, the last line returned. After a client reports a spilled result, `report_spill` lowers the budget for the rest of the session.
 
-**Unknown arguments.** Every MCP tool refuses an argument its schema does not declare, with `<tool>: unknown argument \`x\`; accepted: …`, and does nothing.
+**Unknown arguments.** Every MCP tool refuses an argument its schema does not declare, with a `failed-validation` fault whose `field` is the dotted path of the offending argument (for example `operations.1.kind`) and whose `detail` opens with that quoted path, and does nothing.
 
 **`comments`** returns one file's comments in document order: `{total, comment_cols, comments, effective_limit?}`.
 
