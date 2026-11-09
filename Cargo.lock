@@ -1328,14 +1328,13 @@ dependencies = [
 [[package]]
 name = "tixschema"
 version = "0.3.0"
-source = "git+https://github.com/tixena/tixschema?branch=mcp-transport#17235e9a9221c89bb37c04040fe8d0f668e55978"
+source = "git+https://github.com/tixena/tixschema?branch=mcp-transport#7ad84f2f1825dda6eacfe372a8bd311406c60e4b"
 dependencies = [
  "log",
  "proc-macro2",
  "quote",
  "regex",
  "regex-syntax",
- "rustversion",
  "sha2 0.10.9",
  "syn 3.0.9",
 ]
