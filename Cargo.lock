@@ -1340,7 +1340,7 @@ dependencies = [
 [[package]]
 name = "tixschema"
 version = "0.3.0"
-source = "git+https://github.com/tixena/tixschema?branch=mcp-transport#d17d1e50f684f8de15f25b2b1cc678bf2c4559bb"
+source = "git+https://github.com/tixena/tixschema?branch=mcp-transport#6b9b9c7c773f12095dab2eac478256e28878572b"
 dependencies = [
  "log",
  "proc-macro2",
