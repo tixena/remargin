@@ -11,18 +11,47 @@ use serde::Serialize;
 use tixschema::model_schema;
 
 use crate::activity::{CompactFileChanges, compact_file_changes_schema};
-use crate::document::{ListEntry, list_entry_schema};
+use crate::config::identity::IdentityReport;
+use crate::config::system_prompt::ResolvedSystemPrompt;
+use crate::document::{
+    ListEntry, RmAnswer, RmDirAnswer, RmFileAnswer, WriteAnswer, list_entry_schema,
+};
+use crate::linter::LintAnswer;
+use crate::operations::cp::CpOutcome;
 use crate::operations::links::{CompactLinkRow, compact_link_row_schema};
+use crate::operations::mv::MvAnswer;
+use crate::operations::plan::PlanReport;
+use crate::operations::prompt::{PromptDeleteOutcome, PromptListAnswer, PromptSetOutcome};
+use crate::operations::purge::{PurgeAnswer, PurgeDirAnswer, PurgeFileAnswer};
 use crate::operations::query::{
     CompactCommentRow, CompactCommentRowWithIntegrity, compact_comment_row_schema,
     compact_comment_row_with_integrity_schema,
 };
+use crate::operations::replace::ReplaceReport;
+use crate::operations::sandbox::{SandboxAddReport, SandboxRemoveReport};
 use crate::operations::sandbox::{SandboxListEntry, sandbox_list_entry_schema};
 use crate::operations::search::{
     CompactMatchRow, CompactMatchRowWithContext, compact_match_row_schema,
     compact_match_row_with_context_schema,
 };
-use crate::responses::comment_created_schema;
+use crate::operations::sign::SignResult;
+use crate::operations::verify::{FolderVerifySummaryView, VerifyAnswer, VerifyReportView};
+use crate::permissions::doctor::DoctorReport;
+use crate::permissions::inspect::{CheckOutput, ShowOutput};
+use crate::responses::{
+    AckAnswer, BatchAnswer, CommentCreated, CommentEdited, CommentsDeleted, ReactAnswer,
+};
+
+/// Implements `TimedResponse` for each listed answer struct by replacing its `elapsed_ms`.
+macro_rules! timed_responses {
+    ($($answer:ty),* $(,)?) => {$(
+        impl TimedResponse for $answer {
+            fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
+                Self { elapsed_ms, ..self }
+            }
+        }
+    )*};
+}
 
 /// One comment as a positional row: the 14 columns, or 16 with `checksum`
 /// and `signature`.
@@ -44,6 +73,8 @@ pub struct CommentsPage {
     pub comments: Vec<CommentRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_limit: Option<usize>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub total: usize,
 }
 
@@ -56,6 +87,8 @@ pub struct ActivityPage {
     pub cutoff_explicit: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_limit: Option<usize>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub files: Vec<CompactFileChanges>,
     #[model_schema_prop(nullable)]
     pub newest_ts_overall: Option<DateTime<FixedOffset>>,
@@ -89,6 +122,8 @@ pub struct QueryPage {
     pub comment_cols: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_limit: Option<usize>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub results: Vec<QueryFile>,
     pub total: usize,
 }
@@ -120,6 +155,8 @@ pub struct SearchFile {
 pub struct SearchPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_limit: Option<usize>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub files: Vec<SearchFile>,
     pub match_cols: Vec<String>,
     pub total: usize,
@@ -170,6 +207,8 @@ pub enum GetAnswer {
 pub struct IdentityCreated {
     #[serde(rename = "type")]
     pub author_type: String,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub identity: String,
     #[model_schema_prop(nullable)]
     pub key: Option<String>,
@@ -181,6 +220,8 @@ pub struct IdentityCreated {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct LsAnswer {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub entries: Vec<ListEntry>,
 }
 
@@ -189,6 +230,8 @@ pub struct LsAnswer {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct SandboxListAnswer {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub files: Vec<SandboxListEntry>,
 }
 
@@ -198,20 +241,84 @@ pub struct SandboxListAnswer {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct ReportSpillAnswer {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub inferred: bool,
     pub previous_cap: usize,
     pub reported_size: usize,
     pub spill_cap: usize,
 }
 
-/// A success with the time its call took.
-#[model_schema(enable = ["jsonschema"], default_types(T = CommentCreated))]
-#[derive(Debug, Serialize)]
-#[non_exhaustive]
-pub struct Timed<T> {
-    /// How long the call took.
-    pub elapsed_ms: u64,
-    /// The success.
-    #[serde(flatten)]
-    pub value: T,
+/// A success that carries the time its call took, set once the call has run.
+pub trait TimedResponse {
+    /// Returns the success with `elapsed_ms` set.
+    #[must_use]
+    fn with_elapsed_ms(self, elapsed_ms: u64) -> Self;
+}
+
+timed_responses!(
+    AckAnswer,
+    ActivityPage,
+    BatchAnswer,
+    CheckOutput,
+    CommentCreated,
+    CommentEdited,
+    CommentsDeleted,
+    CommentsPage,
+    CpOutcome,
+    DoctorReport,
+    FolderVerifySummaryView,
+    IdentityCreated,
+    IdentityReport,
+    LintAnswer,
+    LsAnswer,
+    MvAnswer,
+    PlanReport,
+    PromptDeleteOutcome,
+    PromptListAnswer,
+    PromptSetOutcome,
+    PurgeDirAnswer,
+    PurgeFileAnswer,
+    QueryPage,
+    ReactAnswer,
+    ReplaceReport,
+    ReportSpillAnswer,
+    ResolvedSystemPrompt,
+    RmDirAnswer,
+    RmFileAnswer,
+    SandboxAddReport,
+    SandboxListAnswer,
+    SandboxRemoveReport,
+    SearchPage,
+    ShowOutput,
+    SignResult,
+    VerifyReportView,
+    WriteAnswer,
+);
+
+impl TimedResponse for PurgeAnswer {
+    fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
+        match self {
+            Self::Directory(answer) => Self::Directory(answer.with_elapsed_ms(elapsed_ms)),
+            Self::File(answer) => Self::File(answer.with_elapsed_ms(elapsed_ms)),
+        }
+    }
+}
+
+impl TimedResponse for RmAnswer {
+    fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
+        match self {
+            Self::Directory(answer) => Self::Directory(answer.with_elapsed_ms(elapsed_ms)),
+            Self::File(answer) => Self::File(answer.with_elapsed_ms(elapsed_ms)),
+        }
+    }
+}
+
+impl TimedResponse for VerifyAnswer {
+    fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
+        match self {
+            Self::File(answer) => Self::File(answer.with_elapsed_ms(elapsed_ms)),
+            Self::Folder(answer) => Self::Folder(answer.with_elapsed_ms(elapsed_ms)),
+        }
+    }
 }

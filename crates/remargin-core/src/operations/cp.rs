@@ -64,9 +64,9 @@ pub struct CpOutcome {
     pub comments_dropped: usize,
     /// Canonical absolute destination path.
     pub dst_absolute: PathBuf,
-    /// Milliseconds the call took, written by the io layer on the way out.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub elapsed_ms: Option<u64>,
+    /// How long the call took.
+    #[serde(default)]
+    pub elapsed_ms: u64,
     /// Which copy variant ran.
     pub kind: CpKind,
     /// `true` when `dst` existed before the call and was overwritten.
@@ -142,7 +142,7 @@ pub fn cp(
             bytes_copied: 0,
             comments_dropped: 0,
             dst_absolute: dst_resolved,
-            elapsed_ms: None,
+            elapsed_ms: 0,
             kind: CpKind::Noop,
             overwritten: false,
             src_absolute: src_resolved,
@@ -245,7 +245,7 @@ fn perform_copy(
             bytes_copied,
             comments_dropped: 0,
             dst_absolute: dst.to_path_buf(),
-            elapsed_ms: None,
+            elapsed_ms: 0,
             kind: CpKind::Verbatim,
             overwritten: dst_pre_existed,
             src_absolute: src.to_path_buf(),
@@ -267,7 +267,7 @@ fn perform_copy(
             bytes_copied,
             comments_dropped: 0,
             dst_absolute: dst.to_path_buf(),
-            elapsed_ms: None,
+            elapsed_ms: 0,
             kind: CpKind::Verbatim,
             overwritten: dst_pre_existed,
             src_absolute: src.to_path_buf(),
@@ -290,7 +290,7 @@ fn perform_copy(
         bytes_copied,
         comments_dropped,
         dst_absolute: dst.to_path_buf(),
-        elapsed_ms: None,
+        elapsed_ms: 0,
         kind: CpKind::BodyOnly,
         overwritten: dst_pre_existed,
         src_absolute: src.to_path_buf(),

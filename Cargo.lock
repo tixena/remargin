@@ -1339,8 +1339,9 @@ dependencies = [
 
 [[package]]
 name = "tixschema"
-version = "0.3.0"
-source = "git+https://github.com/tixena/tixschema?branch=mcp-transport#9852ab6be0023b0dcc5851eb8af50cc236708973"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "656f67fed297c2539a054dcb8ea1de8242a844db20a4be3023a1ebcf3e26255a"
 dependencies = [
  "log",
  "proc-macro2",

@@ -318,7 +318,7 @@ fn outcome_serializes_to_snake_case_json() {
 fn outcome(kind: CpKind, bytes: u64, dropped: usize, overwritten: bool) -> CpOutcome {
     CpOutcome {
         bytes_copied: bytes,
-        elapsed_ms: None,
+        elapsed_ms: 0,
         comments_dropped: dropped,
         dst_absolute: PathBuf::from("/dst/file.md"),
         kind,

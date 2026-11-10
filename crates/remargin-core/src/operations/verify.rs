@@ -159,6 +159,8 @@ pub struct VerifyRow {
 #[derive(Serialize)]
 #[non_exhaustive]
 pub struct VerifyReportView {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub ok: bool,
     pub results: Vec<VerifyRow>,
 }
@@ -177,6 +179,7 @@ impl VerifyReport {
     #[must_use]
     pub fn answer(&self) -> VerifyReportView {
         VerifyReportView {
+            elapsed_ms: 0,
             ok: self.ok,
             results: verify_rows_json(self),
         }
@@ -234,6 +237,8 @@ pub struct VerifyFailureFile {
 #[derive(Serialize)]
 #[non_exhaustive]
 pub struct FolderVerifySummaryView {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub failures: Vec<VerifyFailureFile>,
     pub files_passed: usize,
     pub files_verified: usize,
@@ -282,6 +287,7 @@ impl FolderVerifyReport {
             .collect();
 
         FolderVerifySummaryView {
+            elapsed_ms: 0,
             failures,
             files_passed,
             files_verified,

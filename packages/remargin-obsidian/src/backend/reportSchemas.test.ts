@@ -64,11 +64,10 @@ describe("report schemas — live --json payloads parse whole", () => {
     assert.equal(report.elapsed_ms, 2n);
   });
 
-  it("elapsed_ms is optional, so a payload without it still parses", () => {
+  it("elapsed_ms is always written, so a payload without it is rejected", () => {
     const payload = JSON.parse(DOCTOR);
     delete payload.elapsed_ms;
-    const report = DoctorReport$Schema.parse(payload);
-    assert.equal(report.elapsed_ms, undefined);
+    assert.equal(DoctorReport$Schema.safeParse(payload).success, false);
   });
 });
 

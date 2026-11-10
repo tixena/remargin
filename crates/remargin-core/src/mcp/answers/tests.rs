@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use super::{
     ActivityPage, CommentRow, CommentsPage, GetAnswer, GetContent, GetLines, IdentityCreated,
     LsAnswer, MatchRow, QueryFile, QueryPage, ReportSpillAnswer, SandboxListAnswer, SearchFile,
-    SearchPage, Timed,
+    SearchPage, TimedResponse as _,
 };
 use crate::advice::{Advice, OpAdvice};
 use crate::config::identity::IdentityReport;
@@ -140,6 +140,7 @@ fn comments_page_writes_effective_limit_only_when_the_cap_trimmed() {
         comment_cols: vec![String::from("id")],
         comments: vec![plain_row()],
         effective_limit,
+        elapsed_ms: 0,
         total: 9,
     };
 
@@ -153,30 +154,26 @@ fn comments_page_writes_effective_limit_only_when_the_cap_trimmed() {
 }
 
 #[test]
-fn timed_adds_elapsed_ms_beside_the_fields_of_its_success() {
-    let timed = Timed {
-        elapsed_ms: 12,
-        value: CommentsPage {
-            comment_cols: Vec::new(),
-            comments: Vec::new(),
-            effective_limit: None,
-            total: 0,
-        },
+fn with_elapsed_ms_sets_elapsed_ms_beside_the_fields_of_its_success() {
+    let page = CommentsPage {
+        comment_cols: Vec::new(),
+        comments: Vec::new(),
+        effective_limit: None,
+        elapsed_ms: 0,
+        total: 0,
     };
 
     assert_eq!(
-        serde_json::to_value(timed).unwrap(),
+        serde_json::to_value(page.with_elapsed_ms(12)).unwrap(),
         json!({ "comment_cols": [], "comments": [], "elapsed_ms": 12_u64, "total": 0_u64 })
     );
+    let created = CommentCreated {
+        elapsed_ms: 0,
+        id: String::from("abc"),
+        warnings: Vec::new(),
+    };
     assert_eq!(
-        serde_json::to_value(Timed {
-            elapsed_ms: 3,
-            value: CommentCreated {
-                id: String::from("abc"),
-                warnings: Vec::new(),
-            },
-        })
-        .unwrap(),
+        serde_json::to_value(created.with_elapsed_ms(3)).unwrap(),
         json!({ "elapsed_ms": 3_u64, "id": "abc" })
     );
 }
@@ -185,6 +182,7 @@ fn timed_adds_elapsed_ms_beside_the_fields_of_its_success() {
 fn search_rows_have_4_or_6_columns() {
     let page = |row| SearchPage {
         effective_limit: None,
+        elapsed_ms: 0,
         files: vec![SearchFile {
             matches: vec![row],
             path: String::from("a.md"),
@@ -202,6 +200,7 @@ fn search_rows_have_4_or_6_columns() {
         ))))
         .unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "files": [{ "matches": [[2_u64, "body", "needle", null]], "path": "a.md" }],
             "match_cols": ["line"],
             "total": 1_u64,
@@ -241,6 +240,7 @@ fn query_file_omits_comments_in_summary_mode() {
         base_path: String::from("./"),
         comment_cols: Vec::new(),
         effective_limit: None,
+        elapsed_ms: 0,
         results: vec![file(Some(vec![plain_row()]))],
         total: 1,
     };
@@ -255,6 +255,7 @@ fn activity_page_writes_a_null_newest_ts_overall() {
         change_cols: Vec::new(),
         cutoff_explicit: false,
         effective_limit: None,
+        elapsed_ms: 0,
         files: Vec::new(),
         newest_ts_overall: None,
         total: 0,
@@ -263,6 +264,7 @@ fn activity_page_writes_a_null_newest_ts_overall() {
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "change_cols": [],
             "cutoff_explicit": false,
             "files": [],
@@ -311,6 +313,7 @@ fn get_answers_are_the_lines_or_the_content() {
 fn identity_created_writes_a_null_key_and_type() {
     let created = IdentityCreated {
         author_type: String::from("human"),
+        elapsed_ms: 0,
         identity: String::from("alice"),
         key: None,
         yaml: String::from("identity: alice\ntype: human\n"),
@@ -319,6 +322,7 @@ fn identity_created_writes_a_null_key_and_type() {
     assert_eq!(
         serde_json::to_value(created).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "identity": "alice",
             "key": null,
             "type": "human",
@@ -330,6 +334,7 @@ fn identity_created_writes_a_null_key_and_type() {
 #[test]
 fn report_spill_answers_the_caps() {
     let answer = ReportSpillAnswer {
+        elapsed_ms: 0,
         inferred: true,
         previous_cap: 40_000,
         reported_size: 1000,
@@ -339,6 +344,7 @@ fn report_spill_answers_the_caps() {
     assert_eq!(
         serde_json::to_value(answer).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "inferred": true,
             "previous_cap": 40_000_u64,
             "reported_size": 1000_u64,
@@ -365,9 +371,12 @@ fn ls_answers_its_entries() {
             size: None,
         },
     ];
-    let expected = json!({ "entries": entries });
+    let expected = json!({ "elapsed_ms": 0_u64, "entries": entries });
 
-    let typed = LsAnswer { entries };
+    let typed = LsAnswer {
+        elapsed_ms: 0,
+        entries,
+    };
 
     assert_eq!(serde_json::to_value(&typed).unwrap(), expected);
 }
@@ -378,9 +387,12 @@ fn sandbox_list_answers_its_files() {
         path: String::from("notes/a.md"),
         since: String::from("2026-01-02T03:04:05Z"),
     }];
-    let expected = json!({ "files": files });
+    let expected = json!({ "elapsed_ms": 0_u64, "files": files });
 
-    let typed = SandboxListAnswer { files };
+    let typed = SandboxListAnswer {
+        elapsed_ms: 0,
+        files,
+    };
 
     assert_eq!(serde_json::to_value(&typed).unwrap(), expected);
 }
@@ -406,6 +418,7 @@ fn lint_answers_its_findings_and_ok() {
     assert_eq!(
         serde_json::to_value(dirty.answer()).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "errors": [{ "line": 3_usize, "message": "unclosed fence" }],
             "ok": false,
             "permissions": [{
@@ -425,7 +438,7 @@ fn lint_answers_its_findings_and_ok() {
     };
     assert_eq!(
         serde_json::to_value(clean.answer()).unwrap(),
-        json!({ "errors": [], "ok": true, "permissions": [], "recipients": [] })
+        json!({ "elapsed_ms": 0_u64, "errors": [], "ok": true, "permissions": [], "recipients": [] })
     );
 }
 
@@ -448,6 +461,7 @@ fn mv_answers_its_outcome() {
     assert_eq!(
         serde_json::to_value(outcome.answer()).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "bytes_moved": 12_usize,
             "dst_absolute": "/vault/b.md",
             "fallback_copy": true,
@@ -468,7 +482,7 @@ fn purge_answers_a_file() {
     };
     assert_eq!(
         serde_json::to_value(PurgeAnswer::File(result.answer())).unwrap(),
-        json!({ "attachments_cleaned": 2_usize, "comments_removed": 5_usize })
+        json!({ "elapsed_ms": 0_u64, "attachments_cleaned": 2_usize, "comments_removed": 5_usize })
     );
 }
 
@@ -496,6 +510,7 @@ fn purge_answers_a_folder() {
     assert_eq!(
         serde_json::to_value(PurgeAnswer::Directory(result.answer(Path::new("/vault")))).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "attachments_cleaned": 1_usize,
             "comments_removed": 6_usize,
             "failed": [{ "path": "docs/locked.md", "reason": "denied" }],
@@ -516,7 +531,7 @@ fn rm_answers_a_file() {
     });
     assert_eq!(
         serde_json::to_value(outcome.answer("a.md")).unwrap(),
-        json!({ "deleted": "a.md", "existed": false })
+        json!({ "elapsed_ms": 0_u64, "deleted": "a.md", "existed": false })
     );
 }
 
@@ -530,6 +545,7 @@ fn rm_answers_a_directory() {
     assert_eq!(
         serde_json::to_value(outcome.answer("d")).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "deleted": "d",
             "files_deleted": ["/vault/d/a.md"],
             "folders_left_behind": ["/vault/d/hidden"],
@@ -542,6 +558,7 @@ fn rm_answers_a_directory() {
 #[test]
 fn sign_answers_its_lists() {
     let result = SignResult {
+        elapsed_ms: 0,
         repaired: vec![RepairedChecksumEntry {
             id: String::from("c3"),
             new_checksum: String::from("sha256:new"),
@@ -559,6 +576,7 @@ fn sign_answers_its_lists() {
     assert_eq!(
         serde_json::to_value(&result).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "repaired": [{ "id": "c3", "new_checksum": "sha256:new", "old_checksum": "sha256:old" }],
             "signed": [{ "id": "c1", "ts": "2026-01-02T03:04:05Z" }],
             "skipped": [{ "id": "c2", "reason": "already_signed" }],
@@ -566,7 +584,7 @@ fn sign_answers_its_lists() {
     );
     assert_eq!(
         serde_json::to_value(SignResult::default()).unwrap(),
-        json!({ "repaired": [], "signed": [], "skipped": [] })
+        json!({ "elapsed_ms": 0_u64, "repaired": [], "signed": [], "skipped": [] })
     );
 }
 
@@ -594,6 +612,7 @@ fn verify_answers_a_passing_file() {
     assert_eq!(
         serde_json::to_value(VerifyAnswer::File(report.answer())).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "ok": true,
             "results": [{
                 "author": "alice",
@@ -678,6 +697,7 @@ fn verify_answers_a_folder() {
     assert_eq!(
         serde_json::to_value(VerifyAnswer::Folder(report.answer())).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "failures": [
                 {
                     "bad": [{
@@ -707,6 +727,7 @@ fn write_answers_every_flag_combination() {
         assert_eq!(
             serde_json::to_value(outcome.answer("a.md", binary, raw)).unwrap(),
             json!({
+                "elapsed_ms": 0_u64,
                 "binary": binary,
                 "noop": false,
                 "raw": raw || binary,
@@ -728,6 +749,7 @@ fn write_answers_its_warnings_only_when_there_are_some() {
     assert_eq!(
         serde_json::to_value(outcome.answer("a.md", false, false)).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "binary": false,
             "noop": true,
             "raw": false,
@@ -753,6 +775,7 @@ fn sandbox_add_answers_its_paths() {
     assert_eq!(
         serde_json::to_value(sandbox_result().add_report(Path::new("/docs"))).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "added": ["a.md", "/other/b.md"],
             "failed": [{ "path": "c.txt", "reason": "not a markdown file" }],
             "skipped": ["d.md"],
@@ -765,6 +788,7 @@ fn sandbox_remove_answers_its_paths() {
     assert_eq!(
         serde_json::to_value(sandbox_result().remove_report(Path::new("/docs"))).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "failed": [{ "path": "c.txt", "reason": "not a markdown file" }],
             "removed": ["a.md", "/other/b.md"],
             "skipped": ["d.md"],
@@ -775,6 +799,7 @@ fn sandbox_remove_answers_its_paths() {
 #[test]
 fn prompt_resolve_answers_the_fallback_and_a_found_block() {
     let fallback = ResolvedSystemPrompt {
+        elapsed_ms: 0,
         is_default: true,
         name: String::from("default"),
         prompt: String::from("Please process"),
@@ -784,6 +809,7 @@ fn prompt_resolve_answers_the_fallback_and_a_found_block() {
     assert_eq!(
         serde_json::to_value(&fallback).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "is_default": true,
             "name": "default",
             "prompt": "Please process",
@@ -792,6 +818,7 @@ fn prompt_resolve_answers_the_fallback_and_a_found_block() {
         })
     );
     let found = ResolvedSystemPrompt {
+        elapsed_ms: 0,
         is_default: false,
         name: String::from("docs"),
         prompt: String::from("Do it"),
@@ -801,6 +828,7 @@ fn prompt_resolve_answers_the_fallback_and_a_found_block() {
     assert_eq!(
         serde_json::to_value(&found).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "is_default": false,
             "name": "docs",
             "prompt": "Do it",
@@ -814,21 +842,23 @@ fn prompt_resolve_answers_the_fallback_and_a_found_block() {
 fn prompt_set_and_delete_answer_their_flags() {
     let set = PromptSetOutcome {
         created: true,
+        elapsed_ms: 0,
         noop: false,
         source: PathBuf::from("/vault/.remargin.yaml"),
     };
     assert_eq!(
         serde_json::to_value(&set).unwrap(),
-        json!({ "created": true, "noop": false, "source": "/vault/.remargin.yaml" })
+        json!({ "elapsed_ms": 0_u64, "created": true, "noop": false, "source": "/vault/.remargin.yaml" })
     );
     let delete = PromptDeleteOutcome {
         absent: false,
+        elapsed_ms: 0,
         left_empty: true,
         source: PathBuf::from("/vault/.remargin.yaml"),
     };
     assert_eq!(
         serde_json::to_value(&delete).unwrap(),
-        json!({ "absent": false, "left_empty": true, "source": "/vault/.remargin.yaml" })
+        json!({ "elapsed_ms": 0_u64, "absent": false, "left_empty": true, "source": "/vault/.remargin.yaml" })
     );
 }
 
@@ -851,8 +881,12 @@ fn prompt_list_answers_its_entries() {
         },
     ];
     assert_eq!(
-        serde_json::to_value(PromptListAnswer { entries }).unwrap(),
-        json!({ "entries": [
+        serde_json::to_value(PromptListAnswer {
+            elapsed_ms: 0,
+            entries
+        })
+        .unwrap(),
+        json!({ "elapsed_ms": 0_u64, "entries": [
             {
                 "folder": "/vault",
                 "name": "docs",
@@ -886,6 +920,7 @@ fn permissions_show_answers_the_resolved_permissions() {
             path: PathBuf::from("/vault/locked"),
             source_file: PathBuf::from("/vault/.remargin.yaml"),
         }],
+        elapsed_ms: 0,
         trusted_roots: vec![
             TrustedRootView {
                 absolute_path: Some(PathBuf::from("/vault/src")),
@@ -908,6 +943,7 @@ fn permissions_show_answers_the_resolved_permissions() {
     assert_eq!(
         serde_json::to_value(&report).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "allow_dot_folders": [{ "names": [".notes"], "source_file": "/vault/.remargin.yaml" }],
             "deny_ops": [{
                 "ops": [{ "exceptions": ["alice"], "name": "purge" }],
@@ -939,15 +975,17 @@ fn permissions_show_answers_the_resolved_permissions() {
 #[test]
 fn permissions_check_answers_with_and_without_a_rule() {
     let plain = CheckOutput {
+        elapsed_ms: 0,
         matching_rule: None,
         path: PathBuf::from("/vault/a.md"),
         restricted: false,
     };
     assert_eq!(
         serde_json::to_value(&plain).unwrap(),
-        json!({ "matching_rule": null, "path": "/vault/a.md", "restricted": false })
+        json!({ "elapsed_ms": 0_u64, "matching_rule": null, "path": "/vault/a.md", "restricted": false })
     );
     let restricted = CheckOutput {
+        elapsed_ms: 0,
         matching_rule: Some(MatchingRule {
             kind: String::from("trusted_roots"),
             rule_text: String::from("outside trusted_roots"),
@@ -959,6 +997,7 @@ fn permissions_check_answers_with_and_without_a_rule() {
     assert_eq!(
         serde_json::to_value(&restricted).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "matching_rule": {
                 "kind": "trusted_roots",
                 "rule_text": "outside trusted_roots",
@@ -983,6 +1022,7 @@ fn plan_report(mv_diff: Option<MvDiff>, warnings: Vec<OpAdvice>) -> PlanReport {
         },
         config_diff: None,
         cp_diff: None,
+        elapsed_ms: 0,
         identity: PlanIdentity::new(Some(String::from("alice")), None, true),
         mv_diff,
         noop: false,
@@ -1019,6 +1059,7 @@ fn plan_answers_a_document_projection() {
     assert_eq!(
         serde_json::to_value(&report).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "changed_line_ranges": [[2_usize, 4_usize]],
             "checksum_after": "sha256:after",
             "checksum_before": "sha256:before",
@@ -1080,6 +1121,7 @@ fn plan_answers_a_move_projection() {
 fn whoami_answers_a_found_and_a_missing_identity() {
     let found = IdentityReport {
         author_type: Some(String::from("human")),
+        elapsed_ms: 0,
         found: true,
         identity: Some(String::from("alice")),
         key: Some(String::from("/keys/alice")),
@@ -1089,6 +1131,7 @@ fn whoami_answers_a_found_and_a_missing_identity() {
     assert_eq!(
         serde_json::to_value(&found).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "author_type": "human",
             "found": true,
             "identity": "alice",
@@ -1099,6 +1142,6 @@ fn whoami_answers_a_found_and_a_missing_identity() {
     );
     assert_eq!(
         serde_json::to_value(IdentityReport::not_found()).unwrap(),
-        json!({ "found": false })
+        json!({ "elapsed_ms": 0_u64, "found": false })
     );
 }

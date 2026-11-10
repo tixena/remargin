@@ -58,6 +58,7 @@ impl SandboxBulkResult {
     pub fn add_report(&self, base_dir: &Path) -> SandboxAddReport {
         SandboxAddReport {
             added: display_paths(&self.changed, base_dir),
+            elapsed_ms: 0,
             failed: self.failure_entries(base_dir),
             skipped: display_paths(&self.skipped, base_dir),
         }
@@ -76,7 +77,7 @@ impl SandboxBulkResult {
     #[must_use]
     pub fn remove_report(&self, base_dir: &Path) -> SandboxRemoveReport {
         SandboxRemoveReport {
-            elapsed_ms: None,
+            elapsed_ms: 0,
             failed: self.failure_entries(base_dir),
             removed: display_paths(&self.changed, base_dir),
             skipped: display_paths(&self.skipped, base_dir),
@@ -109,6 +110,8 @@ pub struct SandboxFailureEntry {
 #[model_schema(enable = ["jsonschema"])]
 pub struct SandboxAddReport {
     pub added: Vec<String>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub failed: Vec<SandboxFailureEntry>,
     pub skipped: Vec<String>,
 }
@@ -118,9 +121,8 @@ pub struct SandboxAddReport {
 #[non_exhaustive]
 #[model_schema(enable = ["jsonschema"])]
 pub struct SandboxRemoveReport {
-    /// Milliseconds the call took, written by the io layer on the way out.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub elapsed_ms: Option<u64>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub failed: Vec<SandboxFailureEntry>,
     pub removed: Vec<String>,
     pub skipped: Vec<String>,

@@ -27,6 +27,8 @@ pub const DEFAULT_PROMPT_BODY: &str =
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct ResolvedSystemPrompt {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub is_default: bool,
     /// The YAML `name:`, else the owning folder's basename; `"default"` for the fallback.
     pub name: String,
@@ -89,6 +91,7 @@ pub fn resolve_system_prompt(
                     bail!("runner must be a single line (in {})", candidate.display());
                 }
                 return Ok(ResolvedSystemPrompt {
+                    elapsed_ms: 0,
                     is_default: false,
                     name,
                     prompt: sp.prompt,
@@ -103,6 +106,7 @@ pub fn resolve_system_prompt(
     }
 
     Ok(ResolvedSystemPrompt {
+        elapsed_ms: 0,
         is_default: true,
         name: "default".to_owned(),
         prompt: DEFAULT_PROMPT_BODY.to_owned(),

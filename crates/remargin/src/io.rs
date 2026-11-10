@@ -81,7 +81,7 @@ pub fn print_text_output(sinks: &mut IoSinks<'_>, value: &Value) -> Result<()> {
     match value {
         Value::String(s) => out(sinks, s),
         Value::Object(map) => {
-            for (key, val) in map {
+            for (key, val) in map.iter().filter(|(key, _)| *key != "elapsed_ms") {
                 if let Value::Array(arr) = val {
                     out(sinks, &format!("{key}:"))?;
                     for item in arr {

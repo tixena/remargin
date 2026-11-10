@@ -82,6 +82,8 @@ pub struct RmResult {
 #[non_exhaustive]
 pub struct RmFileAnswer {
     pub deleted: String,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub existed: bool,
 }
 
@@ -91,6 +93,8 @@ pub struct RmFileAnswer {
 #[non_exhaustive]
 pub struct RmDirAnswer {
     pub deleted: String,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub files_deleted: Vec<String>,
     pub folders_left_behind: Vec<String>,
     pub folders_removed: Vec<String>,
@@ -113,6 +117,8 @@ pub enum RmAnswer {
 #[non_exhaustive]
 pub struct WriteAnswer {
     pub binary: bool,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub noop: bool,
     pub raw: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -127,6 +133,7 @@ impl RmResult {
     pub fn answer(&self, requested_path: &str) -> RmFileAnswer {
         RmFileAnswer {
             deleted: String::from(requested_path),
+            elapsed_ms: 0,
             existed: self.existed,
         }
     }
@@ -159,6 +166,7 @@ impl RmDirReport {
     fn answer(&self, requested_path: &str) -> RmDirAnswer {
         RmDirAnswer {
             deleted: String::from(requested_path),
+            elapsed_ms: 0,
             files_deleted: display_paths(&self.files_deleted),
             folders_left_behind: display_paths(&self.folders_left_behind),
             folders_removed: display_paths(&self.folders_removed),
@@ -252,6 +260,7 @@ impl WriteOutcome {
     pub fn answer(self, written: &str, binary: bool, raw: bool) -> WriteAnswer {
         WriteAnswer {
             binary,
+            elapsed_ms: 0,
             noop: self.noop,
             raw: raw || binary,
             warnings: self.warnings.into_iter().map(Warning::from).collect(),

@@ -747,6 +747,7 @@ fn render_sign_result_empty() {
 #[test]
 fn render_sign_result_signed() {
     let result = SignResult {
+        elapsed_ms: 0,
         repaired: vec![],
         signed: vec![SignedEntry {
             id: String::from("abc123"),
@@ -762,6 +763,7 @@ fn render_sign_result_signed() {
 #[test]
 fn render_sign_result_skipped() {
     let result = SignResult {
+        elapsed_ms: 0,
         repaired: vec![],
         signed: vec![],
         skipped: vec![SkippedEntry {
@@ -779,6 +781,7 @@ fn render_sign_result_skipped() {
 #[test]
 fn render_sign_result_repaired() {
     let result = SignResult {
+        elapsed_ms: 0,
         repaired: vec![RepairedChecksumEntry {
             id: String::from("q1"),
             old_checksum: String::from("old"),

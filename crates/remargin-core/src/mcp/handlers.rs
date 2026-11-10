@@ -18,7 +18,7 @@ use crate::document::{self, RmAnswer, WriteAnswer};
 use crate::linter::{self, LintAnswer};
 use crate::mcp::answers::{
     ActivityPage, CommentRow, CommentsPage, IdentityCreated, LsAnswer, QueryFile, QueryPage,
-    ReportSpillAnswer, SandboxListAnswer, SearchPage, Timed,
+    ReportSpillAnswer, SandboxListAnswer, SearchPage, TimedResponse,
 };
 use crate::mcp::args::{
     AckArgs, ActivityArgs, BatchArgs, CommentArgs, CommentsArgs, CpArgs, DeleteArgs, DoctorArgs,
@@ -138,7 +138,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: AckArgs,
-    ) -> impl Future<Output = Result<Timed<AckAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<AckAnswer, RemarginError>> + Send {
         ready(timed(|| ack_now(ctx, &req)))
     }
 
@@ -146,7 +146,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: ActivityArgs,
-    ) -> impl Future<Output = Result<Timed<ActivityPage>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<ActivityPage, RemarginError>> + Send {
         ready(timed(|| activity_now(ctx, &req, self.spill_cap())))
     }
 
@@ -154,7 +154,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: BatchArgs,
-    ) -> impl Future<Output = Result<Timed<BatchAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<BatchAnswer, RemarginError>> + Send {
         ready(timed(|| batch_now(ctx, &req)))
     }
 
@@ -162,7 +162,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: CommentArgs,
-    ) -> impl Future<Output = Result<Timed<CommentCreated>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CommentCreated, RemarginError>> + Send {
         ready(timed(|| comment_now(ctx, &req)))
     }
 
@@ -170,7 +170,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: CommentsArgs,
-    ) -> impl Future<Output = Result<Timed<CommentsPage>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CommentsPage, RemarginError>> + Send {
         ready(timed(|| comments_now(ctx, &req, self.spill_cap())))
     }
 
@@ -178,7 +178,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: CpArgs,
-    ) -> impl Future<Output = Result<Timed<CpOutcome>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CpOutcome, RemarginError>> + Send {
         ready(timed(|| cp_now(ctx, &req)))
     }
 
@@ -186,7 +186,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: DeleteArgs,
-    ) -> impl Future<Output = Result<Timed<CommentsDeleted>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CommentsDeleted, RemarginError>> + Send {
         ready(timed(|| delete_now(ctx, &req)))
     }
 
@@ -194,7 +194,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: DoctorArgs,
-    ) -> impl Future<Output = Result<Timed<DoctorReport>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<DoctorReport, RemarginError>> + Send {
         ready(timed(|| doctor_now(ctx, &req)))
     }
 
@@ -202,7 +202,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: EditArgs,
-    ) -> impl Future<Output = Result<Timed<CommentEdited>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CommentEdited, RemarginError>> + Send {
         ready(timed(|| edit_now(ctx, &req)))
     }
 
@@ -226,7 +226,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: IdentityCreateArgs,
-    ) -> impl Future<Output = Result<Timed<IdentityCreated>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<IdentityCreated, RemarginError>> + Send {
         ready(timed(|| identity_create_now(ctx, &req)))
     }
 
@@ -234,7 +234,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: LintArgs,
-    ) -> impl Future<Output = Result<Timed<LintAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<LintAnswer, RemarginError>> + Send {
         ready(timed(|| lint_now(ctx, &req)))
     }
 
@@ -242,7 +242,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: LsArgs,
-    ) -> impl Future<Output = Result<Timed<LsAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<LsAnswer, RemarginError>> + Send {
         ready(timed(|| ls_now(ctx, &req)))
     }
 
@@ -258,7 +258,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: MvArgs,
-    ) -> impl Future<Output = Result<Timed<MvAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<MvAnswer, RemarginError>> + Send {
         ready(timed(|| mv_now(ctx, &req)))
     }
 
@@ -266,14 +266,14 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PermissionsCheckArgs,
-    ) -> impl Future<Output = Result<Timed<CheckOutput>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CheckOutput, RemarginError>> + Send {
         ready(timed(|| permissions_check_now(ctx, &req)))
     }
 
     fn permissions_show(
         &self,
         ctx: &RequestContext<'_>,
-    ) -> impl Future<Output = Result<Timed<ShowOutput>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<ShowOutput, RemarginError>> + Send {
         ready(timed(|| permissions_show_now(ctx)))
     }
 
@@ -281,7 +281,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PlanArgs,
-    ) -> impl Future<Output = Result<Timed<PlanReport>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<PlanReport, RemarginError>> + Send {
         ready(timed(|| plan_now(ctx, &req)))
     }
 
@@ -289,7 +289,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PromptDeleteArgs,
-    ) -> impl Future<Output = Result<Timed<PromptDeleteOutcome>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<PromptDeleteOutcome, RemarginError>> + Send {
         ready(timed(|| prompt_delete_now(ctx, &req)))
     }
 
@@ -297,7 +297,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PromptListArgs,
-    ) -> impl Future<Output = Result<Timed<PromptListAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<PromptListAnswer, RemarginError>> + Send {
         ready(timed(|| prompt_list_now(ctx, &req)))
     }
 
@@ -305,7 +305,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PromptResolveArgs,
-    ) -> impl Future<Output = Result<Timed<ResolvedSystemPrompt>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<ResolvedSystemPrompt, RemarginError>> + Send {
         ready(timed(|| prompt_resolve_now(ctx, &req)))
     }
 
@@ -313,7 +313,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PromptSetArgs,
-    ) -> impl Future<Output = Result<Timed<PromptSetOutcome>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<PromptSetOutcome, RemarginError>> + Send {
         ready(timed(|| prompt_set_now(ctx, &req)))
     }
 
@@ -321,7 +321,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: PurgeArgs,
-    ) -> impl Future<Output = Result<Timed<PurgeAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<PurgeAnswer, RemarginError>> + Send {
         ready(timed(|| purge_now(ctx, &req)))
     }
 
@@ -329,7 +329,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: QueryArgs,
-    ) -> impl Future<Output = Result<Timed<QueryPage>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<QueryPage, RemarginError>> + Send {
         ready(timed(|| query_now(ctx, &req, self.spill_cap())))
     }
 
@@ -337,7 +337,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: ReactArgs,
-    ) -> impl Future<Output = Result<Timed<ReactAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<ReactAnswer, RemarginError>> + Send {
         ready(timed(|| react_now(ctx, &req)))
     }
 
@@ -345,7 +345,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: ReplaceArgs,
-    ) -> impl Future<Output = Result<Timed<ReplaceReport>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<ReplaceReport, RemarginError>> + Send {
         ready(timed(|| replace_now(ctx, &req)))
     }
 
@@ -353,7 +353,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: ReplyArgs,
-    ) -> impl Future<Output = Result<Timed<CommentCreated>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<CommentCreated, RemarginError>> + Send {
         ready(timed(|| reply_now(ctx, &req)))
     }
 
@@ -361,7 +361,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: ReportSpillArgs,
-    ) -> impl Future<Output = Result<Timed<ReportSpillAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<ReportSpillAnswer, RemarginError>> + Send {
         ready(timed(|| report_spill_now(ctx, &req, &self.session)))
     }
 
@@ -369,7 +369,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: RmArgs,
-    ) -> impl Future<Output = Result<Timed<RmAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<RmAnswer, RemarginError>> + Send {
         ready(timed(|| rm_now(ctx, &req)))
     }
 
@@ -377,7 +377,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: SandboxAddArgs,
-    ) -> impl Future<Output = Result<Timed<SandboxAddReport>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<SandboxAddReport, RemarginError>> + Send {
         ready(timed(|| sandbox_add_now(ctx, &req)))
     }
 
@@ -385,7 +385,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: SandboxListArgs,
-    ) -> impl Future<Output = Result<Timed<SandboxListAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<SandboxListAnswer, RemarginError>> + Send {
         ready(timed(|| sandbox_list_now(ctx, &req)))
     }
 
@@ -393,7 +393,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: SandboxRemoveArgs,
-    ) -> impl Future<Output = Result<Timed<SandboxRemoveReport>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<SandboxRemoveReport, RemarginError>> + Send {
         ready(timed(|| sandbox_remove_now(ctx, &req)))
     }
 
@@ -401,7 +401,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: SearchArgs,
-    ) -> impl Future<Output = Result<Timed<SearchPage>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<SearchPage, RemarginError>> + Send {
         ready(timed(|| search_now(ctx, &req, self.spill_cap())))
     }
 
@@ -409,7 +409,7 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: SignArgs,
-    ) -> impl Future<Output = Result<Timed<SignResult>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<SignResult, RemarginError>> + Send {
         ready(timed(|| sign_now(ctx, &req)))
     }
 
@@ -417,14 +417,14 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: VerifyArgs,
-    ) -> impl Future<Output = Result<Timed<VerifyAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<VerifyAnswer, RemarginError>> + Send {
         ready(timed(|| verify_now(ctx, &req)))
     }
 
     fn whoami(
         &self,
         ctx: &RequestContext<'_>,
-    ) -> impl Future<Output = Result<Timed<IdentityReport>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<IdentityReport, RemarginError>> + Send {
         ready(timed(|| whoami_now(ctx)))
     }
 
@@ -432,18 +432,18 @@ impl Remargin<RequestContext<'_>> for Server {
         &self,
         ctx: &RequestContext<'_>,
         req: WriteArgs,
-    ) -> impl Future<Output = Result<Timed<WriteAnswer>, RemarginError>> + Send {
+    ) -> impl Future<Output = Result<WriteAnswer, RemarginError>> + Send {
         ready(timed(|| write_now(ctx, &req)))
     }
 }
 
-fn timed<T>(work: impl FnOnce() -> Result<T, RemarginError>) -> Result<Timed<T>, RemarginError> {
+fn timed<T>(work: impl FnOnce() -> Result<T, RemarginError>) -> Result<T, RemarginError>
+where
+    T: TimedResponse,
+{
     let start = Instant::now();
     let value = work()?;
-    Ok(Timed {
-        elapsed_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
-        value,
-    })
+    Ok(value.with_elapsed_ms(u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)))
 }
 
 fn usize_of(value: Option<u64>) -> Option<usize> {
@@ -547,6 +547,7 @@ fn activity_now(
         change_cols: column_names(&activity::CHANGE_COLS),
         cutoff_explicit: result.cutoff_explicit,
         effective_limit,
+        elapsed_ms: 0,
         files: groups,
         newest_ts_overall: result.newest_ts_overall,
         total,
@@ -683,6 +684,7 @@ fn comments_now(
         comment_cols: column_names(query::comment_cols(req.include_integrity)),
         comments: page,
         effective_limit,
+        elapsed_ms: 0,
         total,
     })
 }
@@ -862,6 +864,7 @@ fn identity_create_now(
     }
     Ok(IdentityCreated {
         author_type: String::from(author_type),
+        elapsed_ms: 0,
         identity: req.identity.clone(),
         key,
         yaml,
@@ -877,7 +880,10 @@ fn lint_now(ctx: &RequestContext<'_>, req: &LintArgs) -> Result<LintAnswer, Rema
 fn ls_now(ctx: &RequestContext<'_>, req: &LsArgs) -> Result<LsAnswer, RemarginError> {
     let admitted = ctx.admit("ls", &[req.path.as_deref().unwrap_or(".")])?;
     let entries = document::ls(ctx.system, ctx.base_dir, &admitted[0], &ctx.config)?;
-    Ok(LsAnswer { entries })
+    Ok(LsAnswer {
+        elapsed_ms: 0,
+        entries,
+    })
 }
 
 fn metadata_now(
@@ -1184,7 +1190,10 @@ fn prompt_list_now(
     ctx.admit("prompt_list", &[])?;
     let folder = folder_of(ctx, req.folder.as_deref());
     let entries = prompt_ops::list(ctx.system, &folder)?;
-    Ok(prompt_ops::PromptListAnswer { entries })
+    Ok(prompt_ops::PromptListAnswer {
+        elapsed_ms: 0,
+        entries,
+    })
 }
 
 fn prompt_resolve_now(
@@ -1296,6 +1305,7 @@ fn query_now(
         base_path: query::display_base_path(&path_str, is_file),
         comment_cols: column_names(query::comment_cols(include_integrity)),
         effective_limit,
+        elapsed_ms: 0,
         results: groups,
         total,
     })
@@ -1408,7 +1418,10 @@ fn sandbox_list_now(
         .iter()
         .map(|listing| sandbox_ops::SandboxListEntry::from_listing(listing, &root, false))
         .collect();
-    Ok(SandboxListAnswer { files })
+    Ok(SandboxListAnswer {
+        elapsed_ms: 0,
+        files,
+    })
 }
 
 fn sandbox_remove_now(

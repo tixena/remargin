@@ -120,6 +120,7 @@ impl SessionState {
             self.spill_cap = self.spill_cap.min(reported);
         }
         ReportSpillAnswer {
+            elapsed_ms: 0,
             inferred: explicit.is_none(),
             previous_cap,
             reported_size: reported,
@@ -381,6 +382,7 @@ pub(crate) fn search_compact_envelope(
     }
     SearchPage {
         effective_limit,
+        elapsed_ms: 0,
         files,
         match_cols: column_names(search::match_cols(with_context)),
         total: results.total,

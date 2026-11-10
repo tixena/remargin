@@ -46,6 +46,8 @@ pub struct PurgeResult {
 pub struct PurgeFileAnswer {
     pub attachments_cleaned: usize,
     pub comments_removed: usize,
+    /// How long the call took.
+    pub elapsed_ms: u64,
 }
 
 /// One file a directory purge cleaned.
@@ -74,6 +76,8 @@ pub struct PurgeFailure {
 pub struct PurgeDirAnswer {
     pub attachments_cleaned: usize,
     pub comments_removed: usize,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub failed: Vec<PurgeFailure>,
     pub purged: Vec<PurgedFile>,
     pub skipped: Vec<String>,
@@ -95,6 +99,7 @@ impl PurgeResult {
         PurgeFileAnswer {
             attachments_cleaned: self.attachments_cleaned,
             comments_removed: self.comments_removed,
+            elapsed_ms: 0,
         }
     }
 }
@@ -124,6 +129,7 @@ impl PurgeBulkResult {
         PurgeDirAnswer {
             attachments_cleaned: self.attachments_cleaned_total(),
             comments_removed: self.comments_removed_total(),
+            elapsed_ms: 0,
             failed: self
                 .failed
                 .iter()

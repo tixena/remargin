@@ -17,6 +17,8 @@ use crate::advice::{Advice, OpAdvice, OpWarning, Warning, op_warning_schema, war
 pub struct AckAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acknowledged: Option<Vec<String>>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unacknowledged: Option<Vec<String>>,
 }
@@ -27,6 +29,8 @@ pub struct AckAnswer {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct BatchAnswer {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<OpWarning>,
@@ -37,6 +41,8 @@ pub struct BatchAnswer {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct CommentCreated {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<Warning>,
@@ -48,6 +54,8 @@ pub struct CommentCreated {
 #[non_exhaustive]
 pub struct CommentsDeleted {
     pub deleted: Vec<String>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
 }
 
 /// What `edit` answers: the id it edited.
@@ -56,6 +64,8 @@ pub struct CommentsDeleted {
 #[non_exhaustive]
 pub struct CommentEdited {
     pub edited: String,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<Warning>,
 }
@@ -67,6 +77,8 @@ pub struct CommentEdited {
 pub struct ReactAnswer {
     pub action: String,
     pub comment_id: String,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub emoji: String,
 }
 
@@ -76,11 +88,13 @@ pub fn ack(ids: &[String], remove: bool) -> AckAnswer {
     if remove {
         AckAnswer {
             acknowledged: None,
+            elapsed_ms: 0,
             unacknowledged: listed,
         }
     } else {
         AckAnswer {
             acknowledged: listed,
+            elapsed_ms: 0,
             unacknowledged: None,
         }
     }
@@ -89,6 +103,7 @@ pub fn ack(ids: &[String], remove: bool) -> AckAnswer {
 #[must_use]
 pub fn batch(ids: &[String], notes: Vec<OpAdvice>) -> BatchAnswer {
     BatchAnswer {
+        elapsed_ms: 0,
         ids: ids.to_vec(),
         warnings: notes.into_iter().map(OpWarning::from).collect(),
     }
@@ -97,6 +112,7 @@ pub fn batch(ids: &[String], notes: Vec<OpAdvice>) -> BatchAnswer {
 #[must_use]
 pub fn comment_created(id: &str, notes: Vec<Advice>) -> CommentCreated {
     CommentCreated {
+        elapsed_ms: 0,
         id: String::from(id),
         warnings: notes.into_iter().map(Warning::from).collect(),
     }
@@ -106,6 +122,7 @@ pub fn comment_created(id: &str, notes: Vec<Advice>) -> CommentCreated {
 pub fn comments_deleted(ids: &[String]) -> CommentsDeleted {
     CommentsDeleted {
         deleted: ids.to_vec(),
+        elapsed_ms: 0,
     }
 }
 
@@ -113,6 +130,7 @@ pub fn comments_deleted(ids: &[String]) -> CommentsDeleted {
 pub fn comment_edited(id: &str, notes: Vec<Advice>) -> CommentEdited {
     CommentEdited {
         edited: String::from(id),
+        elapsed_ms: 0,
         warnings: notes.into_iter().map(Warning::from).collect(),
     }
 }
@@ -123,6 +141,7 @@ pub fn react(emoji: &str, comment_id: &str, remove: bool) -> ReactAnswer {
     ReactAnswer {
         action: String::from(action),
         comment_id: String::from(comment_id),
+        elapsed_ms: 0,
         emoji: String::from(emoji),
     }
 }

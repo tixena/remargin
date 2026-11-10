@@ -107,6 +107,8 @@ pub struct MvAnswer {
     pub action: MvAction,
     pub bytes_moved: u64,
     pub dst_absolute: String,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub nested_files_moved: usize,
     pub src_absolute: String,
     #[serde(flatten)]
@@ -120,6 +122,7 @@ impl MvOutcome {
             action: self.action.clone(),
             bytes_moved: self.bytes_moved,
             dst_absolute: self.dst_absolute.display().to_string(),
+            elapsed_ms: 0,
             nested_files_moved: self.nested_files_moved,
             src_absolute: self.src_absolute.display().to_string(),
             topology: self.topology.clone(),

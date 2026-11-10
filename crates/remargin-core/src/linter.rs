@@ -66,6 +66,8 @@ pub struct LintReport {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct LintAnswer {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub errors: Vec<LintErrorView>,
     pub ok: bool,
     pub permissions: Vec<PermissionsLintErrorView>,
@@ -91,6 +93,7 @@ impl LintReport {
     #[must_use]
     pub fn answer(&self) -> LintAnswer {
         LintAnswer {
+            elapsed_ms: 0,
             errors: self.errors.clone(),
             ok: self.is_clean(),
             permissions: self.permissions.clone(),

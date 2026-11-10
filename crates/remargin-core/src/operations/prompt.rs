@@ -34,6 +34,8 @@ use crate::wait::Wait as _;
 pub struct PromptDeleteOutcome {
     /// The file had no `system_prompt:` block, so the call was a no-op.
     pub absent: bool,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     /// The strip left the file with no meaningful content; it stays in place regardless.
     pub left_empty: bool,
     pub source: PathBuf,
@@ -60,6 +62,8 @@ pub struct PromptListEntry {
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct PromptListAnswer {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub entries: Vec<PromptListEntry>,
 }
 
@@ -69,6 +73,8 @@ pub struct PromptListAnswer {
 #[non_exhaustive]
 pub struct PromptSetOutcome {
     pub created: bool,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     /// The splice produced byte-identical content, so nothing was written.
     pub noop: bool,
     pub source: PathBuf,
@@ -116,6 +122,7 @@ pub fn delete(
     if !file_present {
         return Ok(PromptDeleteOutcome {
             absent: true,
+            elapsed_ms: 0,
             left_empty: false,
             source: target,
         });
@@ -132,6 +139,7 @@ pub fn delete(
     if result.noop {
         return Ok(PromptDeleteOutcome {
             absent: true,
+            elapsed_ms: 0,
             left_empty: existing.trim().is_empty(),
             source: target,
         });
@@ -144,6 +152,7 @@ pub fn delete(
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(PromptDeleteOutcome {
         absent: false,
+        elapsed_ms: 0,
         left_empty: result.content.trim().is_empty(),
         source: target,
     })
@@ -260,6 +269,7 @@ pub fn set(
     if result.noop {
         return Ok(PromptSetOutcome {
             created: false,
+            elapsed_ms: 0,
             noop: true,
             source: target,
         });
@@ -272,6 +282,7 @@ pub fn set(
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(PromptSetOutcome {
         created,
+        elapsed_ms: 0,
         noop: false,
         source: target,
     })

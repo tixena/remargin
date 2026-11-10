@@ -18,11 +18,11 @@ fn ack_names_the_key_after_the_direction() {
 
     assert_eq!(
         serde_json::to_value(ack(&ids, false)).unwrap(),
-        json!({ "acknowledged": ["a1", "b2"] })
+        json!({ "elapsed_ms": 0_u64, "acknowledged": ["a1", "b2"] })
     );
     assert_eq!(
         serde_json::to_value(ack(&ids, true)).unwrap(),
-        json!({ "unacknowledged": ["a1", "b2"] })
+        json!({ "elapsed_ms": 0_u64, "unacknowledged": ["a1", "b2"] })
     );
 }
 
@@ -32,11 +32,12 @@ fn batch_carries_the_op_of_each_warning() {
 
     assert_eq!(
         serde_json::to_value(batch(&ids, Vec::new())).unwrap(),
-        json!({ "ids": ["a1"] })
+        json!({ "elapsed_ms": 0_u64, "ids": ["a1"] })
     );
     assert_eq!(
         serde_json::to_value(batch(&ids, vec![OpAdvice::new(2_usize, note())])).unwrap(),
         json!({
+            "elapsed_ms": 0_u64,
             "ids": ["a1"],
             "warnings": [{ "op": 2_u64, "line": 3_u64, "message": "wrapped" }],
         })
@@ -47,11 +48,11 @@ fn batch_carries_the_op_of_each_warning() {
 fn comment_created_omits_warnings_when_clean() {
     assert_eq!(
         serde_json::to_value(comment_created("abc", Vec::new())).unwrap(),
-        json!({ "id": "abc" })
+        json!({ "elapsed_ms": 0_u64, "id": "abc" })
     );
     assert_eq!(
         serde_json::to_value(comment_created("abc", vec![note()])).unwrap(),
-        json!({ "id": "abc", "warnings": [{ "line": 3_u64, "message": "wrapped" }] })
+        json!({ "elapsed_ms": 0_u64, "id": "abc", "warnings": [{ "line": 3_u64, "message": "wrapped" }] })
     );
 }
 
@@ -59,11 +60,11 @@ fn comment_created_omits_warnings_when_clean() {
 fn comment_edited_omits_warnings_when_clean() {
     assert_eq!(
         serde_json::to_value(comment_edited("abc", Vec::new())).unwrap(),
-        json!({ "edited": "abc" })
+        json!({ "elapsed_ms": 0_u64, "edited": "abc" })
     );
     assert_eq!(
         serde_json::to_value(comment_edited("abc", vec![note()])).unwrap(),
-        json!({ "edited": "abc", "warnings": [{ "line": 3_u64, "message": "wrapped" }] })
+        json!({ "elapsed_ms": 0_u64, "edited": "abc", "warnings": [{ "line": 3_u64, "message": "wrapped" }] })
     );
 }
 
@@ -71,7 +72,7 @@ fn comment_edited_omits_warnings_when_clean() {
 fn comments_deleted_lists_the_ids() {
     assert_eq!(
         serde_json::to_value(comments_deleted(&[String::from("a1")])).unwrap(),
-        json!({ "deleted": ["a1"] })
+        json!({ "elapsed_ms": 0_u64, "deleted": ["a1"] })
     );
 }
 
@@ -79,10 +80,10 @@ fn comments_deleted_lists_the_ids() {
 fn react_names_the_action_after_the_direction() {
     assert_eq!(
         serde_json::to_value(react("+1", "c1", false)).unwrap(),
-        json!({ "action": "added", "emoji": "+1", "comment_id": "c1" })
+        json!({ "elapsed_ms": 0_u64, "action": "added", "emoji": "+1", "comment_id": "c1" })
     );
     assert_eq!(
         serde_json::to_value(react("+1", "c1", true)).unwrap(),
-        json!({ "action": "removed", "emoji": "+1", "comment_id": "c1" })
+        json!({ "elapsed_ms": 0_u64, "action": "removed", "emoji": "+1", "comment_id": "c1" })
     );
 }

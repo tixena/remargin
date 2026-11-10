@@ -105,9 +105,8 @@ pub struct ReplaceFileOutcome {
 pub struct ReplaceReport {
     /// `true` when no byte was written (a `--dry-run` preview).
     pub dry_run: bool,
-    /// Milliseconds the call took, written by the io layer on the way out.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub elapsed_ms: Option<u64>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     /// Per-file outcomes, in walk order.
     pub files: Vec<ReplaceFileOutcome>,
     /// Number of files whose body changed (or would change).
@@ -247,7 +246,7 @@ pub fn replace(
 
     Ok(ReplaceReport {
         dry_run: options.dry_run,
-        elapsed_ms: None,
+        elapsed_ms: 0,
         files,
         files_changed,
         files_failed,

@@ -32,6 +32,8 @@ pub struct AllowDotFoldersView {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CheckOutput {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     /// Set when the caller asked `--why` AND the path is restricted.
     #[model_schema_prop(nullable)]
     pub matching_rule: Option<MatchingRule>,
@@ -97,6 +99,8 @@ pub struct TrustedRootView {
 pub struct ShowOutput {
     pub allow_dot_folders: Vec<AllowDotFoldersView>,
     pub deny_ops: Vec<DenyOpsView>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub trusted_roots: Vec<TrustedRootView>,
 }
 
@@ -118,6 +122,7 @@ pub fn check(system: &dyn System, cwd: &Path, path: &Path, why: bool) -> Result<
     let resolved = resolve_permissions(system, cwd)?;
     let matching_rule = first_matching_rule(&resolved, &canonical);
     Ok(CheckOutput {
+        elapsed_ms: 0,
         matching_rule: if why { matching_rule.clone() } else { None },
         path: canonical,
         restricted: matching_rule.is_some(),
@@ -134,6 +139,7 @@ pub fn show(system: &dyn System, cwd: &Path) -> Result<ShowOutput> {
     Ok(ShowOutput {
         allow_dot_folders: group_allow_dot_folders(&resolved),
         deny_ops: group_deny_ops(&resolved),
+        elapsed_ms: 0,
         trusted_roots: group_trusted_roots(&resolved),
     })
 }

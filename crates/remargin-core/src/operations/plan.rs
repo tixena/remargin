@@ -225,6 +225,8 @@ pub struct PlanReport {
     /// Set only by the `cp` op, whose document-level fields stay empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cp_diff: Option<CpDiff>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub identity: PlanIdentity,
     /// Set only by the `mv` op, whose document-level fields stay empty.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -784,6 +786,7 @@ pub fn project_report(
         comments,
         config_diff: None,
         cp_diff: None,
+        elapsed_ms: 0,
         identity,
         mv_diff: None,
         noop,
@@ -850,6 +853,7 @@ pub fn project_doc_report(
         comments,
         config_diff: None,
         cp_diff: None,
+        elapsed_ms: 0,
         identity,
         mv_diff: None,
         noop,

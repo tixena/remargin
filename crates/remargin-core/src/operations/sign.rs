@@ -96,6 +96,8 @@ pub struct SkippedEntry {
 #[derive(Debug, Clone, Default, Serialize)]
 #[non_exhaustive]
 pub struct SignResult {
+    /// How long the call took.
+    pub elapsed_ms: u64,
     /// Set only under [`SignOptions::repair_checksum`], for comments whose stored checksum was
     /// stale.
     pub repaired: Vec<RepairedChecksumEntry>,
@@ -208,6 +210,7 @@ pub fn sign_comments(
     })?;
 
     Ok(SignResult {
+        elapsed_ms: 0,
         repaired,
         signed,
         skipped: skipped_for_ids,

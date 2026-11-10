@@ -128,6 +128,8 @@ impl fmt::Display for IdentitySource {
 pub struct IdentityReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_type: Option<String>,
+    /// How long the call took.
+    pub elapsed_ms: u64,
     pub found: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
@@ -150,6 +152,7 @@ impl IdentityReport {
                 .author_type
                 .as_ref()
                 .map(|t| String::from(t.as_str())),
+            elapsed_ms: 0,
             found: true,
             identity: Some(identity.to_owned()),
             key: config.key_path.as_ref().map(|p| p.display().to_string()),
@@ -162,6 +165,7 @@ impl IdentityReport {
     pub const fn not_found() -> Self {
         Self {
             author_type: None,
+            elapsed_ms: 0,
             found: false,
             identity: None,
             key: None,
