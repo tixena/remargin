@@ -148,7 +148,7 @@ pub fn build_launch_spec(session: &DiscoveredSession) -> Result<SessionLaunchSpe
 /// Concatenates the resolved system-prompt body, the standard remargin
 /// operating rules, and the `/loop` + `/goal` framing (whose authoritative
 /// values remain the spec's structured `loop_interval` / `goal` fields).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compose_prompt(
     system_prompt: &ResolvedSystemPrompt,
     loop_interval: Duration,

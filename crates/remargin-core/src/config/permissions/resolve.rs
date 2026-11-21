@@ -101,7 +101,7 @@ pub struct ResolvedPermissions {
 }
 
 impl ResolvedPermissions {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn allow_dot_folder_names(&self) -> Vec<String> {
         self.allow_dot_folders
             .iter()
@@ -112,7 +112,7 @@ impl ResolvedPermissions {
     /// Effective CLI policy: `true` = CLI allowed for agents. The
     /// nearest declaration in the parent walk wins; when no
     /// `.remargin.yaml` in the walk declares it, the CLI is denied.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn cli_allowed(&self) -> bool {
         match self.cli_allowed {
             Some(v) => v,
@@ -125,14 +125,14 @@ impl ResolvedPermissions {
     /// survived. The op guard treats this as deny-all; the pretool hook
     /// mirrors it so a locked realm is unreachable through a native tool
     /// or a shell word.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn locked_to_empty_roots(&self) -> bool {
         self.trusted_roots.is_empty() && self.trusted_roots_lock.is_some()
     }
 
     /// No opinion stated: every walked file was silent and nothing
     /// locked the realm. Callers fall back to cwd.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn trusted_roots_unconstrained(&self) -> bool {
         self.trusted_roots.is_empty() && self.trusted_roots_lock.is_none()
     }
@@ -175,7 +175,7 @@ impl TrustedRootEscape {
     /// Diagnostic naming the file, the entry as written, the resolved
     /// anchor, and the realm it escaped. Shared verbatim by the
     /// resolve-time error, the lint finding, and the doctor finding.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn message(&self) -> String {
         format!(
             "trusted_roots entry `{}` in {} resolves to {}, outside the realm it declares ({}); a \
@@ -379,7 +379,7 @@ pub fn find_trusted_root_escapes(
 
 /// Anchor for a [`ResolvedTrustedRoot`] — its absolute path or its
 /// realm root.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn trusted_root_anchor(entry: &ResolvedTrustedRoot) -> &Path {
     match &entry.path {
         TrustedRootPath::Absolute(p) => p.as_path(),
@@ -388,7 +388,7 @@ pub fn trusted_root_anchor(entry: &ResolvedTrustedRoot) -> &Path {
 }
 
 /// `true` when the entry covers `target` (descendant or exact match).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn trusted_root_covers(entry: &TrustedRootPath, target: &Path) -> bool {
     let anchor = match entry {
         TrustedRootPath::Absolute(p) => p.as_path(),

@@ -266,7 +266,7 @@ fn group_trusted_roots(resolved: &ResolvedPermissions) -> Vec<TrustedRootView> {
 ///
 /// Output is written to stderr in the CLI; the function returns a `String`
 /// so callers can route it to any sink.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_show_text(cwd: &Path, report: &ShowOutput) -> String {
     use crate::display::format_string_list;
     use core::fmt::Write as _;
@@ -336,7 +336,7 @@ pub fn render_show_text(cwd: &Path, report: &ShowOutput) -> String {
 }
 
 /// Render a [`CheckOutput`] as human-readable text for `permissions check`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_check_text(report: &CheckOutput, why: bool) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();

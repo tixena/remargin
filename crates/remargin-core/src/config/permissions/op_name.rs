@@ -106,7 +106,7 @@ impl OpName {
     ];
 
     /// Kebab-case wire form (matches the deserialised representation).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Ack => "ack",
@@ -138,7 +138,7 @@ impl OpName {
     /// Render the comma-separated list of valid op names, sorted by
     /// kebab-case form. Used in user-facing diagnostics surfaced when
     /// `.remargin.yaml` carries an unknown op name.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn valid_names_csv() -> String {
         let mut buf = String::new();
         for (idx, op) in Self::ALL.iter().enumerate() {

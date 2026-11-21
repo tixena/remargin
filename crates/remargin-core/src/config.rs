@@ -248,7 +248,7 @@ pub enum Mode {
 impl Mode {
     /// Canonical lowercase name for the mode, matching the YAML
     /// representation and the CLI's JSON output.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -289,7 +289,7 @@ impl ResolvedConfig {
     /// Build the [`CallerInfo`] view of this config so the per-op
     /// guard can evaluate identity-scoped `deny_ops`. Pure
     /// projection — no I/O.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn caller_info(&self) -> CallerInfo {
         CallerInfo {
             author_type: self.author_type.clone(),
@@ -463,7 +463,7 @@ impl ResolvedConfig {
     }
 
     /// Open a [`ReadGate`] over this caller for one walk.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn read_gate(&self) -> ReadGate<'_> {
         ReadGate {
             config: self,
@@ -472,7 +472,7 @@ impl ResolvedConfig {
     }
 
     /// Check if a comment must be signed (strict mode + registered participant).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn requires_signature(&self, author: &str) -> bool {
         if self.mode != Mode::Strict {
             return false;
@@ -580,7 +580,7 @@ impl ResolvedConfig {
     ///
     /// [`Self::validate_identity`] has already verified that the key path is present when strict
     /// mode requires one. An unregistered author in strict mode gets `None`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn resolve_signing_key(&self, author: &str) -> Option<&Path> {
         if !self.requires_signature(author) {
             return None;

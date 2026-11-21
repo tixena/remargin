@@ -68,7 +68,7 @@ pub enum RecipientStatus {
 
 impl RecipientStatus {
     /// Canonical lowercase name for JSON / text output.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Ok => "ok",
@@ -95,7 +95,7 @@ pub enum SignatureStatus {
 impl SignatureStatus {
     /// Canonical lowercase name, matching the JSON / text output of
     /// `remargin verify`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Invalid => "invalid",
@@ -176,7 +176,7 @@ pub enum VerifyAnswer {
 }
 
 impl VerifyReport {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> VerifyReportView {
         VerifyReportView {
             elapsed_ms: 0,
@@ -185,7 +185,7 @@ impl VerifyReport {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self) -> Value {
         serde_json::to_value(self.answer()).unwrap_or(Value::Null)
     }
@@ -252,7 +252,7 @@ impl FolderVerifyReport {
     /// plus only its not-clean `bad` rows; a file that failed to
     /// read/parse carries `error`. Keeps whole-vault directory verify
     /// within the MCP token budget.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> FolderVerifySummaryView {
         let files_verified = self.files.len();
         let files_passed = self
@@ -295,7 +295,7 @@ impl FolderVerifyReport {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self) -> Value {
         serde_json::to_value(self.answer()).unwrap_or(Value::Null)
     }
@@ -323,7 +323,7 @@ impl VerifyFailure {
     /// The verify pass is rerun so the failing rows can be classified
     /// against the registry (the `RowStatus` rows in [`VerifyReport`]
     /// alone do not carry registry membership).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn from_document(doc: &ParsedDocument, cfg: &ResolvedConfig, path: &Path) -> Self {
         let report = verify_document(doc, cfg);
         let comments = doc.comments();
@@ -349,7 +349,7 @@ impl VerifyFailure {
 
     /// One-line plain-English summary suitable for the very top of an
     /// error panel. Counts only failing rows.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn headline(&self) -> String {
         let n = self.failures.len();
         let path = self.path.display();
@@ -362,7 +362,7 @@ impl VerifyFailure {
 
     /// Actionable next-step suggestion. Plain prose; safe to append to
     /// the headline when rendering to a single string.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn hint(&self) -> String {
         format!(
             "Try `remargin verify {} --json` for the full breakdown, or contact the document's owner to re-sign legacy entries.",
@@ -372,7 +372,7 @@ impl VerifyFailure {
 
     /// Multi-line human rendering: headline, blank line, summary, blank
     /// line, hint. Suitable for CLI stderr (non-JSON mode).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn human_text(&self) -> String {
         let mut out = self.headline();
         let summary = self.summary_lines();
@@ -409,7 +409,7 @@ impl VerifyFailure {
     }
 
     /// The typed form of [`Self::to_json`].
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn payload(&self) -> VerifyFailurePayload {
         let failures = self
             .failures
@@ -435,7 +435,7 @@ impl VerifyFailure {
     /// Per-failure summary, grouped by signature status, capped at
     /// [`SUMMARY_LINE_LIMIT`] lines with an "and N more" tail when
     /// truncated.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn summary_lines(&self) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
         let mut by_status: BTreeMap<&'static str, Vec<&str>> = BTreeMap::new();
@@ -472,7 +472,7 @@ impl VerifyFailure {
     /// Structured JSON shape: `error_kind`, `headline`, `failures`,
     /// `hint`, `mode`, `path`. Suitable for CLI `--json` and MCP tool
     /// errors.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self) -> Value {
         serde_json::to_value(self.payload()).unwrap_or(Value::Null)
     }
@@ -541,7 +541,7 @@ pub enum AnomalyKind {
 
 impl AnomalyKind {
     /// Stable string for diagnostics.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ChecksumInvalid => "checksum_invalid",
@@ -601,7 +601,7 @@ pub struct SubsetGateFailurePayload {
 
 impl SubsetGateFailure {
     /// One-line plain-English summary.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn headline(&self) -> String {
         let n = self.introduced.len();
         let path = self.path.display();
@@ -613,7 +613,7 @@ impl SubsetGateFailure {
     }
 
     /// Actionable next-step.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn hint(&self) -> String {
         format!(
             "Try `remargin verify {} --json` for the full breakdown.",
@@ -630,7 +630,7 @@ impl SubsetGateFailure {
     }
 
     /// JSON shape for `--json` / MCP tool errors.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self) -> SubsetGateFailurePayload {
         let introduced = self
             .introduced
@@ -811,7 +811,7 @@ fn verify_one(
 ///   was crypto-invalid.
 /// - In [`Mode::Registered`] / [`Mode::Strict`] all authors resolve to
 ///   [`SignatureStatus::UnknownAuthor`] (bad in those modes).
-#[must_use]
+#[must_use = "a check whose result is ignored checks nothing"]
 pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyReport {
     let mut results: Vec<RowStatus> = Vec::new();
     let mut ok = true;
@@ -850,7 +850,7 @@ pub fn verify_document(doc: &ParsedDocument, cfg: &ResolvedConfig) -> VerifyRepo
 /// mode contribute. Distinct anomalies can co-fire on the same comment
 /// (e.g. a bad checksum *and* a missing signature) and are returned as
 /// separate entries.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn anomalies_for_doc(doc: &ParsedDocument, cfg: &ResolvedConfig) -> HashSet<Anomaly> {
     let mut out = HashSet::new();
     let report = verify_document(doc, cfg);
@@ -947,7 +947,7 @@ pub fn verify_and_refresh(
 /// Suitable for error messages when the post-write gate trips. The format
 /// mirrors the CLI's text output so operators see the same rendering in
 /// failures and in successful runs.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_report_diagnostic(report: &VerifyReport, mode: &Mode) -> String {
     let mut out = format!("verify failed (mode: {}):\n", mode.as_str());
     for row in &report.results {

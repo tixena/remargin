@@ -51,7 +51,7 @@ pub struct IdentityFlags {
 
 impl IdentityFlags {
     /// Construct a flags struct that names only `--config <path>`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn for_config_path(config_path: PathBuf) -> Self {
         Self {
             author_type: None,
@@ -63,7 +63,7 @@ impl IdentityFlags {
 
     /// True when every field is `None` — the resolver takes branch 3
     /// (plain walk, no filters).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn is_empty(&self) -> bool {
         self.author_type.is_none()
             && self.config_path.is_none()
@@ -142,7 +142,7 @@ pub struct IdentityReport {
 }
 
 impl IdentityReport {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn from_resolved(config: &ResolvedConfig) -> Self {
         let Some(identity) = config.identity.as_deref() else {
             return Self::not_found();
@@ -161,7 +161,7 @@ impl IdentityReport {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn not_found() -> Self {
         Self {
             author_type: None,

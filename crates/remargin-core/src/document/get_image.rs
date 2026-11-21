@@ -42,7 +42,7 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn mime(self) -> &'static str {
         match self {
             Self::Jpeg => "image/jpeg",
@@ -144,7 +144,7 @@ impl GetImageOptions {
 
     /// Owning constructor — callers outside the crate use this instead
     /// of struct-literal construction (the type is `non_exhaustive`).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new() -> Self {
         Self {
             crop: None,
@@ -154,25 +154,25 @@ impl GetImageOptions {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_crop(mut self, crop: CropRegion) -> Self {
         self.crop = Some(crop);
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_format(mut self, format: OutputFormat) -> Self {
         self.format = Some(format);
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
         self.max_bytes = Some(max_bytes);
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_max_dimension(mut self, max_dimension: u32) -> Self {
         self.max_dimension = Some(max_dimension);
         self
@@ -200,7 +200,7 @@ pub struct GetImageResult {
 impl GetImageResult {
     /// JSON shape returned to MCP callers. `content` is base64-encoded
     /// by the adapter so this stays adapter-agnostic.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json_without_content(&self) -> Value {
         json!({
             "format": self.format,

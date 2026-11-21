@@ -38,7 +38,7 @@ pub enum CommandState {
 /// The binary path out of a hook command — everything ahead of the
 /// subcommand the installer appends. Splitting on the suffix rather than on
 /// whitespace keeps a binary path containing spaces intact.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn command_binary<'command>(command: &'command str, subcommand: &str) -> &'command str {
     command
         .strip_suffix(subcommand)
@@ -91,7 +91,7 @@ pub fn hook_command(system: &dyn System, subcommand: &str) -> Result<String> {
 /// under a different binary path — or by an install predating the absolute
 /// path — is still recognized as ours and rewritten in place instead of
 /// duplicated.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn owns(command: &str, subcommand: &str) -> bool {
     command.trim_end().ends_with(subcommand)
 }

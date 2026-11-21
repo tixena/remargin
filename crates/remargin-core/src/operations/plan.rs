@@ -183,7 +183,7 @@ impl PlanIdentity {
     ///
     /// `would_sign` is `true` when a key path is configured. The key is not loaded here: `plan`
     /// stays side-effect-free.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn from_config(cfg: &ResolvedConfig) -> Self {
         let author_type = cfg.author_type.as_ref().map(|t| String::from(t.as_str()));
         Self::new(cfg.identity.clone(), author_type, cfg.key_path.is_some())
@@ -192,7 +192,7 @@ impl PlanIdentity {
     /// Build a [`PlanIdentity`] from the three fields. The
     /// constructor exists so external crates can populate the struct
     /// without tripping `#[non_exhaustive]`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(name: Option<String>, author_type: Option<String>, would_sign: bool) -> Self {
         Self {
             author_type,
@@ -679,7 +679,7 @@ pub enum PlanRequest<'req> {
 
 impl PlanRequest<'_> {
     /// Short human-readable label used as [`PlanReport::op`].
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn op_label(&self) -> &'static str {
         match self {
             Self::Ack {
@@ -1674,7 +1674,7 @@ fn dispatch_write_projection(
 ///
 /// Pure. Keyed on [`crate::parser::Comment::checksum`] for the
 /// modified-vs-preserved split.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn diff_comment_sets(before: &ParsedDocument, after: &ParsedDocument) -> CommentDiff {
     let mut before_ids: BTreeMap<String, String> = BTreeMap::new();
     for cm in before.comments() {
@@ -1827,7 +1827,7 @@ const fn unprotect_entry_action_label(action: UnprotectEntryAction) -> &'static 
 /// Render a `plan restrict` [`PlanReport`] as a structured text block.
 ///
 /// Returns an empty string when the report has no `config_diff`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_plan_restrict_text(report: &PlanReport) -> String {
     let Some(diff) = report.config_diff.as_ref() else {
         return String::new();
@@ -1893,7 +1893,7 @@ pub fn render_plan_restrict_text(report: &PlanReport) -> String {
 }
 
 /// Render a single [`ConfigConflict`] as an indented text line.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_conflict_line(conflict: &ConfigConflict) -> String {
     let mut out = String::new();
     match conflict {
@@ -1955,7 +1955,7 @@ pub fn render_conflict_line(conflict: &ConfigConflict) -> String {
 /// Render a `plan unprotect` [`PlanReport`] as a structured text block.
 ///
 /// Returns an empty string when the report has no `unprotect_diff`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_plan_unprotect_text(report: &PlanReport) -> String {
     let Some(diff) = report.unprotect_diff.as_ref() else {
         return String::new();
@@ -2009,7 +2009,7 @@ pub fn render_plan_unprotect_text(report: &PlanReport) -> String {
 }
 
 /// Render a single [`UnprotectConflict`] as an indented text line.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_unprotect_conflict_line(conflict: &UnprotectConflict) -> String {
     let mut out = String::new();
     match conflict {

@@ -41,7 +41,7 @@ pub struct RestrictArgs {
 impl RestrictArgs {
     /// Build a [`RestrictArgs`] from outside the crate: the struct is `#[non_exhaustive]`, so
     /// struct literals are unavailable there.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(path: String, also_deny_bash: Vec<String>, cli_allowed: bool) -> Self {
         Self {
             also_deny_bash,
@@ -436,7 +436,7 @@ fn upsert_remargin_yaml(
 ///
 /// Output is written to stderr in the CLI; the function returns a `String`
 /// so callers can route it to any sink.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_restrict_summary(outcome: &RestrictOutcome) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();

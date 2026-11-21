@@ -72,7 +72,7 @@ pub fn validate_single(kind: &str) -> Result<()> {
 
 /// The `--kind` filter shared by `comments` and `query`: `true` when `filter` is empty or when
 /// `comment_kinds` holds at least one of its values.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn matches_kind_filter(comment_kinds: &[String], filter: &[String]) -> bool {
     if filter.is_empty() {
         return true;
@@ -82,7 +82,7 @@ pub fn matches_kind_filter(comment_kinds: &[String], filter: &[String]) -> bool 
 
 /// The kinds as they are hashed: sorted and de-duplicated, so `[a, b]` and `[b, a]` produce the
 /// same checksum and signature. The stored order is left alone.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn canonical_kinds(kinds: &[String]) -> Vec<String> {
     let mut out: Vec<String> = kinds.to_vec();
     out.sort();

@@ -83,7 +83,7 @@ pub enum RegistryParticipantStatus {
 }
 
 impl ParticipantView {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn from_registry(name: &str, participant: &RegistryParticipant) -> Self {
         let status = match participant.status {
             RegistryParticipantStatus::Active => ParticipantStatus::Active,
@@ -107,7 +107,7 @@ impl Registry {
     ///
     /// Unknown ids and revoked ids both return `false`, matching the
     /// author gate in [`crate::config::ResolvedConfig::can_post`].
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn is_active(&self, id: &str) -> bool {
         self.participants
             .get(id)
@@ -125,7 +125,7 @@ const fn default_status() -> RegistryParticipantStatus {
 /// When a display name is set the prefix is `"Display Name" (id)`;
 /// otherwise it is the bare id. Example output:
 /// `"Alice Example" (alice) (human) [active] 2 key(s)`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_registry_participant(name: &str, participant: &RegistryParticipant) -> String {
     let status = match participant.status {
         RegistryParticipantStatus::Active => "active",

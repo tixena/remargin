@@ -82,7 +82,7 @@ pub struct ReactAnswer {
     pub emoji: String,
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn ack(ids: &[String], remove: bool) -> AckAnswer {
     let listed = Some(ids.to_vec());
     if remove {
@@ -100,7 +100,7 @@ pub fn ack(ids: &[String], remove: bool) -> AckAnswer {
     }
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn batch(ids: &[String], notes: Vec<OpAdvice>) -> BatchAnswer {
     BatchAnswer {
         elapsed_ms: 0,
@@ -109,7 +109,7 @@ pub fn batch(ids: &[String], notes: Vec<OpAdvice>) -> BatchAnswer {
     }
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn comment_created(id: &str, notes: Vec<Advice>) -> CommentCreated {
     CommentCreated {
         elapsed_ms: 0,
@@ -118,7 +118,7 @@ pub fn comment_created(id: &str, notes: Vec<Advice>) -> CommentCreated {
     }
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn comments_deleted(ids: &[String]) -> CommentsDeleted {
     CommentsDeleted {
         deleted: ids.to_vec(),
@@ -126,7 +126,7 @@ pub fn comments_deleted(ids: &[String]) -> CommentsDeleted {
     }
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn comment_edited(id: &str, notes: Vec<Advice>) -> CommentEdited {
     CommentEdited {
         edited: String::from(id),
@@ -135,7 +135,7 @@ pub fn comment_edited(id: &str, notes: Vec<Advice>) -> CommentEdited {
     }
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn react(emoji: &str, comment_id: &str, remove: bool) -> ReactAnswer {
     let action = if remove { "removed" } else { "added" };
     ReactAnswer {

@@ -19,7 +19,7 @@ const INITIAL_LENGTH: u32 = 3;
 ///
 /// Starts at 3 characters.  If more than half the ID space at a given length
 /// is already occupied, the generator automatically bumps to length + 1.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn generate(existing_ids: &HashSet<&str>) -> String {
     let length = pick_length(existing_ids);
     let mut rng = rand::rng();

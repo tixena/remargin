@@ -109,7 +109,7 @@ impl PrivateKey {
         })
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn public_key(&self) -> PublicKey {
         PublicKey {
             inner: self.inner.verifying_key(),
@@ -118,7 +118,7 @@ impl PrivateKey {
 
     /// Signs `message` under `namespace`, returning a base64 PEM-armored
     /// `SSHSIG` (`-----BEGIN SSH SIGNATURE-----`).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn sign(&self, namespace: &str, message: &[u8]) -> String {
         let signature = self.inner.sign(&signed_data(namespace, message));
         let public = self.inner.verifying_key();
@@ -141,7 +141,7 @@ impl PrivateKey {
 
     /// Serializes the key as an unencrypted `openssh-key-v1` PEM
     /// (`-----BEGIN OPENSSH PRIVATE KEY-----`) with the given comment.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_openssh(&self, comment: &str) -> String {
         let public = self.inner.verifying_key();
         let pub_blob = public_key_blob(&public);
@@ -204,7 +204,7 @@ impl PublicKey {
     }
 
     /// Serializes the key as an `ssh-ed25519 <base64>` line (no comment).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_openssh(&self) -> String {
         let encoded = BASE64_STANDARD.encode(public_key_blob(&self.inner));
         format!("ssh-ed25519 {encoded}")

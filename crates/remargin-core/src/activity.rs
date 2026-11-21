@@ -143,7 +143,7 @@ impl Change {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn ts(&self) -> DateTime<FixedOffset> {
         match self {
             Self::Ack {
@@ -222,7 +222,7 @@ pub struct CompactFileChanges {
     pub path: PathBuf,
 }
 
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_compact_row(change: &Change) -> CompactChangeRow {
     let ts = change.ts();
     let kind = change.kind_label().to_owned();
@@ -283,7 +283,7 @@ pub fn to_compact_row(change: &Change) -> CompactChangeRow {
 
 /// The compact activity envelope for a verbose result:
 /// `{cutoff_explicit, newest_ts_overall, change_cols, files}`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_compact_activity(result: &ActivityResult) -> Value {
     let files: Vec<Value> = result.files.iter().map(to_compact_file).collect();
     json!({
@@ -301,7 +301,7 @@ fn to_compact_file(file: &FileChanges) -> Value {
 /// One compact per-file record: `path` stays named, `newest_ts` /
 /// `cutoff_applied` stay named when present (absent when unset, never
 /// `null`), `changes` become positional rows.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compact_file(file: &FileChanges) -> CompactFileChanges {
     CompactFileChanges {
         changes: file.changes.iter().map(to_compact_row).collect(),

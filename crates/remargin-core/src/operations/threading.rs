@@ -28,7 +28,7 @@ pub struct ThreadNode {
 ///
 /// Top-level comments (no `reply_to`) become roots.
 /// Comments with `reply_to` are nested under their parent.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn build_thread_tree(comments: &[&Comment]) -> ThreadTree {
     let mut roots: Vec<ThreadNode> = Vec::new();
 
@@ -58,7 +58,7 @@ fn build_node(comment: &Comment, all_comments: &[&Comment]) -> ThreadNode {
 /// Find all descendants of a comment (for cascading operations).
 ///
 /// Returns IDs of all children, grandchildren, etc. in depth-first order.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn find_descendants(comments: &[&Comment], ancestor_id: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut stack = vec![String::from(ancestor_id)];
@@ -80,7 +80,7 @@ pub fn find_descendants(comments: &[&Comment], ancestor_id: &str) -> Vec<String>
 /// - If the parent has a `thread` field, use it (same root).
 /// - If the parent has no `thread`, the parent IS the root.
 /// - If the parent doesn't exist (dangling reference), use the `reply_to` value.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn resolve_thread_root(comments: &[&Comment], parent_id: &str) -> String {
     comments
         .iter()

@@ -68,7 +68,7 @@ impl<'de> Deserialize<'de> for DenyOpsItem {
 }
 
 impl DenyOpsItem {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn exceptions(&self) -> &[String] {
         match self {
             Self::Bare(_) => &[],
@@ -76,7 +76,7 @@ impl DenyOpsItem {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn name(&self) -> &OpName {
         match self {
             Self::Bare(name) => name,
@@ -131,7 +131,7 @@ pub struct TrustedRootEntryFull {
 }
 
 impl TrustedRootEntry {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn also_deny_bash(&self) -> &[String] {
         match self {
             Self::Path(_) => &[],
@@ -139,7 +139,7 @@ impl TrustedRootEntry {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn cli_allowed(&self) -> bool {
         match self {
             Self::Path(_) => false,
@@ -147,7 +147,7 @@ impl TrustedRootEntry {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn path(&self) -> &str {
         match self {
             Self::Full(full) => full.path.as_str(),

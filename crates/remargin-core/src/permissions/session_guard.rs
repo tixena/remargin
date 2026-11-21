@@ -86,7 +86,7 @@ pub enum GuardOutcome {
 }
 
 /// Re-verify that enforcement will be live for a session rooted at `cwd`.
-#[must_use]
+#[must_use = "ignoring the outcome hides a failed enforcement check"]
 pub fn session_guard(system: &dyn System, cwd: &Path) -> GuardOutcome {
     let mut failures: Vec<String> = Vec::new();
 

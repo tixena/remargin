@@ -54,7 +54,7 @@ pub struct SandboxBulkResult {
 }
 
 impl SandboxBulkResult {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn add_report(&self, base_dir: &Path) -> SandboxAddReport {
         SandboxAddReport {
             added: display_paths(&self.changed, base_dir),
@@ -74,7 +74,7 @@ impl SandboxBulkResult {
             .collect()
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn remove_report(&self, base_dir: &Path) -> SandboxRemoveReport {
         SandboxRemoveReport {
             elapsed_ms: 0,
@@ -85,7 +85,7 @@ impl SandboxBulkResult {
     }
 
     /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for remove.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self, base_dir: &Path, changed_key: &str) -> Value {
         let report = match changed_key {
             "added" => serde_json::to_value(self.add_report(base_dir)),
@@ -138,7 +138,7 @@ pub struct SandboxListEntry {
 }
 
 impl SandboxListEntry {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn from_listing(listing: &SandboxListing, root: &Path, absolute: bool) -> Self {
         let path = if absolute {
             listing.path.display().to_string()
@@ -425,7 +425,7 @@ fn remove_one(
 
 /// Appends `identity@now` to `entries`, or refreshes the timestamp of the identity's existing
 /// entry. Returns whether `entries` changed.
-#[must_use]
+#[must_use = "the caller writes the entries back only when this says they changed"]
 pub fn upsert_entry(
     entries: &mut Vec<SandboxEntry>,
     identity: &str,
@@ -454,7 +454,7 @@ fn ensure_markdown(file: &Path) -> Result<()> {
 /// `changed_key` is unused in the text format (it is only relevant for
 /// the JSON form); the changed entries are always listed without a
 /// header label.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_sandbox_bulk_result(
     result: &SandboxBulkResult,
     cwd: &Path,

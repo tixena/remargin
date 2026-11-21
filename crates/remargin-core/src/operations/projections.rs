@@ -170,7 +170,7 @@ impl ProjectBatchOp {
 
     /// Minimum-viable operation with just content. Other fields default to
     /// empty / false.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(content: String) -> Self {
         Self {
             after_comment: None,
@@ -210,7 +210,7 @@ impl<'params> ProjectCommentParams<'params> {
     /// Build the minimum-viable params (content + position). Other
     /// fields default to empty / false and can be set via the builder
     /// methods below.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
         Self {
             attachment_filenames: &[],
@@ -224,31 +224,31 @@ impl<'params> ProjectCommentParams<'params> {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_attachment_filenames(mut self, filenames: &'params [&'params str]) -> Self {
         self.attachment_filenames = filenames;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_auto_ack(mut self, auto_ack: Option<bool>) -> Self {
         self.auto_ack = auto_ack;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_reply_to(mut self, reply_to: Option<&'params str>) -> Self {
         self.reply_to = reply_to;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_sandbox(mut self, sandbox: bool) -> Self {
         self.sandbox = sandbox;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_to(mut self, to: &'params [String]) -> Self {
         self.to = to;
         self

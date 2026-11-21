@@ -210,7 +210,7 @@ pub struct DoctorReport {
 
 impl DoctorReport {
     /// `true` when there are no findings.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn is_clean(&self) -> bool {
         self.findings.is_empty()
     }
@@ -501,7 +501,7 @@ impl CheckName {
     ];
 
     /// The full set — the default when no selection is given.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn all() -> HashSet<Self> {
         Self::ALL.into_iter().collect()
     }
@@ -536,7 +536,7 @@ impl CheckName {
     }
 
     /// This check's stable kebab-case slug for the `--check` flag.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn slug(self) -> &'static str {
         match self {
             Self::ConfigSchemaLint => "config-schema-lint",
@@ -1332,7 +1332,7 @@ fn stale_sandbox_finding(path: &Path, author: &str) -> DoctorFinding {
 /// section appears in both the clean and findings cases. The goose lines
 /// are rendered only when the report carries a goose verdict, so a machine
 /// without goose says nothing about it.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_doctor_text(report: &DoctorReport, verbose: bool) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();
@@ -1397,7 +1397,7 @@ const fn check_verdict(installed: bool) -> &'static str {
 /// `remedy`); a clean report yields a "nothing to do" line. Piping the
 /// output to an agent (`remargin doctor --prompt-mode | claude -p`)
 /// repairs exactly what the human report named.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_doctor_prompt(report: &DoctorReport) -> String {
     use core::fmt::Write as _;
     if report.is_clean() {

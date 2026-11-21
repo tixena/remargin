@@ -58,7 +58,7 @@ pub struct SessionStartEvent {
 /// Re-verify that enforcement will be live for the session `stdin_bytes`
 /// describes, falling back to `cwd` when the envelope names no working
 /// directory.
-#[must_use]
+#[must_use = "ignoring the outcome hides a failed enforcement check"]
 pub fn goose_session_guard(system: &dyn System, stdin_bytes: &[u8], cwd: &Path) -> GuardOutcome {
     let root = session_root(stdin_bytes, cwd);
     let mut failures: Vec<String> = Vec::new();

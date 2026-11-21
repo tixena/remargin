@@ -62,7 +62,7 @@ pub struct Failure {
 }
 
 impl HumanIdentityRejected {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn new(identity: &str, tool: &str) -> Self {
         Self {
             error_kind: HumanIdentityErrorKind::McpHumanIdentityRejected,

@@ -90,7 +90,7 @@ pub struct PermissionsLintErrorView {
 }
 
 impl LintReport {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> LintAnswer {
         LintAnswer {
             elapsed_ms: 0,
@@ -104,7 +104,7 @@ impl LintReport {
     /// Render the report as the human-facing CLI text.
     ///
     /// Returns the "no errors" placeholder when clean.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn format_text(&self) -> String {
         if self.is_clean() {
             return String::from("No lint errors.\n");
@@ -132,12 +132,12 @@ impl LintReport {
     }
 
     /// `true` when neither structural, permissions, nor recipient findings exist.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn is_clean(&self) -> bool {
         self.errors.is_empty() && self.permissions.is_empty() && self.recipients.is_empty()
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self.answer()).unwrap_or(serde_json::Value::Null)
     }

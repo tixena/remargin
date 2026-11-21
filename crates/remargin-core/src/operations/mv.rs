@@ -58,7 +58,7 @@ pub struct MvArgs {
 impl MvArgs {
     /// Constructor that takes ownership of both paths and defaults
     /// `force` to `false`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(src: PathBuf, dst: PathBuf) -> Self {
         Self {
             dst,
@@ -67,7 +67,7 @@ impl MvArgs {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_force(mut self, force: bool) -> Self {
         self.force = force;
         self
@@ -116,7 +116,7 @@ pub struct MvAnswer {
 }
 
 impl MvOutcome {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> MvAnswer {
         MvAnswer {
             action: self.action.clone(),
@@ -542,7 +542,7 @@ fn is_cross_filesystem(err: &StorageError) -> bool {
 ///
 /// `src` and `dst` are the display forms of the paths (caller-supplied
 /// strings, not the resolved canonicals).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_mv_outcome(src: &str, dst: &str, outcome: &MvOutcome) -> String {
     let suffix_overwrite = if outcome.action.overwritten {
         ", overwrote destination"

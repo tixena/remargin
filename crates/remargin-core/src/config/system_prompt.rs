@@ -129,7 +129,7 @@ fn folder_name_for(dir: &Path) -> String {
 /// Output goes to stderr in the CLI; the function returns a `String`
 /// so callers can route it to any sink. `target` is the file path
 /// the resolution was run for (for the header line).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_resolved_prompt(target: &Path, resolved: &ResolvedSystemPrompt) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();

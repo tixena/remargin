@@ -169,26 +169,26 @@ impl Matcher {
 }
 
 impl SearchOptions {
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn context_lines(mut self, n: usize) -> Self {
         self.context_lines = n;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn ignore_case(mut self, yes: bool) -> Self {
         self.ignore_case = yes;
         self
     }
 
     /// Set the page size (max matches returned). `None` returns all.
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn limit(mut self, limit: Option<usize>) -> Self {
         self.limit = limit;
         self
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(pattern: String) -> Self {
         Self {
             context_lines: 0,
@@ -201,19 +201,19 @@ impl SearchOptions {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn offset(mut self, offset: usize) -> Self {
         self.offset = offset;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn regex(mut self, yes: bool) -> Self {
         self.regex = yes;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn scope(mut self, scope: SearchScope) -> Self {
         self.scope = scope;
         self
@@ -222,7 +222,7 @@ impl SearchOptions {
 
 /// Column header naming the [`to_compact_row`] positions, widened when
 /// context lines were requested.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub const fn match_cols(with_context: bool) -> &'static [&'static str] {
     if with_context {
         &MATCH_COLS_CTX
@@ -239,7 +239,7 @@ const fn hit_location(m: &SearchMatch) -> SearchHitLocation {
 }
 
 /// Project one verbose [`SearchMatch`] onto its 4-column compact row.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compact_row(m: &SearchMatch) -> CompactMatchRow {
     (
         m.line,
@@ -250,7 +250,7 @@ pub fn compact_row(m: &SearchMatch) -> CompactMatchRow {
 }
 
 /// [`compact_row`] with the `before` / `after` context lines appended.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compact_row_with_context(m: &SearchMatch) -> CompactMatchRowWithContext {
     (
         m.line,
@@ -267,7 +267,7 @@ pub fn compact_row_with_context(m: &SearchMatch) -> CompactMatchRowWithContext {
 /// `before` / `after` are appended only when context lines were requested;
 /// `location` is lowercased to the MCP convention and `comment_id`
 /// serializes `null` for body matches.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_compact_row(m: &SearchMatch, with_context: bool) -> Value {
     if with_context {
         json!(compact_row_with_context(m))
@@ -282,7 +282,7 @@ pub fn to_compact_row(m: &SearchMatch, with_context: bool) -> Value {
 /// appear in order of their first match within the page. A single pass
 /// suffices because the scan already emits a file's matches consecutively
 /// — this preserves that order rather than re-sorting.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn group_compact(matches: &[SearchMatch], with_context: bool) -> Vec<Value> {
     let mut files: Vec<Value> = Vec::new();
     for m in matches {

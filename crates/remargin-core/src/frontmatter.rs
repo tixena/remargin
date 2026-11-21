@@ -430,7 +430,7 @@ fn extract_body_text(doc: &ParsedDocument) -> String {
 }
 
 /// Extract the title from the first `# heading` line in the body.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn extract_title_from_heading(body: &str) -> Option<String> {
     for line in body.lines() {
         let trimmed = line.trim();

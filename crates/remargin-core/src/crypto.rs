@@ -28,7 +28,7 @@ const SIGNATURE_NAMESPACE: &str = "remargin";
 /// 1. Replace `\r\n` with `\n` (CRLF -> LF)
 /// 2. Strip trailing whitespace from each line
 /// 3. Trim leading and trailing newlines from the whole content
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn normalize_whitespace(content: &str) -> String {
     let lf_only = content.replace("\r\n", "\n");
     let trimmed_lines: Vec<&str> = lf_only.split('\n').map(str::trim_end).collect();
@@ -43,7 +43,7 @@ pub fn normalize_whitespace(content: &str) -> String {
 /// carries no kinds keeps the checksum it would have without the field. With kinds, a separator
 /// and the [`canonical_kinds`] list are appended first, so `[a, b]` and `[b, a]` produce
 /// identical checksums.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
     let mut payload = normalize_whitespace(content);
     if !kinds.is_empty() {
@@ -64,7 +64,7 @@ pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
 /// sorted, then joined with commas — so two writers that add the same
 /// reactions in different orders produce the same checksum, and the
 /// checksum changes when either an author or a timestamp changes.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
     let mut payload = String::new();
     for (emoji, entries) in reactions.entries_by_emoji() {
@@ -122,7 +122,7 @@ pub fn generate_keypair(comment: &str) -> Result<(String, String)> {
     Ok((private_openssh, public_openssh))
 }
 
-#[must_use]
+#[must_use = "a check whose result is ignored checks nothing"]
 pub fn verify_checksum(comment: &Comment) -> bool {
     compute_checksum(&comment.content, comment.kinds()) == comment.checksum
 }

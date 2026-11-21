@@ -72,7 +72,7 @@ impl Multiplexer {
     /// herdr's **default** session — it is not itself a herdr session, so the
     /// hint attaches to `default` and names the workspace to open, not
     /// `herdr session attach <session_name>` (which would not resolve).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn attach_hint(self, session_name: &str) -> String {
         match self {
             Self::Herdr => {
@@ -86,7 +86,7 @@ impl Multiplexer {
     /// herdr **workspace** (inside herdr's default session) or a tmux
     /// **session**. herdr's is a workspace, not a session — calling it a
     /// session would send users to a `herdr session attach` that fails.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn container_kind(self) -> &'static str {
         match self {
             Self::Herdr => "workspace",
@@ -95,7 +95,7 @@ impl Multiplexer {
     }
 
     /// Stable lowercase name (`"herdr"` / `"tmux"`).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Herdr => "herdr",
@@ -132,7 +132,7 @@ pub struct Tab {
 }
 
 impl Tab {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(
         identity: String,
         cwd: PathBuf,
@@ -305,7 +305,7 @@ struct HerdrWorkspaceResult {
 /// herdr when its server is reachable, else tmux. An explicit value is parsed
 /// by [`Multiplexer::parse`] and always wins; this only decides the
 /// unspecified case.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub const fn default_multiplexer(herdr_available: bool) -> Multiplexer {
     if herdr_available {
         Multiplexer::Herdr
@@ -321,7 +321,7 @@ pub const fn default_multiplexer(herdr_available: bool) -> Multiplexer {
 /// full path and timestamp. `now` is a parameter so the name is deterministic
 /// under test; the caller passes [`chrono::Utc::now`], whose sub-second
 /// precision makes two consecutive launches produce two distinct names.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn session_name(cwd: &Path, now: DateTime<Utc>) -> String {
     let raw_base = cwd
         .file_name()
@@ -363,7 +363,7 @@ fn sanitize_base(base: &str) -> String {
 /// `new-window` in the same session. Every tab's seed choreography targets
 /// its window by name (`<session>:<identity>`), which is robust against the
 /// user's `base-index` setting. Pure: builds argv vectors, spawns nothing.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn build_tmux_plan(session_name: &str, tabs: &[Tab]) -> TmuxPlan {
     let mut launch = Vec::with_capacity(tabs.len());
     let mut seeds = Vec::with_capacity(tabs.len());
@@ -461,7 +461,7 @@ fn tmux_tab_seed(session_name: &str, tab: &Tab) -> TmuxTabSeed {
 /// the ordered name-addressed seed commands (both carrying a `<PANE>`
 /// placeholder). Pure: builds argv vectors and spawns nothing; the thin
 /// execution layer substitutes the real ids parsed from herdr's JSON.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn build_herdr_plan(session_name: &str, tabs: &[Tab]) -> HerdrPlan {
     let root = tabs.first().map_or_else(
         || ".".to_owned(),
@@ -681,7 +681,7 @@ pub fn launch_into_multiplexer(mux: Multiplexer, session_name: &str, tabs: &[Tab
 ///
 /// Spawns a real `herdr`; used for default-multiplexer selection and is not
 /// exercised by the quality gate.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn herdr_available() -> bool {
     Command::new("herdr")
         .arg("status")

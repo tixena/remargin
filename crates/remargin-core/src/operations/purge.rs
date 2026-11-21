@@ -94,7 +94,7 @@ pub enum PurgeAnswer {
 }
 
 impl PurgeResult {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn answer(&self) -> PurgeFileAnswer {
         PurgeFileAnswer {
             attachments_cleaned: self.attachments_cleaned,
@@ -124,7 +124,7 @@ pub struct PurgeBulkResult {
 
 impl PurgeBulkResult {
     /// `base_dir` is stripped from each path so the answer uses caller-friendly relative paths.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self, base_dir: &Path) -> PurgeDirAnswer {
         PurgeDirAnswer {
             attachments_cleaned: self.attachments_cleaned_total(),
@@ -155,13 +155,13 @@ impl PurgeBulkResult {
         }
     }
     /// Sum of per-file `attachments_cleaned` across every entry in `purged`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn attachments_cleaned_total(&self) -> usize {
         self.purged.iter().map(|f| f.attachments_cleaned).sum()
     }
 
     /// Sum of per-file `comments_removed` across every entry in `purged`.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn comments_removed_total(&self) -> usize {
         self.purged.iter().map(|f| f.comments_removed).sum()
     }

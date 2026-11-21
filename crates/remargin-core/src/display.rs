@@ -90,7 +90,7 @@ pub(crate) fn is_pending(cm: &Comment) -> bool {
 
 /// Root comments are sorted by line number (document order).
 /// Replies are nested under their parents, sorted by timestamp ascending.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_comments_pretty(file_path: &str, comments: &[&Comment]) -> String {
     let forest = build_comment_tree(comments);
 
@@ -190,7 +190,7 @@ fn render_node(
 /// When `pending_label` is provided, pending counts read "N pending
 /// <label>" (e.g. "for alice", "broadcast, unacked by alice"); otherwise
 /// just "N pending".
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_query_pretty(results: &[QueryResult], pending_label: Option<&str>) -> String {
     let mut out = String::new();
 
@@ -305,7 +305,7 @@ fn format_pending_label(count: usize, pending_label: Option<&str>) -> String {
 ///
 /// Produces `[a, b, c]` — suitable wherever a compact inline list is
 /// needed without leaking `Debug` escaping rules.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_string_list(items: &[String]) -> String {
     let mut out = String::from("[");
     for (idx, item) in items.iter().enumerate() {
@@ -320,7 +320,7 @@ pub fn format_string_list(items: &[String]) -> String {
 
 /// Strip `base` from `path` for display; if `path` is not anchored
 /// under `base`, the full path is returned.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn strip_prefix_display(path: &Path, base: &Path) -> String {
     path.strip_prefix(base)
         .unwrap_or(path)
@@ -334,7 +334,7 @@ pub fn strip_prefix_display(path: &Path, base: &Path) -> String {
 /// A grand footer prints the `newest_ts_overall` when present.
 /// Returns an empty string (with a `"(no activity)"` note on a single
 /// line) when there are no files.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_activity_pretty(result: &ActivityResult) -> String {
     let mut out = String::new();
     if result.files.is_empty() {
@@ -403,7 +403,7 @@ pub fn render_activity_pretty(result: &ActivityResult) -> String {
 }
 
 /// Render the per-file cutoff header line for `activity --pretty`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_activity_cutoff_header(
     cutoff_explicit: bool,
     cutoff: Option<chrono::DateTime<chrono::FixedOffset>>,
@@ -431,7 +431,7 @@ pub fn render_activity_cutoff_header(
 /// Returns an empty string when `report.found` is `false` — the caller
 /// is responsible for emitting a "No identity config found." message if
 /// needed.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_identity_report(report: &IdentityReport) -> String {
     if !report.found {
         return String::new();

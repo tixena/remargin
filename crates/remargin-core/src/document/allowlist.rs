@@ -35,7 +35,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
 
 /// Check if a path is visible (allowed extension, not a dotfile).
 /// Directories are always visible (for navigation).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_visible(path: &Path, is_dir: bool) -> bool {
     let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -59,7 +59,7 @@ pub fn is_visible(path: &Path, is_dir: bool) -> bool {
 /// When the sole reason is an extension outside the allowlist, name the
 /// extension so callers don't read a bare "file not visible" as a
 /// sandbox or permission failure.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn not_visible_message(path: &Path) -> String {
     let display = path.display();
     let is_dotfile = path
@@ -78,7 +78,7 @@ pub fn not_visible_message(path: &Path) -> String {
 }
 
 /// Check if a file extension is text-based (supports `--lines`).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_text(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())

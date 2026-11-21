@@ -161,7 +161,7 @@ pub enum UninstallOutcome {
 
 /// The config file a `--local` install writes, under the project root.
 /// goose reads it only when [`ADDITIONAL_CONFIG_ENV`] names it.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn local_config_file(root: &Path) -> PathBuf {
     root.join(LOCAL_CONFIG_DIR).join(CONFIG_FILE)
 }
@@ -264,7 +264,7 @@ pub fn uninstall(system: &dyn System, path: &Path) -> Result<UninstallOutcome> {
 /// goose's config file for user scope: `$XDG_CONFIG_HOME/goose/config.yaml`,
 /// falling back to `~/.config/goose/config.yaml`. This is the only path
 /// goose discovers on its own.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn user_config_file(system: &dyn System, home: &Path) -> PathBuf {
     let config_home = system
         .env_var(XDG_CONFIG_HOME)

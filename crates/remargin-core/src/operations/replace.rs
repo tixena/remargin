@@ -48,13 +48,13 @@ pub struct ReplaceOptions {
 }
 
 impl ReplaceOptions {
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn dry_run(mut self, yes: bool) -> Self {
         self.dry_run = yes;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn ignore_case(mut self, yes: bool) -> Self {
         self.ignore_case = yes;
         self
@@ -62,7 +62,7 @@ impl ReplaceOptions {
 
     /// Create a new set of replace options (literal pattern, literal
     /// replacement, case-sensitive, real write).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(pattern: String, replacement: String) -> Self {
         Self {
             dry_run: false,
@@ -73,7 +73,7 @@ impl ReplaceOptions {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn regex(mut self, yes: bool) -> Self {
         self.regex = yes;
         self

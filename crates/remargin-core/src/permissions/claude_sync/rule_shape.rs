@@ -53,7 +53,7 @@ impl PathGlob {
     /// Classify the overlap relationship between an existing `allow`
     /// glob (`self`) and a projected `deny` glob (`other`). Returns
     /// `None` when the two do not overlap.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn classify_overlap(&self, other: &Self) -> Option<OverlapKind> {
         if self.components == other.components {
             // The same path on both sides counts as exact, whichever side is recursive.
@@ -86,7 +86,7 @@ impl PathGlob {
     ///   confusion).
     /// - Same prefix but neither side recursive only overlaps when the
     ///   components are equal.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn overlaps(&self, other: &Self) -> bool {
         if self.components == other.components {
             return true;
@@ -109,7 +109,7 @@ impl PathGlob {
     /// Collapses runs of `/`, lexically resolves `.` and `..`, strips
     /// trailing `/` and `/**`, records `recursive` accordingly.
     /// Whitespace around the glob is trimmed.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn parse(s: &str) -> Self {
         let trimmed = s.trim();
         let stripped = trimmed.strip_suffix("/**");
@@ -165,7 +165,7 @@ pub enum RuleShape {
 impl RuleShape {
     /// Parse a full rule string. Returns [`RuleShape::Opaque`] for any
     /// shape the detector does not understand structurally.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn parse(rule: &str) -> Self {
         let trimmed = rule.trim();
         let Some(open) = trimmed.find('(') else {
@@ -228,7 +228,7 @@ fn looks_like_path(token: &str) -> bool {
 
 /// Compare two parsed rules for overlap. `Opaque` rules never overlap,
 /// and cross-tool / cross-cmd-token pairs return `None`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn rules_overlap(a: &RuleShape, b: &RuleShape) -> Option<OverlapKind> {
     match (a, b) {
         (

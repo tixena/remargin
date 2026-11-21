@@ -61,7 +61,7 @@ impl ToolPrefix {
     /// goose's namespacing: `remargin__get`.
     pub const GOOSE: Self = Self("remargin__");
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(self) -> &'static str {
         self.0
     }
@@ -150,7 +150,7 @@ pub enum ToolTarget {
 
 /// Top-level entry point. Parses stdin, extracts the target, and
 /// resolves permissions from the realm that governs it.
-#[must_use]
+#[must_use = "ignoring the outcome lets a denied tool call through"]
 pub fn pretool(system: &dyn System, stdin_bytes: &[u8]) -> PretoolOutcome {
     let event: PreToolUseEvent = match serde_json::from_slice(stdin_bytes) {
         Ok(value) => value,
@@ -170,7 +170,7 @@ pub fn pretool(system: &dyn System, stdin_bytes: &[u8]) -> PretoolOutcome {
 ///
 /// `tool_prefix` only renders the remargin op names inside deny messages;
 /// it cannot change what is denied.
-#[must_use]
+#[must_use = "ignoring the outcome lets a denied tool call through"]
 pub fn decide(
     system: &dyn System,
     target: &ToolTarget,

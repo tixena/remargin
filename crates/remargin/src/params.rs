@@ -44,7 +44,7 @@ pub enum GetOutputMode {
 
 impl GetOutputMode {
     /// `true` when the result is serialized as JSON.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn is_json(&self) -> bool {
         matches!(self, Self::Json)
     }

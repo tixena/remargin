@@ -38,7 +38,7 @@ pub struct UnprotectArgs {
 impl UnprotectArgs {
     /// Build an [`UnprotectArgs`] from outside the crate: the struct is `#[non_exhaustive]`, so
     /// struct literals are unavailable there.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(path: String) -> Self {
         Self {
             path,
@@ -46,7 +46,7 @@ impl UnprotectArgs {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn with_strict(mut self, strict: bool) -> Self {
         self.strict = strict;
         self
@@ -247,7 +247,7 @@ fn compact_permissions(root: &mut serde_yaml::Mapping) -> bool {
 ///
 /// Output is written to stderr in the CLI; the function returns a `String`
 /// so callers can route it to any sink.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_unprotect_summary(outcome: &UnprotectOutcome) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();

@@ -59,7 +59,7 @@ pub struct CreateCommentParams<'params> {
 }
 
 impl<'params> CreateCommentParams<'params> {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(content: &'params str, position: &'params InsertPosition) -> Self {
         Self {
             attachments: &[],

@@ -160,7 +160,7 @@ fn refuse(findings: impl IntoIterator<Item = StyleFinding>) -> Result<()> {
 
 /// Every advisory note a written comment body earns: the general
 /// [`crate::advice`] pass plus this module's warn tier, in line order.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn notes(content: &str) -> Vec<Advice> {
     let mut notes = advice::review(content);
     notes.extend(review(content).into_iter().filter_map(|finding| {

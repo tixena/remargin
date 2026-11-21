@@ -82,7 +82,7 @@ impl Report {
 /// Return the version string baked in at compile time. Exposed so the CLI
 /// can print a human-readable "Downloading remargin plugin v…" line before
 /// the (potentially slow) network round trip.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub const fn plugin_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }

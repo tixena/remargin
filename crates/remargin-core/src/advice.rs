@@ -84,7 +84,7 @@ impl From<OpAdvice> for OpWarning {
 }
 
 impl OpAdvice {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(op: usize, note: Advice) -> Self {
         Self { note, op }
     }
@@ -106,7 +106,7 @@ pub(crate) struct ProseBlock<'text> {
 ///
 /// Returns an empty vector for content that reads cleanly -- the common
 /// case, and the one callers should treat as "say nothing".
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn review(content: &str) -> Vec<Advice> {
     let mut notes = Vec::new();
     check_hard_wrapped_paragraphs(content, &mut notes);
@@ -128,7 +128,7 @@ pub fn offset_lines(notes: &mut [Advice], offset: usize) {
 ///
 /// Built by hand rather than through `serde_json::to_value` so the payload
 /// path carries no fallible conversion.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_json(notes: &[Advice]) -> Value {
     Value::Array(
         notes
@@ -177,7 +177,7 @@ pub fn attach_op_notes(result: &mut Value, notes: &[OpAdvice]) {
 ///
 /// Empty string when there is nothing to say, so callers can print it
 /// unconditionally without emitting a stray blank line.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_text(notes: &[Advice]) -> String {
     let mut buf = String::new();
     for note in notes {
@@ -187,7 +187,7 @@ pub fn format_text(notes: &[Advice]) -> String {
 }
 
 /// [`format_text`] for op-scoped notes, which lead with the operation.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_op_text(notes: &[OpAdvice]) -> String {
     let mut buf = String::new();
     for entry in notes {

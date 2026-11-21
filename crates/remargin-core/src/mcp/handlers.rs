@@ -112,7 +112,7 @@ impl PlanPaths {
 }
 
 impl Server {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn new() -> Self {
         Self::default()
     }

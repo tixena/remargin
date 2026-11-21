@@ -122,14 +122,14 @@ pub enum UninstallOutcome {
 }
 
 /// The directory whose presence marks `root` as a goose plugin scope.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn agents_dir(root: &Path) -> PathBuf {
     root.join(".agents")
 }
 
 /// The guard's plugin directory under `root` — a home directory for
 /// user scope, a project directory for `--local`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn plugin_dir(root: &Path) -> PathBuf {
     agents_dir(root).join("plugins").join(PLUGIN_NAME)
 }

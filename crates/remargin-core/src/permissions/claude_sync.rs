@@ -194,7 +194,7 @@ pub struct RuleSet {
 impl RuleSet {
     /// `true` when the set carries neither allow nor deny rules, in which case the restrict path
     /// skips the settings and sidecar write.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn is_empty(&self) -> bool {
         self.allow.is_empty() && self.deny.is_empty()
     }
@@ -253,7 +253,7 @@ pub struct SettingsFileSim {
 ///   user-supplied entry.
 /// - Per `allow_dot_folders` entry: per-tool re-allows that override
 ///   the dot-folder default-deny.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn hook_covered_rules(
     entry: &ResolvedTrustedRoot,
     _anchor: &Path,
@@ -316,7 +316,7 @@ pub fn hook_covered_rules(
 /// `allow_dot_folders`, and resolves every path-shaped word of a Bash command whatever the verb,
 /// so each shape [`hook_covered_rules`] emits is already enforced. This is a named function so
 /// the live `restrict` path and the `plan restrict` projection share one source.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn residual_rules() -> RuleSet {
     RuleSet::default()
 }
@@ -404,7 +404,7 @@ fn partition_rules(rules: &[String], existing: &[String]) -> (Vec<String>, Vec<S
 /// — `Bash(http://x.example/x /foo/**)` would also collapse the URL,
 /// but every Claude rule we emit anchors paths absolutely so the
 /// happy-path round-trip is exact.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn canonicalize_rule(rule: &str) -> String {
     let mut out = String::with_capacity(rule.len());
     let mut prev_slash = false;

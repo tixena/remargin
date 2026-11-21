@@ -8,7 +8,7 @@ use std::path::Path;
 ///
 /// Unknown or missing extensions return `application/octet-stream`. Comparison
 /// is case-insensitive on the extension.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn mime_for_extension(path: &Path) -> &'static str {
     let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
         return "application/octet-stream";
@@ -59,7 +59,7 @@ pub fn mime_for_extension(path: &Path) -> &'static str {
 }
 
 /// Return `true` when the MIME type is a binary format (not `text/*`).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_binary_mime(mime: &str) -> bool {
     !mime.starts_with("text/")
 }

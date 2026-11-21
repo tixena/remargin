@@ -48,7 +48,7 @@ impl InsertPosition {
     /// `after_heading` beats `after_line`; absence of all four falls
     /// back to [`InsertPosition::Append`]. Keeping the rule in one
     /// place prevents adapter-layer drift on insertion semantics.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn from_hints(
         reply_to: Option<&str>,
         after_comment: Option<&str>,
@@ -81,7 +81,7 @@ impl InsertPosition {
 /// byte-stable on already-deduped docs and self-healing on duped ones.
 /// Cross-identity acks are left alone -- alice + bob ack stays as two
 /// entries.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn dedupe_acks(acks: &[Acknowledgment]) -> Vec<Acknowledgment> {
     let mut keep: Vec<Acknowledgment> = Vec::with_capacity(acks.len());
     let mut seen: HashMap<String, usize> = HashMap::with_capacity(acks.len());

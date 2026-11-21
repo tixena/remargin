@@ -287,7 +287,7 @@ pub(crate) fn classify_candidates(
 ///
 /// One line per repaired/signed/skipped entry; when all lists are empty
 /// the output is a single `"no candidates"` line.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_sign_result_text(result: &SignResult) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();

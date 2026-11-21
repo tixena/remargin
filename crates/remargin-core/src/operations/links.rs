@@ -102,7 +102,7 @@ struct Resolved {
 
 /// Project verbose [`Link`]s onto the columnar [`CompactLinkRow`] shape,
 /// dropping the derivable `count` / `path` columns.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_compact_rows(links: Vec<Link>) -> Vec<CompactLinkRow> {
     links
         .into_iter()
@@ -121,7 +121,7 @@ pub fn to_compact_rows(links: Vec<Link>) -> Vec<CompactLinkRow> {
 ///
 /// Lines are 1-indexed relative to the start of `body` — slice-relative
 /// when the caller passed a slice, whole-file-relative otherwise.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn extract_links(body: &str, base_dir: &Path, system: &dyn System) -> Vec<Link> {
     let mut raw: Vec<RawLink> = Vec::new();
 

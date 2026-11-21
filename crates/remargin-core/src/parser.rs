@@ -57,7 +57,7 @@ pub enum AuthorType {
 impl AuthorType {
     /// Canonical lowercase name for the author type, matching the YAML
     /// representation and the CLI / MCP JSON output.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Agent => "agent",
@@ -126,7 +126,7 @@ pub struct Comment {
 impl Comment {
     /// `max(ts, edited_at)`: the timestamp to use when deciding whether the comment is newer than a
     /// cutoff, so an edited comment surfaces under its edit time.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn effective_ts(&self) -> DateTime<FixedOffset> {
         match self.edited_at {
             Some(edited) if edited > self.ts => edited,
@@ -138,7 +138,7 @@ impl Comment {
     /// (or, for broadcasts, when nobody has). The single source of
     /// truth used by frontmatter, metadata, search, and query so the
     /// surfaces never disagree.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn is_pending(&self) -> bool {
         is_pending(&self.to, &self.ack)
     }
@@ -149,13 +149,13 @@ impl Comment {
     /// the conversation from the caller's view even when other
     /// participants have not, and the caller's own broadcasts never
     /// count.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn is_pending_broadcast_for(&self, me: &str) -> bool {
         is_pending_broadcast_for(&self.author, &self.to, &self.ack, me)
     }
 
     /// True when `target` is in `to:` and has not acknowledged yet.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn is_pending_for(&self, target: &str) -> bool {
         is_pending_for(&self.to, &self.ack, target)
     }
@@ -166,7 +166,7 @@ impl Comment {
     /// check emptiness, or pass through to helpers like
     /// [`crate::crypto::compute_checksum`] without unwrapping the
     /// `Option` at each site.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn kinds(&self) -> &[String] {
         self.remargin_kind.as_deref().unwrap_or(&[])
     }
@@ -200,13 +200,13 @@ struct FencedBlock {
 }
 
 impl ParsedDocument {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn comment_ids(&self) -> HashSet<&str> {
         self.comments().iter().map(|cm| cm.id.as_str()).collect()
     }
 
     /// All Remargin comments in document order.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn comments(&self) -> Vec<&Comment> {
         self.segments
             .iter()
@@ -217,7 +217,7 @@ impl ParsedDocument {
             .collect()
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn find_comment(&self, id: &str) -> Option<&Comment> {
         self.comments().into_iter().find(|cm| cm.id == id)
     }
@@ -225,7 +225,7 @@ impl ParsedDocument {
     /// Build a document from segments — for in-memory construction
     /// (writer, projections, tests). Comments built this way carry no
     /// source span (`sl`/`el` are `None`); only [`parse`] records spans.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn from_segments(segments: Vec<Segment>) -> Self {
         Self { segments }
     }
@@ -257,7 +257,7 @@ fn byte_offset_to_line(content: &str, offset: usize) -> usize {
 
 /// True when `author` appears in `ack`. Shared by `Comment` and any
 /// other carrier of `(to, ack)` (e.g. `ExpandedComment`).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_acked_by(ack: &[Acknowledgment], author: &str) -> bool {
     ack.iter().any(|a| a.author == author)
 }
@@ -265,7 +265,7 @@ pub fn is_acked_by(ack: &[Acknowledgment], author: &str) -> bool {
 /// Pending predicate over the `(to, ack)` shape. Directed comments
 /// are pending when at least one named recipient has not acked;
 /// broadcasts (`to:` empty) are pending when nobody has.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_pending(to: &[String], ack: &[Acknowledgment]) -> bool {
     if to.is_empty() {
         return ack.is_empty();
@@ -275,7 +275,7 @@ pub fn is_pending(to: &[String], ack: &[Acknowledgment]) -> bool {
 
 /// Pending-for-`target` predicate: `target` must be in `to` and not
 /// already in `ack`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_pending_for(to: &[String], ack: &[Acknowledgment], target: &str) -> bool {
     to.iter().any(|t| t == target) && !is_acked_by(ack, target)
 }
@@ -283,7 +283,7 @@ pub fn is_pending_for(to: &[String], ack: &[Acknowledgment], target: &str) -> bo
 /// Pending-broadcast-for-`me` predicate: `to` empty, `me` is not the
 /// author, and `me` has not personally acked. Writing a broadcast is
 /// not owing one — the author never sees their own in this set.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_pending_broadcast_for(
     author: &str,
     to: &[String],
@@ -482,7 +482,7 @@ pub fn parse_sandbox_entry(entry: &str) -> Result<SandboxEntry> {
 }
 
 /// Serialize a [`SandboxEntry`] to its compact `author@timestamp` wire form.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_sandbox_entry(entry: &SandboxEntry) -> String {
     format!("{}@{}", entry.author, rfc3339_z(&entry.ts))
 }

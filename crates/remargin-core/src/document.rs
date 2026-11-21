@@ -129,7 +129,7 @@ pub struct WriteAnswer {
 impl RmResult {
     /// `deleted` echoes the caller-supplied path verbatim so the
     /// response round-trips through the same surface.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self, requested_path: &str) -> RmFileAnswer {
         RmFileAnswer {
             deleted: String::from(requested_path),
@@ -210,7 +210,7 @@ pub enum RmOutcome {
 impl RmOutcome {
     /// `requested_path` echoes the caller-supplied path verbatim so the
     /// response round-trips through the same surface.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self, requested_path: &str) -> RmAnswer {
         match self {
             Self::Directory(report) => RmAnswer::Directory(report.answer(requested_path)),
@@ -219,7 +219,7 @@ impl RmOutcome {
     }
 
     /// Human-readable one-or-more-line summary for non-JSON output.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn render_text(&self, requested_path: &str) -> String {
         match self {
             Self::Directory(report) => report.render_text(requested_path),
@@ -233,7 +233,7 @@ impl RmOutcome {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self, requested_path: &str) -> Value {
         serde_json::to_value(self.answer(requested_path)).unwrap_or(Value::Null)
     }
@@ -256,7 +256,7 @@ pub struct WriteOutcome {
 impl WriteOutcome {
     /// `raw` is forced true for binary writes (they skip the frontmatter
     /// / comment-preservation pass), so callers don't need to OR it in.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn answer(self, written: &str, binary: bool, raw: bool) -> WriteAnswer {
         WriteAnswer {
             binary,
@@ -269,7 +269,7 @@ impl WriteOutcome {
     }
 
     /// A completed write carrying no advice yet; [`write`] attaches any.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     const fn new(noop: bool) -> Self {
         Self {
             noop,
@@ -277,7 +277,7 @@ impl WriteOutcome {
         }
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(self, written: &str, binary: bool, raw: bool) -> Value {
         serde_json::to_value(self.answer(written, binary, raw)).unwrap_or(Value::Null)
     }
@@ -312,7 +312,7 @@ pub struct DocumentMetadata {
 impl DocumentMetadata {
     /// CLI passes `include_frontmatter=false` (round-tripping via
     /// `get`/`write`); MCP passes `true` so agents get one round trip.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn to_json(&self, include_frontmatter: bool) -> Value {
         let mut map = serde_json::Map::new();
         map.insert("binary".into(), json!(self.binary));
@@ -357,25 +357,25 @@ pub struct WriteOptions {
 }
 
 impl WriteOptions {
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn binary(mut self, value: bool) -> Self {
         self.binary = value;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn create(mut self, value: bool) -> Self {
         self.create = value;
         self
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn lines(mut self, range: Option<(usize, usize)>) -> Self {
         self.lines = range;
         self
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new() -> Self {
         Self {
             binary: false,
@@ -385,7 +385,7 @@ impl WriteOptions {
         }
     }
 
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     pub const fn raw(mut self, value: bool) -> Self {
         self.raw = value;
         self
@@ -582,7 +582,7 @@ pub fn get(
 /// A lone bound yields a half-open range: a lone `start` is a tail to EOF
 /// (the slicer clamps `end` past EOF), a lone `end` is a head from line 1.
 /// Neither bound means "whole document".
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub const fn resolve_line_window(
     start: Option<usize>,
     end: Option<usize>,

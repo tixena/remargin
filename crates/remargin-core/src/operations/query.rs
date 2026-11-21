@@ -140,7 +140,7 @@ impl QueryFilter {
     /// is, and `for <name> or broadcast` for the union — so a match
     /// that came from the broadcast flavor is never labeled as if it
     /// were addressed to the caller.
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn pending_label(&self) -> Option<String> {
         let directed = self
             .pending_for
@@ -363,7 +363,7 @@ pub struct CompactQueryResult {
 
 /// Column header naming the [`to_compact_row`] positions, widened when
 /// `include_integrity` is set.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub const fn comment_cols(include_integrity: bool) -> &'static [&'static str] {
     if include_integrity {
         &COMMENT_COLS_INTEGRITY
@@ -378,7 +378,7 @@ pub const fn comment_cols(include_integrity: bool) -> &'static [&'static str] {
 ///
 /// A file argument yields a filename-only result path (see [`query`]), so
 /// only the parent makes `base_path` ⊕ `path` reconstruct the real path.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn display_base_path(raw: &str, is_file: bool) -> String {
     let trimmed = raw.trim_end_matches('/');
     let base = if is_file {
@@ -405,7 +405,7 @@ fn ack_cells(comment: &ExpandedComment) -> Vec<String> {
 
 /// Project one verbose [`ExpandedComment`] onto its 14-column compact row;
 /// the redundant `file` is dropped.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compact_row(comment: &ExpandedComment) -> CompactCommentRow {
     (
         comment.id.clone(),
@@ -426,7 +426,7 @@ pub fn compact_row(comment: &ExpandedComment) -> CompactCommentRow {
 }
 
 /// [`compact_row`] with `checksum` and `signature` before `content`.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn compact_row_with_integrity(comment: &ExpandedComment) -> CompactCommentRowWithIntegrity {
     (
         comment.id.clone(),
@@ -452,7 +452,7 @@ pub fn compact_row_with_integrity(comment: &ExpandedComment) -> CompactCommentRo
 ///
 /// `checksum` / `signature` are added before `content` only when
 /// `include_integrity` is set; the redundant `file` is always dropped.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_compact_row(comment: &ExpandedComment, include_integrity: bool) -> Value {
     if include_integrity {
         json!(compact_row_with_integrity(comment))
@@ -464,7 +464,7 @@ pub fn to_compact_row(comment: &ExpandedComment, include_integrity: bool) -> Val
 /// Project one verbose [`QueryResult`] onto the compact per-file shape:
 /// summary fields stay named, comments become positional rows. Comments
 /// are omitted in summary mode (mirrors the verbose skip).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn to_compact_result(result: &QueryResult, include_integrity: bool) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert(String::from("path"), json!(result.path));
@@ -489,7 +489,7 @@ pub fn to_compact_result(result: &QueryResult, include_integrity: bool) -> Value
 
 /// The comments of one parsed document that pass `filter`, in document
 /// order.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn comments_matching(
     doc: &parser::ParsedDocument,
     file: &Path,
@@ -831,7 +831,7 @@ pub(crate) fn format_comment_count(matched: u32, total: u32) -> String {
 /// This covers the `Plain` and `Summary` output modes. The `Pretty`
 /// mode delegates to [`crate::display::format_query_pretty`]; the `Json`
 /// mode is handled entirely in the binary's dispatch layer.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn render_query_plain(results: &[QueryResult]) -> String {
     use core::fmt::Write as _;
     let mut out = String::new();

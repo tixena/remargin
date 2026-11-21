@@ -252,7 +252,7 @@ pub struct ReportSpillAnswer {
 /// A success that carries the time its call took, set once the call has run.
 pub trait TimedResponse {
     /// Returns the success with `elapsed_ms` set.
-    #[must_use]
+    #[must_use = "the change applies only to the returned value"]
     fn with_elapsed_ms(self, elapsed_ms: u64) -> Self;
 }
 

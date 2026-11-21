@@ -72,7 +72,7 @@ pub struct CallerInfo {
 }
 
 impl CallerInfo {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn display_identity(&self) -> String {
         self.identity_name
             .clone()
@@ -80,14 +80,14 @@ impl CallerInfo {
             .unwrap_or_else(|| String::from("<anonymous>"))
     }
 
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn is_strict_agent(&self) -> bool {
         matches!(self.author_type, Some(AuthorType::Agent)) && matches!(self.mode, Mode::Strict)
     }
 
     /// `true` when the caller's name or id matches one of `list`.
     /// Empty `list` returns `false` (caller is in no list).
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn matches_identity_list(&self, list: &[String]) -> bool {
         if list.is_empty() {
             return false;
@@ -158,13 +158,13 @@ pub enum OpGuardError {
 
 /// Unknown ops default to `true` so missing classification fails
 /// closed (treated as write for projection surfaces).
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn is_mutating_op(op: &str) -> bool {
     !matches!(op_kind(op), Some(OpKind::Read))
 }
 
 /// `None` for unknown ops. [`is_mutating_op`] treats those as write.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn op_kind(op: &str) -> Option<OpKind> {
     if READ_OPS.contains(&op) {
         Some(OpKind::Read)
@@ -351,7 +351,7 @@ fn find_deny_ops_violation(
 
 /// Empty list returns `true`; callers decide what that means.
 /// Shared between `op_guard` and inspect to keep them in sync.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn target_is_sanctioned(target: &Path, trusted_roots: &[ResolvedTrustedRoot]) -> bool {
     if trusted_roots.is_empty() {
         return true;
@@ -450,7 +450,7 @@ pub(crate) fn first_disallowed_dot_folder(
 /// blanket restriction for exactly those paths. A non-dot path, or one
 /// under the always-special `.remargin` unless `.remargin` is itself
 /// listed, is not re-allowed.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub(crate) fn dot_folder_reallowed(
     realm_anchor: &Path,
     target: &Path,

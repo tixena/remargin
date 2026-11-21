@@ -43,7 +43,7 @@ pub struct Sidecar {
 impl Sidecar {
     /// Build an empty sidecar pinned to the current
     /// [`SIDECAR_VERSION`].
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -159,7 +159,7 @@ pub fn save(system: &dyn System, anchor: &Path, sidecar: &Sidecar) -> Result<()>
 }
 
 /// Resolved on-disk path for the sidecar.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn sidecar_path(anchor: &Path) -> PathBuf {
     anchor.join(SIDECAR_RELATIVE_PATH)
 }

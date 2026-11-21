@@ -53,7 +53,7 @@ pub struct ReactionEntry {
 }
 
 impl ReactionEntry {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub const fn new(author: String, ts: DateTime<FixedOffset>) -> Self {
         Self { author, ts }
     }
@@ -231,7 +231,7 @@ where
 /// Returns the UNIX epoch projected into a `FixedOffset` of zero
 /// (`1970-01-01T00:00:00+00:00`). Built from chrono's `UNIX_EPOCH`
 /// constant so the function is total — no panics, no error paths.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn legacy_sentinel_ts() -> DateTime<FixedOffset> {
     chrono::DateTime::UNIX_EPOCH.fixed_offset()
 }
@@ -239,7 +239,7 @@ pub fn legacy_sentinel_ts() -> DateTime<FixedOffset> {
 /// Serialize one [`ReactionEntry`] into a stable two-line YAML block
 /// fragment used by the writer. Returns text that begins with `- `
 /// and ends with a trailing newline.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn format_reaction_entry_block(indent: &str, entry: &ReactionEntry) -> String {
     let mut out = String::new();
     out.push_str(indent);
@@ -256,7 +256,7 @@ pub fn format_reaction_entry_block(indent: &str, entry: &ReactionEntry) -> Strin
 /// Quote an emoji key so the writer never produces malformed YAML for
 /// keys that look like flow-syntax (`+1`, `:fire:`, etc.). Quoting
 /// every key keeps the output deterministic without per-key analysis.
-#[must_use]
+#[must_use = "the return value is the only result of this call"]
 pub fn quote_emoji_key(emoji: &str) -> String {
     let mut out = String::with_capacity(emoji.len() + 2);
     out.push('"');

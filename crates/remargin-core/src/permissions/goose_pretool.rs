@@ -60,7 +60,7 @@ pub struct BlockDecision {
 }
 
 impl BlockDecision {
-    #[must_use]
+    #[must_use = "the return value is the only result of this call"]
     pub fn new(reason: &str) -> Self {
         Self {
             decision: "block",
@@ -95,7 +95,7 @@ pub struct PreToolUseEvent {
 
 /// Top-level entry point. Parses stdin, maps the tool onto a
 /// [`ToolTarget`], and renders the engine's outcome as goose's verdict.
-#[must_use]
+#[must_use = "ignoring the verdict lets a blocked tool call through"]
 pub fn goose_pretool(system: &dyn System, stdin_bytes: &[u8]) -> GooseVerdict {
     let event: PreToolUseEvent = match serde_json::from_slice(stdin_bytes) {
         Ok(value) => value,
