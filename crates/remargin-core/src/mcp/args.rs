@@ -1,12 +1,6 @@
 //! One argument struct per MCP tool, each declaring the tool's input schema as a Rust type.
 
-extern crate alloc;
-
-use alloc::collections::BTreeMap;
-
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
 #[cfg(test)]
@@ -356,26 +350,9 @@ pub struct PermissionsCheckArgs {
 
 /// The arguments of `permissions_show`.
 #[model_schema(enable = ["jsonschema"])]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct PermissionsShowArgs;
-
-impl<'de> Deserialize<'de> for PermissionsShowArgs {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        read_no_fields(deserializer).map(|()| Self)
-    }
-
-    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        *place = Self::deserialize(deserializer)?;
-        Ok(())
-    }
-}
 
 /// The arguments of `plan`.
 #[model_schema(enable = ["jsonschema"])]
@@ -804,26 +781,9 @@ pub struct VerifyArgs {
 
 /// The arguments of `whoami`.
 #[model_schema(enable = ["jsonschema"])]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct WhoamiArgs;
-
-impl<'de> Deserialize<'de> for WhoamiArgs {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        read_no_fields(deserializer).map(|()| Self)
-    }
-
-    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        *place = Self::deserialize(deserializer)?;
-        Ok(())
-    }
-}
 
 /// The arguments of `write`.
 #[model_schema(enable = ["jsonschema"])]
@@ -873,17 +833,4 @@ pub enum ImageFormat {
     Jpeg,
     Jpg,
     Png,
-}
-
-/// Reads an object that must be empty, naming the first key of any other.
-fn read_no_fields<'de, D>(deserializer: D) -> Result<(), D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let fields = BTreeMap::<String, Value>::deserialize(deserializer)?;
-    fields.into_keys().next().map_or(Ok(()), |key| {
-        Err(D::Error::custom(format_args!(
-            "unknown field `{key}`, there are no fields"
-        )))
-    })
 }

@@ -147,7 +147,7 @@ impl IdentityReport {
         let Some(identity) = config.identity.as_deref() else {
             return Self::not_found();
         };
-        Self {
+        IdentityReportDraft {
             author_type: config
                 .author_type
                 .as_ref()
@@ -159,11 +159,12 @@ impl IdentityReport {
             mode: Some(String::from(config.mode.as_str())),
             path: config.source_path.as_ref().map(|p| p.display().to_string()),
         }
+        .into()
     }
 
     #[must_use = "the return value is the only result of this call"]
-    pub const fn not_found() -> Self {
-        Self {
+    pub fn not_found() -> Self {
+        IdentityReportDraft {
             author_type: None,
             elapsed_ms: 0,
             found: false,
@@ -172,6 +173,7 @@ impl IdentityReport {
             mode: None,
             path: None,
         }
+        .into()
     }
 }
 

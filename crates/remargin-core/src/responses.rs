@@ -86,62 +86,69 @@ pub struct ReactAnswer {
 pub fn ack(ids: &[String], remove: bool) -> AckAnswer {
     let listed = Some(ids.to_vec());
     if remove {
-        AckAnswer {
+        AckAnswerDraft {
             acknowledged: None,
             elapsed_ms: 0,
             unacknowledged: listed,
         }
+        .into()
     } else {
-        AckAnswer {
+        AckAnswerDraft {
             acknowledged: listed,
             elapsed_ms: 0,
             unacknowledged: None,
         }
+        .into()
     }
 }
 
 #[must_use = "the return value is the only result of this call"]
 pub fn batch(ids: &[String], notes: Vec<OpAdvice>) -> BatchAnswer {
-    BatchAnswer {
+    BatchAnswerDraft {
         elapsed_ms: 0,
         ids: ids.to_vec(),
         warnings: notes.into_iter().map(OpWarning::from).collect(),
     }
+    .into()
 }
 
 #[must_use = "the return value is the only result of this call"]
 pub fn comment_created(id: &str, notes: Vec<Advice>) -> CommentCreated {
-    CommentCreated {
+    CommentCreatedDraft {
         elapsed_ms: 0,
         id: String::from(id),
         warnings: notes.into_iter().map(Warning::from).collect(),
     }
+    .into()
 }
 
 #[must_use = "the return value is the only result of this call"]
 pub fn comments_deleted(ids: &[String]) -> CommentsDeleted {
-    CommentsDeleted {
+    CommentsDeletedDraft {
         deleted: ids.to_vec(),
         elapsed_ms: 0,
     }
+    .into()
 }
 
 #[must_use = "the return value is the only result of this call"]
 pub fn comment_edited(id: &str, notes: Vec<Advice>) -> CommentEdited {
-    CommentEdited {
+    CommentEditedDraft {
         edited: String::from(id),
         elapsed_ms: 0,
         warnings: notes.into_iter().map(Warning::from).collect(),
     }
+    .into()
 }
 
 #[must_use = "the return value is the only result of this call"]
 pub fn react(emoji: &str, comment_id: &str, remove: bool) -> ReactAnswer {
     let action = if remove { "removed" } else { "added" };
-    ReactAnswer {
+    ReactAnswerDraft {
         action: String::from(action),
         comment_id: String::from(comment_id),
         elapsed_ms: 0,
         emoji: String::from(emoji),
     }
+    .into()
 }

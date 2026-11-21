@@ -7,7 +7,8 @@ use os_shim::error::StorageError;
 use os_shim::mock::MemorySystem;
 
 use crate::operations::plan::{
-    ConfigConflict, ConfigPlanDiff, EntryAction, RemarginYamlDiff, SidecarDiff,
+    ConfigConflictDraft, ConfigPlanDiff, ConfigPlanDiffDraft, EntryAction, RemarginYamlDiffDraft,
+    SidecarDiffDraft,
 };
 use crate::operations::projections::restrict::{RestrictProjection, project_restrict};
 use crate::permissions::restrict::{RestrictArgs, restrict};
@@ -38,24 +39,29 @@ fn diff_or_fail(projection: RestrictProjection) -> Box<ConfigPlanDiff> {
         RestrictProjection::Diff(diff) => diff,
         RestrictProjection::Reject(reason) => {
             assert_eq!(reason, "<expected RestrictProjection::Diff>");
-            Box::new(ConfigPlanDiff {
-                absolute_path: PathBuf::new(),
-                anchor: PathBuf::new(),
-                conflicts: Vec::new(),
-                remargin_yaml: RemarginYamlDiff {
-                    entry_action: EntryAction::Noop,
-                    path: PathBuf::new(),
-                    previous_entry: None,
-                    projected_entry: None,
-                    will_be_created: false,
-                },
-                settings_files: Vec::new(),
-                sidecar: SidecarDiff {
-                    entry_action: EntryAction::Noop,
-                    path: PathBuf::new(),
-                    will_be_created: false,
-                },
-            })
+            Box::new(
+                ConfigPlanDiffDraft {
+                    absolute_path: PathBuf::new(),
+                    anchor: PathBuf::new(),
+                    conflicts: Vec::new(),
+                    remargin_yaml: RemarginYamlDiffDraft {
+                        entry_action: EntryAction::Noop,
+                        path: PathBuf::new(),
+                        previous_entry: None,
+                        projected_entry: None,
+                        will_be_created: false,
+                    }
+                    .into(),
+                    settings_files: Vec::new(),
+                    sidecar: SidecarDiffDraft {
+                        entry_action: EntryAction::Noop,
+                        path: PathBuf::new(),
+                        will_be_created: false,
+                    }
+                    .into(),
+                }
+                .into(),
+            )
         }
     }
 }
@@ -102,12 +108,10 @@ fn anchor_at_cwd_with_empty_state_projects_yaml_only() {
         diff.settings_files
     );
     assert!(matches!(diff.sidecar.entry_action, EntryAction::Noop));
-    assert!(
-        !diff
-            .conflicts
-            .iter()
-            .any(|c| matches!(c, ConfigConflict::AnchorIsAncestor { anchor: _, cwd: _ }))
-    );
+    assert!(!diff.conflicts.iter().any(|c| matches!(
+        &**c,
+        ConfigConflictDraft::AnchorIsAncestor { anchor: _, cwd: _ }
+    )));
     let _: StorageError = system
         .read_to_string(&realm.join(".remargin.yaml"))
         .wait()
@@ -127,9 +131,10 @@ fn anchor_is_ancestor_when_cwd_is_subdirectory() {
     let diff = diff_or_fail(projection);
 
     assert!(
-        diff.conflicts
-            .iter()
-            .any(|c| matches!(c, ConfigConflict::AnchorIsAncestor { anchor: _, cwd: _ })),
+        diff.conflicts.iter().any(|c| matches!(
+            &**c,
+            ConfigConflictDraft::AnchorIsAncestor { anchor: _, cwd: _ }
+        )),
         "expected AnchorIsAncestor in {:?}",
         diff.conflicts
     );
@@ -222,8 +227,8 @@ fn yaml_entry_change_surfaces_conflict_with_previous() {
 
     let saw_yaml = diff.conflicts.iter().any(|c| {
         matches!(
-            c,
-            ConfigConflict::YamlEntryWouldChange { previous, path: _, projected: _ } if !previous.cli_allowed
+            &**c,
+            ConfigConflictDraft::YamlEntryWouldChange { previous, path: _, projected: _ } if !previous.cli_allowed
         )
     });
     assert!(
@@ -252,8 +257,8 @@ fn overlapping_allow_surfaces_no_conflict_now_projection_retired() {
 
     assert!(
         !diff.conflicts.iter().any(|c| matches!(
-            c,
-            ConfigConflict::AllowDenyOverlap {
+            &**c,
+            ConfigConflictDraft::AllowDenyOverlap {
                 allow_rule: _,
                 overlap_kind: _,
                 projected_deny_rule: _,
@@ -284,8 +289,8 @@ fn allow_deny_overlap_cross_tool_does_not_fire() {
 
     let any_user_overlap = diff.conflicts.iter().any(|c| {
         matches!(
-            c,
-            ConfigConflict::AllowDenyOverlap { settings_file, allow_rule: _, overlap_kind: _, projected_deny_rule: _ } if settings_file == &user
+            &**c,
+            ConfigConflictDraft::AllowDenyOverlap { settings_file, allow_rule: _, overlap_kind: _, projected_deny_rule: _ } if settings_file == &user
         )
     });
     assert!(
@@ -314,8 +319,8 @@ fn allow_deny_overlap_rejects_component_confusion() {
 
     let any_user_overlap = diff.conflicts.iter().any(|c| {
         matches!(
-            c,
-            ConfigConflict::AllowDenyOverlap { settings_file, allow_rule: _, overlap_kind: _, projected_deny_rule: _ } if settings_file == &user
+            &**c,
+            ConfigConflictDraft::AllowDenyOverlap { settings_file, allow_rule: _, overlap_kind: _, projected_deny_rule: _ } if settings_file == &user
         )
     });
     assert!(

@@ -407,11 +407,12 @@ fn read_restrict_entry(entry: &Value, fallback_path: &str) -> RestrictEntryProje
         .and_then(|m| m.get(Value::String(String::from("cli_allowed"))))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    RestrictEntryProjection {
+    RestrictEntryProjectionDraft {
         also_deny_bash,
         cli_allowed,
         path,
     }
+    .into()
 }
 
 /// Read `<anchor>/.remargin.yaml`, append-or-merge the

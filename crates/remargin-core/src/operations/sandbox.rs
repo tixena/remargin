@@ -56,32 +56,36 @@ pub struct SandboxBulkResult {
 impl SandboxBulkResult {
     #[must_use = "the return value is the only result of this call"]
     pub fn add_report(&self, base_dir: &Path) -> SandboxAddReport {
-        SandboxAddReport {
+        SandboxAddReportDraft {
             added: display_paths(&self.changed, base_dir),
             elapsed_ms: 0,
             failed: self.failure_entries(base_dir),
             skipped: display_paths(&self.skipped, base_dir),
         }
+        .into()
     }
 
     fn failure_entries(&self, base_dir: &Path) -> Vec<SandboxFailureEntry> {
         self.failed
             .iter()
-            .map(|f| SandboxFailureEntry {
-                path: strip_prefix_display(&f.path, base_dir),
-                reason: f.reason.clone(),
+            .map(|f| {
+                SandboxFailureEntry::from(SandboxFailureEntryDraft {
+                    path: strip_prefix_display(&f.path, base_dir),
+                    reason: f.reason.clone(),
+                })
             })
             .collect()
     }
 
     #[must_use = "the return value is the only result of this call"]
     pub fn remove_report(&self, base_dir: &Path) -> SandboxRemoveReport {
-        SandboxRemoveReport {
+        SandboxRemoveReportDraft {
             elapsed_ms: 0,
             failed: self.failure_entries(base_dir),
             removed: display_paths(&self.changed, base_dir),
             skipped: display_paths(&self.skipped, base_dir),
         }
+        .into()
     }
 
     /// `changed_key` is `"added"` for `sandbox add`, `"removed"` for remove.
@@ -96,18 +100,18 @@ impl SandboxBulkResult {
 }
 
 /// A per-file failure entry in a sandbox bulk report.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxFailureEntry {
     pub path: String,
     pub reason: String,
 }
 
 /// JSON report for `sandbox add`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxAddReport {
     pub added: Vec<String>,
     /// How long the call took.
@@ -117,9 +121,9 @@ pub struct SandboxAddReport {
 }
 
 /// JSON report for `sandbox remove`.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxRemoveReport {
     /// How long the call took.
     pub elapsed_ms: u64,
@@ -129,9 +133,9 @@ pub struct SandboxRemoveReport {
 }
 
 /// A single entry in a `sandbox list` report.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct SandboxListEntry {
     pub path: String,
     pub since: String,
@@ -145,10 +149,11 @@ impl SandboxListEntry {
         } else {
             strip_prefix_display(&listing.path, root)
         };
-        Self {
+        SandboxListEntryDraft {
             path,
             since: parser::rfc3339_z(&listing.since),
         }
+        .into()
     }
 }
 
@@ -353,7 +358,7 @@ pub fn scan_all_entries(system: &dyn System, root: &Path) -> Result<Vec<SandboxS
         let Ok(sandbox) = frontmatter::read_sandbox_entries(&doc) else {
             continue;
         };
-        for sb in sandbox {
+        for sb in sandbox.into_iter().map(SandboxEntry::into_draft) {
             out.push(SandboxScanEntry {
                 author: sb.author,
                 path: entry.path.clone(),

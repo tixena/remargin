@@ -2783,7 +2783,7 @@ fn project_batch_sandbox_op_projects_the_entry() {
         frontmatter::read_sandbox_entries(doc)
             .unwrap()
             .into_iter()
-            .map(|entry| entry.author)
+            .map(|entry| entry.into_draft().author)
             .collect()
     };
     assert_eq!(authors(&before), Vec::<String>::new());

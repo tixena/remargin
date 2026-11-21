@@ -29,12 +29,12 @@ export function parseEnvelope<T>(raw: string, schema: z.ZodType<T>, label: strin
  * just a carrier and is deliberately not validated, so legitimate metadata can
  * never cause a false "did not match schema" rejection.
  */
-export function parsePayloadArray<E>(
+export function parsePayloadArray<Element extends z.ZodType>(
   raw: string,
   key: string,
-  element: z.ZodType<E>,
+  element: Element,
   label: string
-): E[] {
+): z.output<Element>[] {
   let payload: unknown;
   try {
     payload = JSON.parse(raw);

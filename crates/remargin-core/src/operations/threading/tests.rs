@@ -5,11 +5,11 @@ extern crate alloc;
 use chrono::DateTime;
 
 use crate::operations::threading::{build_thread_tree, find_descendants, resolve_thread_root};
-use crate::parser::{AuthorType, Comment};
+use crate::parser::{AuthorType, Comment, CommentDraft};
 use crate::reactions::Reactions;
 
 fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comment {
-    Comment {
+    CommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from("eduardo"),
@@ -29,6 +29,7 @@ fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comme
         to: Vec::new(),
         ts: DateTime::parse_from_rfc3339("2026-04-06T12:00:00-04:00").unwrap(),
     }
+    .into()
 }
 
 #[test]

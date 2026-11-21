@@ -11,7 +11,7 @@ use os_shim::mock::MemorySystem;
 
 use crate::linter;
 use crate::on_disk_comment::OnDiskComment;
-use crate::parser::{self, Acknowledgment, AuthorType, Comment};
+use crate::parser::{self, Acknowledgment, AcknowledgmentDraft, AuthorType, Comment, CommentDraft};
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::wait::Wait as _;
 
@@ -21,7 +21,7 @@ use super::{
 };
 
 fn make_comment(id: &str, content: &str) -> Comment {
-    Comment {
+    CommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from("testuser"),
@@ -41,6 +41,7 @@ fn make_comment(id: &str, content: &str) -> Comment {
         to: Vec::new(),
         ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
     }
+    .into()
 }
 
 #[test]
@@ -66,11 +67,14 @@ fn full_serialize() {
         DateTime::parse_from_rfc3339("2026-04-06T14:35:00-04:00").unwrap(),
     );
 
-    let comment = Comment {
-        ack: vec![Acknowledgment {
-            author: String::from("jorge"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
-        }],
+    let comment = CommentDraft {
+        ack: vec![
+            AcknowledgmentDraft {
+                author: String::from("jorge"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
         attachments: vec![String::from("diagram.png")],
         author: String::from("eduardo"),
         author_type: AuthorType::Agent,
@@ -88,7 +92,8 @@ fn full_serialize() {
         thread: Some(String::from("t01")),
         to: vec![String::from("jorge"), String::from("claude")],
         ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
-    };
+    }
+    .into();
 
     let output = serialize_comment(&comment).unwrap();
 
@@ -546,10 +551,11 @@ fn round_trip_append_code_block_all_comments_preserved() {
 }
 
 fn ack_at(author: &str, ts_rfc3339: &str) -> Acknowledgment {
-    Acknowledgment {
+    AcknowledgmentDraft {
         author: String::from(author),
         ts: DateTime::parse_from_rfc3339(ts_rfc3339).unwrap(),
     }
+    .into()
 }
 
 #[test]
@@ -615,12 +621,12 @@ fn dedupe_acks_empty_input_returns_empty() {
 
 #[test]
 fn serialize_comment_collapses_duplicate_acks() {
-    let mut comment = make_comment("dup", "body");
+    let mut comment = make_comment("dup", "body").into_draft();
     comment.ack = vec![
         ack_at("eduardo-burgos", "2026-04-27T05:01:50+00:00"),
         ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
     ];
-    let output = serialize_comment(&comment).unwrap();
+    let output = serialize_comment(&comment.into()).unwrap();
     let occurrences = output.matches("- eduardo-burgos@").count();
     assert_eq!(occurrences, 1, "serialized output must collapse duplicates");
     assert!(
@@ -632,20 +638,22 @@ fn serialize_comment_collapses_duplicate_acks() {
 /// A parsed document whose one comment carries a same-identity duplicate ack, injected in
 /// memory because the writer never emits one.
 fn doc_with_duplicate_acks() -> parser::ParsedDocument {
-    let mut comment = make_comment("dup", "body");
+    let mut comment = make_comment("dup", "body").into_draft();
     comment.ack = vec![
         ack_at("eduardo-burgos", "2026-04-27T05:01:50+00:00"),
         ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
     ];
-    let serialized = serialize_comment(&comment).unwrap();
+    let serialized = serialize_comment(&comment.into()).unwrap();
     let mut doc = parser::parse(&serialized).unwrap();
     let segments = &mut doc.segments;
     for seg in segments.iter_mut() {
         if let parser::Segment::Comment(cm) = seg {
-            cm.ack = vec![
+            let mut draft = parser::Comment::clone(cm).into_draft();
+            draft.ack = vec![
                 ack_at("eduardo-burgos", "2026-04-27T05:01:50+00:00"),
                 ack_at("eduardo-burgos", "2026-04-27T05:02:15+00:00"),
             ];
+            **cm = draft.into();
         }
     }
     doc
@@ -721,11 +729,14 @@ fn writer_emits_every_on_disk_comment_field() {
         "bob",
         DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap(),
     );
-    let comment = Comment {
-        ack: vec![Acknowledgment {
-            author: String::from("jorge"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
-        }],
+    let comment = CommentDraft {
+        ack: vec![
+            AcknowledgmentDraft {
+                author: String::from("jorge"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
         attachments: vec![String::from("diagram.png")],
         author: String::from("eduardo"),
         author_type: AuthorType::Agent,
@@ -743,7 +754,8 @@ fn writer_emits_every_on_disk_comment_field() {
         thread: Some(String::from("t01")),
         to: vec![String::from("jorge"), String::from("claude")],
         ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
-    };
+    }
+    .into();
 
     let on_disk = OnDiskComment::from(&comment);
     let value: serde_yaml::Value = serde_yaml::to_value(&on_disk).unwrap();

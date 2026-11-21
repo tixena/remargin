@@ -92,13 +92,14 @@ pub struct PermissionsLintErrorView {
 impl LintReport {
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> LintAnswer {
-        LintAnswer {
+        LintAnswerDraft {
             elapsed_ms: 0,
             errors: self.errors.clone(),
             ok: self.is_clean(),
             permissions: self.permissions.clone(),
             recipients: self.recipients.clone(),
         }
+        .into()
     }
 
     /// Render the report as the human-facing CLI text.
@@ -208,12 +209,15 @@ pub fn lint_doc(
         for cm in doc.comments() {
             for recipient in &cm.to {
                 if !registry.is_active(recipient) {
-                    recipient_findings.push(LintErrorView {
-                        line: cm.line,
-                        message: format!(
-                            "recipient {recipient:?} is not an active registry participant"
-                        ),
-                    });
+                    recipient_findings.push(
+                        LintErrorViewDraft {
+                            line: cm.line,
+                            message: format!(
+                                "recipient {recipient:?} is not an active registry participant"
+                            ),
+                        }
+                        .into(),
+                    );
                 }
             }
         }
@@ -222,18 +226,22 @@ pub fn lint_doc(
     Ok(LintReport {
         errors: structural
             .into_iter()
-            .map(|err| LintErrorView {
-                line: err.line,
-                message: err.message,
+            .map(|err| {
+                LintErrorView::from(LintErrorViewDraft {
+                    line: err.line,
+                    message: err.message,
+                })
             })
             .collect(),
         permissions: permissions
             .into_iter()
-            .map(|finding| PermissionsLintErrorView {
-                column: finding.column,
-                line: finding.line,
-                message: finding.message,
-                source_file: finding.source_file,
+            .map(|finding| {
+                PermissionsLintErrorView::from(PermissionsLintErrorViewDraft {
+                    column: finding.column,
+                    line: finding.line,
+                    message: finding.message,
+                    source_file: finding.source_file,
+                })
             })
             .collect(),
         recipients: recipient_findings,

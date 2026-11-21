@@ -178,11 +178,12 @@ pub enum VerifyAnswer {
 impl VerifyReport {
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> VerifyReportView {
-        VerifyReportView {
+        VerifyReportViewDraft {
             elapsed_ms: 0,
             ok: self.ok,
             results: verify_rows_json(self),
         }
+        .into()
     }
 
     #[must_use = "the return value is the only result of this call"]
@@ -266,33 +267,40 @@ impl FolderVerifyReport {
             .iter()
             .filter_map(|f| {
                 if let Some(err) = &f.error {
-                    return Some(VerifyFailureFile {
-                        bad: Vec::new(),
-                        comments: None,
-                        error: Some(err.clone()),
-                        path: f.path.display().to_string(),
-                    });
+                    return Some(
+                        VerifyFailureFileDraft {
+                            bad: Vec::new(),
+                            comments: None,
+                            error: Some(err.clone()),
+                            path: f.path.display().to_string(),
+                        }
+                        .into(),
+                    );
                 }
                 let report = f.report.as_ref()?;
                 if report.ok {
                     return None;
                 }
-                Some(VerifyFailureFile {
-                    bad: bad_rows_json(report),
-                    comments: Some(report.results.len()),
-                    error: None,
-                    path: f.path.display().to_string(),
-                })
+                Some(
+                    VerifyFailureFileDraft {
+                        bad: bad_rows_json(report),
+                        comments: Some(report.results.len()),
+                        error: None,
+                        path: f.path.display().to_string(),
+                    }
+                    .into(),
+                )
             })
             .collect();
 
-        FolderVerifySummaryView {
+        FolderVerifySummaryViewDraft {
             elapsed_ms: 0,
             failures,
             files_passed,
             files_verified,
             ok: self.ok,
         }
+        .into()
     }
 
     #[must_use = "the return value is the only result of this call"]
@@ -414,14 +422,16 @@ impl VerifyFailure {
         let failures = self
             .failures
             .iter()
-            .map(|row| VerifyFailureRow {
-                checksum_ok: row.checksum_ok,
-                id: row.id.clone(),
-                recipients: row.recipients.as_str().to_owned(),
-                signature: row.signature.as_str().to_owned(),
+            .map(|row| {
+                VerifyFailureRow::from(VerifyFailureRowDraft {
+                    checksum_ok: row.checksum_ok,
+                    id: row.id.clone(),
+                    recipients: row.recipients.as_str().to_owned(),
+                    signature: row.signature.as_str().to_owned(),
+                })
             })
             .collect();
-        VerifyFailurePayload {
+        VerifyFailurePayloadDraft {
             elapsed_ms: None,
             error_kind: VerifyErrorKind::VerifyFailed,
             failures,
@@ -430,6 +440,7 @@ impl VerifyFailure {
             mode: self.mode.as_str().to_owned(),
             path: self.path.display().to_string(),
         }
+        .into()
     }
 
     /// Per-failure summary, grouped by signature status, capped at
@@ -479,18 +490,18 @@ impl VerifyFailure {
 }
 
 /// `error_kind` discriminant for the verify-gate refusal payload.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum VerifyErrorKind {
     #[serde(rename = "verify_failed")]
     VerifyFailed,
 }
 
 /// One failing row in a [`VerifyFailure`] JSON payload.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct VerifyFailureRow {
     pub checksum_ok: bool,
     pub id: String,
@@ -499,9 +510,9 @@ pub struct VerifyFailureRow {
 }
 
 /// JSON projection of a [`VerifyFailure`] verify-gate refusal.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct VerifyFailurePayload {
     /// Milliseconds the call took, written by the io layer on the way out. Part
     /// of the contract because the plugin parses this payload strictly.
@@ -569,27 +580,27 @@ pub struct SubsetGateFailure {
 }
 
 /// `error_kind` discriminant for the subset-gate refusal payload.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum SubsetGateErrorKind {
     #[serde(rename = "subset_gate_failed")]
     SubsetGateFailed,
 }
 
 /// JSON form of one introduced [`Anomaly`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct IntroducedAnomaly {
     pub id: String,
     pub kind: String,
 }
 
 /// JSON form of a [`SubsetGateFailure`].
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct SubsetGateFailurePayload {
     pub error_kind: SubsetGateErrorKind,
     pub headline: String,
@@ -635,12 +646,14 @@ impl SubsetGateFailure {
         let introduced = self
             .introduced
             .iter()
-            .map(|a| IntroducedAnomaly {
-                id: a.id.clone(),
-                kind: a.kind.as_str().to_owned(),
+            .map(|a| {
+                IntroducedAnomaly::from(IntroducedAnomalyDraft {
+                    id: a.id.clone(),
+                    kind: a.kind.as_str().to_owned(),
+                })
             })
             .collect();
-        SubsetGateFailurePayload {
+        SubsetGateFailurePayloadDraft {
             error_kind: SubsetGateErrorKind::SubsetGateFailed,
             headline: self.headline(),
             hint: self.hint(),
@@ -648,23 +661,26 @@ impl SubsetGateFailure {
             mode: self.mode.as_str().to_owned(),
             path: self.path.display().to_string(),
         }
+        .into()
     }
 }
 
 fn row_to_json(row: &RowStatus) -> VerifyRow {
-    VerifyRow {
+    VerifyRowDraft {
         author: row.author.clone(),
         checksum_ok: row.checksum_ok,
         id: row.id.clone(),
         line: row.line,
         recipients: match &row.recipients {
             RecipientStatus::Ok => Recipients::Ok,
-            RecipientStatus::Unknown(bad) => Recipients::Unknown {
+            RecipientStatus::Unknown(bad) => RecipientsDraft::Unknown {
                 unresolved: bad.clone(),
-            },
+            }
+            .into(),
         },
         signature: row.signature,
     }
+    .into()
 }
 
 /// Project a [`VerifyReport`]'s rows to their JSON row shape, used by the

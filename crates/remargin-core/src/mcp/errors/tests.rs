@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
-use super::{HumanIdentityRejected, RemarginError};
+use super::{HumanIdentityRejected, RemarginError, RemarginErrorDraft};
 use crate::config::Mode;
 use crate::operations::verify::{
     Anomaly, AnomalyKind, RecipientStatus, RowStatus, SignatureStatus, SubsetGateFailure,
@@ -17,7 +17,8 @@ fn to_value(error: &RemarginError) -> Value {
 
 #[test]
 fn human_identity_refusal_keeps_its_json() {
-    let refused = RemarginError::HumanIdentity(HumanIdentityRejected::new("reviewer", "comment"));
+    let refused =
+        RemarginErrorDraft::HumanIdentity(HumanIdentityRejected::new("reviewer", "comment")).into();
     assert_eq!(
         to_value(&refused),
         json!({
@@ -57,7 +58,7 @@ fn verify_failure_keeps_its_json() {
         "path": "/d/a.md",
     });
     let error = RemarginError::from(anyhow::Error::new(failure));
-    assert!(matches!(error, RemarginError::Verify(_)));
+    assert!(matches!(*error, RemarginErrorDraft::Verify(_)));
     assert_eq!(to_value(&error), expected);
 }
 
@@ -80,7 +81,7 @@ fn subset_gate_failure_keeps_its_json() {
         "path": "/d/a.md",
     });
     let error = RemarginError::from(anyhow::Error::new(failure));
-    assert!(matches!(error, RemarginError::SubsetGate(_)));
+    assert!(matches!(*error, RemarginErrorDraft::SubsetGate(_)));
     assert_eq!(to_value(&error), expected);
 }
 

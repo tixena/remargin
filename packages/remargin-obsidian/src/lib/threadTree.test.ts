@@ -2,11 +2,12 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { decodeComment } from "@/generated/schemas";
 import type { Comment } from "@/generated/types";
 import { buildThreadTree, indexById, walkThread } from "./threadTree.ts";
 
 function mkComment(id: string, replyTo?: string, ts?: Date): Comment {
-  return {
+  return decodeComment({
     ack: [],
     attachments: [],
     author: "tester",
@@ -25,7 +26,7 @@ function mkComment(id: string, replyTo?: string, ts?: Date): Comment {
     thread: undefined,
     to: [],
     ts: ts ?? new Date("2026-01-01T00:00:00Z"),
-  };
+  });
 }
 
 describe("buildThreadTree", () => {

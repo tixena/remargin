@@ -22,7 +22,9 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
-use crate::parser::{self, Comment, ParsedDocument, SandboxEntry, Segment, rfc3339_z};
+use crate::parser::{
+    self, Comment, ParsedDocument, SandboxEntry, SandboxEntryDraft, Segment, rfc3339_z,
+};
 
 /// Not prefixed with `remargin_`: that prefix is reserved for tool-managed fields, and `sandbox`
 /// is user-written state.
@@ -301,13 +303,18 @@ pub fn add_sandbox_entry_for(
         if existing.ts == now {
             return false;
         }
-        existing.ts = now;
+        let mut draft = SandboxEntry::clone(existing).into_draft();
+        draft.ts = now;
+        *existing = draft.into();
         return true;
     }
-    entries.push(SandboxEntry {
-        author: String::from(identity),
-        ts: now,
-    });
+    entries.push(
+        SandboxEntryDraft {
+            author: String::from(identity),
+            ts: now,
+        }
+        .into(),
+    );
     true
 }
 

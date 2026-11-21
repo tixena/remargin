@@ -2,11 +2,12 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { decodeAcknowledgment } from "../../generated/schemas.ts";
 import type { Acknowledgment, ExpandedComment } from "../../generated/types.ts";
 import { deriveLeafState } from "./inboxLeafState.ts";
 
 function ack(author: string): Acknowledgment {
-  return { author, ts: new Date("2026-04-06T12:00:00-04:00") };
+  return decodeAcknowledgment({ author, ts: new Date("2026-04-06T12:00:00-04:00") });
 }
 
 function fixture(

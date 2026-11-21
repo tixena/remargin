@@ -3,7 +3,9 @@
 
 use serde_json::json;
 
-use super::{Advice, OpAdvice, attach_op_notes, format_op_text, format_text, offset_lines, review};
+use super::{
+    AdviceDraft, OpAdvice, attach_op_notes, format_op_text, format_text, offset_lines, review,
+};
 
 #[test]
 fn flags_a_hard_wrapped_paragraph_at_its_first_line() {
@@ -135,12 +137,16 @@ fn unclosed_fence_swallows_the_rest_without_notes() {
 
 #[test]
 fn offset_lines_points_notes_at_the_real_file() {
-    let mut notes = vec![Advice {
-        line: 1,
-        message: String::from("note"),
-    }];
-
-    offset_lines(&mut notes, 409);
+    let notes = offset_lines(
+        vec![
+            AdviceDraft {
+                line: 1,
+                message: String::from("note"),
+            }
+            .into(),
+        ],
+        409,
+    );
 
     assert_eq!(notes[0].line, 410);
 }
@@ -152,10 +158,13 @@ fn format_text_is_empty_when_there_is_nothing_to_say() {
 
 #[test]
 fn format_text_labels_each_note_as_advice() {
-    let notes = vec![Advice {
-        line: 411,
-        message: String::from("say something"),
-    }];
+    let notes = vec![
+        AdviceDraft {
+            line: 411,
+            message: String::from("say something"),
+        }
+        .into(),
+    ];
 
     assert_eq!(format_text(&notes), "advice: line 411: say something\n");
 }
@@ -164,10 +173,11 @@ fn format_text_labels_each_note_as_advice() {
 fn format_op_text_names_the_operation_ahead_of_the_line() {
     let notes = vec![OpAdvice::new(
         1,
-        Advice {
+        AdviceDraft {
             line: 3,
             message: String::from("say something"),
-        },
+        }
+        .into(),
     )];
 
     assert_eq!(
@@ -189,10 +199,11 @@ fn attach_op_notes_carries_the_op_alongside_line_and_message() {
         &mut result,
         &[OpAdvice::new(
             1,
-            Advice {
+            AdviceDraft {
                 line: 3,
                 message: String::from("say something"),
-            },
+            }
+            .into(),
         )],
     );
 

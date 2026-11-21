@@ -6,7 +6,7 @@ default-members = ["crates/remargin", "crates/remargin-core"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.19"
+version = "0.1.20"
 edition = "2024"
 rust-version = "1.91.1"
 authors = ["Eduardo Burgos <eduardo@tixena.com>"]
@@ -27,7 +27,7 @@ serde_json = "1.0"
 os-shim = "0.4"
 
 # TypeScript type + Zod schema generation from Rust models, and the MCP server
-tixschema = { version = "0.4.0", features = ["chrono"] }
+tixschema = { version = "0.6.2", features = ["chrono"] }
 
 # Cryptography (checksums, signatures)
 sha2 = "0.11"
@@ -60,11 +60,11 @@ tracing-subscriber = { version = ">=0.3.23", features = ["env-filter", "fmt"] }
 
 # HTTP client (sync, minimal, pure-Rust TLS). Used by the `obsidian` feature
 # to fetch plugin assets from GitHub releases at install time.
-ureq = { version = "3.5.0" }
+ureq = { version = "3.5.2" }
 # Floors for ureq's TLS stack, which ureq itself does not require: the first releases that drop
 # trust in distrusted certificate intermediates (RUSTSEC-2026-0382, RUSTSEC-2026-0381).
-rustls-webpki = "0.103.16"
-webpki-roots = "1.0.11"
+rustls-webpki = "0.103.17"
+webpki-roots = "1.0.12"
 
 # Test-only crates
 assert_cmd = "2"

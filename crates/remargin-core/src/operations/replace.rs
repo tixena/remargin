@@ -81,9 +81,9 @@ impl ReplaceOptions {
 }
 
 /// Per-file outcome of a replace operation.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct ReplaceFileOutcome {
     /// `true` when this file's body was (or would be) modified.
     pub changed: bool,
@@ -99,9 +99,9 @@ pub struct ReplaceFileOutcome {
 }
 
 /// Aggregate report for a replace operation over a file or folder.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct ReplaceReport {
     /// `true` when no byte was written (a `--dry-run` preview).
     pub dry_run: bool,
@@ -244,14 +244,15 @@ pub fn replace(
     let files_changed = files.iter().filter(|f| f.changed).count();
     let files_failed = files.iter().filter(|f| f.error.is_some()).count();
 
-    Ok(ReplaceReport {
+    Ok(ReplaceReportDraft {
         dry_run: options.dry_run,
         elapsed_ms: 0,
         files,
         files_changed,
         files_failed,
         total_replacements,
-    })
+    }
+    .into())
 }
 
 /// Run the per-file replace algorithm, capturing any failure into the
@@ -265,18 +266,20 @@ fn replace_one(
     config: &ResolvedConfig,
 ) -> ReplaceFileOutcome {
     match try_replace_one(system, resolved, matcher, options, config) {
-        Ok((replacements, changed)) => ReplaceFileOutcome {
+        Ok((replacements, changed)) => ReplaceFileOutcomeDraft {
             changed,
             error: None,
             path: relative.to_path_buf(),
             replacements,
-        },
-        Err(err) => ReplaceFileOutcome {
+        }
+        .into(),
+        Err(err) => ReplaceFileOutcomeDraft {
             changed: false,
             error: Some(format!("{err:#}")),
             path: relative.to_path_buf(),
             replacements: 0,
-        },
+        }
+        .into(),
     }
 }
 

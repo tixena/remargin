@@ -34,13 +34,15 @@ use crate::frontmatter;
 use crate::id;
 use crate::kind::{kinds_from_json, validate_kinds};
 use crate::linter;
-use crate::operations::batch::refuse_unknown_fields;
+use crate::operations::batch::{apply_batch_auto_ack, refuse_unknown_fields};
 use crate::operations::sign;
 use crate::operations::{
-    apply_sandbox_entry, collapse_body_segments, collect_descendants, find_comment_mut,
+    apply_sandbox_entry, change_comment, collapse_body_segments, collect_descendants,
     remove_comment_segments, resolve_thread,
 };
-use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{
+    self, AcknowledgmentDraft, AuthorType, Comment, CommentDraft, ParsedDocument, Segment,
+};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::writer::{self, InsertPosition};
@@ -284,25 +286,26 @@ pub fn project_ack(
     let now = Utc::now().fixed_offset();
 
     for comment_id in comment_ids {
-        let found = find_comment_mut(&mut after, comment_id);
-        let Some(cm) = found else {
-            bail!("comment {comment_id:?} not found");
-        };
+        change_comment(&mut after, comment_id, |cm| {
+            // Self-heal: keep only the first Acknowledgment per author so
+            // repeated acks or pre-dirty input converge to a single entry.
+            let mut seen: HashSet<String> = HashSet::new();
+            cm.ack.retain(|a| seen.insert(a.author.clone()));
 
-        // Self-heal: keep only the first Acknowledgment per author so
-        // repeated acks or pre-dirty input converge to a single entry.
-        let mut seen: HashSet<String> = HashSet::new();
-        cm.ack.retain(|a| seen.insert(a.author.clone()));
-
-        if remove {
-            cm.ack.retain(|a| a.author != identity);
-        } else if cm.ack.iter().any(|a| a.author == identity) {
-        } else {
-            cm.ack.push(Acknowledgment {
-                author: String::from(identity),
-                ts: now,
-            });
-        }
+            if remove {
+                cm.ack.retain(|a| a.author != identity);
+            } else if cm.ack.iter().any(|a| a.author == identity) {
+            } else {
+                cm.ack.push(
+                    AcknowledgmentDraft {
+                        author: String::from(identity),
+                        ts: now,
+                    }
+                    .into(),
+                );
+            }
+        })
+        .with_context(|| format!("comment {comment_id:?} not found"))?;
     }
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
@@ -382,7 +385,7 @@ pub fn project_batch(
             op.to.clone()
         };
 
-        let comment = Comment {
+        let comment = CommentDraft {
             ack: Vec::new(),
             attachments: resolved_attachments,
             author: String::from(identity),
@@ -401,7 +404,8 @@ pub fn project_batch(
             thread,
             to: effective_to,
             ts: now,
-        };
+        }
+        .into();
 
         let position = resolve_batch_position(op, &line_shifts);
         let lines_before = after.to_markdown()?.matches('\n').count();
@@ -410,33 +414,15 @@ pub fn project_batch(
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
 
         if let Some(parent_id) = op.reply_to.as_deref() {
-            let should_ack = {
-                let parent = after.find_comment(parent_id).with_context(|| {
-                    format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
-                })?;
-                match op.auto_ack {
-                    Some(true) => true,
-                    Some(false) => false,
-                    None => parent.author != identity,
-                }
-            };
-            if should_ack {
-                let lines_before_ack = after.to_markdown()?.matches('\n').count();
-                let parent = find_comment_mut(&mut after, parent_id).with_context(|| {
-                    format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
-                })?;
-                parent.ack.push(Acknowledgment {
-                    author: String::from(identity),
-                    ts: now,
-                });
-                let lines_after_ack = after.to_markdown()?.matches('\n').count();
-                let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
-                if ack_lines_added > 0
-                    && let Some(parent_cm) = after.find_comment(parent_id)
-                {
-                    line_shifts.push((parent_cm.line, ack_lines_added));
-                }
-            }
+            apply_batch_auto_ack(
+                &mut after,
+                parent_id,
+                identity,
+                op.auto_ack,
+                now,
+                idx,
+                &mut line_shifts,
+            )?;
         }
 
         if let Some(original_target) = op.after_line {
@@ -540,7 +526,7 @@ pub fn project_comment(
     };
 
     let now = Utc::now().fixed_offset();
-    let comment = Comment {
+    let comment = CommentDraft {
         ack: Vec::new(),
         attachments: resolved_attachments,
         author: String::from(identity),
@@ -559,7 +545,8 @@ pub fn project_comment(
         thread,
         to: effective_to,
         ts: now,
-    };
+    }
+    .into();
 
     writer::insert_comment(&mut after, comment, params.position)?;
 
@@ -575,12 +562,16 @@ pub fn project_comment(
             }
         };
         if should_ack {
-            let parent = find_comment_mut(&mut after, parent_id)
-                .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
-            parent.ack.push(Acknowledgment {
-                author: String::from(identity),
-                ts: now,
-            });
+            change_comment(&mut after, parent_id, |parent| {
+                parent.ack.push(
+                    AcknowledgmentDraft {
+                        author: String::from(identity),
+                        ts: now,
+                    }
+                    .into(),
+                );
+            })
+            .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
         }
     }
 
@@ -670,27 +661,26 @@ pub fn project_edit(
 ) -> Result<(ParsedDocument, ParsedDocument)> {
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    let cm = find_comment_mut(&mut after, comment_id)
-        .with_context(|| format!("comment {comment_id:?} not found"))?;
-
     // Keyed on the editor rather than the comment's original author,
     // matching `edit_comment`: whoever writes this body answers for it.
     let editor_type = config.author_type.clone().unwrap_or(AuthorType::Human);
-    comment_style::gate_edit(&cm.content, new_content, &editor_type)?;
+    change_comment(&mut after, comment_id, |cm| -> Result<()> {
+        comment_style::gate_edit(&cm.content, new_content, &editor_type)?;
 
-    cm.content = String::from(new_content);
-    // `kinds()` returns `&[]` when the field is absent, which keeps the no-kinds checksum.
-    cm.checksum = compute_checksum(new_content, cm.kinds());
-    cm.ack.clear();
-    // `edit_comment` wipes the signature when content changes; mirror it so the projected verify
-    // matches.
-    cm.signature = None;
+        cm.content = String::from(new_content);
+        // `kinds()` returns `&[]` when the field is absent, which keeps the no-kinds checksum.
+        cm.checksum = compute_checksum(new_content, cm.kinds());
+        cm.ack.clear();
+        // `edit_comment` wipes the signature when content changes; mirror it so the projected
+        // verify matches.
+        cm.signature = None;
+        Ok(())
+    })
+    .with_context(|| format!("comment {comment_id:?} not found"))??;
 
     let descendants = collect_descendants(&after, comment_id);
     for descendant_id in &descendants {
-        if let Some(child) = find_comment_mut(&mut after, descendant_id) {
-            child.ack.clear();
-        }
+        change_comment(&mut after, descendant_id, |child| child.ack.clear());
     }
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
@@ -751,15 +741,15 @@ pub fn project_react(
 
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    let cm = find_comment_mut(&mut after, comment_id)
-        .with_context(|| format!("comment {comment_id:?} not found"))?;
-
     let now = Utc::now().fixed_offset();
-    if remove {
-        let _was_removed = cm.reactions.remove_reaction(emoji, identity);
-    } else {
-        let _was_added = cm.reactions.add_reaction(emoji, identity, now);
-    }
+    change_comment(&mut after, comment_id, |cm| {
+        if remove {
+            let _was_removed = cm.reactions.remove_reaction(emoji, identity);
+        } else {
+            let _was_added = cm.reactions.add_reaction(emoji, identity, now);
+        }
+    })
+    .with_context(|| format!("comment {comment_id:?} not found"))?;
 
     frontmatter::ensure_frontmatter(&mut after, config)?;
 
@@ -826,9 +816,11 @@ pub fn project_sign(
         if let Segment::Comment(cm) = seg
             && target_ids.contains(&cm.id)
         {
-            let sig = compute_signature(cm, &key_path, system)
-                .with_context(|| format!("signing comment {:?}", cm.id))?;
-            cm.signature = Some(sig);
+            let mut draft = Comment::clone(cm).into_draft();
+            let sig = compute_signature(&draft, &key_path, system)
+                .with_context(|| format!("signing comment {:?}", draft.id))?;
+            draft.signature = Some(sig);
+            **cm = draft.into();
         }
     }
 

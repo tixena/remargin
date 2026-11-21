@@ -23,7 +23,7 @@ use crate::operations::verify::{
 use crate::operations::{
     CreateCommentParams, ack_comments, create_comment, delete_comments, edit_comment, react,
 };
-use crate::parser::{self, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{self, AuthorType, Comment, CommentDraft, ParsedDocument, Segment};
 use crate::reactions::Reactions;
 use crate::wait::Wait as _;
 use crate::writer::InsertPosition;
@@ -133,7 +133,7 @@ no yaml header here
 
 fn make_comment(id: &str, author: &str, content: &str) -> Comment {
     let checksum = crypto::compute_checksum(content, &[]);
-    Comment {
+    CommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from(author),
@@ -153,6 +153,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
         to: Vec::new(),
         ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
     }
+    .into()
 }
 
 fn doc_with(comments: Vec<Comment>) -> ParsedDocument {
@@ -233,9 +234,9 @@ fn open_mode_unknown_author_is_neutral() {
 
 #[test]
 fn open_mode_invalid_is_bad() {
-    let mut cm = make_comment("a", "alice", "hello");
+    let mut cm = make_comment("a", "alice", "hello").into_draft();
     cm.signature = Some(String::from("ed25519:garbage-not-a-valid-signature"));
-    let doc = doc_with(vec![cm]);
+    let doc = doc_with(vec![cm.into()]);
     let cfg = make_config(Mode::Open, Some(alice_active_registry()));
     let rep = verify_document(&doc, &cfg);
     assert_eq!(rep.results[0].signature, SignatureStatus::Invalid);
@@ -244,9 +245,9 @@ fn open_mode_invalid_is_bad() {
 
 #[test]
 fn open_mode_bad_checksum_is_bad() {
-    let mut cm = make_comment("a", "alice", "hello");
+    let mut cm = make_comment("a", "alice", "hello").into_draft();
     cm.checksum = String::from("sha256:deadbeef");
-    let doc = doc_with(vec![cm]);
+    let doc = doc_with(vec![cm.into()]);
     let cfg = make_config(Mode::Open, None);
     let rep = verify_document(&doc, &cfg);
     assert!(!rep.results[0].checksum_ok);
@@ -273,9 +274,9 @@ fn registered_mode_unknown_author_is_bad() {
 
 #[test]
 fn registered_mode_invalid_is_bad() {
-    let mut cm = make_comment("a", "alice", "hello");
+    let mut cm = make_comment("a", "alice", "hello").into_draft();
     cm.signature = Some(String::from("ed25519:garbage"));
-    let doc = doc_with(vec![cm]);
+    let doc = doc_with(vec![cm.into()]);
     let cfg = make_config(Mode::Registered, Some(alice_active_registry()));
     let rep = verify_document(&doc, &cfg);
     assert_eq!(rep.results[0].signature, SignatureStatus::Invalid);
@@ -311,9 +312,9 @@ fn strict_mode_unknown_author_is_bad() {
 
 #[test]
 fn strict_mode_invalid_is_bad() {
-    let mut cm = make_comment("a", "alice", "hello");
+    let mut cm = make_comment("a", "alice", "hello").into_draft();
     cm.signature = Some(String::from("ed25519:garbage"));
-    let doc = doc_with(vec![cm]);
+    let doc = doc_with(vec![cm.into()]);
     let cfg = make_config(Mode::Strict, Some(alice_active_registry()));
     let rep = verify_document(&doc, &cfg);
     assert_eq!(rep.results[0].signature, SignatureStatus::Invalid);
@@ -333,10 +334,10 @@ fn empty_document_is_ok_in_every_mode() {
 
 #[test]
 fn one_bad_row_marks_whole_report_bad() {
-    let mut bad = make_comment("a", "alice", "hello");
+    let mut bad = make_comment("a", "alice", "hello").into_draft();
     bad.checksum = String::from("sha256:deadbeef");
     let good = make_comment("b", "alice", "hello");
-    let doc = doc_with(vec![bad, good]);
+    let doc = doc_with(vec![bad.into(), good]);
     let cfg = make_config(Mode::Open, None);
     let rep = verify_document(&doc, &cfg);
     assert_eq!(rep.results.len(), 2);
@@ -363,9 +364,9 @@ fn commit_with_verify_invokes_writer_when_ok() {
 
 #[test]
 fn commit_with_verify_blocks_writer_on_bad_checksum() {
-    let mut bad = make_comment("a", "alice", "hello");
+    let mut bad = make_comment("a", "alice", "hello").into_draft();
     bad.checksum = String::from("sha256:deadbeef");
-    let doc = doc_with(vec![bad]);
+    let doc = doc_with(vec![bad.into()]);
     let cfg = make_config(Mode::Open, None);
     let system = MemorySystem::new();
 
@@ -1330,9 +1331,9 @@ fn anomalies_open_mode_returns_empty_for_clean_doc() {
 
 #[test]
 fn anomalies_reports_bad_checksum_under_open_mode() {
-    let mut cm = make_comment("a", "alice", "hello");
+    let mut cm = make_comment("a", "alice", "hello").into_draft();
     cm.checksum = String::from("sha256:deadbeef");
-    let doc = doc_with(vec![cm]);
+    let doc = doc_with(vec![cm.into()]);
     let cfg = make_config(Mode::Open, None);
     let set = anomalies_for_doc(&doc, &cfg);
     assert_eq!(set.len(), 1);
@@ -1403,7 +1404,7 @@ alice's note
     let system = mock_with_doc(before);
     let cfg = open_cfg_as("alice");
 
-    let mut new = make_comment("b", "alice", "new comment");
+    let mut new = make_comment("b", "alice", "new comment").into_draft();
     new.checksum = String::from("sha256:deadbeef");
     let doc = doc_with(vec![
         parser::parse_file(&system, Path::new("/d/a.md"))
@@ -1411,7 +1412,7 @@ alice's note
             .find_comment("alc")
             .unwrap()
             .clone(),
-        new,
+        new.into(),
     ]);
 
     let err =
@@ -1459,9 +1460,9 @@ fn subset_gate_allows_op_when_pre_file_missing_and_post_is_clean() {
 
 #[test]
 fn anomaly_kind_pair_distinguishes_checksum_from_signature() {
-    let mut cm_bad_checksum = make_comment("a", "alice", "hello");
+    let mut cm_bad_checksum = make_comment("a", "alice", "hello").into_draft();
     cm_bad_checksum.checksum = String::from("sha256:deadbeef");
-    let doc_bad_checksum = doc_with(vec![cm_bad_checksum]);
+    let doc_bad_checksum = doc_with(vec![cm_bad_checksum.into()]);
     let cfg = make_config(Mode::Open, None);
     let p = anomalies_for_doc(&doc_bad_checksum, &cfg);
     assert!(p.contains(&Anomaly {
@@ -1475,9 +1476,9 @@ fn anomaly_kind_pair_distinguishes_checksum_from_signature() {
 }
 
 fn make_comment_with_to(id: &str, author: &str, content: &str, to: Vec<String>) -> Comment {
-    let mut cm = make_comment(id, author, content);
+    let mut cm = make_comment(id, author, content).into_draft();
     cm.to = to;
-    cm
+    cm.into()
 }
 
 fn recipient_verify_registry() -> Registry {

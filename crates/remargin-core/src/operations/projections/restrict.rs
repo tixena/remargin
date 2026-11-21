@@ -16,12 +16,13 @@ use anyhow::Result;
 use os_shim::System;
 
 use crate::operations::plan::{
-    ConfigConflict, ConfigPlanDiff, EntryAction, RemarginYamlDiff, SettingsFileDiff, SidecarDiff,
+    ConfigConflictDraft, ConfigPlanDiff, ConfigPlanDiffDraft, EntryAction, RemarginYamlDiff,
+    RemarginYamlDiffDraft, SettingsFileDiff, SettingsFileDiffDraft, SidecarDiff, SidecarDiffDraft,
 };
 use crate::permissions::claude_sync::rule_shape::{RuleShape, rules_overlap};
 use crate::permissions::claude_sync::{self, RuleSet, residual_rules};
 use crate::permissions::restrict::{
-    self as permissions_restrict, RestrictArgs, RestrictEntryProjection,
+    self as permissions_restrict, RestrictArgs, RestrictEntryProjectionDraft,
 };
 use crate::permissions::sidecar;
 use crate::wait::Wait as _;
@@ -105,7 +106,7 @@ pub fn project_restrict(
     let target_key = resolution.absolute_path.display().to_string();
     let sidecar_diff = simulate_sidecar(system, &anchor, &target_key, &rules)?;
 
-    let mut diff = ConfigPlanDiff {
+    let mut diff = ConfigPlanDiffDraft {
         absolute_path: resolution.absolute_path,
         anchor: anchor.clone(),
         conflicts: Vec::new(),
@@ -123,7 +124,7 @@ pub fn project_restrict(
         &anchor,
     );
 
-    Ok(RestrictProjection::Diff(Box::new(diff)))
+    Ok(RestrictProjection::Diff(Box::new(diff.into())))
 }
 
 fn build_yaml_diff(
@@ -141,27 +142,31 @@ fn build_yaml_diff(
     let projected_entry = if matches!(entry_action, EntryAction::Noop) {
         sim.previous_entry.clone()
     } else {
-        Some(RestrictEntryProjection {
-            also_deny_bash: args.also_deny_bash.clone(),
-            cli_allowed: args.cli_allowed,
-            path: if args.path == RESTRICT_WILDCARD {
-                String::from(RESTRICT_WILDCARD)
-            } else {
-                args.path.clone()
-            },
-        })
+        Some(
+            RestrictEntryProjectionDraft {
+                also_deny_bash: args.also_deny_bash.clone(),
+                cli_allowed: args.cli_allowed,
+                path: if args.path == RESTRICT_WILDCARD {
+                    String::from(RESTRICT_WILDCARD)
+                } else {
+                    args.path.clone()
+                },
+            }
+            .into(),
+        )
     };
-    RemarginYamlDiff {
+    RemarginYamlDiffDraft {
         entry_action,
         path: anchor.join(".remargin.yaml"),
         previous_entry: sim.previous_entry.clone(),
         projected_entry,
         will_be_created: sim.will_be_created,
     }
+    .into()
 }
 
 fn detect_conflicts(
-    diff: &mut ConfigPlanDiff,
+    diff: &mut ConfigPlanDiffDraft,
     settings_sims: &[claude_sync::SettingsFileSim],
     yaml_sim: &permissions_restrict::RemarginYamlSim,
     args: &RestrictArgs,
@@ -176,27 +181,34 @@ fn detect_conflicts(
     if !yaml_sim.would_be_noop
         && let Some(previous) = &yaml_sim.previous_entry
     {
-        let projected = RestrictEntryProjection {
+        let projected = RestrictEntryProjectionDraft {
             also_deny_bash: args.also_deny_bash.clone(),
             cli_allowed: args.cli_allowed,
             path: previous.path.clone(),
-        };
+        }
+        .into();
         if previous != &projected {
-            diff.conflicts.push(ConfigConflict::YamlEntryWouldChange {
-                path: previous.path.clone(),
-                previous: previous.clone(),
-                projected,
-            });
+            diff.conflicts.push(
+                ConfigConflictDraft::YamlEntryWouldChange {
+                    path: previous.path.clone(),
+                    previous: previous.clone(),
+                    projected,
+                }
+                .into(),
+            );
         }
     }
 
     // Reported even when cwd is a descendant of the anchor: the realm root may sit further up
     // than the caller thinks.
     if cwd != anchor {
-        diff.conflicts.push(ConfigConflict::AnchorIsAncestor {
-            anchor: anchor.to_path_buf(),
-            cwd: cwd.to_path_buf(),
-        });
+        diff.conflicts.push(
+            ConfigConflictDraft::AnchorIsAncestor {
+                anchor: anchor.to_path_buf(),
+                cwd: cwd.to_path_buf(),
+            }
+            .into(),
+        );
     }
 }
 
@@ -265,7 +277,7 @@ fn resolve_path(system: &dyn System, anchor: &Path, args: &RestrictArgs) -> Resu
 /// Naive O(deny × allow). Both lists are small (tens of rules per
 /// file) and the work is per-file, so indexing is unnecessary.
 fn detect_allow_deny_overlap(
-    diff: &mut ConfigPlanDiff,
+    diff: &mut ConfigPlanDiffDraft,
     settings_sims: &[claude_sync::SettingsFileSim],
 ) {
     for sim in settings_sims {
@@ -278,19 +290,22 @@ fn detect_allow_deny_overlap(
                 let Some(kind) = rules_overlap(&allow_shape, &deny_shape) else {
                     continue;
                 };
-                diff.conflicts.push(ConfigConflict::AllowDenyOverlap {
-                    allow_rule: existing_allow.clone(),
-                    overlap_kind: kind,
-                    projected_deny_rule: projected_deny.clone(),
-                    settings_file: sim.path.clone(),
-                });
+                diff.conflicts.push(
+                    ConfigConflictDraft::AllowDenyOverlap {
+                        allow_rule: existing_allow.clone(),
+                        overlap_kind: kind,
+                        projected_deny_rule: projected_deny.clone(),
+                        settings_file: sim.path.clone(),
+                    }
+                    .into(),
+                );
             }
         }
     }
 }
 
 fn settings_diff_from_sim(sim: &claude_sync::SettingsFileSim) -> SettingsFileDiff {
-    SettingsFileDiff {
+    SettingsFileDiffDraft {
         allow_rules_already_present: sim.allow_rules_already_present.clone(),
         allow_rules_to_add: sim.allow_rules_to_add.clone(),
         deny_rules_already_present: sim.deny_rules_already_present.clone(),
@@ -298,6 +313,7 @@ fn settings_diff_from_sim(sim: &claude_sync::SettingsFileSim) -> SettingsFileDif
         path: sim.path.clone(),
         will_be_created: sim.will_be_created,
     }
+    .into()
 }
 
 fn simulate_sidecar(
@@ -309,11 +325,12 @@ fn simulate_sidecar(
     let sidecar_path = sidecar::sidecar_path(anchor);
     // An empty projection writes no sidecar entry, so the plan shows no sidecar change.
     if rules.is_empty() {
-        return Ok(SidecarDiff {
+        return Ok(SidecarDiffDraft {
             entry_action: EntryAction::Noop,
             path: sidecar_path,
             will_be_created: false,
-        });
+        }
+        .into());
     }
     let exists_on_disk = system.read_to_string(&sidecar_path).wait().is_ok();
     let will_be_created = !exists_on_disk;
@@ -329,9 +346,10 @@ fn simulate_sidecar(
                 EntryAction::Updated
             }
         });
-    Ok(SidecarDiff {
+    Ok(SidecarDiffDraft {
         entry_action,
         path: sidecar_path,
         will_be_created,
-    })
+    }
+    .into())
 }

@@ -14,7 +14,7 @@ use crate::activity::{CompactFileChanges, compact_file_changes_schema};
 use crate::config::identity::IdentityReport;
 use crate::config::system_prompt::ResolvedSystemPrompt;
 use crate::document::{
-    ListEntry, RmAnswer, RmDirAnswer, RmFileAnswer, WriteAnswer, list_entry_schema,
+    ListEntry, RmAnswer, RmAnswerDraft, RmDirAnswer, RmFileAnswer, WriteAnswer, list_entry_schema,
 };
 use crate::linter::LintAnswer;
 use crate::operations::cp::CpOutcome;
@@ -22,7 +22,7 @@ use crate::operations::links::{CompactLinkRow, compact_link_row_schema};
 use crate::operations::mv::MvAnswer;
 use crate::operations::plan::PlanReport;
 use crate::operations::prompt::{PromptDeleteOutcome, PromptListAnswer, PromptSetOutcome};
-use crate::operations::purge::{PurgeAnswer, PurgeDirAnswer, PurgeFileAnswer};
+use crate::operations::purge::{PurgeAnswer, PurgeAnswerDraft, PurgeDirAnswer, PurgeFileAnswer};
 use crate::operations::query::{
     CompactCommentRow, CompactCommentRowWithIntegrity, compact_comment_row_schema,
     compact_comment_row_with_integrity_schema,
@@ -35,7 +35,9 @@ use crate::operations::search::{
     compact_match_row_with_context_schema,
 };
 use crate::operations::sign::SignResult;
-use crate::operations::verify::{FolderVerifySummaryView, VerifyAnswer, VerifyReportView};
+use crate::operations::verify::{
+    FolderVerifySummaryView, VerifyAnswer, VerifyAnswerDraft, VerifyReportView,
+};
 use crate::permissions::doctor::DoctorReport;
 use crate::permissions::inspect::{CheckOutput, ShowOutput};
 use crate::responses::{
@@ -47,7 +49,9 @@ macro_rules! timed_responses {
     ($($answer:ty),* $(,)?) => {$(
         impl TimedResponse for $answer {
             fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
-                Self { elapsed_ms, ..self }
+                let mut draft = self.into_draft();
+                draft.elapsed_ms = elapsed_ms;
+                draft.into()
             }
         }
     )*};
@@ -298,27 +302,40 @@ timed_responses!(
 
 impl TimedResponse for PurgeAnswer {
     fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
-        match self {
-            Self::Directory(answer) => Self::Directory(answer.with_elapsed_ms(elapsed_ms)),
-            Self::File(answer) => Self::File(answer.with_elapsed_ms(elapsed_ms)),
+        match self.into_draft() {
+            PurgeAnswerDraft::Directory(answer) => {
+                PurgeAnswerDraft::Directory(answer.with_elapsed_ms(elapsed_ms))
+            }
+            PurgeAnswerDraft::File(answer) => {
+                PurgeAnswerDraft::File(answer.with_elapsed_ms(elapsed_ms))
+            }
         }
+        .into()
     }
 }
 
 impl TimedResponse for RmAnswer {
     fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
-        match self {
-            Self::Directory(answer) => Self::Directory(answer.with_elapsed_ms(elapsed_ms)),
-            Self::File(answer) => Self::File(answer.with_elapsed_ms(elapsed_ms)),
+        match self.into_draft() {
+            RmAnswerDraft::Directory(answer) => {
+                RmAnswerDraft::Directory(answer.with_elapsed_ms(elapsed_ms))
+            }
+            RmAnswerDraft::File(answer) => RmAnswerDraft::File(answer.with_elapsed_ms(elapsed_ms)),
         }
+        .into()
     }
 }
 
 impl TimedResponse for VerifyAnswer {
     fn with_elapsed_ms(self, elapsed_ms: u64) -> Self {
-        match self {
-            Self::File(answer) => Self::File(answer.with_elapsed_ms(elapsed_ms)),
-            Self::Folder(answer) => Self::Folder(answer.with_elapsed_ms(elapsed_ms)),
+        match self.into_draft() {
+            VerifyAnswerDraft::File(answer) => {
+                VerifyAnswerDraft::File(answer.with_elapsed_ms(elapsed_ms))
+            }
+            VerifyAnswerDraft::Folder(answer) => {
+                VerifyAnswerDraft::Folder(answer.with_elapsed_ms(elapsed_ms))
+            }
         }
+        .into()
     }
 }

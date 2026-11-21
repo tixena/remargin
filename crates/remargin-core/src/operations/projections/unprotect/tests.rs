@@ -7,8 +7,8 @@ use os_shim::error::StorageError;
 use os_shim::mock::MemorySystem;
 
 use crate::operations::plan::{
-    UnprotectConfigDiff, UnprotectConflict, UnprotectEntryAction, UnprotectSidecarDiff,
-    UnprotectYamlDiff,
+    UnprotectConfigDiff, UnprotectConfigDiffDraft, UnprotectConflictDraft, UnprotectEntryAction,
+    UnprotectSidecarDiffDraft, UnprotectYamlDiffDraft,
 };
 use crate::operations::projections::unprotect::{UnprotectProjection, project_unprotect};
 use crate::permissions::claude_sync::{RuleSet, apply_rules};
@@ -78,21 +78,26 @@ fn diff_or_fail(projection: UnprotectProjection) -> Box<UnprotectConfigDiff> {
         UnprotectProjection::Diff(diff) => diff,
         UnprotectProjection::Reject(reason) => {
             assert_eq!(reason, "<expected UnprotectProjection::Diff>");
-            Box::new(UnprotectConfigDiff {
-                absolute_path: PathBuf::new(),
-                anchor: PathBuf::new(),
-                conflicts: Vec::new(),
-                remargin_yaml: UnprotectYamlDiff {
-                    entry_action: UnprotectEntryAction::Absent,
-                    path: PathBuf::new(),
-                    previous_entry: None,
-                },
-                settings_files: Vec::new(),
-                sidecar: UnprotectSidecarDiff {
-                    entry_action: UnprotectEntryAction::Absent,
-                    path: PathBuf::new(),
-                },
-            })
+            Box::new(
+                UnprotectConfigDiffDraft {
+                    absolute_path: PathBuf::new(),
+                    anchor: PathBuf::new(),
+                    conflicts: Vec::new(),
+                    remargin_yaml: UnprotectYamlDiffDraft {
+                        entry_action: UnprotectEntryAction::Absent,
+                        path: PathBuf::new(),
+                        previous_entry: None,
+                    }
+                    .into(),
+                    settings_files: Vec::new(),
+                    sidecar: UnprotectSidecarDiffDraft {
+                        entry_action: UnprotectEntryAction::Absent,
+                        path: PathBuf::new(),
+                    }
+                    .into(),
+                }
+                .into(),
+            )
         }
     }
 }
@@ -172,11 +177,13 @@ fn never_restricted_yields_both_missing_conflicts() {
     let saw_yaml_missing = diff
         .conflicts
         .iter()
-        .any(|c| matches!(c, UnprotectConflict::YamlEntryMissing { path: _ }));
-    let saw_sidecar_missing = diff
-        .conflicts
-        .iter()
-        .any(|c| matches!(c, UnprotectConflict::SidecarEntryMissing { path: _ }));
+        .any(|c| matches!(&**c, UnprotectConflictDraft::YamlEntryMissing { path: _ }));
+    let saw_sidecar_missing = diff.conflicts.iter().any(|c| {
+        matches!(
+            &**c,
+            UnprotectConflictDraft::SidecarEntryMissing { path: _ }
+        )
+    });
     assert!(saw_yaml_missing, "expected YamlEntryMissing conflict");
     assert!(saw_sidecar_missing, "expected SidecarEntryMissing conflict");
 }
@@ -207,10 +214,12 @@ fn yaml_present_sidecar_missing() {
         UnprotectEntryAction::Absent
     ));
     assert!(diff.settings_files.is_empty());
-    let saw_sidecar_missing = diff
-        .conflicts
-        .iter()
-        .any(|c| matches!(c, UnprotectConflict::SidecarEntryMissing { path: _ }));
+    let saw_sidecar_missing = diff.conflicts.iter().any(|c| {
+        matches!(
+            &**c,
+            UnprotectConflictDraft::SidecarEntryMissing { path: _ }
+        )
+    });
     assert!(saw_sidecar_missing);
 }
 
@@ -244,7 +253,7 @@ fn sidecar_present_yaml_missing() {
     let saw_yaml_missing = diff
         .conflicts
         .iter()
-        .any(|c| matches!(c, UnprotectConflict::YamlEntryMissing { path: _ }));
+        .any(|c| matches!(&**c, UnprotectConflictDraft::YamlEntryMissing { path: _ }));
     assert!(saw_yaml_missing);
 }
 
@@ -287,8 +296,8 @@ fn rule_already_absent_drift_surfaces_conflict() {
     );
     let saw = diff.conflicts.iter().any(|c| {
         matches!(
-            c,
-            UnprotectConflict::RuleAlreadyAbsent { rule, settings_file }
+            &**c,
+            UnprotectConflictDraft::RuleAlreadyAbsent { rule, settings_file }
                 if rule == &removed_rule && settings_file == &project
         )
     });

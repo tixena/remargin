@@ -120,12 +120,13 @@ pub fn delete(
         .wait()
         .with_context(|| format!("checking existence of {}", target.display()))?;
     if !file_present {
-        return Ok(PromptDeleteOutcome {
+        return Ok(PromptDeleteOutcomeDraft {
             absent: true,
             elapsed_ms: 0,
             left_empty: false,
             source: target,
-        });
+        }
+        .into());
     }
 
     pre_mutate_check_for_caller(system, "write", &target, &config.caller_info())
@@ -137,12 +138,13 @@ pub fn delete(
         .with_context(|| format!("reading {}", target.display()))?;
     let result = remove_system_prompt(&existing);
     if result.noop {
-        return Ok(PromptDeleteOutcome {
+        return Ok(PromptDeleteOutcomeDraft {
             absent: true,
             elapsed_ms: 0,
             left_empty: existing.trim().is_empty(),
             source: target,
-        });
+        }
+        .into());
     }
     diff_only_system_prompt(&existing, &result.content)
         .context("post-splice diff: refusing write that changes fields other than system_prompt")?;
@@ -150,12 +152,13 @@ pub fn delete(
         .write(&target, result.content.as_bytes(), Condition::None)
         .wait()
         .with_context(|| format!("writing {}", target.display()))?;
-    Ok(PromptDeleteOutcome {
+    Ok(PromptDeleteOutcomeDraft {
         absent: false,
         elapsed_ms: 0,
         left_empty: result.content.trim().is_empty(),
         source: target,
-    })
+    }
+    .into())
 }
 
 /// Walk `root` recursively and return every `.remargin.yaml` that
@@ -172,7 +175,7 @@ pub fn list(system: &dyn System, root: &Path) -> Result<Vec<PromptListEntry>> {
         .wait()
         .with_context(|| format!("walking directory {}", root.display()))?;
 
-    let mut out = Vec::new();
+    let mut out: Vec<PromptListEntry> = Vec::new();
     for entry in &entries {
         if !entry.is_file {
             continue;
@@ -213,13 +216,16 @@ pub fn list(system: &dyn System, root: &Path) -> Result<Vec<PromptListEntry>> {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        out.push(PromptListEntry {
-            folder,
-            name,
-            prompt,
-            runner,
-            source: entry.path.clone(),
-        });
+        out.push(
+            PromptListEntryDraft {
+                folder,
+                name,
+                prompt,
+                runner,
+                source: entry.path.clone(),
+            }
+            .into(),
+        );
     }
     out.sort_by(|a, b| a.source.cmp(&b.source));
     Ok(out)
@@ -267,12 +273,13 @@ pub fn set(
         },
     );
     if result.noop {
-        return Ok(PromptSetOutcome {
+        return Ok(PromptSetOutcomeDraft {
             created: false,
             elapsed_ms: 0,
             noop: true,
             source: target,
-        });
+        }
+        .into());
     }
     diff_only_system_prompt(&existing, &result.content)
         .context("post-splice diff: refusing write that changes fields other than system_prompt")?;
@@ -280,12 +287,13 @@ pub fn set(
         .write(&target, result.content.as_bytes(), Condition::None)
         .wait()
         .with_context(|| format!("writing {}", target.display()))?;
-    Ok(PromptSetOutcome {
+    Ok(PromptSetOutcomeDraft {
         created,
         elapsed_ms: 0,
         noop: false,
         source: target,
-    })
+    }
+    .into())
 }
 
 fn collapse_blank_runs(s: &str) -> String {

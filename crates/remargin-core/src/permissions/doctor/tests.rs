@@ -8,8 +8,8 @@ use os_shim::mock::MemorySystem;
 use serde_json::json;
 
 use crate::permissions::doctor::{
-    CheckName, DoctorFinding, DoctorReport, FindingKind, Severity, render_doctor_prompt,
-    render_doctor_text,
+    CheckName, DoctorFinding, DoctorFindingDraft, DoctorReport, DoctorReportDraft, FindingKind,
+    Severity, render_doctor_prompt, render_doctor_text,
 };
 use crate::permissions::pretool_install::{HOOK_MATCHER, HOOK_SUBCOMMAND};
 use crate::permissions::session_guard_install::SESSION_HOOK_SUBCOMMAND;
@@ -502,7 +502,7 @@ fn guard_absent_from_both_scopes_reports_session_guard_missing() {
 }
 
 fn clean_report() -> DoctorReport {
-    DoctorReport {
+    DoctorReportDraft {
         elapsed_ms: 0,
         findings: vec![],
         goose_guard_installed: None,
@@ -513,17 +513,21 @@ fn clean_report() -> DoctorReport {
         project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
     }
+    .into()
 }
 
 fn findings_report() -> DoctorReport {
-    DoctorReport {
+    DoctorReportDraft {
         elapsed_ms: 0,
-        findings: vec![DoctorFinding {
-            kind: FindingKind::HookMissing,
-            message: String::from("hook is missing"),
-            remedy: String::from("run install"),
-            severity: Severity::Critical,
-        }],
+        findings: vec![
+            DoctorFindingDraft {
+                kind: FindingKind::HookMissing,
+                message: String::from("hook is missing"),
+                remedy: String::from("run install"),
+                severity: Severity::Critical,
+            }
+            .into(),
+        ],
         goose_guard_installed: None,
         goose_mcp_installed: None,
         goose_session_guard_installed: None,
@@ -532,6 +536,7 @@ fn findings_report() -> DoctorReport {
         project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
     }
+    .into()
 }
 
 #[test]
@@ -706,18 +711,19 @@ fn out_of_realm_trusted_root_emits_finding_without_crashing() {
 }
 
 fn leftover_finding_fixture(rule: &str, file: &str) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::LeftoverProjectedRule,
         message: format!("The deny rule `{rule}` in {file} is drift."),
         remedy: format!("Remove the deny rule `{rule}` from the permissions.deny array in {file}."),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 /// One imperative instruction per finding, naming its rule and its file.
 #[test]
 fn render_prompt_names_each_finding_rule_and_file() {
-    let report = DoctorReport {
+    let report = DoctorReportDraft {
         elapsed_ms: 0,
         findings: vec![
             leftover_finding_fixture("Bash(remargin *)", "/r/.claude/settings.local.json"),
@@ -730,7 +736,8 @@ fn render_prompt_names_each_finding_rule_and_file() {
         session_guard_installed: true,
         project_settings_file: PathBuf::from("/r/.claude/settings.local.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
-    };
+    }
+    .into();
     let out = render_doctor_prompt(&report);
     assert!(out.contains("1."), "expected numbered instruction: {out}");
     assert!(out.contains("2."), "expected numbered instruction: {out}");
@@ -947,21 +954,23 @@ fn hook_missing_skips_identity_key_check() {
 
 #[test]
 fn identity_findings_render_and_serialize() {
-    let report = DoctorReport {
+    let report = DoctorReportDraft {
         elapsed_ms: 0,
         findings: vec![
-            DoctorFinding {
+            DoctorFindingDraft {
                 kind: FindingKind::IdentityKeyUnresolvable,
                 message: String::from("agent1 signing key is not a readable file"),
                 remedy: String::from("Fix the key: path in /r/.remargin.yaml"),
                 severity: Severity::Warning,
-            },
-            DoctorFinding {
+            }
+            .into(),
+            DoctorFindingDraft {
                 kind: FindingKind::AgentKeyUnderUserSsh,
                 message: String::from("agent1 key lives under ~/.ssh"),
                 remedy: String::from("Move the agent's key out of ~/.ssh"),
                 severity: Severity::Warning,
-            },
+            }
+            .into(),
         ],
         goose_guard_installed: None,
         goose_mcp_installed: None,
@@ -970,7 +979,8 @@ fn identity_findings_render_and_serialize() {
         session_guard_installed: true,
         project_settings_file: PathBuf::from("/r/.claude/settings.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
-    };
+    }
+    .into();
 
     let json = serde_json::to_string(&report).unwrap();
     assert!(
@@ -1103,14 +1113,17 @@ fn schema_lint_clean_tree_has_no_findings() {
 
 #[test]
 fn config_schema_lint_serializes_and_renders() {
-    let report = DoctorReport {
+    let report = DoctorReportDraft {
         elapsed_ms: 0,
-        findings: vec![DoctorFinding {
-            kind: FindingKind::ConfigSchemaLint,
-            message: String::from("/r/.remargin.yaml (line 2, col 3): unknown field `deny_op`"),
-            remedy: String::from("Fix the permissions schema in /r/.remargin.yaml."),
-            severity: Severity::Warning,
-        }],
+        findings: vec![
+            DoctorFindingDraft {
+                kind: FindingKind::ConfigSchemaLint,
+                message: String::from("/r/.remargin.yaml (line 2, col 3): unknown field `deny_op`"),
+                remedy: String::from("Fix the permissions schema in /r/.remargin.yaml."),
+                severity: Severity::Warning,
+            }
+            .into(),
+        ],
         goose_guard_installed: None,
         goose_mcp_installed: None,
         goose_session_guard_installed: None,
@@ -1118,7 +1131,8 @@ fn config_schema_lint_serializes_and_renders() {
         session_guard_installed: true,
         project_settings_file: PathBuf::from("/r/.claude/settings.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
-    };
+    }
+    .into();
     let json = serde_json::to_string(&report).unwrap();
     assert!(
         json.contains("config_schema_lint"),
@@ -1294,9 +1308,9 @@ fn stale_sandbox_skipped_when_hook_missing() {
 
 #[test]
 fn stale_sandbox_serializes_and_renders() {
-    let report = DoctorReport {
+    let report = DoctorReportDraft {
         elapsed_ms: 0,
-        findings: vec![DoctorFinding {
+        findings: vec![DoctorFindingDraft {
             kind: FindingKind::StaleSandboxEntry,
             message: String::from(
                 "`notes/roster.md` carries a sandbox entry for `ghost_agent`, who is not active.",
@@ -1306,7 +1320,7 @@ fn stale_sandbox_serializes_and_renders() {
                  notes/roster.md.",
             ),
             severity: Severity::Warning,
-        }],
+        }.into()],
         goose_guard_installed: None,
         goose_mcp_installed: None,
         goose_session_guard_installed: None,
@@ -1314,7 +1328,8 @@ fn stale_sandbox_serializes_and_renders() {
         session_guard_installed: true,
         project_settings_file: PathBuf::from("/r/.claude/settings.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
-    };
+    }
+    .into();
     let json = serde_json::to_string(&report).unwrap();
     assert!(
         json.contains("stale_sandbox_entry"),
@@ -1419,9 +1434,9 @@ fn trusted_root_missing_skipped_when_escape_present() {
 
 #[test]
 fn trusted_root_missing_serializes_and_renders() {
-    let report = DoctorReport {
+    let report = DoctorReportDraft {
         elapsed_ms: 0,
-        findings: vec![DoctorFinding {
+        findings: vec![DoctorFindingDraft {
             kind: FindingKind::TrustedRootMissing,
             message: String::from(
                 "trusted_roots entry in /r/.remargin.yaml resolves to /r/src/secret, which does \
@@ -1431,7 +1446,7 @@ fn trusted_root_missing_serializes_and_renders() {
                 "Point the entry at an existing path, or drop it from /r/.remargin.yaml.",
             ),
             severity: Severity::Warning,
-        }],
+        }.into()],
         goose_guard_installed: None,
         goose_mcp_installed: None,
         goose_session_guard_installed: None,
@@ -1439,7 +1454,8 @@ fn trusted_root_missing_serializes_and_renders() {
         session_guard_installed: true,
         project_settings_file: PathBuf::from("/r/.claude/settings.json"),
         user_settings_file: PathBuf::from("/home/u/.claude/settings.json"),
-    };
+    }
+    .into();
     let json = serde_json::to_string(&report).unwrap();
     assert!(
         json.contains("trusted_root_missing"),
@@ -2035,10 +2051,10 @@ fn render_verbose_omits_goose_lines_without_goose() {
 
 #[test]
 fn render_verbose_names_both_goose_verdicts() {
-    let mut report = clean_report();
+    let mut report = clean_report().into_draft();
     report.goose_guard_installed = Some(true);
     report.goose_session_guard_installed = Some(false);
-    let out = render_doctor_text(&report, true);
+    let out = render_doctor_text(&report.into(), true);
     assert!(
         out.contains("goose-guard: ok"),
         "missing goose guard verdict: {out}",
@@ -2051,9 +2067,9 @@ fn render_verbose_names_both_goose_verdicts() {
 
 #[test]
 fn render_plain_omits_goose_lines() {
-    let mut report = clean_report();
+    let mut report = clean_report().into_draft();
     report.goose_guard_installed = Some(true);
     report.goose_session_guard_installed = Some(true);
-    let out = render_doctor_text(&report, false);
+    let out = render_doctor_text(&report.into(), false);
     assert!(!out.contains("goose-guard"), "goose line in plain: {out}");
 }

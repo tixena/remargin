@@ -11,7 +11,7 @@ use crate::crypto::{
     compute_checksum, compute_reaction_checksum, compute_signature, normalize_whitespace,
     signature_payload, verify_checksum, verify_signature,
 };
-use crate::parser::{AuthorType, Comment};
+use crate::parser::{AuthorType, Comment, CommentDraft};
 use crate::reactions::{Reactions, ReactionsExt as _};
 
 const TEST_PRIVATE_KEY: &str = "\
@@ -27,7 +27,7 @@ AAAEAk2Tz65AVfgL3ddyz72e8OkjFsl+pyRUGWLQkHBKtYx7VfufIVR1+wwXvHwYjjSVOO
 const TEST_PUBLIC_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVfufIVR1+wwXvHwYjjSVOO1PyMrur+yoibLd5o/hmV test@remargin";
 
 fn make_comment(content: &str) -> Comment {
-    Comment {
+    CommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from("eduardo"),
@@ -47,6 +47,7 @@ fn make_comment(content: &str) -> Comment {
         to: Vec::new(),
         ts: DateTime::parse_from_rfc3339("2026-04-06T12:00:00-04:00").unwrap(),
     }
+    .into()
 }
 
 fn system_with_key() -> MemorySystem {
@@ -119,7 +120,7 @@ fn verify_checksum_pass() {
 
 #[test]
 fn verify_checksum_fail() {
-    let mut comment = make_comment("Original content");
+    let mut comment = make_comment("Original content").into_draft();
     comment.content = String::from("Modified content");
     assert!(!verify_checksum(&comment));
 }
@@ -211,7 +212,7 @@ fn ack_does_not_affect_content_checksum() {
 fn signature_round_trip() {
     let system = system_with_key();
 
-    let mut comment = make_comment("Signed content");
+    let mut comment = make_comment("Signed content").into_draft();
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
@@ -223,7 +224,7 @@ fn signature_round_trip() {
 fn signature_tamper_content() {
     let system = system_with_key();
 
-    let mut comment = make_comment("Original content");
+    let mut comment = make_comment("Original content").into_draft();
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
@@ -237,7 +238,7 @@ fn signature_tamper_content() {
 fn signature_tamper_author() {
     let system = system_with_key();
 
-    let mut comment = make_comment("Content");
+    let mut comment = make_comment("Content").into_draft();
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
 
@@ -273,7 +274,7 @@ fn verify_no_signature() {
 fn signature_with_all_fields() {
     let system = system_with_key();
 
-    let mut comment = make_comment("Full comment");
+    let mut comment = make_comment("Full comment").into_draft();
     comment.to = vec![String::from("alice"), String::from("bob")];
     comment.reply_to = Some(String::from("xyz"));
     comment.thread = Some(String::from("thread-1"));
@@ -296,7 +297,7 @@ fn empty_kinds_produce_legacy_checksum() {
 /// Pins the frozen payload bytes: a zero offset renders as `+00:00`, never `Z`.
 #[test]
 fn signature_payload_renders_zero_offset_as_plus_zero() {
-    let mut comment = make_comment("Frozen payload");
+    let mut comment = make_comment("Frozen payload").into_draft();
     comment.ts = DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z").unwrap();
     assert_eq!(
         signature_payload(&comment),
@@ -326,9 +327,9 @@ fn reaction_checksum_renders_zero_offset_as_plus_zero() {
 /// `+00:00` and `Z` on disk parse to the same instant, so both canonicalize to one payload.
 #[test]
 fn z_and_plus_zero_disk_forms_canonicalize_identically() {
-    let mut from_z = make_comment("Same instant");
+    let mut from_z = make_comment("Same instant").into_draft();
     from_z.ts = DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z").unwrap();
-    let mut from_offset = make_comment("Same instant");
+    let mut from_offset = make_comment("Same instant").into_draft();
     from_offset.ts = DateTime::parse_from_rfc3339("2026-04-06T12:00:00+00:00").unwrap();
     assert_eq!(signature_payload(&from_z), signature_payload(&from_offset));
 
@@ -369,7 +370,7 @@ fn kinds_order_does_not_affect_checksum() {
 fn signature_tamper_kind() {
     let system = system_with_key();
 
-    let mut comment = make_comment("Body");
+    let mut comment = make_comment("Body").into_draft();
     comment.remargin_kind = Some(vec![String::from("question")]);
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
@@ -384,7 +385,7 @@ fn signature_tamper_kind() {
 fn signature_back_compat_with_empty_kinds() {
     let system = system_with_key();
 
-    let mut comment = make_comment("Body");
+    let mut comment = make_comment("Body").into_draft();
     assert!(comment.remargin_kind.is_none());
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), &system).unwrap();
     comment.signature = Some(sig);
@@ -414,7 +415,7 @@ fn compute_checksum_with_empty_kinds_ignores_the_suffix() {
 
 #[test]
 fn verify_checksum_equivalent_for_none_and_empty_vec() {
-    let mut comment = make_comment("Hello, world.");
+    let mut comment = make_comment("Hello, world.").into_draft();
     assert!(verify_checksum(&comment), "baseline None case must verify");
 
     comment.remargin_kind = Some(Vec::new());

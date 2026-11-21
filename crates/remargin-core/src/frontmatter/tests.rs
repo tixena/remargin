@@ -12,7 +12,8 @@ use crate::frontmatter::{
     update_remargin_fields, write_sandbox_entries,
 };
 use crate::parser::{
-    self, Acknowledgment, AuthorType, Comment, ParsedDocument, SandboxEntry, Segment,
+    self, Acknowledgment, AcknowledgmentDraft, AuthorType, Comment, CommentDraft, ParsedDocument,
+    SandboxEntryDraft, Segment,
 };
 use crate::reactions::Reactions;
 
@@ -44,7 +45,7 @@ fn test_config() -> ResolvedConfig {
 }
 
 fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -> Comment {
-    Comment {
+    CommentDraft {
         ack,
         attachments: Vec::new(),
         author: String::from("eduardo"),
@@ -64,6 +65,7 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
         to,
         ts: DateTime::parse_from_rfc3339(ts).unwrap(),
     }
+    .into()
 }
 
 fn make_doc(body: &str, comments: Vec<Comment>) -> ParsedDocument {
@@ -131,10 +133,13 @@ fn pending_count() {
         "c",
         "2026-04-06T14:00:00-04:00",
         Vec::new(),
-        vec![Acknowledgment {
-            author: String::from("alice"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("alice"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
 
     let comments: Vec<&Comment> = vec![&cm1, &cm2, &cm3];
@@ -234,10 +239,13 @@ fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
         "a",
         "2026-04-06T12:00:00-04:00",
         Vec::new(),
-        vec![Acknowledgment {
-            author: String::from("anyone"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("anyone"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -255,10 +263,13 @@ fn pending_count_directed_with_partial_ack_is_pending() {
         "a",
         "2026-04-06T12:00:00-04:00",
         vec![String::from("alice")],
-        vec![Acknowledgment {
-            author: String::from("bob"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("bob"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -278,10 +289,13 @@ fn pending_for_directed_with_partial_ack_lists_unacked_recipient() {
         "a",
         "2026-04-06T12:00:00-04:00",
         vec![String::from("alice")],
-        vec![Acknowledgment {
-            author: String::from("bob"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("bob"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -303,10 +317,13 @@ fn pending_for_directed_with_one_recipient_acked_excludes_them() {
         "a",
         "2026-04-06T12:00:00-04:00",
         vec![String::from("alice"), String::from("eduardo")],
-        vec![Acknowledgment {
-            author: String::from("alice"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("alice"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -328,10 +345,13 @@ fn pending_count_self_addressed_with_third_party_ack_is_pending() {
         "a",
         "2026-04-06T12:00:00-04:00",
         vec![String::from("eduardo")],
-        vec![Acknowledgment {
-            author: String::from("agent"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("agent"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
@@ -385,10 +405,13 @@ fn last_activity() {
         "b",
         "2026-04-06T13:00:00-04:00",
         Vec::new(),
-        vec![Acknowledgment {
-            author: String::from("alice"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T16:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("alice"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T16:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
 
     let comments: Vec<&Comment> = vec![&cm1, &cm2];
@@ -429,10 +452,13 @@ fn zero_pending_sheds_stale_stored_values() {
         "a",
         "2026-04-06T12:00:00-04:00",
         vec![String::from("alice")],
-        vec![Acknowledgment {
-            author: String::from("alice"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
-        }],
+        vec![
+            AcknowledgmentDraft {
+                author: String::from("alice"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
     );
     let comments: Vec<&Comment> = vec![&cm];
     update_remargin_fields(&mut mapping, &comments);
@@ -775,10 +801,13 @@ fn add_sandbox_entry_first_time() {
 
 #[test]
 fn add_sandbox_entry_refreshes_with_new_ts() {
-    let mut entries = vec![SandboxEntry {
-        author: String::from("alice"),
-        ts: t1(),
-    }];
+    let mut entries = vec![
+        SandboxEntryDraft {
+            author: String::from("alice"),
+            ts: t1(),
+        }
+        .into(),
+    ];
     let mutated = add_sandbox_entry_for(&mut entries, "alice", t2());
     assert!(mutated);
     assert_eq!(entries.len(), 1);
@@ -787,20 +816,26 @@ fn add_sandbox_entry_refreshes_with_new_ts() {
 
 #[test]
 fn add_sandbox_entry_noop_on_identical_ts() {
-    let mut entries = vec![SandboxEntry {
-        author: String::from("alice"),
-        ts: t1(),
-    }];
+    let mut entries = vec![
+        SandboxEntryDraft {
+            author: String::from("alice"),
+            ts: t1(),
+        }
+        .into(),
+    ];
     let mutated = add_sandbox_entry_for(&mut entries, "alice", t1());
     assert!(!mutated);
 }
 
 #[test]
 fn add_sandbox_entry_appends_second_identity() {
-    let mut entries = vec![SandboxEntry {
-        author: String::from("alice"),
-        ts: t1(),
-    }];
+    let mut entries = vec![
+        SandboxEntryDraft {
+            author: String::from("alice"),
+            ts: t1(),
+        }
+        .into(),
+    ];
     let mutated = add_sandbox_entry_for(&mut entries, "bob", t2());
     assert!(mutated);
     assert_eq!(entries.len(), 2);
@@ -810,14 +845,16 @@ fn add_sandbox_entry_appends_second_identity() {
 #[test]
 fn add_sandbox_entry_refreshes_one_in_multi_roster() {
     let mut entries = vec![
-        SandboxEntry {
+        SandboxEntryDraft {
             author: String::from("alice"),
             ts: t1(),
-        },
-        SandboxEntry {
+        }
+        .into(),
+        SandboxEntryDraft {
             author: String::from("bob"),
             ts: t2(),
-        },
+        }
+        .into(),
     ];
     let mutated = add_sandbox_entry_for(&mut entries, "alice", t3());
     assert!(mutated);
@@ -829,18 +866,21 @@ fn add_sandbox_entry_refreshes_one_in_multi_roster() {
 #[test]
 fn add_sandbox_entry_preserves_order_across_refresh() {
     let mut entries = vec![
-        SandboxEntry {
+        SandboxEntryDraft {
             author: String::from("alice"),
             ts: t1(),
-        },
-        SandboxEntry {
+        }
+        .into(),
+        SandboxEntryDraft {
             author: String::from("bob"),
             ts: t2(),
-        },
-        SandboxEntry {
+        }
+        .into(),
+        SandboxEntryDraft {
             author: String::from("carol"),
             ts: t3(),
-        },
+        }
+        .into(),
     ];
     add_sandbox_entry_for(&mut entries, "bob", t4());
     assert_eq!(entries[0].author, "alice");

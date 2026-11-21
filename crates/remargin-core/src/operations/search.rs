@@ -37,9 +37,9 @@ enum LineAttribution {
 }
 
 /// Where a match was found within the document.
+#[model_schema]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub enum MatchLocation {
     /// In document body text (outside any comment block).
     Body,
@@ -48,10 +48,10 @@ pub enum MatchLocation {
 }
 
 /// Lowercase `location` for the MCP `search` output.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum SearchHitLocation {
     Body,
     Comment,
@@ -67,9 +67,9 @@ struct Matcher {
 /// Serializes to JSON that matches the `SearchMatch` tixschema:
 /// `path` as a string, `location` as `"Body"` or `"Comment"`, and
 /// `comment_id` skipped when `None`.
+#[model_schema]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct SearchMatch {
     /// Context lines after the match.
     pub after: Vec<String>,
@@ -231,7 +231,7 @@ pub const fn match_cols(with_context: bool) -> &'static [&'static str] {
     }
 }
 
-const fn hit_location(m: &SearchMatch) -> SearchHitLocation {
+fn hit_location(m: &SearchMatch) -> SearchHitLocation {
     match m.location {
         MatchLocation::Body => SearchHitLocation::Body,
         MatchLocation::Comment => SearchHitLocation::Comment,
@@ -487,14 +487,17 @@ fn search_file(
             Vec::new()
         };
 
-        results.push(SearchMatch {
-            after,
-            before,
-            comment_id,
-            line: idx + 1,
-            location,
-            path: relative_path.to_path_buf(),
-            text: String::from(*line),
-        });
+        results.push(
+            SearchMatchDraft {
+                after,
+                before,
+                comment_id,
+                line: idx + 1,
+                location,
+                path: relative_path.to_path_buf(),
+                text: String::from(*line),
+            }
+            .into(),
+        );
     }
 }

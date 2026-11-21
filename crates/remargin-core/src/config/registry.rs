@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use tixschema::model_schema;
 
 /// JSON projection of a registry participant for `registry show --json`.
+#[model_schema]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct ParticipantView {
     #[serde(rename = "type")]
     pub author_type: String,
@@ -64,10 +64,10 @@ pub struct RegistryParticipant {
 }
 
 /// Status of a participant as rendered in `registry show --json`.
+#[model_schema]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-#[model_schema]
 pub enum ParticipantStatus {
     Active,
     Revoked,
@@ -89,7 +89,7 @@ impl ParticipantView {
             RegistryParticipantStatus::Active => ParticipantStatus::Active,
             RegistryParticipantStatus::Revoked => ParticipantStatus::Revoked,
         };
-        Self {
+        ParticipantViewDraft {
             author_type: participant.author_type.clone(),
             display_name: participant
                 .display_name
@@ -99,6 +99,7 @@ impl ParticipantView {
             pubkeys: participant.pubkeys.len(),
             status,
         }
+        .into()
     }
 }
 

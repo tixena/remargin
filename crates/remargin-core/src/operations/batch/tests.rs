@@ -82,7 +82,7 @@ fn sandbox_authors(doc: &parser::ParsedDocument) -> Vec<String> {
     frontmatter::read_sandbox_entries(doc)
         .unwrap()
         .into_iter()
-        .map(|entry| entry.author)
+        .map(|entry| entry.into_draft().author)
         .collect()
 }
 

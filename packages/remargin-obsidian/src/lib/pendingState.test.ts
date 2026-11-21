@@ -2,6 +2,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { decodeAcknowledgment, decodeComment } from "@/generated/schemas";
 import type { Comment } from "@/generated/types";
 import {
   isPendingBroadcast,
@@ -19,8 +20,10 @@ interface MkOpts {
 }
 
 function mk(id: string, opts: MkOpts = {}): Comment {
-  return {
-    ack: (opts.ackBy ?? []).map((author) => ({ author, ts: new Date("2026-01-01T00:00:00Z") })),
+  return decodeComment({
+    ack: (opts.ackBy ?? []).map((author) =>
+      decodeAcknowledgment({ author, ts: new Date("2026-01-01T00:00:00Z") })
+    ),
     attachments: [],
     author: "alice",
     author_type: "human",
@@ -38,7 +41,7 @@ function mk(id: string, opts: MkOpts = {}): Comment {
     thread: undefined,
     to: opts.to ?? [],
     ts: new Date("2026-01-01T00:00:00Z"),
-  };
+  });
 }
 
 describe("isPendingFor", () => {

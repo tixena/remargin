@@ -1,7 +1,7 @@
 //! Tests for the comment wire schema: field rendering, timestamps and the round trip.
 
 use super::{OnDiskComment, comment_from_on_disk};
-use crate::parser::{Acknowledgment, AuthorType, Comment};
+use crate::parser::{AcknowledgmentDraft, AuthorType, Comment, CommentDraft};
 use crate::reactions::{Reactions, ReactionsExt as _};
 use chrono::DateTime;
 
@@ -12,11 +12,14 @@ fn sample_comment() -> Comment {
         "bob",
         DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap(),
     );
-    Comment {
-        ack: vec![Acknowledgment {
-            author: String::from("jorge"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
-        }],
+    CommentDraft {
+        ack: vec![
+            AcknowledgmentDraft {
+                author: String::from("jorge"),
+                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+            }
+            .into(),
+        ],
         attachments: vec![String::from("diagram.png")],
         author: String::from("eduardo"),
         author_type: AuthorType::Agent,
@@ -35,6 +38,7 @@ fn sample_comment() -> Comment {
         to: vec![String::from("jorge"), String::from("claude")],
         ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
     }
+    .into()
 }
 
 #[test]
@@ -52,13 +56,16 @@ fn from_comment_formats_ack_as_author_at_ts_string() {
 /// A zero offset lands on disk as `Z`, matching what serde emits in a JSON payload.
 #[test]
 fn from_comment_renders_every_zero_offset_timestamp_with_z() {
-    let mut comment = sample_comment();
+    let mut comment = sample_comment().into_draft();
     comment.ts = DateTime::parse_from_rfc3339("2026-04-06T14:32:00+00:00").unwrap();
     comment.edited_at = Some(DateTime::parse_from_rfc3339("2026-04-07T10:00:00+00:00").unwrap());
-    comment.ack = vec![Acknowledgment {
-        author: String::from("jorge"),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00+00:00").unwrap(),
-    }];
+    comment.ack = vec![
+        AcknowledgmentDraft {
+            author: String::from("jorge"),
+            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00+00:00").unwrap(),
+        }
+        .into(),
+    ];
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction(
         "+1",
@@ -67,7 +74,7 @@ fn from_comment_renders_every_zero_offset_timestamp_with_z() {
     );
     comment.reactions = reactions;
 
-    let on_disk = OnDiskComment::from(&comment);
+    let on_disk = OnDiskComment::from(&Comment::from(comment));
     assert_eq!(on_disk.ts, "2026-04-06T14:32:00Z");
     assert_eq!(on_disk.edited_at.as_deref(), Some("2026-04-07T10:00:00Z"));
     assert_eq!(on_disk.ack, vec!["jorge@2026-04-06T15:00:00Z"]);
@@ -86,7 +93,8 @@ fn from_comment_drops_in_memory_only_fields() {
 fn round_trip_preserves_all_wire_fields() {
     let original = sample_comment();
     let on_disk = OnDiskComment::from(&original);
-    let restored = comment_from_on_disk(on_disk, original.content, original.line).unwrap();
+    let draft = original.into_draft();
+    let restored = comment_from_on_disk(on_disk, draft.content, draft.line).unwrap();
     assert_eq!(restored.id, "full");
     assert_eq!(restored.author, "eduardo");
     assert_eq!(restored.author_type, AuthorType::Agent);
@@ -115,9 +123,9 @@ fn round_trip_preserves_all_wire_fields() {
 
 #[test]
 fn empty_remargin_kind_round_trips_to_none() {
-    let mut comment = sample_comment();
+    let mut comment = sample_comment().into_draft();
     comment.remargin_kind = None;
-    let on_disk = OnDiskComment::from(&comment);
+    let on_disk = OnDiskComment::from(&Comment::from(comment.clone()));
     assert_eq!(on_disk.remargin_kind, [] as [String; 0]);
     let restored = comment_from_on_disk(on_disk, comment.content, 0).unwrap();
     assert!(restored.remargin_kind.is_none());
@@ -125,18 +133,20 @@ fn empty_remargin_kind_round_trips_to_none() {
 
 #[test]
 fn dedupes_acks_at_wire_boundary() {
-    let mut comment = sample_comment();
+    let mut comment = sample_comment().into_draft();
     comment.ack = vec![
-        Acknowledgment {
+        AcknowledgmentDraft {
             author: String::from("alice"),
             ts: DateTime::parse_from_rfc3339("2026-04-27T05:01:00+00:00").unwrap(),
-        },
-        Acknowledgment {
+        }
+        .into(),
+        AcknowledgmentDraft {
             author: String::from("alice"),
             ts: DateTime::parse_from_rfc3339("2026-04-27T05:02:00+00:00").unwrap(),
-        },
+        }
+        .into(),
     ];
-    let on_disk = OnDiskComment::from(&comment);
+    let on_disk = OnDiskComment::from(&Comment::from(comment));
     assert_eq!(on_disk.ack.len(), 1, "duplicate acks must collapse");
     assert!(
         on_disk.ack[0].contains("2026-04-27T05:02:00Z"),

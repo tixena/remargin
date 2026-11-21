@@ -3,13 +3,14 @@
 use serde_json::json;
 
 use super::{ack, batch, comment_created, comment_edited, comments_deleted, react};
-use crate::advice::{Advice, OpAdvice};
+use crate::advice::{Advice, AdviceDraft, OpAdvice};
 
 fn note() -> Advice {
-    Advice {
+    AdviceDraft {
         line: 3_usize,
         message: String::from("wrapped"),
     }
+    .into()
 }
 
 #[test]

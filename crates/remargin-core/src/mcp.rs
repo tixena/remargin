@@ -24,7 +24,7 @@ use anyhow::{Context as _, Result, bail};
 use os_shim::System;
 use serde::Serialize;
 
-use crate::activity::{self, CompactFileChanges};
+use crate::activity::{self, CompactFileChangesDraft};
 use crate::config::ResolvedConfig;
 use crate::config::identity::IdentityFlags;
 use crate::config::permissions::resolve::ResolvedPermissions;
@@ -37,8 +37,9 @@ use crate::permissions::op_guard::{CallerInfo, check_against_resolved_for_caller
 use crate::wait::Wait as _;
 
 use self::answers::{
-    CommentRow, GetAnswer, GetContent, GetLines, MatchRow, QueryFile, ReportSpillAnswer,
-    SearchFile, SearchPage,
+    CommentRow, CommentRowDraft, GetAnswer, GetAnswerDraft, GetContentDraft, GetLinesDraft,
+    MatchRow, MatchRowDraft, QueryFile, QueryFileDraft, ReportSpillAnswer, ReportSpillAnswerDraft,
+    SearchFileDraft, SearchPage, SearchPageDraft,
 };
 
 /// In UTF-8 bytes of emitted tool-result text: a proxy for the client's token limit, seeded low
@@ -119,13 +120,14 @@ impl SessionState {
         if reported > 0 {
             self.spill_cap = self.spill_cap.min(reported);
         }
-        ReportSpillAnswer {
+        ReportSpillAnswerDraft {
             elapsed_ms: 0,
             inferred: explicit.is_none(),
             previous_cap,
             reported_size: reported,
             spill_cap: self.spill_cap,
         }
+        .into()
     }
 
     pub(crate) const fn spill_cap(&self) -> usize {
@@ -133,7 +135,7 @@ impl SessionState {
     }
 }
 
-impl RowGroup for CompactFileChanges {
+impl RowGroup for CompactFileChangesDraft {
     type Row = activity::CompactChangeRow;
 
     fn push_row(&mut self, row: Self::Row) {
@@ -145,7 +147,7 @@ impl RowGroup for CompactFileChanges {
     }
 }
 
-impl RowGroup for QueryFile {
+impl RowGroup for QueryFileDraft {
     type Row = CommentRow;
 
     fn push_row(&mut self, row: Self::Row) {
@@ -324,22 +326,30 @@ pub(crate) fn get_envelope(
     if line_numbers {
         // Line numbers are contiguous, so state the start once and drop the
         // per-line objects: line i's number is `start_line + i`.
-        GetAnswer::Lines(GetLines {
-            effective_end_line,
-            lines: result.content.split('\n').map(String::from).collect(),
-            links,
-            links_cols,
-            start_line: start_num,
-            total_lines: result.total_lines,
-        })
+        GetAnswerDraft::Lines(
+            GetLinesDraft {
+                effective_end_line,
+                lines: result.content.split('\n').map(String::from).collect(),
+                links,
+                links_cols,
+                start_line: start_num,
+                total_lines: result.total_lines,
+            }
+            .into(),
+        )
+        .into()
     } else {
-        GetAnswer::Content(GetContent {
-            content: result.content,
-            effective_end_line,
-            links,
-            links_cols,
-            total_lines: result.total_lines,
-        })
+        GetAnswerDraft::Content(
+            GetContentDraft {
+                content: result.content,
+                effective_end_line,
+                links,
+                links_cols,
+                total_lines: result.total_lines,
+            }
+            .into(),
+        )
+        .into()
     }
 }
 
@@ -361,32 +371,33 @@ pub(crate) fn search_compact_envelope(
         .iter()
         .map(|m| {
             if with_context {
-                MatchRow::WithContext(search::compact_row_with_context(m))
+                MatchRowDraft::WithContext(search::compact_row_with_context(m)).into()
             } else {
-                MatchRow::Plain(search::compact_row(m))
+                MatchRowDraft::Plain(search::compact_row(m)).into()
             }
         })
         .collect();
     let (kept, effective_limit) = size_page(rows, spill_cap);
 
-    let mut files: Vec<SearchFile> = Vec::new();
+    let mut files: Vec<SearchFileDraft> = Vec::new();
     for (m, row) in results.matches.iter().zip(kept) {
         let path = m.path.display().to_string();
         match files.last_mut() {
             Some(file) if file.path == path => file.matches.push(row),
-            _ => files.push(SearchFile {
+            _ => files.push(SearchFileDraft {
                 matches: vec![row],
                 path,
             }),
         }
     }
-    SearchPage {
+    SearchPageDraft {
         effective_limit,
         elapsed_ms: 0,
-        files,
+        files: files.into_iter().map(Into::into).collect(),
         match_cols: column_names(search::match_cols(with_context)),
         total: results.total,
     }
+    .into()
 }
 
 /// Trim a page so its emitted size stays under `spill_cap`.
@@ -509,16 +520,16 @@ pub(crate) fn column_names(cols: &[&str]) -> Vec<String> {
 
 pub(crate) fn comment_row(comment: &query::ExpandedComment, include_integrity: bool) -> CommentRow {
     if include_integrity {
-        CommentRow::WithIntegrity(query::compact_row_with_integrity(comment))
+        CommentRowDraft::WithIntegrity(query::compact_row_with_integrity(comment)).into()
     } else {
-        CommentRow::Plain(query::compact_row(comment))
+        CommentRowDraft::Plain(query::compact_row(comment)).into()
     }
 }
 
 /// One file of a `query` answer: the summary fields stay named, comments
 /// become positional rows, and a summary query carries none.
 pub(crate) fn query_file(result: &QueryResult, include_integrity: bool) -> QueryFile {
-    QueryFile {
+    QueryFileDraft {
         comment_count: result.comment_count,
         comments: result.comments.as_ref().map(|comments| {
             comments
@@ -532,6 +543,7 @@ pub(crate) fn query_file(result: &QueryResult, include_integrity: bool) -> Query
         pending_count: result.pending_count,
         pending_for: result.pending_for.clone(),
     }
+    .into()
 }
 
 /// Answers one request against a configuration the caller resolved, over a server with no

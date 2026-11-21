@@ -17,7 +17,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::crypto::ssh::{PrivateKey, PublicKey, SshSig};
 use crate::kind::canonical_kinds;
-use crate::parser::Comment;
+use crate::parser::CommentDraft;
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::wait::Wait as _;
 
@@ -88,7 +88,7 @@ pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
 /// Returns an error if the private key file cannot be read, is not a valid OpenSSH private
 /// key, or signing fails.
 pub fn compute_signature(
-    comment: &Comment,
+    comment: &CommentDraft,
     private_key_path: &Path,
     system: &dyn System,
 ) -> Result<String> {
@@ -123,7 +123,7 @@ pub fn generate_keypair(comment: &str) -> Result<(String, String)> {
 }
 
 #[must_use = "a check whose result is ignored checks nothing"]
-pub fn verify_checksum(comment: &Comment) -> bool {
+pub fn verify_checksum(comment: &CommentDraft) -> bool {
     compute_checksum(&comment.content, comment.kinds()) == comment.checksum
 }
 
@@ -134,7 +134,7 @@ pub fn verify_checksum(comment: &Comment) -> bool {
 ///
 /// Returns an error if the public key cannot be parsed, the signature string is malformed, or
 /// PEM decoding fails.
-pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool> {
+pub fn verify_signature(comment: &CommentDraft, public_key_str: &str) -> Result<bool> {
     let signature_str = comment
         .signature
         .as_ref()
@@ -173,7 +173,7 @@ pub fn verify_signature(comment: &Comment, public_key_str: &str) -> Result<bool>
 /// An empty `remargin_kind` contributes zero bytes, so a comment without kinds signs the same
 /// with or without the field. A non-empty list is emitted in [`canonical_kinds`] order, so
 /// reordering the stored list keeps the signature valid.
-fn signature_payload(comment: &Comment) -> String {
+fn signature_payload(comment: &CommentDraft) -> String {
     let mut payload = String::new();
     let _ = writeln!(payload, "id:{}", comment.id);
     let _ = writeln!(payload, "author:{}", comment.author);

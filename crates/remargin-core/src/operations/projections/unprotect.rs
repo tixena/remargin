@@ -16,11 +16,14 @@ use os_shim::System;
 use serde_yaml::Value;
 
 use crate::operations::plan::{
-    UnprotectConfigDiff, UnprotectConflict, UnprotectEntryAction, UnprotectSettingsDiff,
-    UnprotectSidecarDiff, UnprotectYamlDiff,
+    UnprotectConfigDiff, UnprotectConfigDiffDraft, UnprotectConflict, UnprotectConflictDraft,
+    UnprotectEntryAction, UnprotectSettingsDiff, UnprotectSettingsDiffDraft,
+    UnprotectSidecarDiffDraft, UnprotectYamlDiffDraft,
 };
 use crate::permissions::claude_sync::canonicalize_rule;
-use crate::permissions::restrict::{RestrictEntryProjection, find_claude_anchor};
+use crate::permissions::restrict::{
+    RestrictEntryProjection, RestrictEntryProjectionDraft, find_claude_anchor,
+};
 use crate::permissions::sidecar;
 use crate::permissions::unprotect::UnprotectArgs;
 use crate::wait::Wait as _;
@@ -84,7 +87,7 @@ pub fn project_unprotect(
     let mut conflicts: Vec<UnprotectConflict> = Vec::new();
 
     let yaml_entry_present = yaml_entry.is_some();
-    let yaml_diff = UnprotectYamlDiff {
+    let yaml_diff = UnprotectYamlDiffDraft {
         entry_action: if yaml_entry_present {
             UnprotectEntryAction::WouldBeRemoved
         } else {
@@ -92,9 +95,10 @@ pub fn project_unprotect(
         },
         path: yaml_path.clone(),
         previous_entry: yaml_entry,
-    };
+    }
+    .into();
     if !yaml_entry_present {
-        conflicts.push(UnprotectConflict::YamlEntryMissing { path: yaml_path });
+        conflicts.push(UnprotectConflictDraft::YamlEntryMissing { path: yaml_path }.into());
     }
 
     let (sidecar_diff, settings_files) = if let Some(entry) = sidecar_entry {
@@ -110,33 +114,39 @@ pub fn project_unprotect(
             sims.push(sim);
         }
         (
-            UnprotectSidecarDiff {
+            UnprotectSidecarDiffDraft {
                 entry_action: UnprotectEntryAction::WouldBeRemoved,
                 path: sidecar_path,
-            },
+            }
+            .into(),
             sims,
         )
     } else {
-        conflicts.push(UnprotectConflict::SidecarEntryMissing {
-            path: absolute_path.clone(),
-        });
+        conflicts.push(
+            UnprotectConflictDraft::SidecarEntryMissing {
+                path: absolute_path.clone(),
+            }
+            .into(),
+        );
         (
-            UnprotectSidecarDiff {
+            UnprotectSidecarDiffDraft {
                 entry_action: UnprotectEntryAction::Absent,
                 path: sidecar_path,
-            },
+            }
+            .into(),
             Vec::new(),
         )
     };
 
-    let diff = UnprotectConfigDiff {
+    let diff = UnprotectConfigDiffDraft {
         absolute_path,
         anchor,
         conflicts,
         remargin_yaml: yaml_diff,
         settings_files,
         sidecar: sidecar_diff,
-    };
+    }
+    .into();
     Ok(UnprotectProjection::Diff(Box::new(diff)))
 }
 
@@ -202,11 +212,14 @@ fn read_yaml_entry(
             .get(Value::String(String::from("cli_allowed")))
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        return Ok(Some(RestrictEntryProjection {
-            also_deny_bash,
-            cli_allowed,
-            path: String::from(path_on_disk),
-        }));
+        return Ok(Some(
+            RestrictEntryProjectionDraft {
+                also_deny_bash,
+                cli_allowed,
+                path: String::from(path_on_disk),
+            }
+            .into(),
+        ));
     }
     Ok(None)
 }
@@ -264,11 +277,12 @@ fn simulate_settings_scrub(
         conflicts,
     );
 
-    Ok(UnprotectSettingsDiff {
+    Ok(UnprotectSettingsDiffDraft {
         path: settings_file.to_path_buf(),
         rules_already_absent,
         rules_to_remove,
-    })
+    }
+    .into())
 }
 
 /// Split `tracked` into "present in `existing`" vs. "absent". Drift
@@ -288,10 +302,13 @@ fn classify_rules(
             rules_to_remove.push(rule.clone());
         } else {
             rules_already_absent.push(rule.clone());
-            conflicts.push(UnprotectConflict::RuleAlreadyAbsent {
-                rule: rule.clone(),
-                settings_file: settings_file.to_path_buf(),
-            });
+            conflicts.push(
+                UnprotectConflictDraft::RuleAlreadyAbsent {
+                    rule: rule.clone(),
+                    settings_file: settings_file.to_path_buf(),
+                }
+                .into(),
+            );
         }
     }
 }

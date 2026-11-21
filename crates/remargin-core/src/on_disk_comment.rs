@@ -10,17 +10,20 @@ use serde::ser::SerializeStruct as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tixschema::model_schema;
 
-use crate::parser::{Acknowledgment, AuthorType, Comment, rfc3339_z};
+use crate::parser::{
+    Acknowledgment, AcknowledgmentDraft, AuthorType, Comment, CommentDraft, rfc3339_z,
+};
 use crate::reactions::{
-    ReactionEntry, Reactions, ReactionsExt as _, deserialize_with_legacy, legacy_sentinel_ts,
+    ReactionEntry, ReactionEntryDraft, Reactions, ReactionsExt as _, deserialize_with_legacy,
+    legacy_sentinel_ts,
 };
 use crate::writer::dedupe_acks;
 
 /// One reaction entry on the wire.
+#[model_schema]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-#[model_schema]
 pub struct ReactionEntryOnDisk {
     pub author: String,
     pub ts: String,
@@ -40,9 +43,9 @@ pub struct ReactionEntryOnDisk {
 /// byte sequence is (`id`, `author`, `type`,
 /// `ts`, `edited_at`, `to`, `reply-to`, `thread`, `attachments`,
 /// `remargin_kind`, `reactions`, `ack`, `checksum`, `signature`).
+#[model_schema(nonstrict)]
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct OnDiskComment {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ack: Vec<String>,
@@ -151,7 +154,7 @@ impl From<&Comment> for OnDiskComment {
     // The full destructure is the compile-time check that every `Comment` field is routed or
     // skipped; `..` would let a new field slip through.
     fn from(comment: &Comment) -> Self {
-        let Comment {
+        let CommentDraft {
             ack,
             attachments,
             author,
@@ -170,7 +173,7 @@ impl From<&Comment> for OnDiskComment {
             thread,
             to,
             ts,
-        } = comment;
+        } = &**comment;
 
         let deduped_acks = dedupe_acks(ack);
         let ack_strings: Vec<String> = deduped_acks
@@ -184,16 +187,20 @@ impl From<&Comment> for OnDiskComment {
             .map(|(emoji, entries)| {
                 let on_disk = entries
                     .into_iter()
-                    .map(|entry| ReactionEntryOnDisk {
-                        author: entry.author,
-                        ts: rfc3339_z(&entry.ts),
+                    .map(ReactionEntry::into_draft)
+                    .map(|entry| {
+                        ReactionEntryOnDiskDraft {
+                            author: entry.author,
+                            ts: rfc3339_z(&entry.ts),
+                        }
+                        .into()
                     })
                     .collect();
                 (emoji, on_disk)
             })
             .collect();
 
-        Self {
+        OnDiskCommentDraft {
             id: id.clone(),
             author: author.clone(),
             author_type: String::from(author_type.as_str()),
@@ -209,6 +216,7 @@ impl From<&Comment> for OnDiskComment {
             checksum: checksum.clone(),
             signature: signature.clone(),
         }
+        .into()
     }
 }
 
@@ -225,7 +233,7 @@ pub fn comment_from_on_disk(
     content: String,
     line: usize,
 ) -> Result<Comment> {
-    let OnDiskComment {
+    let OnDiskCommentDraft {
         id,
         author,
         author_type: author_type_raw,
@@ -240,7 +248,7 @@ pub fn comment_from_on_disk(
         ack: ack_raw,
         checksum,
         signature,
-    } = on_disk;
+    } = on_disk.into_draft();
 
     let ts = DateTime::parse_from_rfc3339(&ts_raw)
         .map_err(|e| anyhow!("invalid timestamp {ts_raw:?}: {e}"))?;
@@ -267,7 +275,7 @@ pub fn comment_from_on_disk(
     let mut rich_reactions = Reactions::new();
     for (emoji, entries) in reactions_raw {
         let mut converted = Vec::with_capacity(entries.len());
-        for entry in entries {
+        for entry in entries.into_iter().map(ReactionEntryOnDisk::into_draft) {
             // Empty ts (legacy) maps to the sentinel; the surrounding
             // backfill replaces it against the comment ts and ack list.
             let entry_ts = if entry.ts.is_empty() {
@@ -276,10 +284,13 @@ pub fn comment_from_on_disk(
                 DateTime::parse_from_rfc3339(&entry.ts)
                     .map_err(|e| anyhow!("invalid reaction ts {:?}: {e}", entry.ts))?
             };
-            converted.push(ReactionEntry {
-                author: entry.author,
-                ts: entry_ts,
-            });
+            converted.push(
+                ReactionEntryDraft {
+                    author: entry.author,
+                    ts: entry_ts,
+                }
+                .into(),
+            );
         }
         let _previous = rich_reactions.insert(emoji, converted);
     }
@@ -291,7 +302,7 @@ pub fn comment_from_on_disk(
         Some(remargin_kind)
     };
 
-    Ok(Comment {
+    Ok(CommentDraft {
         ack: ack_list,
         attachments,
         author,
@@ -310,7 +321,8 @@ pub fn comment_from_on_disk(
         thread,
         to,
         ts,
-    })
+    }
+    .into())
 }
 
 fn deserialize_reactions_with_legacy<'de, D>(
@@ -325,9 +337,13 @@ where
         .map(|(emoji, entries)| {
             let on_disk: Vec<ReactionEntryOnDisk> = entries
                 .into_iter()
-                .map(|entry: ReactionEntry| ReactionEntryOnDisk {
-                    author: entry.author,
-                    ts: rfc3339_z(&entry.ts),
+                .map(ReactionEntry::into_draft)
+                .map(|entry| {
+                    ReactionEntryOnDiskDraft {
+                        author: entry.author,
+                        ts: rfc3339_z(&entry.ts),
+                    }
+                    .into()
                 })
                 .collect();
             (emoji, on_disk)
@@ -343,7 +359,7 @@ fn parse_ack_string(entry: &str) -> Result<Acknowledgment> {
     let ts_str = &entry[at_pos + 1..];
     let ts = DateTime::parse_from_rfc3339(ts_str)
         .map_err(|e| anyhow!("invalid ack timestamp {ts_str:?}: {e}"))?;
-    Ok(Acknowledgment { author, ts })
+    Ok(AcknowledgmentDraft { author, ts }.into())
 }
 
 #[cfg(test)]

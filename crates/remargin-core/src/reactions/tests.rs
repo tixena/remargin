@@ -2,10 +2,12 @@
 //! serialization.
 
 use super::{
-    Acknowledgment, ReactionEntry, Reactions, ReactionsExt, deserialize_with_legacy,
-    format_reaction_entry_block, legacy_sentinel_ts, quote_emoji_key,
+    ReactionEntry, Reactions, ReactionsExt, deserialize_with_legacy, format_reaction_entry_block,
+    legacy_sentinel_ts, quote_emoji_key,
 };
 use chrono::{DateTime, FixedOffset};
+
+use crate::parser::AcknowledgmentDraft;
 use serde_yaml::Value;
 
 fn ts(s: &str) -> DateTime<FixedOffset> {
@@ -87,10 +89,13 @@ fn backfill_uses_ack_ts_when_author_acked() {
     let _added = reactions.add_reaction("+1", "eduardo", legacy_sentinel_ts());
     let comment_ts = ts("2026-04-26T10:00:00-04:00");
     let ack_ts = ts("2026-04-26T11:00:00-04:00");
-    let acks = vec![Acknowledgment {
-        author: String::from("eduardo"),
-        ts: ack_ts,
-    }];
+    let acks = vec![
+        AcknowledgmentDraft {
+            author: String::from("eduardo"),
+            ts: ack_ts,
+        }
+        .into(),
+    ];
     reactions.backfill_legacy_timestamps(comment_ts, &acks);
     assert_eq!(entries_for(&reactions, "+1")[0].ts, ack_ts);
 }
@@ -110,10 +115,13 @@ fn backfill_clamps_to_comment_ts_floor() {
     let _added = reactions.add_reaction("+1", "eduardo", legacy_sentinel_ts());
     let comment_ts = ts("2026-04-26T10:00:00-04:00");
     let stale_ack = ts("2024-01-01T00:00:00+00:00");
-    let acks = vec![Acknowledgment {
-        author: String::from("eduardo"),
-        ts: stale_ack,
-    }];
+    let acks = vec![
+        AcknowledgmentDraft {
+            author: String::from("eduardo"),
+            ts: stale_ack,
+        }
+        .into(),
+    ];
     reactions.backfill_legacy_timestamps(comment_ts, &acks);
     assert_eq!(entries_for(&reactions, "+1")[0].ts, comment_ts);
 }
@@ -124,10 +132,13 @@ fn backfill_leaves_explicit_ts_alone() {
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction("+1", "eduardo", explicit_ts);
     let comment_ts = ts("2026-04-26T10:00:00-04:00");
-    let acks = vec![Acknowledgment {
-        author: String::from("eduardo"),
-        ts: ts("2026-04-26T11:00:00-04:00"),
-    }];
+    let acks = vec![
+        AcknowledgmentDraft {
+            author: String::from("eduardo"),
+            ts: ts("2026-04-26T11:00:00-04:00"),
+        }
+        .into(),
+    ];
     reactions.backfill_legacy_timestamps(comment_ts, &acks);
     assert_eq!(entries_for(&reactions, "+1")[0].ts, explicit_ts);
 }

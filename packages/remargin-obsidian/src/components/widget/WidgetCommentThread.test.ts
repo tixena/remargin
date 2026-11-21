@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Participant, RemarginBackend } from "../../backend/index.ts";
+import { decodeComment } from "../../generated/schemas.ts";
 import type { Comment } from "../../generated/types.ts";
 import { BackendContext } from "../../hooks/useBackend.ts";
 import { __resetParticipantsCacheForTests } from "../../hooks/useParticipants.ts";
@@ -21,7 +22,7 @@ const backendStub = {
 } as unknown as RemarginBackend;
 
 function comment(overrides: Partial<Comment> = {}): Comment {
-  return {
+  return decodeComment({
     ack: [],
     attachments: [],
     author: "alice",
@@ -41,7 +42,7 @@ function comment(overrides: Partial<Comment> = {}): Comment {
     to: [],
     ts: new Date("2026-04-25T12:00:00-04:00"),
     ...overrides,
-  };
+  });
 }
 
 function leaf(id: string, replyTo?: string): ThreadNode {

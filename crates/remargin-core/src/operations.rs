@@ -36,7 +36,9 @@ use crate::id;
 use crate::kind::validate_kinds;
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
-use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument, Segment};
+use crate::parser::{
+    self, AcknowledgmentDraft, AuthorType, Comment, CommentDraft, ParsedDocument, Segment,
+};
 use crate::permissions::op_guard::{pre_mutate_check, pre_mutate_check_for_caller};
 use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::wait::Wait as _;
@@ -131,7 +133,7 @@ pub fn create_comment(
     }
 
     let now = Utc::now().fixed_offset();
-    let mut comment = Comment {
+    let mut comment = CommentDraft {
         ack: Vec::new(),
         attachments: resolved_attachments,
         author: String::from(identity),
@@ -157,7 +159,7 @@ pub fn create_comment(
         comment.signature = Some(sig);
     }
 
-    writer::insert_comment(&mut doc, comment, params.position)?;
+    writer::insert_comment(&mut doc, comment.into(), params.position)?;
 
     if let Some(parent_id) = params.reply_to {
         apply_auto_ack_to_parent(&mut doc, parent_id, identity, params.auto_ack, now)?;
@@ -236,20 +238,23 @@ fn apply_auto_ack_to_parent(
     auto_ack: Option<bool>,
     now: chrono::DateTime<chrono::FixedOffset>,
 ) -> Result<()> {
-    let parent = find_comment_mut(doc, parent_id)
-        .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))?;
-    let should_ack = match auto_ack {
-        Some(true) => true,
-        Some(false) => false,
-        None => parent.author != identity,
-    };
-    if should_ack {
-        parent.ack.push(Acknowledgment {
-            author: String::from(identity),
-            ts: now,
-        });
-    }
-    Ok(())
+    change_comment(doc, parent_id, |parent| {
+        let should_ack = match auto_ack {
+            Some(true) => true,
+            Some(false) => false,
+            None => parent.author != identity,
+        };
+        if should_ack {
+            parent.ack.push(
+                AcknowledgmentDraft {
+                    author: String::from(identity),
+                    ts: now,
+                }
+                .into(),
+            );
+        }
+    })
+    .with_context(|| format!("auto-ack: parent comment {parent_id:?} not found"))
 }
 
 /// Add or refresh the caller's sandbox entry in the same write cycle as the comment. Runs after
@@ -294,25 +299,26 @@ pub fn ack_comments(
     let now = Utc::now().fixed_offset();
 
     for comment_id in comment_ids {
-        let found = find_comment_mut(&mut doc, comment_id);
-        let Some(cm) = found else {
-            bail!("comment {comment_id:?} not found");
-        };
+        change_comment(&mut doc, comment_id, |cm| {
+            // Self-heal: keep only the first ack per author, so repeated acks converge to one
+            // entry with the original timestamp.
+            let mut seen: HashSet<String> = HashSet::new();
+            cm.ack.retain(|a| seen.insert(a.author.clone()));
 
-        // Self-heal: keep only the first ack per author, so repeated acks converge to one entry with
-        // the original timestamp.
-        let mut seen: HashSet<String> = HashSet::new();
-        cm.ack.retain(|a| seen.insert(a.author.clone()));
-
-        if remove {
-            cm.ack.retain(|a| a.author != identity);
-        } else if cm.ack.iter().any(|a| a.author == identity) {
-        } else {
-            cm.ack.push(Acknowledgment {
-                author: String::from(identity),
-                ts: now,
-            });
-        }
+            if remove {
+                cm.ack.retain(|a| a.author != identity);
+            } else if cm.ack.iter().any(|a| a.author == identity) {
+            } else {
+                cm.ack.push(
+                    AcknowledgmentDraft {
+                        author: String::from(identity),
+                        ts: now,
+                    }
+                    .into(),
+                );
+            }
+        })
+        .with_context(|| format!("comment {comment_id:?} not found"))?;
     }
 
     frontmatter::ensure_frontmatter(&mut doc, config)?;
@@ -348,17 +354,16 @@ pub fn react(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    let cm = find_comment_mut(&mut doc, comment_id)
-        .with_context(|| format!("comment {comment_id:?} not found"))?;
-
     let now = Utc::now().fixed_offset();
-    if remove {
-        let _was_removed = cm.reactions.remove_reaction(emoji, identity);
-    } else {
-        let _was_added = cm.reactions.add_reaction(emoji, identity, now);
-    }
-
-    let _reaction_checksum = compute_reaction_checksum(&cm.reactions);
+    let _reaction_checksum = change_comment(&mut doc, comment_id, |cm| {
+        if remove {
+            let _was_removed = cm.reactions.remove_reaction(emoji, identity);
+        } else {
+            let _was_added = cm.reactions.add_reaction(emoji, identity, now);
+        }
+        compute_reaction_checksum(&cm.reactions)
+    })
+    .with_context(|| format!("comment {comment_id:?} not found"))?;
 
     frontmatter::ensure_frontmatter(&mut doc, config)?;
 
@@ -507,41 +512,40 @@ pub fn edit_comment(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    let cm = find_comment_mut(&mut doc, comment_id)
-        .with_context(|| format!("comment {comment_id:?} not found"))?;
-
     // Keyed on the editor rather than the comment's original author:
     // whoever writes this body answers for it.
     let editor_type = cfg.author_type.clone().unwrap_or(AuthorType::Human);
-    comment_style::gate_edit(&cm.content, new_content, &editor_type)?;
+    change_comment(&mut doc, comment_id, |cm| -> Result<()> {
+        comment_style::gate_edit(&cm.content, new_content, &editor_type)?;
 
-    cm.content = String::from(new_content);
-    if let Some(kinds) = new_kinds {
-        cm.remargin_kind = if kinds.is_empty() {
-            None
-        } else {
-            Some(kinds.to_vec())
-        };
-    }
-    // Rehash against the kinds now on the comment, so the checksum matches the persisted YAML.
-    cm.checksum = compute_checksum(new_content, cm.kinds());
+        cm.content = String::from(new_content);
+        if let Some(kinds) = new_kinds {
+            cm.remargin_kind = if kinds.is_empty() {
+                None
+            } else {
+                Some(kinds.to_vec())
+            };
+        }
+        // Rehash against the kinds now on the comment, so the checksum matches the persisted YAML.
+        cm.checksum = compute_checksum(new_content, cm.kinds());
 
-    // `ts` keeps the creation time and `edited_at` records the edit. The signature payload
-    // excludes `edited_at`.
-    cm.edited_at = Some(Utc::now().fixed_offset());
+        // `ts` keeps the creation time and `edited_at` records the edit. The signature payload
+        // excludes `edited_at`.
+        cm.edited_at = Some(Utc::now().fixed_offset());
 
-    cm.ack.clear();
+        cm.ack.clear();
 
-    if let Some(key_path) = signing_key {
-        let sig = compute_signature(cm, key_path, system)?;
-        cm.signature = Some(sig);
-    }
+        if let Some(key_path) = signing_key {
+            let sig = compute_signature(cm, key_path, system)?;
+            cm.signature = Some(sig);
+        }
+        Ok(())
+    })
+    .with_context(|| format!("comment {comment_id:?} not found"))??;
 
     let descendants = collect_descendants(&doc, comment_id);
     for descendant_id in &descendants {
-        if let Some(child) = find_comment_mut(&mut doc, descendant_id) {
-            child.ack.clear();
-        }
+        change_comment(&mut doc, descendant_id, |child| child.ack.clear());
     }
 
     frontmatter::ensure_frontmatter(&mut doc, cfg)?;
@@ -744,14 +748,21 @@ fn copy_attachments(
     Ok(result)
 }
 
-pub(crate) fn find_comment_mut<'doc>(
-    doc: &'doc mut ParsedDocument,
+/// Changes the comment `id` of `doc` through its draft and answers what `change` answers, or
+/// `None` when `doc` holds no comment with that id.
+pub(crate) fn change_comment<Answer>(
+    doc: &mut ParsedDocument,
     id: &str,
-) -> Option<&'doc mut Comment> {
-    doc.segments.iter_mut().find_map(|seg| match seg {
-        Segment::Comment(cm) if cm.id == id => Some(cm.as_mut()),
+    change: impl FnOnce(&mut CommentDraft) -> Answer,
+) -> Option<Answer> {
+    let comment = doc.segments.iter_mut().find_map(|seg| match seg {
+        Segment::Comment(cm) if cm.id == id => Some(cm),
         Segment::Body(_) | Segment::Comment(_) => None,
-    })
+    })?;
+    let mut draft = Comment::clone(comment).into_draft();
+    let answer = change(&mut draft);
+    **comment = draft.into();
+    Some(answer)
 }
 
 /// Resolve the thread field for a reply comment.

@@ -264,5 +264,12 @@ fn mcp_verify_with_only_the_legacy_file_alias_is_refused_naming_path() {
     let fault: Value = serde_json::from_str(text).unwrap();
     assert_eq!(fault["fault"]["kind"], "failed-validation");
     assert_eq!(fault["fault"]["operation"], "verify");
-    assert_eq!(fault["fault"]["field"], "path");
+    assert!(
+        fault["fault"]["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["field"] == "path"),
+        "{fault}"
+    );
 }

@@ -10,47 +10,53 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use super::{
-    ActivityPage, CommentRow, CommentsPage, GetAnswer, GetContent, GetLines, IdentityCreated,
-    LsAnswer, MatchRow, QueryFile, QueryPage, ReportSpillAnswer, SandboxListAnswer, SearchFile,
-    SearchPage, TimedResponse as _,
+    ActivityPage, ActivityPageDraft, CommentRow, CommentRowDraft, CommentsPage, CommentsPageDraft,
+    GetAnswer, GetAnswerDraft, GetContentDraft, GetLinesDraft, IdentityCreated,
+    IdentityCreatedDraft, LsAnswer, LsAnswerDraft, MatchRow, MatchRowDraft, QueryFile,
+    QueryFileDraft, QueryPage, QueryPageDraft, ReportSpillAnswer, ReportSpillAnswerDraft,
+    SandboxListAnswer, SandboxListAnswerDraft, SearchFileDraft, SearchPage, SearchPageDraft,
+    TimedResponse as _,
 };
-use crate::advice::{Advice, OpAdvice};
-use crate::config::identity::IdentityReport;
-use crate::config::system_prompt::ResolvedSystemPrompt;
-use crate::document::{ListEntry, RmDirReport, RmOutcome, RmResult, WriteOutcome};
-use crate::linter::{LintErrorView, LintReport, PermissionsLintErrorView};
-use crate::operations::mv::{MvAction, MvOutcome, MvTopology};
+use crate::advice::{AdviceDraft, OpAdvice};
+use crate::config::identity::{IdentityReport, IdentityReportDraft};
+use crate::config::system_prompt::{ResolvedSystemPrompt, ResolvedSystemPromptDraft};
+use crate::document::{ListEntryDraft, RmDirReport, RmOutcome, RmResult, WriteOutcome};
+use crate::linter::{LintErrorViewDraft, LintReport, PermissionsLintErrorViewDraft};
+use crate::operations::mv::{MvActionDraft, MvOutcome, MvTopologyDraft};
 use crate::operations::plan::{
-    CommentDiff, MvDiff, MvExistence, MvState, PlanIdentity, PlanReport, PlanVerifyReport,
-    PlanVerifyRow,
+    CommentDiffDraft, MvDiff, MvDiffDraft, MvExistenceDraft, MvStateDraft, PlanIdentity,
+    PlanReport, PlanReportDraft, PlanVerifyReportDraft, PlanVerifyRowDraft,
 };
 use crate::operations::prompt::{
-    PromptDeleteOutcome, PromptListAnswer, PromptListEntry, PromptSetOutcome,
+    PromptDeleteOutcome, PromptDeleteOutcomeDraft, PromptListAnswer, PromptListAnswerDraft,
+    PromptListEntryDraft, PromptSetOutcome, PromptSetOutcomeDraft,
 };
 use crate::operations::purge::{
-    PurgeAnswer, PurgeBulkFailure, PurgeBulkFile, PurgeBulkResult, PurgeResult,
+    PurgeAnswer, PurgeAnswerDraft, PurgeBulkFailure, PurgeBulkFile, PurgeBulkResult, PurgeResult,
 };
-use crate::operations::sandbox::SandboxListEntry;
+use crate::operations::sandbox::SandboxListEntryDraft;
 use crate::operations::sandbox::{SandboxBulkResult, SandboxFailure};
 use crate::operations::search::SearchHitLocation;
-use crate::operations::sign::{RepairedChecksumEntry, SignResult, SignedEntry, SkippedEntry};
+use crate::operations::sign::{
+    RepairedChecksumEntryDraft, SignResult, SignResultDraft, SignedEntryDraft, SkippedEntryDraft,
+};
 use crate::operations::verify::{
     FileVerifyOutcome, FolderVerifyReport, RecipientStatus, RowStatus, SignatureStatus,
-    VerifyAnswer, VerifyReport,
+    VerifyAnswer, VerifyAnswerDraft, VerifyReport,
 };
 use crate::parser::AuthorType;
 use crate::permissions::inspect::{
-    AllowDotFoldersView, CheckOutput, DenyOpsItemView, DenyOpsView, MatchingRule, ShowOutput,
-    TrustedRootView,
+    AllowDotFoldersViewDraft, CheckOutput, CheckOutputDraft, DenyOpsItemViewDraft,
+    DenyOpsViewDraft, MatchingRuleDraft, ShowOutput, ShowOutputDraft, TrustedRootViewDraft,
 };
-use crate::responses::CommentCreated;
+use crate::responses::{CommentCreated, CommentCreatedDraft};
 
 fn ts() -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339("2026-01-02T03:04:05Z").unwrap()
 }
 
 fn plain_row() -> CommentRow {
-    CommentRow::Plain((
+    CommentRowDraft::Plain((
         String::from("c1"),
         4,
         String::from("alice"),
@@ -66,10 +72,11 @@ fn plain_row() -> CommentRow {
         Vec::new(),
         String::from("hi"),
     ))
+    .into()
 }
 
 fn integrity_row() -> CommentRow {
-    CommentRow::WithIntegrity((
+    CommentRowDraft::WithIntegrity((
         String::from("c1"),
         4,
         String::from("alice"),
@@ -87,6 +94,7 @@ fn integrity_row() -> CommentRow {
         None,
         String::from("hi"),
     ))
+    .into()
 }
 
 #[test]
@@ -136,12 +144,14 @@ fn comment_rows_have_14_or_16_columns() {
 
 #[test]
 fn comments_page_writes_effective_limit_only_when_the_cap_trimmed() {
-    let page = |effective_limit| CommentsPage {
-        comment_cols: vec![String::from("id")],
-        comments: vec![plain_row()],
-        effective_limit,
-        elapsed_ms: 0,
-        total: 9,
+    let page = |effective_limit| {
+        CommentsPage::from(CommentsPageDraft {
+            comment_cols: vec![String::from("id")],
+            comments: vec![plain_row()],
+            effective_limit,
+            elapsed_ms: 0,
+            total: 9,
+        })
     };
 
     let whole = serde_json::to_value(page(None)).unwrap();
@@ -155,23 +165,23 @@ fn comments_page_writes_effective_limit_only_when_the_cap_trimmed() {
 
 #[test]
 fn with_elapsed_ms_sets_elapsed_ms_beside_the_fields_of_its_success() {
-    let page = CommentsPage {
+    let page = CommentsPage::from(CommentsPageDraft {
         comment_cols: Vec::new(),
         comments: Vec::new(),
         effective_limit: None,
         elapsed_ms: 0,
         total: 0,
-    };
+    });
 
     assert_eq!(
         serde_json::to_value(page.with_elapsed_ms(12)).unwrap(),
         json!({ "comment_cols": [], "comments": [], "elapsed_ms": 12_u64, "total": 0_u64 })
     );
-    let created = CommentCreated {
+    let created = CommentCreated::from(CommentCreatedDraft {
         elapsed_ms: 0,
         id: String::from("abc"),
         warnings: Vec::new(),
-    };
+    });
     assert_eq!(
         serde_json::to_value(created.with_elapsed_ms(3)).unwrap(),
         json!({ "elapsed_ms": 3_u64, "id": "abc" })
@@ -180,24 +190,29 @@ fn with_elapsed_ms_sets_elapsed_ms_beside_the_fields_of_its_success() {
 
 #[test]
 fn search_rows_have_4_or_6_columns() {
-    let page = |row| SearchPage {
-        effective_limit: None,
-        elapsed_ms: 0,
-        files: vec![SearchFile {
-            matches: vec![row],
-            path: String::from("a.md"),
-        }],
-        match_cols: vec![String::from("line")],
-        total: 1,
+    let page = |row| {
+        SearchPage::from(SearchPageDraft {
+            effective_limit: None,
+            elapsed_ms: 0,
+            files: vec![
+                SearchFileDraft {
+                    matches: vec![row],
+                    path: String::from("a.md"),
+                }
+                .into(),
+            ],
+            match_cols: vec![String::from("line")],
+            total: 1,
+        })
     };
 
     assert_eq!(
-        serde_json::to_value(page(MatchRow::Plain((
+        serde_json::to_value(page(MatchRow::from(MatchRowDraft::Plain((
             2,
             SearchHitLocation::Body,
             String::from("needle"),
             None
-        ))))
+        )))))
         .unwrap(),
         json!({
             "elapsed_ms": 0_u64,
@@ -207,14 +222,17 @@ fn search_rows_have_4_or_6_columns() {
         })
     );
     assert_eq!(
-        serde_json::to_value(page(MatchRow::WithContext((
-            2,
-            SearchHitLocation::Comment,
-            String::from("needle"),
-            Some(String::from("c1")),
-            vec![String::from("before")],
-            Vec::new(),
-        ))))
+        serde_json::to_value(page(
+            MatchRowDraft::WithContext((
+                2,
+                SearchHitLocation::Comment,
+                String::from("needle"),
+                Some(String::from("c1")),
+                vec![String::from("before")],
+                Vec::new(),
+            ))
+            .into()
+        ))
         .unwrap()["files"][0]["matches"],
         json!([[2_u64, "comment", "needle", "c1", ["before"], []]])
     );
@@ -222,28 +240,30 @@ fn search_rows_have_4_or_6_columns() {
 
 #[test]
 fn query_file_omits_comments_in_summary_mode() {
-    let file = |comments| QueryFile {
-        comment_count: 2,
-        comments,
-        last_activity: None,
-        matched_count: 1,
-        path: "a.md".into(),
-        pending_count: 0,
-        pending_for: None,
+    let file = |comments| {
+        QueryFile::from(QueryFileDraft {
+            comment_count: 2,
+            comments,
+            last_activity: None,
+            matched_count: 1,
+            path: "a.md".into(),
+            pending_count: 0,
+            pending_for: None,
+        })
     };
 
     assert_eq!(
         serde_json::to_value(file(None)).unwrap(),
         json!({ "comment_count": 2_u64, "matched_count": 1_u64, "path": "a.md", "pending_count": 0_u64 })
     );
-    let page = QueryPage {
+    let page = QueryPage::from(QueryPageDraft {
         base_path: String::from("./"),
         comment_cols: Vec::new(),
         effective_limit: None,
         elapsed_ms: 0,
         results: vec![file(Some(vec![plain_row()]))],
         total: 1,
-    };
+    });
     let written = serde_json::to_value(page).unwrap();
     assert_eq!(written["results"][0]["comments"][0][0], json!("c1"));
     assert_eq!(written["base_path"], json!("./"));
@@ -251,7 +271,7 @@ fn query_file_omits_comments_in_summary_mode() {
 
 #[test]
 fn activity_page_writes_a_null_newest_ts_overall() {
-    let page = ActivityPage {
+    let page = ActivityPage::from(ActivityPageDraft {
         change_cols: Vec::new(),
         cutoff_explicit: false,
         effective_limit: None,
@@ -259,7 +279,7 @@ fn activity_page_writes_a_null_newest_ts_overall() {
         files: Vec::new(),
         newest_ts_overall: None,
         total: 0,
-    };
+    });
 
     assert_eq!(
         serde_json::to_value(page).unwrap(),
@@ -276,26 +296,32 @@ fn activity_page_writes_a_null_newest_ts_overall() {
 
 #[test]
 fn get_answers_are_the_lines_or_the_content() {
-    let content = GetAnswer::Content(GetContent {
-        content: String::from("a\nb"),
-        effective_end_line: None,
-        links: Vec::new(),
-        links_cols: vec![String::from("alias")],
-        total_lines: 2,
-    });
+    let content = GetAnswer::from(GetAnswerDraft::Content(
+        GetContentDraft {
+            content: String::from("a\nb"),
+            effective_end_line: None,
+            links: Vec::new(),
+            links_cols: vec![String::from("alias")],
+            total_lines: 2,
+        }
+        .into(),
+    ));
     assert_eq!(
         serde_json::to_value(content).unwrap(),
         json!({ "content": "a\nb", "links": [], "links_cols": ["alias"], "total_lines": 2_u64 })
     );
 
-    let lines = GetAnswer::Lines(GetLines {
-        effective_end_line: Some(2),
-        lines: vec![String::from("a"), String::from("b")],
-        links: Vec::new(),
-        links_cols: Vec::new(),
-        start_line: 1,
-        total_lines: 5,
-    });
+    let lines = GetAnswer::from(GetAnswerDraft::Lines(
+        GetLinesDraft {
+            effective_end_line: Some(2),
+            lines: vec![String::from("a"), String::from("b")],
+            links: Vec::new(),
+            links_cols: Vec::new(),
+            start_line: 1,
+            total_lines: 5,
+        }
+        .into(),
+    ));
     assert_eq!(
         serde_json::to_value(lines).unwrap(),
         json!({
@@ -311,13 +337,13 @@ fn get_answers_are_the_lines_or_the_content() {
 
 #[test]
 fn identity_created_writes_a_null_key_and_type() {
-    let created = IdentityCreated {
+    let created = IdentityCreated::from(IdentityCreatedDraft {
         author_type: String::from("human"),
         elapsed_ms: 0,
         identity: String::from("alice"),
         key: None,
         yaml: String::from("identity: alice\ntype: human\n"),
-    };
+    });
 
     assert_eq!(
         serde_json::to_value(created).unwrap(),
@@ -333,13 +359,13 @@ fn identity_created_writes_a_null_key_and_type() {
 
 #[test]
 fn report_spill_answers_the_caps() {
-    let answer = ReportSpillAnswer {
+    let answer = ReportSpillAnswer::from(ReportSpillAnswerDraft {
         elapsed_ms: 0,
         inferred: true,
         previous_cap: 40_000,
         reported_size: 1000,
         spill_cap: 1000,
-    };
+    });
 
     assert_eq!(
         serde_json::to_value(answer).unwrap(),
@@ -356,43 +382,48 @@ fn report_spill_answers_the_caps() {
 #[test]
 fn ls_answers_its_entries() {
     let entries = vec![
-        ListEntry {
+        ListEntryDraft {
             is_dir: false,
             path: PathBuf::from("notes/a.md"),
             remargin_last_activity: Some(String::from("2026-01-02T03:04:05Z")),
             remargin_pending: Some(2),
             size: Some(120),
-        },
-        ListEntry {
+        }
+        .into(),
+        ListEntryDraft {
             is_dir: true,
             path: PathBuf::from("notes"),
             remargin_last_activity: None,
             remargin_pending: None,
             size: None,
-        },
+        }
+        .into(),
     ];
     let expected = json!({ "elapsed_ms": 0_u64, "entries": entries });
 
-    let typed = LsAnswer {
+    let typed = LsAnswer::from(LsAnswerDraft {
         elapsed_ms: 0,
         entries,
-    };
+    });
 
     assert_eq!(serde_json::to_value(&typed).unwrap(), expected);
 }
 
 #[test]
 fn sandbox_list_answers_its_files() {
-    let files = vec![SandboxListEntry {
-        path: String::from("notes/a.md"),
-        since: String::from("2026-01-02T03:04:05Z"),
-    }];
+    let files = vec![
+        SandboxListEntryDraft {
+            path: String::from("notes/a.md"),
+            since: String::from("2026-01-02T03:04:05Z"),
+        }
+        .into(),
+    ];
     let expected = json!({ "elapsed_ms": 0_u64, "files": files });
 
-    let typed = SandboxListAnswer {
+    let typed = SandboxListAnswer::from(SandboxListAnswerDraft {
         elapsed_ms: 0,
         files,
-    };
+    });
 
     assert_eq!(serde_json::to_value(&typed).unwrap(), expected);
 }
@@ -400,20 +431,29 @@ fn sandbox_list_answers_its_files() {
 #[test]
 fn lint_answers_its_findings_and_ok() {
     let dirty = LintReport {
-        errors: vec![LintErrorView {
-            line: 3,
-            message: String::from("unclosed fence"),
-        }],
-        permissions: vec![PermissionsLintErrorView {
-            column: None,
-            line: Some(2),
-            message: String::from("bad yaml"),
-            source_file: PathBuf::from("/vault/.remargin.yaml"),
-        }],
-        recipients: vec![LintErrorView {
-            line: 9,
-            message: String::from("unknown recipient"),
-        }],
+        errors: vec![
+            LintErrorViewDraft {
+                line: 3,
+                message: String::from("unclosed fence"),
+            }
+            .into(),
+        ],
+        permissions: vec![
+            PermissionsLintErrorViewDraft {
+                column: None,
+                line: Some(2),
+                message: String::from("bad yaml"),
+                source_file: PathBuf::from("/vault/.remargin.yaml"),
+            }
+            .into(),
+        ],
+        recipients: vec![
+            LintErrorViewDraft {
+                line: 9,
+                message: String::from("unknown recipient"),
+            }
+            .into(),
+        ],
     };
     assert_eq!(
         serde_json::to_value(dirty.answer()).unwrap(),
@@ -445,18 +485,20 @@ fn lint_answers_its_findings_and_ok() {
 #[test]
 fn mv_answers_its_outcome() {
     let outcome = MvOutcome {
-        action: MvAction {
+        action: MvActionDraft {
             fallback_copy: true,
             overwritten: false,
-        },
+        }
+        .into(),
         bytes_moved: 12,
         dst_absolute: PathBuf::from("/vault/b.md"),
         nested_files_moved: 3,
         src_absolute: PathBuf::from("/vault/a.md"),
-        topology: MvTopology {
+        topology: MvTopologyDraft {
             is_directory: true,
             noop_same_path: false,
-        },
+        }
+        .into(),
     };
     assert_eq!(
         serde_json::to_value(outcome.answer()).unwrap(),
@@ -481,7 +523,7 @@ fn purge_answers_a_file() {
         comments_removed: 5,
     };
     assert_eq!(
-        serde_json::to_value(PurgeAnswer::File(result.answer())).unwrap(),
+        serde_json::to_value(PurgeAnswer::from(PurgeAnswerDraft::File(result.answer()))).unwrap(),
         json!({ "elapsed_ms": 0_u64, "attachments_cleaned": 2_usize, "comments_removed": 5_usize })
     );
 }
@@ -508,7 +550,10 @@ fn purge_answers_a_folder() {
         skipped: vec![PathBuf::from("/vault/docs/clean.md")],
     };
     assert_eq!(
-        serde_json::to_value(PurgeAnswer::Directory(result.answer(Path::new("/vault")))).unwrap(),
+        serde_json::to_value(PurgeAnswer::from(PurgeAnswerDraft::Directory(
+            result.answer(Path::new("/vault"))
+        )))
+        .unwrap(),
         json!({
             "elapsed_ms": 0_u64,
             "attachments_cleaned": 1_usize,
@@ -557,22 +602,31 @@ fn rm_answers_a_directory() {
 
 #[test]
 fn sign_answers_its_lists() {
-    let result = SignResult {
+    let result = SignResult::from(SignResultDraft {
         elapsed_ms: 0,
-        repaired: vec![RepairedChecksumEntry {
-            id: String::from("c3"),
-            new_checksum: String::from("sha256:new"),
-            old_checksum: String::from("sha256:old"),
-        }],
-        signed: vec![SignedEntry {
-            id: String::from("c1"),
-            ts: String::from("2026-01-02T03:04:05Z"),
-        }],
-        skipped: vec![SkippedEntry {
-            id: String::from("c2"),
-            reason: String::from("already_signed"),
-        }],
-    };
+        repaired: vec![
+            RepairedChecksumEntryDraft {
+                id: String::from("c3"),
+                new_checksum: String::from("sha256:new"),
+                old_checksum: String::from("sha256:old"),
+            }
+            .into(),
+        ],
+        signed: vec![
+            SignedEntryDraft {
+                id: String::from("c1"),
+                ts: String::from("2026-01-02T03:04:05Z"),
+            }
+            .into(),
+        ],
+        skipped: vec![
+            SkippedEntryDraft {
+                id: String::from("c2"),
+                reason: String::from("already_signed"),
+            }
+            .into(),
+        ],
+    });
     assert_eq!(
         serde_json::to_value(&result).unwrap(),
         json!({
@@ -583,7 +637,7 @@ fn sign_answers_its_lists() {
         })
     );
     assert_eq!(
-        serde_json::to_value(SignResult::default()).unwrap(),
+        serde_json::to_value(SignResult::from(SignResultDraft::default())).unwrap(),
         json!({ "elapsed_ms": 0_u64, "repaired": [], "signed": [], "skipped": [] })
     );
 }
@@ -610,7 +664,7 @@ fn verify_answers_a_passing_file() {
         )],
     };
     assert_eq!(
-        serde_json::to_value(VerifyAnswer::File(report.answer())).unwrap(),
+        serde_json::to_value(VerifyAnswer::from(VerifyAnswerDraft::File(report.answer()))).unwrap(),
         json!({
             "elapsed_ms": 0_u64,
             "ok": true,
@@ -640,7 +694,8 @@ fn verify_answers_a_failing_file() {
             verify_row("c3", SignatureStatus::Missing, RecipientStatus::Ok),
         ],
     };
-    let value = serde_json::to_value(VerifyAnswer::File(report.answer())).unwrap();
+    let value =
+        serde_json::to_value(VerifyAnswer::from(VerifyAnswerDraft::File(report.answer()))).unwrap();
     assert_eq!(value["ok"], json!(false));
     assert_eq!(
         value["results"][0],
@@ -695,7 +750,10 @@ fn verify_answers_a_folder() {
         ok: false,
     };
     assert_eq!(
-        serde_json::to_value(VerifyAnswer::Folder(report.answer())).unwrap(),
+        serde_json::to_value(VerifyAnswer::from(VerifyAnswerDraft::Folder(
+            report.answer()
+        )))
+        .unwrap(),
         json!({
             "elapsed_ms": 0_u64,
             "failures": [
@@ -741,10 +799,13 @@ fn write_answers_every_flag_combination() {
 fn write_answers_its_warnings_only_when_there_are_some() {
     let outcome = WriteOutcome {
         noop: true,
-        warnings: vec![Advice {
-            line: 4,
-            message: String::from("heading skipped"),
-        }],
+        warnings: vec![
+            AdviceDraft {
+                line: 4,
+                message: String::from("heading skipped"),
+            }
+            .into(),
+        ],
     };
     assert_eq!(
         serde_json::to_value(outcome.answer("a.md", false, false)).unwrap(),
@@ -798,14 +859,14 @@ fn sandbox_remove_answers_its_paths() {
 
 #[test]
 fn prompt_resolve_answers_the_fallback_and_a_found_block() {
-    let fallback = ResolvedSystemPrompt {
+    let fallback = ResolvedSystemPrompt::from(ResolvedSystemPromptDraft {
         elapsed_ms: 0,
         is_default: true,
         name: String::from("default"),
         prompt: String::from("Please process"),
         runner: None,
         source: None,
-    };
+    });
     assert_eq!(
         serde_json::to_value(&fallback).unwrap(),
         json!({
@@ -817,14 +878,14 @@ fn prompt_resolve_answers_the_fallback_and_a_found_block() {
             "source": null,
         })
     );
-    let found = ResolvedSystemPrompt {
+    let found = ResolvedSystemPrompt::from(ResolvedSystemPromptDraft {
         elapsed_ms: 0,
         is_default: false,
         name: String::from("docs"),
         prompt: String::from("Do it"),
         runner: Some(String::from("claude")),
         source: Some(PathBuf::from("/vault/.remargin.yaml")),
-    };
+    });
     assert_eq!(
         serde_json::to_value(&found).unwrap(),
         json!({
@@ -840,22 +901,22 @@ fn prompt_resolve_answers_the_fallback_and_a_found_block() {
 
 #[test]
 fn prompt_set_and_delete_answer_their_flags() {
-    let set = PromptSetOutcome {
+    let set = PromptSetOutcome::from(PromptSetOutcomeDraft {
         created: true,
         elapsed_ms: 0,
         noop: false,
         source: PathBuf::from("/vault/.remargin.yaml"),
-    };
+    });
     assert_eq!(
         serde_json::to_value(&set).unwrap(),
         json!({ "elapsed_ms": 0_u64, "created": true, "noop": false, "source": "/vault/.remargin.yaml" })
     );
-    let delete = PromptDeleteOutcome {
+    let delete = PromptDeleteOutcome::from(PromptDeleteOutcomeDraft {
         absent: false,
         elapsed_ms: 0,
         left_empty: true,
         source: PathBuf::from("/vault/.remargin.yaml"),
-    };
+    });
     assert_eq!(
         serde_json::to_value(&delete).unwrap(),
         json!({ "elapsed_ms": 0_u64, "absent": false, "left_empty": true, "source": "/vault/.remargin.yaml" })
@@ -865,26 +926,28 @@ fn prompt_set_and_delete_answer_their_flags() {
 #[test]
 fn prompt_list_answers_its_entries() {
     let entries = vec![
-        PromptListEntry {
+        PromptListEntryDraft {
             folder: PathBuf::from("/vault"),
             name: Some(String::from("docs")),
             prompt: String::from("Do it"),
             runner: None,
             source: PathBuf::from("/vault/.remargin.yaml"),
-        },
-        PromptListEntry {
+        }
+        .into(),
+        PromptListEntryDraft {
             folder: PathBuf::from("/vault/sub"),
             name: None,
             prompt: String::from("Other"),
             runner: Some(String::from("claude")),
             source: PathBuf::from("/vault/sub/.remargin.yaml"),
-        },
+        }
+        .into(),
     ];
     assert_eq!(
-        serde_json::to_value(PromptListAnswer {
+        serde_json::to_value(PromptListAnswer::from(PromptListAnswerDraft {
             elapsed_ms: 0,
             entries
-        })
+        }))
         .unwrap(),
         json!({ "elapsed_ms": 0_u64, "entries": [
             {
@@ -907,39 +970,50 @@ fn prompt_list_answers_its_entries() {
 
 #[test]
 fn permissions_show_answers_the_resolved_permissions() {
-    let report = ShowOutput {
-        allow_dot_folders: vec![AllowDotFoldersView {
-            names: vec![String::from(".notes")],
-            source_file: PathBuf::from("/vault/.remargin.yaml"),
-        }],
-        deny_ops: vec![DenyOpsView {
-            ops: vec![DenyOpsItemView {
-                exceptions: vec![String::from("alice")],
-                name: String::from("purge"),
-            }],
-            path: PathBuf::from("/vault/locked"),
-            source_file: PathBuf::from("/vault/.remargin.yaml"),
-        }],
+    let report = ShowOutput::from(ShowOutputDraft {
+        allow_dot_folders: vec![
+            AllowDotFoldersViewDraft {
+                names: vec![String::from(".notes")],
+                source_file: PathBuf::from("/vault/.remargin.yaml"),
+            }
+            .into(),
+        ],
+        deny_ops: vec![
+            DenyOpsViewDraft {
+                ops: vec![
+                    DenyOpsItemViewDraft {
+                        exceptions: vec![String::from("alice")],
+                        name: String::from("purge"),
+                    }
+                    .into(),
+                ],
+                path: PathBuf::from("/vault/locked"),
+                source_file: PathBuf::from("/vault/.remargin.yaml"),
+            }
+            .into(),
+        ],
         elapsed_ms: 0,
         trusted_roots: vec![
-            TrustedRootView {
+            TrustedRootViewDraft {
                 absolute_path: Some(PathBuf::from("/vault/src")),
                 also_deny_bash: vec![String::from("rm")],
                 cli_allowed: true,
                 path_text: String::from("src"),
                 realm_root: None,
                 source_file: PathBuf::from("/vault/.remargin.yaml"),
-            },
-            TrustedRootView {
+            }
+            .into(),
+            TrustedRootViewDraft {
                 absolute_path: None,
                 also_deny_bash: Vec::new(),
                 cli_allowed: false,
                 path_text: String::from("*"),
                 realm_root: Some(PathBuf::from("/vault")),
                 source_file: PathBuf::from("/vault/.remargin.yaml"),
-            },
+            }
+            .into(),
         ],
-    };
+    });
     assert_eq!(
         serde_json::to_value(&report).unwrap(),
         json!({
@@ -974,26 +1048,29 @@ fn permissions_show_answers_the_resolved_permissions() {
 
 #[test]
 fn permissions_check_answers_with_and_without_a_rule() {
-    let plain = CheckOutput {
+    let plain = CheckOutput::from(CheckOutputDraft {
         elapsed_ms: 0,
         matching_rule: None,
         path: PathBuf::from("/vault/a.md"),
         restricted: false,
-    };
+    });
     assert_eq!(
         serde_json::to_value(&plain).unwrap(),
         json!({ "elapsed_ms": 0_u64, "matching_rule": null, "path": "/vault/a.md", "restricted": false })
     );
-    let restricted = CheckOutput {
+    let restricted = CheckOutput::from(CheckOutputDraft {
         elapsed_ms: 0,
-        matching_rule: Some(MatchingRule {
-            kind: String::from("trusted_roots"),
-            rule_text: String::from("outside trusted_roots"),
-            source_file: PathBuf::from("/vault/.remargin.yaml"),
-        }),
+        matching_rule: Some(
+            MatchingRuleDraft {
+                kind: String::from("trusted_roots"),
+                rule_text: String::from("outside trusted_roots"),
+                source_file: PathBuf::from("/vault/.remargin.yaml"),
+            }
+            .into(),
+        ),
         path: PathBuf::from("/other/a.md"),
         restricted: true,
-    };
+    });
     assert_eq!(
         serde_json::to_value(&restricted).unwrap(),
         json!({
@@ -1010,16 +1087,17 @@ fn permissions_check_answers_with_and_without_a_rule() {
 }
 
 fn plan_report(mv_diff: Option<MvDiff>, warnings: Vec<OpAdvice>) -> PlanReport {
-    PlanReport {
+    PlanReportDraft {
         changed_line_ranges: vec![[2, 4]],
         checksum_after: String::from("sha256:after"),
         checksum_before: String::from("sha256:before"),
-        comments: CommentDiff {
+        comments: CommentDiffDraft {
             added: vec![String::from("c9")],
             destroyed: Vec::new(),
             modified: vec![String::from("c2")],
             preserved: vec![String::from("c1")],
-        },
+        }
+        .into(),
         config_diff: None,
         cp_diff: None,
         elapsed_ms: 0,
@@ -1031,17 +1109,22 @@ fn plan_report(mv_diff: Option<MvDiff>, warnings: Vec<OpAdvice>) -> PlanReport {
         reject_reason: None,
         subset_gate: None,
         unprotect_diff: None,
-        verify_after: PlanVerifyReport {
+        verify_after: PlanVerifyReportDraft {
             ok: true,
-            rows: vec![PlanVerifyRow {
-                checksum_ok: true,
-                id: String::from("c1"),
-                signature: String::from("valid"),
-            }],
-        },
+            rows: vec![
+                PlanVerifyRowDraft {
+                    checksum_ok: true,
+                    id: String::from("c1"),
+                    signature: String::from("valid"),
+                }
+                .into(),
+            ],
+        }
+        .into(),
         warnings,
         would_commit: true,
     }
+    .into()
 }
 
 #[test]
@@ -1050,10 +1133,11 @@ fn plan_answers_a_document_projection() {
         None,
         vec![OpAdvice::new(
             1,
-            Advice {
+            AdviceDraft {
                 line: 4,
                 message: String::from("heading skipped"),
-            },
+            }
+            .into(),
         )],
     );
     assert_eq!(
@@ -1086,20 +1170,25 @@ fn plan_answers_a_document_projection() {
 #[test]
 fn plan_answers_a_move_projection() {
     let report = plan_report(
-        Some(MvDiff {
-            dst_absolute: PathBuf::from("/vault/b.md"),
-            existence: MvExistence {
-                dst_exists: false,
-                is_directory: false,
-                src_exists: true,
-            },
-            nested_files_moved: 0,
-            src_absolute: PathBuf::from("/vault/a.md"),
-            state: MvState {
-                idempotent_already_settled: false,
-                noop_same_path: false,
-            },
-        }),
+        Some(
+            MvDiffDraft {
+                dst_absolute: PathBuf::from("/vault/b.md"),
+                existence: MvExistenceDraft {
+                    dst_exists: false,
+                    is_directory: false,
+                    src_exists: true,
+                }
+                .into(),
+                nested_files_moved: 0,
+                src_absolute: PathBuf::from("/vault/a.md"),
+                state: MvStateDraft {
+                    idempotent_already_settled: false,
+                    noop_same_path: false,
+                }
+                .into(),
+            }
+            .into(),
+        ),
         Vec::new(),
     );
     assert_eq!(
@@ -1119,7 +1208,7 @@ fn plan_answers_a_move_projection() {
 
 #[test]
 fn whoami_answers_a_found_and_a_missing_identity() {
-    let found = IdentityReport {
+    let found = IdentityReport::from(IdentityReportDraft {
         author_type: Some(String::from("human")),
         elapsed_ms: 0,
         found: true,
@@ -1127,7 +1216,7 @@ fn whoami_answers_a_found_and_a_missing_identity() {
         key: Some(String::from("/keys/alice")),
         mode: Some(String::from("strict")),
         path: Some(String::from("/vault/.remargin.yaml")),
-    };
+    });
     assert_eq!(
         serde_json::to_value(&found).unwrap(),
         json!({

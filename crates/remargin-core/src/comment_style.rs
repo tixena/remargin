@@ -23,7 +23,7 @@ use std::sync::LazyLock;
 use anyhow::{Result, bail};
 use regex::Regex;
 
-use crate::advice::{self, Advice};
+use crate::advice::{self, Advice, AdviceDraft};
 use crate::parser::AuthorType;
 
 /// Generous on purpose: the check should fire only on a body that is unarguably a slab.
@@ -164,10 +164,13 @@ fn refuse(findings: impl IntoIterator<Item = StyleFinding>) -> Result<()> {
 pub fn notes(content: &str) -> Vec<Advice> {
     let mut notes = advice::review(content);
     notes.extend(review(content).into_iter().filter_map(|finding| {
-        (finding.kind.severity() == Severity::Warn).then_some(Advice {
-            line: finding.line,
-            message: finding.message,
-        })
+        (finding.kind.severity() == Severity::Warn).then_some(
+            AdviceDraft {
+                line: finding.line,
+                message: finding.message,
+            }
+            .into(),
+        )
     }));
     notes.sort_by_key(|note| note.line);
     notes
@@ -240,6 +243,7 @@ fn check_hard_wraps(content: &str, findings: &mut Vec<StyleFinding>) {
     findings.extend(
         advice::hard_wrapped_paragraphs(content)
             .into_iter()
+            .map(Advice::into_draft)
             .map(|note| StyleFinding {
                 kind: FindingKind::HardWrap,
                 line: note.line,

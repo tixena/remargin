@@ -8,7 +8,7 @@ use os_shim::System;
 
 use crate::config::ResolvedConfig;
 use crate::config::permissions::resolve::ResolvedPermissions;
-use crate::mcp::errors::{HumanIdentityRejected, RemarginError};
+use crate::mcp::errors::{HumanIdentityRejected, RemarginError, RemarginErrorDraft};
 use crate::mcp::{HUMAN_IDENTITY_EXEMPT_TOOLS, check_one_path};
 use crate::parser::AuthorType;
 use crate::path::expand_path;
@@ -34,10 +34,13 @@ impl RequestContext<'_> {
         if matches!(self.config.author_type, Some(AuthorType::Human))
             && !HUMAN_IDENTITY_EXEMPT_TOOLS.contains(&tool)
         {
-            return Err(RemarginError::HumanIdentity(HumanIdentityRejected::new(
-                self.config.identity.as_deref().unwrap_or("<unknown>"),
-                tool,
-            )));
+            return Err(
+                RemarginErrorDraft::HumanIdentity(HumanIdentityRejected::new(
+                    self.config.identity.as_deref().unwrap_or("<unknown>"),
+                    tool,
+                ))
+                .into(),
+            );
         }
         let mut expanded = Vec::with_capacity(paths.len());
         for raw in paths {

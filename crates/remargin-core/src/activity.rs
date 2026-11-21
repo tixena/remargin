@@ -303,12 +303,13 @@ fn to_compact_file(file: &FileChanges) -> Value {
 /// `null`), `changes` become positional rows.
 #[must_use = "the return value is the only result of this call"]
 pub fn compact_file(file: &FileChanges) -> CompactFileChanges {
-    CompactFileChanges {
+    CompactFileChangesDraft {
         changes: file.changes.iter().map(to_compact_row).collect(),
         cutoff_applied: file.cutoff_applied,
         newest_ts: file.newest_ts,
         path: file.path.clone(),
     }
+    .into()
 }
 
 /// Gathers the changes under `path` (a file or a directory) since `since`.

@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use os_shim::mock::MemorySystem;
 
 use super::{
-    PlanIdentity, PlanRequest, diff_comment_sets, dispatch, project_doc_report, project_report,
-    whole_file_checksum,
+    PlanIdentity, PlanIdentityDraft, PlanRequest, diff_comment_sets, dispatch, project_doc_report,
+    project_report, whole_file_checksum,
 };
 use crate::advice::OpAdvice;
 use crate::comment_style;
@@ -46,11 +46,12 @@ fn open_config() -> ResolvedConfig {
 }
 
 fn test_identity() -> PlanIdentity {
-    PlanIdentity {
+    PlanIdentityDraft {
         author_type: Some(String::from("human")),
         name: Some(String::from("eduardo")),
         would_sign: false,
     }
+    .into()
 }
 
 #[test]
@@ -208,7 +209,7 @@ fn project_doc_report_introduced_anomaly_populates_subset_gate() {
     .unwrap();
 
     assert!(!report.would_commit);
-    let gate = report.subset_gate.unwrap();
+    let gate = report.into_draft().subset_gate.unwrap();
     assert_eq!(gate.path, path);
     assert_eq!(gate.mode, "open");
     assert_eq!(gate.introduced.len(), 1);
@@ -273,9 +274,10 @@ fn project_doc_report_escalates_mode_to_realm_yaml() {
     )
     .unwrap();
 
-    let gate = report.subset_gate.unwrap();
+    let draft = report.into_draft();
+    let gate = draft.subset_gate.unwrap();
     assert_eq!(gate.mode, "strict");
-    assert!(!report.would_commit);
+    assert!(!draft.would_commit);
 }
 
 fn system_with_one_comment() -> MemorySystem {

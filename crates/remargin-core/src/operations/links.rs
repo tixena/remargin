@@ -37,9 +37,9 @@ pub const LINK_COLS: [&str; 4] = ["alias", "lines", "target", "title"];
 /// One `Link` exists per distinct `target`; every occurrence of that
 /// target in the scanned text contributes its line to `lines` and
 /// bumps `count`.
+#[model_schema]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct Link {
     /// Display text the link used, when it carried one
     /// (`[[X|the model]]` -> `"the model"`, `[text](url)` -> `"text"`).
@@ -106,7 +106,8 @@ struct Resolved {
 pub fn to_compact_rows(links: Vec<Link>) -> Vec<CompactLinkRow> {
     links
         .into_iter()
-        .map(|l| (l.alias, l.lines, l.target, l.title))
+        .map(Link::into_draft)
+        .map(|link| (link.alias, link.lines, link.target, link.title))
         .collect()
 }
 
@@ -135,7 +136,7 @@ pub fn extract_links(body: &str, base_dir: &Path, system: &dyn System) -> Vec<Li
 /// internal targets same-folder only and dropping broken internal links
 /// and every external URL (local links only).
 fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) -> Vec<Link> {
-    let mut out: Vec<Link> = Vec::new();
+    let mut out: Vec<LinkDraft> = Vec::new();
 
     for occurrence in raw {
         // Drop external URLs before the dedup-append branch, so an external target never creates an
@@ -158,7 +159,7 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
             Some(resolved) => (Some(resolved.path), resolved.title),
         };
 
-        out.push(Link {
+        out.push(LinkDraft {
             alias: occurrence.alias,
             count: 1,
             lines: vec![occurrence.line],
@@ -168,7 +169,7 @@ fn dedup_and_resolve(raw: Vec<RawLink>, base_dir: &Path, system: &dyn System) ->
         });
     }
 
-    out
+    out.into_iter().map(Into::into).collect()
 }
 
 /// Resolve `target` against `base_dir` only. Returns `None` when no

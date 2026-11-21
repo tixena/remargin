@@ -179,27 +179,35 @@ pub fn sign_comments(
     let mut signed = Vec::new();
     let mut repaired = Vec::new();
     for seg in &mut doc.segments {
-        if let Segment::Comment(cm) = seg
-            && target_ids.contains(&cm.id)
+        if let Segment::Comment(boxed) = seg
+            && target_ids.contains(&boxed.id)
         {
+            let mut cm = Comment::clone(boxed).into_draft();
             if options.repair_checksum {
                 let fresh = compute_checksum(&cm.content, cm.kinds());
                 if fresh != cm.checksum {
-                    repaired.push(RepairedChecksumEntry {
-                        id: cm.id.clone(),
-                        old_checksum: cm.checksum.clone(),
-                        new_checksum: fresh.clone(),
-                    });
+                    repaired.push(
+                        RepairedChecksumEntryDraft {
+                            id: cm.id.clone(),
+                            old_checksum: cm.checksum.clone(),
+                            new_checksum: fresh.clone(),
+                        }
+                        .into(),
+                    );
                     cm.checksum = fresh;
                 }
             }
-            let sig = compute_signature(cm, &key_path, system)
+            let sig = compute_signature(&cm, &key_path, system)
                 .with_context(|| format!("signing comment {:?}", cm.id))?;
             cm.signature = Some(sig);
-            signed.push(SignedEntry {
-                id: cm.id.clone(),
-                ts: parser::rfc3339_z(&cm.ts),
-            });
+            signed.push(
+                SignedEntryDraft {
+                    id: cm.id.clone(),
+                    ts: parser::rfc3339_z(&cm.ts),
+                }
+                .into(),
+            );
+            **boxed = cm.into();
         }
     }
 
@@ -209,12 +217,13 @@ pub fn sign_comments(
         writer::write_document(system, path, verified_doc, &empty, &empty)
     })?;
 
-    Ok(SignResult {
+    Ok(SignResultDraft {
         elapsed_ms: 0,
         repaired,
         signed,
         skipped: skipped_for_ids,
-    })
+    }
+    .into())
 }
 
 /// Walk the document and split each comment into "to sign" / "skip with
@@ -270,10 +279,13 @@ pub(crate) fn classify_candidates(
                     );
                 }
                 if cm.signature.is_some() && !repair_checksum {
-                    skipped.push(SkippedEntry {
-                        id: id.clone(),
-                        reason: String::from("already_signed"),
-                    });
+                    skipped.push(
+                        SkippedEntryDraft {
+                            id: id.clone(),
+                            reason: String::from("already_signed"),
+                        }
+                        .into(),
+                    );
                 } else {
                     targets.push((cm.id.clone(), parser::rfc3339_z(&cm.ts)));
                 }

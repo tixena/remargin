@@ -121,12 +121,13 @@ pub fn check(system: &dyn System, cwd: &Path, path: &Path, why: bool) -> Result<
         .unwrap_or_else(|_err| absolutise(cwd, path));
     let resolved = resolve_permissions(system, cwd)?;
     let matching_rule = first_matching_rule(&resolved, &canonical);
-    Ok(CheckOutput {
+    Ok(CheckOutputDraft {
         elapsed_ms: 0,
         matching_rule: if why { matching_rule.clone() } else { None },
         path: canonical,
         restricted: matching_rule.is_some(),
-    })
+    }
+    .into())
 }
 
 /// `permissions show`: dump the resolved permissions for `cwd`.
@@ -136,12 +137,13 @@ pub fn check(system: &dyn System, cwd: &Path, path: &Path, why: bool) -> Result<
 /// Forwards I/O / parse failures from `resolve_permissions`.
 pub fn show(system: &dyn System, cwd: &Path) -> Result<ShowOutput> {
     let resolved = resolve_permissions(system, cwd)?;
-    Ok(ShowOutput {
+    Ok(ShowOutputDraft {
         allow_dot_folders: group_allow_dot_folders(&resolved),
         deny_ops: group_deny_ops(&resolved),
         elapsed_ms: 0,
         trusted_roots: group_trusted_roots(&resolved),
-    })
+    }
+    .into())
 }
 
 fn absolutise(cwd: &Path, path: &Path) -> PathBuf {
@@ -159,15 +161,18 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
         .find(|entry| canonical == entry.path || canonical.starts_with(&entry.path))
     {
         let rendered: Vec<String> = entry.ops.iter().map(render_deny_ops_item).collect();
-        return Some(MatchingRule {
-            kind: String::from("deny_ops"),
-            rule_text: format!(
-                "deny_ops {{ path: {}, ops: [{}] }}",
-                entry.path.display(),
-                rendered.join(", "),
-            ),
-            source_file: entry.source_file.clone(),
-        });
+        return Some(
+            MatchingRuleDraft {
+                kind: String::from("deny_ops"),
+                rule_text: format!(
+                    "deny_ops {{ path: {}, ops: [{}] }}",
+                    entry.path.display(),
+                    rendered.join(", "),
+                ),
+                source_file: entry.source_file.clone(),
+            }
+            .into(),
+        );
     }
 
     if !resolved.trusted_roots_unconstrained() {
@@ -180,14 +185,17 @@ fn first_matching_rule(resolved: &ResolvedPermissions, canonical: &Path) -> Opti
                 .map(|entry| entry.source_file.clone())
                 .or_else(|| resolved.trusted_roots_lock.clone())
         {
-            return Some(MatchingRule {
-                kind: String::from("trusted_roots"),
-                rule_text: format!(
-                    "outside trusted_roots (target {} is not inside any entry)",
-                    canonical.display(),
-                ),
-                source_file: source,
-            });
+            return Some(
+                MatchingRuleDraft {
+                    kind: String::from("trusted_roots"),
+                    rule_text: format!(
+                        "outside trusted_roots (target {} is not inside any entry)",
+                        canonical.display(),
+                    ),
+                    source_file: source,
+                }
+                .into(),
+            );
         }
     }
 
@@ -199,9 +207,11 @@ fn group_allow_dot_folders(resolved: &ResolvedPermissions) -> Vec<AllowDotFolder
     resolved
         .allow_dot_folders
         .iter()
-        .map(|entry| AllowDotFoldersView {
-            names: entry.names.clone(),
-            source_file: entry.source_file.clone(),
+        .map(|entry| {
+            AllowDotFoldersView::from(AllowDotFoldersViewDraft {
+                names: entry.names.clone(),
+                source_file: entry.source_file.clone(),
+            })
         })
         .collect()
 }
@@ -210,17 +220,21 @@ fn group_deny_ops(resolved: &ResolvedPermissions) -> Vec<DenyOpsView> {
     resolved
         .deny_ops
         .iter()
-        .map(|entry| DenyOpsView {
-            ops: entry
-                .ops
-                .iter()
-                .map(|item| DenyOpsItemView {
-                    exceptions: item.exceptions.clone(),
-                    name: String::from(item.name.as_str()),
-                })
-                .collect(),
-            path: entry.path.clone(),
-            source_file: entry.source_file.clone(),
+        .map(|entry| {
+            DenyOpsView::from(DenyOpsViewDraft {
+                ops: entry
+                    .ops
+                    .iter()
+                    .map(|item| {
+                        DenyOpsItemView::from(DenyOpsItemViewDraft {
+                            exceptions: item.exceptions.clone(),
+                            name: String::from(item.name.as_str()),
+                        })
+                    })
+                    .collect(),
+                path: entry.path.clone(),
+                source_file: entry.source_file.clone(),
+            })
         })
         .collect()
 }
@@ -242,22 +256,24 @@ fn group_trusted_roots(resolved: &ResolvedPermissions) -> Vec<TrustedRootView> {
         .trusted_roots
         .iter()
         .map(|entry| match &entry.path {
-            TrustedRootPath::Absolute(path) => TrustedRootView {
+            TrustedRootPath::Absolute(path) => TrustedRootViewDraft {
                 absolute_path: Some(path.clone()),
                 also_deny_bash: entry.also_deny_bash.clone(),
                 cli_allowed: entry.cli_allowed,
                 path_text: path.display().to_string(),
                 realm_root: None,
                 source_file: entry.source_file.clone(),
-            },
-            TrustedRootPath::Wildcard { realm_root } => TrustedRootView {
+            }
+            .into(),
+            TrustedRootPath::Wildcard { realm_root } => TrustedRootViewDraft {
                 absolute_path: None,
                 also_deny_bash: entry.also_deny_bash.clone(),
                 cli_allowed: entry.cli_allowed,
                 path_text: String::from("*"),
                 realm_root: Some(realm_root.clone()),
                 source_file: entry.source_file.clone(),
-            },
+            }
+            .into(),
         })
         .collect()
 }

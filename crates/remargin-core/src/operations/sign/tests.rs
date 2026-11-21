@@ -28,10 +28,10 @@ use crate::config::registry::Registry;
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto::{self, compute_signature};
 use crate::operations::sign::{
-    RepairedChecksumEntry, SignOptions, SignResult, SignSelection, SignedEntry, SkippedEntry,
-    render_sign_result_text, sign_comments,
+    RepairedChecksumEntryDraft, SignOptions, SignResultDraft, SignSelection, SignedEntryDraft,
+    SkippedEntryDraft, render_sign_result_text, sign_comments,
 };
-use crate::parser::{self, AuthorType, Comment, Segment};
+use crate::parser::{self, AuthorType, CommentDraft, Segment};
 use crate::reactions::Reactions;
 use crate::wait::Wait as _;
 use crate::writer::write_document;
@@ -129,7 +129,7 @@ fn pre_signed_doc(system_for_signing: &MemorySystem) -> String {
     let content = "alice's note";
     let cksum = crypto::compute_checksum(content, &[]);
 
-    let comment = Comment {
+    let comment = CommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from("alice"),
@@ -427,7 +427,7 @@ fn signed_comment_survives_reparse_with_signature() {
 fn legacy_zero_offset_signature_survives_the_z_rewrite() {
     let content = "alice's note";
     let cksum = crypto::compute_checksum(content, &[]);
-    let comment = Comment {
+    let comment = CommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from("alice"),
@@ -739,22 +739,26 @@ fn sign_forgery_guard_blocks_repair_on_foreign_comment() {
 
 #[test]
 fn render_sign_result_empty() {
-    let result = SignResult::default();
+    let result = SignResultDraft::default().into();
     let out = render_sign_result_text(&result);
     assert_eq!(out.trim(), "no candidates");
 }
 
 #[test]
 fn render_sign_result_signed() {
-    let result = SignResult {
+    let result = SignResultDraft {
         elapsed_ms: 0,
         repaired: vec![],
-        signed: vec![SignedEntry {
-            id: String::from("abc123"),
-            ts: String::from("2026-01-01T00:00:00Z"),
-        }],
+        signed: vec![
+            SignedEntryDraft {
+                id: String::from("abc123"),
+                ts: String::from("2026-01-01T00:00:00Z"),
+            }
+            .into(),
+        ],
         skipped: vec![],
-    };
+    }
+    .into();
     let out = render_sign_result_text(&result);
     assert!(out.contains("signed: abc123 (ts="), "unexpected: {out}");
     assert!(!out.contains("no candidates"), "unexpected: {out}");
@@ -762,15 +766,19 @@ fn render_sign_result_signed() {
 
 #[test]
 fn render_sign_result_skipped() {
-    let result = SignResult {
+    let result = SignResultDraft {
         elapsed_ms: 0,
         repaired: vec![],
         signed: vec![],
-        skipped: vec![SkippedEntry {
-            id: String::from("xyz"),
-            reason: String::from("already_signed"),
-        }],
-    };
+        skipped: vec![
+            SkippedEntryDraft {
+                id: String::from("xyz"),
+                reason: String::from("already_signed"),
+            }
+            .into(),
+        ],
+    }
+    .into();
     let out = render_sign_result_text(&result);
     assert!(
         out.contains("skipped: xyz (already_signed)"),
@@ -780,16 +788,20 @@ fn render_sign_result_skipped() {
 
 #[test]
 fn render_sign_result_repaired() {
-    let result = SignResult {
+    let result = SignResultDraft {
         elapsed_ms: 0,
-        repaired: vec![RepairedChecksumEntry {
-            id: String::from("q1"),
-            old_checksum: String::from("old"),
-            new_checksum: String::from("new"),
-        }],
+        repaired: vec![
+            RepairedChecksumEntryDraft {
+                id: String::from("q1"),
+                old_checksum: String::from("old"),
+                new_checksum: String::from("new"),
+            }
+            .into(),
+        ],
         signed: vec![],
         skipped: vec![],
-    };
+    }
+    .into();
     let out = render_sign_result_text(&result);
     assert!(
         out.contains("repaired checksum: q1 (old -> new)"),

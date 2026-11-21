@@ -95,12 +95,13 @@ pub enum PurgeAnswer {
 
 impl PurgeResult {
     #[must_use = "the return value is the only result of this call"]
-    pub const fn answer(&self) -> PurgeFileAnswer {
-        PurgeFileAnswer {
+    pub fn answer(&self) -> PurgeFileAnswer {
+        PurgeFileAnswerDraft {
             attachments_cleaned: self.attachments_cleaned,
             comments_removed: self.comments_removed,
             elapsed_ms: 0,
         }
+        .into()
     }
 }
 
@@ -126,25 +127,29 @@ impl PurgeBulkResult {
     /// `base_dir` is stripped from each path so the answer uses caller-friendly relative paths.
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self, base_dir: &Path) -> PurgeDirAnswer {
-        PurgeDirAnswer {
+        PurgeDirAnswerDraft {
             attachments_cleaned: self.attachments_cleaned_total(),
             comments_removed: self.comments_removed_total(),
             elapsed_ms: 0,
             failed: self
                 .failed
                 .iter()
-                .map(|f| PurgeFailure {
-                    path: strip_prefix_display(&f.path, base_dir),
-                    reason: f.reason.clone(),
+                .map(|f| {
+                    PurgeFailure::from(PurgeFailureDraft {
+                        path: strip_prefix_display(&f.path, base_dir),
+                        reason: f.reason.clone(),
+                    })
                 })
                 .collect(),
             purged: self
                 .purged
                 .iter()
-                .map(|f| PurgedFile {
-                    attachments_cleaned: f.attachments_cleaned,
-                    comments_removed: f.comments_removed,
-                    path: strip_prefix_display(&f.path, base_dir),
+                .map(|f| {
+                    PurgedFile::from(PurgedFileDraft {
+                        attachments_cleaned: f.attachments_cleaned,
+                        comments_removed: f.comments_removed,
+                        path: strip_prefix_display(&f.path, base_dir),
+                    })
                 })
                 .collect(),
             skipped: self
@@ -153,6 +158,7 @@ impl PurgeBulkResult {
                 .map(|p| strip_prefix_display(p, base_dir))
                 .collect(),
         }
+        .into()
     }
     /// Sum of per-file `attachments_cleaned` across every entry in `purged`.
     #[must_use = "the return value is the only result of this call"]

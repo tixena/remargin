@@ -90,14 +90,15 @@ pub fn resolve_system_prompt(
                 if sp.runner.as_deref().is_some_and(|r| r.contains('\n')) {
                     bail!("runner must be a single line (in {})", candidate.display());
                 }
-                return Ok(ResolvedSystemPrompt {
+                return Ok(ResolvedSystemPromptDraft {
                     elapsed_ms: 0,
                     is_default: false,
                     name,
                     prompt: sp.prompt,
                     runner: sp.runner,
                     source: Some(candidate),
-                });
+                }
+                .into());
             }
         }
         if !current.pop() {
@@ -105,14 +106,15 @@ pub fn resolve_system_prompt(
         }
     }
 
-    Ok(ResolvedSystemPrompt {
+    Ok(ResolvedSystemPromptDraft {
         elapsed_ms: 0,
         is_default: true,
         name: "default".to_owned(),
         prompt: DEFAULT_PROMPT_BODY.to_owned(),
         runner: None,
         source: None,
-    })
+    }
+    .into())
 }
 
 /// Derive a display name from the owning folder when `name:` is absent.

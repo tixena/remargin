@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use anyhow::{Context as _, bail};
 
-use crate::activity::{self, CompactFileChanges};
+use crate::activity::{self, CompactFileChangesDraft};
 use crate::comment_style;
 use crate::config::identity::{IdentityFlags, IdentityReport, resolve_identity_report};
 use crate::config::system_prompt::ResolvedSystemPrompt;
@@ -17,8 +17,9 @@ use crate::document::get_image as image_ops;
 use crate::document::{self, RmAnswer, WriteAnswer};
 use crate::linter::{self, LintAnswer};
 use crate::mcp::answers::{
-    ActivityPage, CommentRow, CommentsPage, IdentityCreated, LsAnswer, QueryFile, QueryPage,
-    ReportSpillAnswer, SandboxListAnswer, SearchPage, TimedResponse,
+    ActivityPage, ActivityPageDraft, CommentRow, CommentsPage, CommentsPageDraft, IdentityCreated,
+    IdentityCreatedDraft, LsAnswer, LsAnswerDraft, QueryFileDraft, QueryPage, QueryPageDraft,
+    ReportSpillAnswer, SandboxListAnswer, SandboxListAnswerDraft, SearchPage, TimedResponse,
 };
 use crate::mcp::args::{
     AckArgs, ActivityArgs, BatchArgs, CommentArgs, CommentsArgs, CpArgs, DeleteArgs, DoctorArgs,
@@ -44,7 +45,7 @@ use crate::operations::projections;
 use crate::operations::prompt::{
     self as prompt_ops, PromptDeleteOutcome, PromptListAnswer, PromptSetOutcome,
 };
-use crate::operations::purge::{self, PurgeAnswer};
+use crate::operations::purge::{self, PurgeAnswer, PurgeAnswerDraft};
 use crate::operations::query::{self, QueryFilter};
 use crate::operations::replace::{self, ReplaceReport};
 use crate::operations::sandbox::{self as sandbox_ops, SandboxAddReport, SandboxRemoveReport};
@@ -535,7 +536,11 @@ fn activity_now(
         None => None,
     };
     let result = activity::gather_activity(ctx.system, &target, cutoff, &ctx.config)?;
-    let files: Vec<CompactFileChanges> = result.files.iter().map(activity::compact_file).collect();
+    let files: Vec<CompactFileChangesDraft> = result
+        .files
+        .iter()
+        .map(|file| activity::compact_file(file).into_draft())
+        .collect();
     let page = page_grouped(
         files,
         usize_of(req.offset).unwrap_or(0),
@@ -543,15 +548,16 @@ fn activity_now(
         spill_cap,
     );
     let (effective_limit, groups, total) = page.into_parts();
-    Ok(ActivityPage {
+    Ok(ActivityPageDraft {
         change_cols: column_names(&activity::CHANGE_COLS),
         cutoff_explicit: result.cutoff_explicit,
         effective_limit,
         elapsed_ms: 0,
-        files: groups,
+        files: groups.into_iter().map(Into::into).collect(),
         newest_ts_overall: result.newest_ts_overall,
         total,
-    })
+    }
+    .into())
 }
 
 fn batch_now(ctx: &RequestContext<'_>, req: &BatchArgs) -> Result<BatchAnswer, RemarginError> {
@@ -680,13 +686,14 @@ fn comments_now(
     .map(|comment| comment_row(comment, req.include_integrity))
     .collect();
     let (page, effective_limit) = size_page(rows, spill_cap);
-    Ok(CommentsPage {
+    Ok(CommentsPageDraft {
         comment_cols: column_names(query::comment_cols(req.include_integrity)),
         comments: page,
         effective_limit,
         elapsed_ms: 0,
         total,
-    })
+    }
+    .into())
 }
 
 fn cp_now(ctx: &RequestContext<'_>, req: &CpArgs) -> Result<CpOutcome, RemarginError> {
@@ -862,13 +869,14 @@ fn identity_create_now(
         use core::fmt::Write as _;
         let _ = writeln!(yaml, "key: {rendered}");
     }
-    Ok(IdentityCreated {
+    Ok(IdentityCreatedDraft {
         author_type: String::from(author_type),
         elapsed_ms: 0,
         identity: req.identity.clone(),
         key,
         yaml,
-    })
+    }
+    .into())
 }
 
 fn lint_now(ctx: &RequestContext<'_>, req: &LintArgs) -> Result<LintAnswer, RemarginError> {
@@ -880,10 +888,11 @@ fn lint_now(ctx: &RequestContext<'_>, req: &LintArgs) -> Result<LintAnswer, Rema
 fn ls_now(ctx: &RequestContext<'_>, req: &LsArgs) -> Result<LsAnswer, RemarginError> {
     let admitted = ctx.admit("ls", &[req.path.as_deref().unwrap_or(".")])?;
     let entries = document::ls(ctx.system, ctx.base_dir, &admitted[0], &ctx.config)?;
-    Ok(LsAnswer {
+    Ok(LsAnswerDraft {
         elapsed_ms: 0,
         entries,
-    })
+    }
+    .into())
 }
 
 fn metadata_now(
@@ -1190,10 +1199,11 @@ fn prompt_list_now(
     ctx.admit("prompt_list", &[])?;
     let folder = folder_of(ctx, req.folder.as_deref());
     let entries = prompt_ops::list(ctx.system, &folder)?;
-    Ok(prompt_ops::PromptListAnswer {
+    Ok(prompt_ops::PromptListAnswerDraft {
         elapsed_ms: 0,
         entries,
-    })
+    }
+    .into())
 }
 
 fn prompt_resolve_now(
@@ -1232,7 +1242,7 @@ fn purge_now(ctx: &RequestContext<'_>, req: &PurgeArgs) -> Result<PurgeAnswer, R
 
     if req.recursive.unwrap_or(false) {
         let result = purge::purge_dir(ctx.system, &path, &ctx.config)?;
-        return Ok(PurgeAnswer::Directory(result.answer(ctx.base_dir)));
+        return Ok(PurgeAnswerDraft::Directory(result.answer(ctx.base_dir)).into());
     }
 
     if ctx.system.is_dir(&path).wait().unwrap_or(false) {
@@ -1243,7 +1253,7 @@ fn purge_now(ctx: &RequestContext<'_>, req: &PurgeArgs) -> Result<PurgeAnswer, R
     }
 
     let result = purge::purge(ctx.system, &path, &ctx.config)?;
-    Ok(PurgeAnswer::File(result.answer()))
+    Ok(PurgeAnswerDraft::File(result.answer()).into())
 }
 
 fn query_filter(req: &QueryArgs, identity: Option<String>) -> anyhow::Result<QueryFilter> {
@@ -1290,9 +1300,9 @@ fn query_now(
     let is_file = ctx.system.is_file(&target).wait().unwrap_or(false);
     let results = query::query(ctx.system, &target, &filter, &ctx.config)?;
 
-    let files: Vec<QueryFile> = results
+    let files: Vec<QueryFileDraft> = results
         .iter()
-        .map(|result| query_file(result, include_integrity))
+        .map(|result| query_file(result, include_integrity).into_draft())
         .collect();
     let page = page_grouped(
         files,
@@ -1301,14 +1311,15 @@ fn query_now(
         spill_cap,
     );
     let (effective_limit, groups, total) = page.into_parts();
-    Ok(QueryPage {
+    Ok(QueryPageDraft {
         base_path: query::display_base_path(&path_str, is_file),
         comment_cols: column_names(query::comment_cols(include_integrity)),
         effective_limit,
         elapsed_ms: 0,
-        results: groups,
+        results: groups.into_iter().map(Into::into).collect(),
         total,
-    })
+    }
+    .into())
 }
 
 fn react_now(ctx: &RequestContext<'_>, req: &ReactArgs) -> Result<ReactAnswer, RemarginError> {
@@ -1418,10 +1429,11 @@ fn sandbox_list_now(
         .iter()
         .map(|listing| sandbox_ops::SandboxListEntry::from_listing(listing, &root, false))
         .collect();
-    Ok(SandboxListAnswer {
+    Ok(SandboxListAnswerDraft {
         elapsed_ms: 0,
         files,
-    })
+    }
+    .into())
 }
 
 fn sandbox_remove_now(
@@ -1495,10 +1507,10 @@ fn verify_now(ctx: &RequestContext<'_>, req: &VerifyArgs) -> Result<VerifyAnswer
     if ctx.system.is_dir(&target).wait().unwrap_or(false) {
         let report =
             operations::verify::verify_path(ctx.system, ctx.base_dir, &target, &ctx.config)?;
-        return Ok(operations::verify::VerifyAnswer::Folder(report.answer()));
+        return Ok(operations::verify::VerifyAnswerDraft::Folder(report.answer()).into());
     }
     let report = operations::verify::verify_and_refresh(ctx.system, &target, &ctx.config)?;
-    Ok(operations::verify::VerifyAnswer::File(report.answer()))
+    Ok(operations::verify::VerifyAnswerDraft::File(report.answer()).into())
 }
 
 fn whoami_now(ctx: &RequestContext<'_>) -> Result<IdentityReport, RemarginError> {

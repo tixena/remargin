@@ -51,9 +51,9 @@ pub struct BinaryPayload {
 }
 
 /// A single entry from a directory listing.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct ListEntry {
     pub is_dir: bool,
     pub path: PathBuf,
@@ -131,11 +131,12 @@ impl RmResult {
     /// response round-trips through the same surface.
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self, requested_path: &str) -> RmFileAnswer {
-        RmFileAnswer {
+        RmFileAnswerDraft {
             deleted: String::from(requested_path),
             elapsed_ms: 0,
             existed: self.existed,
         }
+        .into()
     }
 }
 
@@ -164,7 +165,7 @@ pub struct RmDirReport {
 
 impl RmDirReport {
     fn answer(&self, requested_path: &str) -> RmDirAnswer {
-        RmDirAnswer {
+        RmDirAnswerDraft {
             deleted: String::from(requested_path),
             elapsed_ms: 0,
             files_deleted: display_paths(&self.files_deleted),
@@ -172,6 +173,7 @@ impl RmDirReport {
             folders_removed: display_paths(&self.folders_removed),
             is_directory: true,
         }
+        .into()
     }
 
     fn render_text(&self, requested_path: &str) -> String {
@@ -213,8 +215,10 @@ impl RmOutcome {
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self, requested_path: &str) -> RmAnswer {
         match self {
-            Self::Directory(report) => RmAnswer::Directory(report.answer(requested_path)),
-            Self::File(result) => RmAnswer::File(result.answer(requested_path)),
+            Self::Directory(report) => {
+                RmAnswerDraft::Directory(report.answer(requested_path)).into()
+            }
+            Self::File(result) => RmAnswerDraft::File(result.answer(requested_path)).into(),
         }
     }
 
@@ -258,7 +262,7 @@ impl WriteOutcome {
     /// / comment-preservation pass), so callers don't need to OR it in.
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(self, written: &str, binary: bool, raw: bool) -> WriteAnswer {
-        WriteAnswer {
+        WriteAnswerDraft {
             binary,
             elapsed_ms: 0,
             noop: self.noop,
@@ -266,6 +270,7 @@ impl WriteOutcome {
             warnings: self.warnings.into_iter().map(Warning::from).collect(),
             written: String::from(written),
         }
+        .into()
     }
 
     /// A completed write carrying no advice yet; [`write`] attaches any.
@@ -498,13 +503,16 @@ pub fn ls(
             .unwrap_or(entry_path)
             .to_path_buf();
 
-        result.push(ListEntry {
-            is_dir,
-            path: relative,
-            remargin_last_activity,
-            remargin_pending,
-            size,
-        });
+        result.push(
+            ListEntryDraft {
+                is_dir,
+                path: relative,
+                remargin_last_activity,
+                remargin_pending,
+                size,
+            }
+            .into(),
+        );
     }
 
     Ok(result)
@@ -1027,11 +1035,11 @@ fn review_payload(path: &Path, content: &str, opts: &WriteOptions) -> Vec<Advice
     if opts.binary || !is_markdown_extension(path) {
         return Vec::new();
     }
-    let mut notes = advice::review(content);
-    if let Some((start, _)) = opts.lines {
-        advice::offset_lines(&mut notes, start.saturating_sub(1));
+    let notes = advice::review(content);
+    match opts.lines {
+        Some((start, _)) => advice::offset_lines(notes, start.saturating_sub(1)),
+        None => notes,
     }
-    notes
 }
 
 fn write_content(

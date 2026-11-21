@@ -4606,12 +4606,14 @@ fn every_mcp_tool_rejects_identity_flags() {
             let fault = payload_fault(&response);
             assert_eq!(fault["kind"], "failed-validation", "{name} {flag}");
             assert_eq!(fault["operation"], name);
-            assert_eq!(fault["field"], flag, "{name} {flag}");
             assert!(
-                fault["detail"]
-                    .as_str()
-                    .unwrap()
-                    .contains(&format!("unknown field `{flag}`")),
+                fault["issues"].as_array().unwrap().iter().any(|issue| {
+                    issue["field"] == flag
+                        && issue["detail"]
+                            .as_str()
+                            .unwrap()
+                            .contains(&format!("unknown field `{flag}`"))
+                }),
                 "tool {name} returned wrong diagnostic for {flag}: {fault}"
             );
         }
@@ -4637,8 +4639,12 @@ fn identity_flag_rejection_is_structured() {
     let fault = payload_fault(&response);
     assert_eq!(fault["kind"], "failed-validation");
     assert_eq!(fault["operation"], "comment");
-    assert_eq!(fault["field"], "identity");
-    assert!(fault["detail"].as_str().unwrap().contains("`identity`"));
+    assert!(
+        fault["issues"].as_array().unwrap().iter().any(|issue| {
+            issue["field"] == "identity" && issue["detail"].as_str().unwrap().contains("`identity`")
+        }),
+        "{fault}"
+    );
 }
 
 /// A config whose resolved identity is `type: human`, as when the walk
@@ -7456,12 +7462,14 @@ fn every_tool_refuses_an_argument_it_does_not_declare() {
         let fault = payload_fault(&response);
         assert_eq!(fault["kind"], "failed-validation", "{name}: {response}");
         assert_eq!(fault["operation"], name);
-        assert_eq!(fault["field"], "not_an_argument", "{name}: {response}");
         assert!(
-            fault["detail"]
-                .as_str()
-                .unwrap()
-                .contains("unknown field `not_an_argument`"),
+            fault["issues"].as_array().unwrap().iter().any(|issue| {
+                issue["field"] == "not_an_argument"
+                    && issue["detail"]
+                        .as_str()
+                        .unwrap()
+                        .contains("unknown field `not_an_argument`")
+            }),
             "{name}: {response}"
         );
     }
@@ -7482,12 +7490,14 @@ fn comment_refuses_the_storage_name_remargin_kind() {
     );
     let fault = payload_fault(&response);
     assert_eq!(fault["kind"], "failed-validation");
-    assert_eq!(fault["field"], "remargin_kind");
     assert!(
-        fault["detail"]
-            .as_str()
-            .unwrap()
-            .starts_with("'remargin_kind': unknown field `remargin_kind`"),
+        fault["issues"].as_array().unwrap().iter().any(|issue| {
+            issue["field"] == "remargin_kind"
+                && issue["detail"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("unknown field `remargin_kind`")
+        }),
         "{response}"
     );
 }

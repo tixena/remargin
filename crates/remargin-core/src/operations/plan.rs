@@ -76,16 +76,19 @@ impl PlanVerifyReport {
         let rows = report
             .results
             .iter()
-            .map(|row| PlanVerifyRow {
-                checksum_ok: row.checksum_ok,
-                id: row.id.clone(),
-                signature: String::from(row.signature.as_str()),
+            .map(|row| {
+                PlanVerifyRow::from(PlanVerifyRowDraft {
+                    checksum_ok: row.checksum_ok,
+                    id: row.id.clone(),
+                    signature: String::from(row.signature.as_str()),
+                })
             })
             .collect();
-        Self {
+        PlanVerifyReportDraft {
             ok: report.ok,
             rows,
         }
+        .into()
     }
 }
 
@@ -130,18 +133,21 @@ impl PlanSubsetGate {
         let hint = format!("Try `remargin verify {path_str} --json` for the full breakdown.");
         let plan_anomalies = introduced
             .into_iter()
-            .map(|a| PlanAnomaly {
-                id: a.id,
-                kind: String::from(a.kind.as_str()),
+            .map(|a| {
+                PlanAnomaly::from(PlanAnomalyDraft {
+                    id: a.id,
+                    kind: String::from(a.kind.as_str()),
+                })
             })
             .collect();
-        Self {
+        PlanSubsetGateDraft {
             headline,
             hint,
             introduced: plan_anomalies,
             mode: String::from(mode.as_str()),
             path,
         }
+        .into()
     }
 }
 
@@ -166,7 +172,7 @@ pub struct CommentDiff {
 
 /// Identity block for a plan report. The core projection helper treats it as opaque data the
 /// caller owns.
-#[model_schema(enable = ["jsonschema"])]
+#[model_schema(enable = ["jsonschema"], new = false)]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlanIdentity {
@@ -193,12 +199,13 @@ impl PlanIdentity {
     /// constructor exists so external crates can populate the struct
     /// without tripping `#[non_exhaustive]`.
     #[must_use = "the return value is the only result of this call"]
-    pub const fn new(name: Option<String>, author_type: Option<String>, would_sign: bool) -> Self {
-        Self {
+    pub fn new(name: Option<String>, author_type: Option<String>, would_sign: bool) -> Self {
+        PlanIdentityDraft {
             author_type,
             name,
             would_sign,
         }
+        .into()
     }
 }
 
@@ -779,7 +786,7 @@ pub fn project_report(
 
     let (would_commit, reject_reason, subset_gate) = decide_commit(before, after, cfg, None);
 
-    Ok(PlanReport {
+    Ok(PlanReportDraft {
         changed_line_ranges,
         checksum_after,
         checksum_before,
@@ -798,7 +805,8 @@ pub fn project_report(
         verify_after,
         warnings: Vec::new(),
         would_commit,
-    })
+    }
+    .into())
 }
 
 /// Doc-bearing variant of [`project_report`].
@@ -846,7 +854,7 @@ pub fn project_doc_report(
     let (would_commit, reject_reason, subset_gate) =
         decide_commit(before, after, &realm_cfg, Some(path.to_path_buf()));
 
-    Ok(PlanReport {
+    Ok(PlanReportDraft {
         changed_line_ranges,
         checksum_after,
         checksum_before,
@@ -865,7 +873,8 @@ pub fn project_doc_report(
         verify_after,
         warnings: Vec::new(),
         would_commit,
-    })
+    }
+    .into())
 }
 
 /// Canonical plan dispatcher shared by CLI + MCP.
@@ -899,16 +908,18 @@ pub fn dispatch(
         PlanRequest::Batch { path, ops } => {
             let (before, after) = projections::project_batch(system, path, cfg, ops)?;
             let mut report =
-                project_doc_report(system, path, label, &before, &after, cfg, identity)?;
+                project_doc_report(system, path, label, &before, &after, cfg, identity)?
+                    .into_draft();
             report.warnings = body_warnings(ops.iter().map(|op| op.content.as_str()));
-            Ok(report)
+            Ok(report.into())
         }
         PlanRequest::Comment { path, params } => {
             let (before, after) = projections::project_comment(system, path, cfg, params)?;
             let mut report =
-                project_doc_report(system, path, label, &before, &after, cfg, identity)?;
+                project_doc_report(system, path, label, &before, &after, cfg, identity)?
+                    .into_draft();
             report.warnings = body_warnings([params.content]);
-            Ok(report)
+            Ok(report.into())
         }
         PlanRequest::Delete { path, ids } => {
             let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -921,9 +932,10 @@ pub fn dispatch(
         PlanRequest::Edit { path, id, content } => {
             let (before, after) = projections::project_edit(system, path, cfg, id, content)?;
             let mut report =
-                project_doc_report(system, path, label, &before, &after, cfg, identity)?;
+                project_doc_report(system, path, label, &before, &after, cfg, identity)?
+                    .into_draft();
             report.warnings = body_warnings([*content]);
-            Ok(report)
+            Ok(report.into())
         }
         PlanRequest::Mv { src, dst, force } => {
             dispatch_mv(system, base_dir, cfg, identity, src, dst, *force)
@@ -992,7 +1004,7 @@ fn dispatch_restrict(
 ) -> Result<PlanReport> {
     let projection = projections::restrict::project_restrict(system, cwd, args, settings_files)?;
     let empty = parser::parse("").context("parsing empty before-document for plan restrict")?;
-    let mut report = project_report("restrict", &empty, &empty, cfg, identity)?;
+    let mut report = project_report("restrict", &empty, &empty, cfg, identity)?.into_draft();
     match projection {
         projections::restrict::RestrictProjection::Diff(diff) => {
             report.noop = is_diff_noop(&diff);
@@ -1003,7 +1015,7 @@ fn dispatch_restrict(
             report.would_commit = false;
         }
     }
-    Ok(report)
+    Ok(report.into())
 }
 
 /// Build a [`PlanReport`] from the `unprotect` projection's verdict.
@@ -1020,7 +1032,7 @@ fn dispatch_unprotect(
 ) -> Result<PlanReport> {
     let projection = projections::unprotect::project_unprotect(system, cwd, args)?;
     let empty = parser::parse("").context("parsing empty before-document for plan unprotect")?;
-    let mut report = project_report("unprotect", &empty, &empty, cfg, identity)?;
+    let mut report = project_report("unprotect", &empty, &empty, cfg, identity)?.into_draft();
     match projection {
         projections::unprotect::UnprotectProjection::Diff(diff) => {
             report.noop = is_unprotect_diff_noop(&diff);
@@ -1032,7 +1044,7 @@ fn dispatch_unprotect(
             report.would_commit = false;
         }
     }
-    Ok(report)
+    Ok(report.into())
 }
 
 /// The warn tier every projected body earns, tagged with its position in
@@ -1068,7 +1080,7 @@ fn dispatch_cp(
     force: bool,
 ) -> Result<PlanReport> {
     let empty = parser::parse("").context("parsing empty before-document for plan cp")?;
-    let mut report = project_report("cp", &empty, &empty, cfg, identity)?;
+    let mut report = project_report("cp", &empty, &empty, cfg, identity)?.into_draft();
 
     let projection = project_cp(system, base_dir, cfg, src, dst, force);
 
@@ -1084,7 +1096,7 @@ fn dispatch_cp(
         }
     }
 
-    Ok(report)
+    Ok(report.into())
 }
 
 /// Run every preflight check the live `cp` op would run and assemble a
@@ -1105,13 +1117,14 @@ fn project_cp(
     let dst_exists = system.exists(&dst_resolved).wait().unwrap_or(false);
 
     if src_resolved == dst_resolved {
-        return Ok(CpDiff {
+        return Ok(CpDiffDraft {
             comments_to_drop: 0,
             dst_absolute: dst_resolved,
             dst_exists,
             kind: String::from("noop"),
             src_absolute: src_resolved,
-        });
+        }
+        .into());
     }
 
     let caller = cfg.caller_info();
@@ -1202,13 +1215,14 @@ fn plan_cp_diff_kind(
         });
 
     if !is_md {
-        return Ok(CpDiff {
+        return Ok(CpDiffDraft {
             comments_to_drop: 0,
             dst_absolute: dst_resolved,
             dst_exists,
             kind: String::from("verbatim"),
             src_absolute: src_resolved,
-        });
+        }
+        .into());
     }
 
     let src_content = system
@@ -1225,13 +1239,14 @@ fn plan_cp_diff_kind(
         (String::from("body_only"), comment_count)
     };
 
-    Ok(CpDiff {
+    Ok(CpDiffDraft {
         comments_to_drop,
         dst_absolute: dst_resolved,
         dst_exists,
         kind,
         src_absolute: src_resolved,
-    })
+    }
+    .into())
 }
 
 /// Build a [`PlanReport`] for the `mv` op.
@@ -1254,7 +1269,7 @@ fn dispatch_mv(
     force: bool,
 ) -> Result<PlanReport> {
     let empty = parser::parse("").context("parsing empty before-document for plan mv")?;
-    let mut report = project_report("mv", &empty, &empty, cfg, identity)?;
+    let mut report = project_report("mv", &empty, &empty, cfg, identity)?.into_draft();
 
     let projection = project_mv(system, base_dir, cfg, src, dst, force);
 
@@ -1270,7 +1285,7 @@ fn dispatch_mv(
         }
     }
 
-    Ok(report)
+    Ok(report.into())
 }
 
 /// Run every preflight check the live `mv` op would run, in the same
@@ -1322,24 +1337,27 @@ fn project_mv(
         0
     };
 
-    Ok(MvDiff {
+    Ok(MvDiffDraft {
         dst_absolute: dst_resolved,
-        existence: MvExistence {
+        existence: MvExistenceDraft {
             dst_exists,
             is_directory: src_is_dir && src_exists,
             src_exists,
-        },
+        }
+        .into(),
         nested_files_moved,
         src_absolute: if src_exists {
             src_resolved
         } else {
             src_lexical
         },
-        state: MvState {
+        state: MvStateDraft {
             idempotent_already_settled,
             noop_same_path,
-        },
-    })
+        }
+        .into(),
+    }
+    .into())
 }
 
 fn mv_lexical_paths(base_dir: &Path, src: &Path, dst: &Path) -> (PathBuf, PathBuf) {
@@ -1464,17 +1482,17 @@ fn dispatch_purge_dir(
     dir: &Path,
 ) -> Result<PlanReport> {
     let empty = parser::parse("").context("parsing empty before-document for plan purge")?;
-    let mut report = project_report("purge", &empty, &empty, cfg, identity)?;
+    let mut report = project_report("purge", &empty, &empty, cfg, identity)?.into_draft();
 
     if !system.exists(dir).wait().unwrap_or(false) {
         report.reject_reason = Some(format!("directory does not exist: {}", dir.display()));
         report.would_commit = false;
-        return Ok(report);
+        return Ok(report.into());
     }
     if !system.is_dir(dir).wait().unwrap_or(false) {
         report.reject_reason = Some(format!("not a directory: {}", dir.display()));
         report.would_commit = false;
-        return Ok(report);
+        return Ok(report.into());
     }
 
     let entries = system
@@ -1519,12 +1537,15 @@ fn dispatch_purge_dir(
     let no_md_files = candidates.is_empty();
     report.noop = !any_would_purge;
     report.would_commit = true;
-    report.purge_dir_diff = Some(PurgeDirDiff {
-        directory: dir.to_path_buf(),
-        files,
-        no_md_files,
-    });
-    Ok(report)
+    report.purge_dir_diff = Some(
+        PurgeDirDiffDraft {
+            directory: dir.to_path_buf(),
+            files,
+            no_md_files,
+        }
+        .into(),
+    );
+    Ok(report.into())
 }
 
 /// `true` when `path` has any path component (relative to `root`)
@@ -1562,25 +1583,27 @@ fn project_one_purge_file(
     })();
 
     if let Err(err) = preflight {
-        return PurgeDirFileDiff {
+        return PurgeDirFileDiffDraft {
             attachments_cleaned: 0,
             comments_removed: 0,
             outcome: PurgeDirFileOutcome::Refused,
             path: path.to_path_buf(),
             reject_reason: Some(format!("{err:#}")),
-        };
+        }
+        .into();
     }
 
     let parsed = match parser::parse_file(system, path) {
         Ok(doc) => doc,
         Err(err) => {
-            return PurgeDirFileDiff {
+            return PurgeDirFileDiffDraft {
                 attachments_cleaned: 0,
                 comments_removed: 0,
                 outcome: PurgeDirFileOutcome::Refused,
                 path: path.to_path_buf(),
                 reject_reason: Some(format!("{err:#}")),
-            };
+            }
+            .into();
         }
     };
 
@@ -1589,21 +1612,23 @@ fn project_one_purge_file(
     let attachments_cleaned = comments.iter().map(|cm| cm.attachments.len()).sum();
 
     if comments_removed == 0 {
-        PurgeDirFileDiff {
+        PurgeDirFileDiffDraft {
             attachments_cleaned: 0,
             comments_removed: 0,
             outcome: PurgeDirFileOutcome::Skipped,
             path: path.to_path_buf(),
             reject_reason: None,
         }
+        .into()
     } else {
-        PurgeDirFileDiff {
+        PurgeDirFileDiffDraft {
             attachments_cleaned,
             comments_removed,
             outcome: PurgeDirFileOutcome::WouldPurge,
             path: path.to_path_buf(),
             reject_reason: None,
         }
+        .into()
     }
 }
 
@@ -1654,17 +1679,18 @@ fn dispatch_write_projection(
             noop,
         } => {
             let mut report =
-                project_doc_report(system, path, "write", before, after, cfg, identity)?;
+                project_doc_report(system, path, "write", before, after, cfg, identity)?
+                    .into_draft();
             report.noop = report.noop || *noop;
-            Ok(report)
+            Ok(report.into())
         }
         WriteProjection::Unsupported { reason } => {
             let empty =
                 parser::parse("").context("parsing empty before-document for plan write")?;
-            let mut report = project_report("write", &empty, &empty, cfg, identity)?;
+            let mut report = project_report("write", &empty, &empty, cfg, identity)?.into_draft();
             report.reject_reason = Some(reason.clone());
             report.would_commit = false;
-            Ok(report)
+            Ok(report.into())
         }
     }
 }
@@ -1708,12 +1734,13 @@ pub fn diff_comment_sets(before: &ParsedDocument, after: &ParsedDocument) -> Com
         }
     }
 
-    CommentDiff {
+    CommentDiffDraft {
         added,
         destroyed,
         modified,
         preserved,
     }
+    .into()
 }
 
 /// Compute 1-indexed inclusive `[start, end]` line ranges that differ
@@ -1896,8 +1923,8 @@ pub fn render_plan_restrict_text(report: &PlanReport) -> String {
 #[must_use = "the return value is the only result of this call"]
 pub fn render_conflict_line(conflict: &ConfigConflict) -> String {
     let mut out = String::new();
-    match conflict {
-        ConfigConflict::AllowDenyOverlap {
+    match &**conflict {
+        ConfigConflictDraft::AllowDenyOverlap {
             allow_rule,
             overlap_kind,
             projected_deny_rule,
@@ -1920,7 +1947,7 @@ pub fn render_conflict_line(conflict: &ConfigConflict) -> String {
             let _ = writeln!(out, "      existing allow:  {allow_rule}");
             let _ = writeln!(out, "      projected deny:  {projected_deny_rule}");
         }
-        ConfigConflict::AnchorIsAncestor { anchor, cwd } => {
+        ConfigConflictDraft::AnchorIsAncestor { anchor, cwd } => {
             let _ = writeln!(
                 out,
                 "    anchor_is_ancestor: cwd={} anchor={}",
@@ -1928,7 +1955,7 @@ pub fn render_conflict_line(conflict: &ConfigConflict) -> String {
                 anchor.display(),
             );
         }
-        ConfigConflict::YamlEntryWouldChange {
+        ConfigConflictDraft::YamlEntryWouldChange {
             path,
             previous,
             projected,
@@ -2012,8 +2039,8 @@ pub fn render_plan_unprotect_text(report: &PlanReport) -> String {
 #[must_use = "the return value is the only result of this call"]
 pub fn render_unprotect_conflict_line(conflict: &UnprotectConflict) -> String {
     let mut out = String::new();
-    match conflict {
-        UnprotectConflict::RuleAlreadyAbsent {
+    match &**conflict {
+        UnprotectConflictDraft::RuleAlreadyAbsent {
             rule,
             settings_file,
         } => {
@@ -2023,10 +2050,10 @@ pub fn render_unprotect_conflict_line(conflict: &UnprotectConflict) -> String {
                 settings_file.display(),
             );
         }
-        UnprotectConflict::SidecarEntryMissing { path } => {
+        UnprotectConflictDraft::SidecarEntryMissing { path } => {
             let _ = writeln!(out, "    sidecar_entry_missing: {}", path.display());
         }
-        UnprotectConflict::YamlEntryMissing { path } => {
+        UnprotectConflictDraft::YamlEntryMissing { path } => {
             let _ = writeln!(out, "    yaml_entry_missing: {}", path.display());
         }
     }

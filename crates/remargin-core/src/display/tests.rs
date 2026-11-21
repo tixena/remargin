@@ -10,8 +10,10 @@ use crate::display::{
     build_comment_tree, count_pending, format_comments_pretty, format_query_pretty,
     format_string_list, is_pending, render_activity_cutoff_header, strip_prefix_display,
 };
-use crate::operations::query::{ExpandedComment, QueryResult};
-use crate::parser::{Acknowledgment, AuthorType, Comment};
+use crate::operations::query::{
+    ExpandedComment, ExpandedCommentDraft, QueryResult, QueryResultDraft,
+};
+use crate::parser::{Acknowledgment, AcknowledgmentDraft, AuthorType, Comment, CommentDraft};
 use crate::reactions::{Reactions, ReactionsExt as _};
 
 /// Parameters for building a test comment.
@@ -46,7 +48,7 @@ impl Default for TestComment<'_> {
 }
 
 fn build_comment(params: TestComment<'_>) -> Comment {
-    Comment {
+    CommentDraft {
         ack: params.ack,
         attachments: Vec::new(),
         author: String::from(params.author),
@@ -66,6 +68,7 @@ fn build_comment(params: TestComment<'_>) -> Comment {
         to: params.to.into_iter().map(String::from).collect(),
         ts: DateTime::parse_from_rfc3339(params.ts).unwrap(),
     }
+    .into()
 }
 
 fn make_comment(id: &str, line: usize, ts: &str) -> Comment {
@@ -91,10 +94,11 @@ fn make_reply(id: &str, line: usize, ts: &str, reply_to: &str) -> Comment {
 }
 
 fn make_ack(author: &str, ts: &str) -> Acknowledgment {
-    Acknowledgment {
+    AcknowledgmentDraft {
         author: String::from(author),
         ts: DateTime::parse_from_rfc3339(ts).unwrap(),
     }
+    .into()
 }
 
 #[test]
@@ -548,7 +552,7 @@ fn make_expanded(
     ts: &str,
     file: &str,
 ) -> ExpandedComment {
-    ExpandedComment {
+    ExpandedCommentDraft {
         ack: Vec::new(),
         attachments: Vec::new(),
         author: String::from(author),
@@ -567,6 +571,7 @@ fn make_expanded(
         to: Vec::new(),
         ts: DateTime::parse_from_rfc3339(ts).unwrap(),
     }
+    .into()
 }
 
 fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult {
@@ -586,7 +591,7 @@ fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult 
             .count(),
     )
     .unwrap_or(u32::MAX);
-    QueryResult {
+    QueryResultDraft {
         comment_count,
         comments: Some(comments),
         last_activity,
@@ -595,6 +600,7 @@ fn make_query_result(path: &str, comments: Vec<ExpandedComment>) -> QueryResult 
         pending_count,
         pending_for: None,
     }
+    .into()
 }
 
 #[test]
@@ -630,10 +636,10 @@ fn query_pretty_header_names_both_counts_under_a_filter() {
         "2026-04-06T14:00:00-04:00",
         "docs/design.md",
     );
-    let mut result = make_query_result("docs/design.md", vec![cm]);
+    let mut result = make_query_result("docs/design.md", vec![cm]).into_draft();
     result.comment_count = 190;
 
-    let output = format_query_pretty(&[result], Some("for alice"));
+    let output = format_query_pretty(&[result.into()], Some("for alice"));
 
     assert!(
         output.contains("docs/design.md (1 of 190 comments, 1 pending for alice)"),
@@ -682,12 +688,13 @@ fn query_pretty_pending_for() {
         "Review this.",
         "2026-04-06T14:00:00-04:00",
         "design.md",
-    );
+    )
+    .into_draft();
     cm.to = vec![String::from("alice")];
-    let mut result = make_query_result("design.md", vec![cm]);
+    let mut result = make_query_result("design.md", vec![cm.into()]).into_draft();
     result.pending_count = 1;
 
-    let output = format_query_pretty(&[result], Some("for alice"));
+    let output = format_query_pretty(&[result.into()], Some("for alice"));
 
     assert!(output.contains("1 pending for alice"));
     assert!(output.contains("design.md (1 comment, 1 pending for alice)"));
@@ -713,9 +720,10 @@ fn query_pretty_flat_not_threaded() {
         "Reply comment.",
         "2026-04-06T14:01:00-04:00",
         "file.md",
-    );
+    )
+    .into_draft();
     reply.reply_to = Some(String::from("aaa"));
-    let result = make_query_result("file.md", vec![root, reply]);
+    let result = make_query_result("file.md", vec![root, reply.into()]);
 
     let output = format_query_pretty(&[result], None);
 
@@ -772,9 +780,10 @@ fn query_pretty_reactions() {
         "Nice idea.",
         "2026-04-06T14:00:00-04:00",
         "file.md",
-    );
+    )
+    .into_draft();
     cm.reactions = reactions;
-    let result = make_query_result("file.md", vec![cm]);
+    let result = make_query_result("file.md", vec![cm.into()]);
     let output = format_query_pretty(&[result], None);
 
     assert!(output.contains("\u{2502} \u{1f44d} alice, bob"));
@@ -782,10 +791,11 @@ fn query_pretty_reactions() {
 
 #[test]
 fn query_pretty_acked_status() {
-    let ack = Acknowledgment {
+    let ack = AcknowledgmentDraft {
         author: String::from("alice"),
         ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
-    };
+    }
+    .into();
     let mut cm = make_expanded(
         "abc",
         "eduardo",
@@ -794,10 +804,11 @@ fn query_pretty_acked_status() {
         "Review this.",
         "2026-04-06T14:00:00-04:00",
         "file.md",
-    );
+    )
+    .into_draft();
     cm.to = vec![String::from("alice")];
     cm.ack = vec![ack];
-    let result = make_query_result("file.md", vec![cm]);
+    let result = make_query_result("file.md", vec![cm.into()]);
     let output = format_query_pretty(&[result], None);
 
     assert!(output.contains("\u{2502} \u{2713} acked by alice @ 2026-04-06 15:00"));
@@ -867,9 +878,10 @@ fn query_pretty_reply_marker() {
         "Reply content.",
         "2026-04-06T14:01:00-04:00",
         "file.md",
-    );
+    )
+    .into_draft();
     cm.reply_to = Some(String::from("abc"));
-    let result = make_query_result("file.md", vec![cm]);
+    let result = make_query_result("file.md", vec![cm.into()]);
     let output = format_query_pretty(&[result], None);
 
     assert!(output.contains("  \u{2502} \u{2934} reply-to: abc"));

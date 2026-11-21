@@ -43,10 +43,10 @@ use tixschema::model_schema;
 use crate::parser::{Acknowledgment, rfc3339_z};
 
 /// One author's reaction with the time it was added.
+#[model_schema(enable = ["jsonschema"], new = false)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct ReactionEntry {
     pub author: String,
     pub ts: DateTime<FixedOffset>,
@@ -54,8 +54,8 @@ pub struct ReactionEntry {
 
 impl ReactionEntry {
     #[must_use = "the return value is the only result of this call"]
-    pub const fn new(author: String, ts: DateTime<FixedOffset>) -> Self {
-        Self { author, ts }
+    pub fn new(author: String, ts: DateTime<FixedOffset>) -> Self {
+        ReactionEntryDraft { author, ts }.into()
     }
 }
 
@@ -85,11 +85,12 @@ enum RawReactionItem {
 impl RawReactionItem {
     fn into_entry(self) -> ReactionEntry {
         match self {
-            Self::Author(author) => ReactionEntry {
+            Self::Author(author) => ReactionEntryDraft {
                 author,
                 ts: legacy_sentinel_ts(),
-            },
-            Self::Full { author, ts } => ReactionEntry { author, ts },
+            }
+            .into(),
+            Self::Full { author, ts } => ReactionEntryDraft { author, ts }.into(),
         }
     }
 }
@@ -141,10 +142,13 @@ impl ReactionsExt for Reactions {
         if entries.iter().any(|e| e.author == author) {
             return false;
         }
-        entries.push(ReactionEntry {
-            author: String::from(author),
-            ts,
-        });
+        entries.push(
+            ReactionEntryDraft {
+                author: String::from(author),
+                ts,
+            }
+            .into(),
+        );
         true
     }
 
@@ -163,11 +167,13 @@ impl ReactionsExt for Reactions {
                 } else {
                     entry.ts
                 };
-                entry.ts = if resolved < comment_ts {
+                let mut draft = ReactionEntry::clone(entry).into_draft();
+                draft.ts = if resolved < comment_ts {
                     comment_ts
                 } else {
                     resolved
                 };
+                *entry = draft.into();
             }
         }
     }

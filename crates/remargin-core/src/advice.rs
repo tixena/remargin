@@ -35,7 +35,7 @@ pub struct Advice {
 /// `op` is the zero-based index into the request's operations array — the
 /// one handle the caller holds for every operation, including the ones
 /// that produced no id.
-#[model_schema(enable = ["jsonschema"])]
+#[model_schema(enable = ["jsonschema"], new = false)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct OpAdvice {
@@ -66,27 +66,32 @@ pub struct OpWarning {
 
 impl From<Advice> for Warning {
     fn from(note: Advice) -> Self {
-        Self {
-            line: note.line,
-            message: note.message,
+        let draft = note.into_draft();
+        WarningDraft {
+            line: draft.line,
+            message: draft.message,
         }
+        .into()
     }
 }
 
 impl From<OpAdvice> for OpWarning {
     fn from(entry: OpAdvice) -> Self {
-        Self {
-            line: entry.note.line,
-            message: entry.note.message,
-            op: entry.op,
+        let draft = entry.into_draft();
+        let note = draft.note.into_draft();
+        OpWarningDraft {
+            line: note.line,
+            message: note.message,
+            op: draft.op,
         }
+        .into()
     }
 }
 
 impl OpAdvice {
     #[must_use = "the return value is the only result of this call"]
-    pub const fn new(op: usize, note: Advice) -> Self {
-        Self { note, op }
+    pub fn new(op: usize, note: Advice) -> Self {
+        OpAdviceDraft { note, op }.into()
     }
 }
 
@@ -118,10 +123,16 @@ pub fn review(content: &str) -> Vec<Advice> {
 /// A partial write reviews only the caller's fragment, so its notes start
 /// at line 1 of that fragment. Offsetting by `start_line - 1` makes them
 /// point at the real lines of the file the caller is editing.
-pub fn offset_lines(notes: &mut [Advice], offset: usize) {
-    for note in notes {
-        note.line += offset;
-    }
+#[must_use = "the return value is the only result of this call"]
+pub fn offset_lines(notes: Vec<Advice>, offset: usize) -> Vec<Advice> {
+    notes
+        .into_iter()
+        .map(|note| {
+            let mut draft = note.into_draft();
+            draft.line += offset;
+            draft.into()
+        })
+        .collect()
 }
 
 /// The notes as the canonical `warnings` JSON array.
@@ -213,12 +224,12 @@ fn check_hard_wrapped_paragraphs(content: &str, notes: &mut Vec<Advice>) {
     for block in prose_blocks(content) {
         let span = block.lines.len();
         if span > 1 {
-            notes.push(Advice {
+            notes.push(AdviceDraft {
                 line: block.line,
                 message: format!(
                     "this paragraph is hard-wrapped across {span} lines; write it as one continuous line and let the reader's viewer wrap it"
                 ),
-            });
+            }.into());
         }
     }
 }

@@ -118,7 +118,7 @@ pub struct MvAnswer {
 impl MvOutcome {
     #[must_use = "the return value is the only result of this call"]
     pub fn answer(&self) -> MvAnswer {
-        MvAnswer {
+        MvAnswerDraft {
             action: self.action.clone(),
             bytes_moved: self.bytes_moved,
             dst_absolute: self.dst_absolute.display().to_string(),
@@ -127,6 +127,7 @@ impl MvOutcome {
             src_absolute: self.src_absolute.display().to_string(),
             topology: self.topology.clone(),
         }
+        .into()
     }
 }
 
@@ -261,14 +262,16 @@ pub fn mv(
         dst_absolute: dst_resolved,
         nested_files_moved: 0,
         src_absolute: src_resolved,
-        topology: MvTopology {
+        topology: MvTopologyDraft {
             is_directory: false,
             noop_same_path: false,
-        },
-        action: MvAction {
+        }
+        .into(),
+        action: MvActionDraft {
             fallback_copy,
             overwritten: dst_pre_existed,
-        },
+        }
+        .into(),
     })
 }
 
@@ -335,14 +338,16 @@ fn idempotent_already_settled(
             dst_absolute: dst_resolved.to_path_buf(),
             nested_files_moved: 0,
             src_absolute: src_lexical.to_path_buf(),
-            topology: MvTopology {
+            topology: MvTopologyDraft {
                 is_directory,
                 noop_same_path: false,
-            },
-            action: MvAction {
+            }
+            .into(),
+            action: MvActionDraft {
                 fallback_copy: false,
                 overwritten: false,
-            },
+            }
+            .into(),
         });
     }
     bail!(
@@ -373,14 +378,16 @@ fn same_path_noop(
         dst_absolute: dst_resolved,
         nested_files_moved: 0,
         src_absolute: src_resolved.to_path_buf(),
-        topology: MvTopology {
+        topology: MvTopologyDraft {
             is_directory,
             noop_same_path: true,
-        },
-        action: MvAction {
+        }
+        .into(),
+        action: MvActionDraft {
             fallback_copy: false,
             overwritten: false,
-        },
+        }
+        .into(),
     })
 }
 
@@ -488,14 +495,16 @@ fn mv_directory(
         dst_absolute: dst_resolved,
         nested_files_moved,
         src_absolute: src_resolved.to_path_buf(),
-        topology: MvTopology {
+        topology: MvTopologyDraft {
             is_directory: true,
             noop_same_path: false,
-        },
-        action: MvAction {
+        }
+        .into(),
+        action: MvActionDraft {
             fallback_copy,
             overwritten: dst_pre_existed,
-        },
+        }
+        .into(),
     })
 }
 

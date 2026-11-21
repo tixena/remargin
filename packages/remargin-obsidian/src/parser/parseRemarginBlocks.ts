@@ -1,14 +1,21 @@
 /** Parses the remargin fenced blocks of a markdown document. */
 
-import type {
-  Acknowledgment,
-  AuthorType,
-  Comment,
-  OnDiskComment,
-  ReactionEntry,
+import {
+  type Acknowledgment,
+  type AuthorType,
+  type Comment,
+  type OnDiskComment,
+  type ReactionEntry,
+  safeDecodeAcknowledgment,
+  safeDecodeReactionEntry,
 } from "@/generated";
 
 const LEGACY_REACTION_TS = "1970-01-01T00:00:00+00:00";
+
+/** The decoded value as a one-element list, or none when the schema refused it. */
+function decoded<Value>(result: { success: true; data: Value } | { success: false }): Value[] {
+  return result.success ? [result.data] : [];
+}
 
 function normalizeAcks(
   raw: Array<string | { author: string; ts: string }> | undefined
@@ -19,9 +26,11 @@ function normalizeAcks(
       // Wire shape: "author@rfc3339-ts"
       const at = entry.indexOf("@");
       if (at < 0) return [];
-      return [{ author: entry.slice(0, at), ts: new Date(entry.slice(at + 1)) }];
+      return decoded(
+        safeDecodeAcknowledgment({ author: entry.slice(0, at), ts: new Date(entry.slice(at + 1)) })
+      );
     }
-    return [{ author: entry.author, ts: new Date(entry.ts) }];
+    return decoded(safeDecodeAcknowledgment({ author: entry.author, ts: new Date(entry.ts) }));
   });
 }
 
@@ -31,10 +40,14 @@ function normalizeReactions(
   if (!raw) return {};
   const out: Record<string, ReactionEntry[]> = {};
   for (const [emoji, items] of Object.entries(raw)) {
-    out[emoji] = items.map((item) =>
-      typeof item === "string"
-        ? { author: item, ts: new Date(LEGACY_REACTION_TS) }
-        : { author: item.author, ts: new Date(item.ts) }
+    out[emoji] = items.flatMap((item) =>
+      decoded(
+        safeDecodeReactionEntry(
+          typeof item === "string"
+            ? { author: item, ts: new Date(LEGACY_REACTION_TS) }
+            : { author: item.author, ts: new Date(item.ts) }
+        )
+      )
     );
   }
   return out;

@@ -18,7 +18,10 @@ use os_shim::bucket::Condition;
 
 use crate::on_disk_comment::OnDiskComment;
 use crate::parser::heading::resolve_heading_path;
-use crate::parser::{self, Acknowledgment, Comment, ParsedDocument, Segment, required_fence_depth};
+use crate::parser::{
+    self, Acknowledgment, AcknowledgmentDraft, Comment, ParsedDocument, Segment,
+    required_fence_depth,
+};
 use crate::reactions::quote_emoji_key;
 use crate::wait::Wait as _;
 
@@ -83,7 +86,7 @@ impl InsertPosition {
 /// entries.
 #[must_use = "the return value is the only result of this call"]
 pub fn dedupe_acks(acks: &[Acknowledgment]) -> Vec<Acknowledgment> {
-    let mut keep: Vec<Acknowledgment> = Vec::with_capacity(acks.len());
+    let mut keep: Vec<AcknowledgmentDraft> = Vec::with_capacity(acks.len());
     let mut seen: HashMap<String, usize> = HashMap::with_capacity(acks.len());
     for ack in acks {
         if let Some(&idx) = seen.get(&ack.author) {
@@ -92,10 +95,10 @@ pub fn dedupe_acks(acks: &[Acknowledgment]) -> Vec<Acknowledgment> {
             }
         } else {
             seen.insert(ack.author.clone(), keep.len());
-            keep.push(ack.clone());
+            keep.push(ack.clone().into_draft());
         }
     }
-    keep
+    keep.into_iter().map(Into::into).collect()
 }
 
 /// Return an error if `path`'s basename matches [`FORBIDDEN_TARGETS`].

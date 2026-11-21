@@ -15,7 +15,7 @@ use os_shim::mock::MemorySystem;
 
 use crate::config::{Mode, ResolvedConfig};
 use crate::crypto;
-use crate::operations::cp::{CpArgs, CpKind, CpOutcome, cp, render_cp_outcome};
+use crate::operations::cp::{CpArgs, CpKind, CpOutcome, CpOutcomeDraft, cp, render_cp_outcome};
 use crate::parser::{self, AuthorType};
 use crate::wait::Wait as _;
 
@@ -316,7 +316,7 @@ fn outcome_serializes_to_snake_case_json() {
 }
 
 fn outcome(kind: CpKind, bytes: u64, dropped: usize, overwritten: bool) -> CpOutcome {
-    CpOutcome {
+    CpOutcomeDraft {
         bytes_copied: bytes,
         elapsed_ms: 0,
         comments_dropped: dropped,
@@ -325,6 +325,7 @@ fn outcome(kind: CpKind, bytes: u64, dropped: usize, overwritten: bool) -> CpOut
         overwritten,
         src_absolute: PathBuf::from("/src/file.md"),
     }
+    .into()
 }
 
 #[test]

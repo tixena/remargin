@@ -36,10 +36,10 @@ use crate::permissions::session_guard_install::{self, TestOutcome as GuardTestOu
 use crate::wait::Wait as _;
 
 /// Severity levels for doctor findings.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum Severity {
     /// No enforcement at all — blocks every other meaningful check.
     Critical,
@@ -48,10 +48,10 @@ pub enum Severity {
 }
 
 /// Identifies the specific issue a finding describes.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum FindingKind {
     /// An agent identity whose resolved key path lives under the user's
     /// primary SSH directory (`~/.ssh`) — the agent can read and sign
@@ -145,9 +145,9 @@ pub enum FindingKind {
 }
 
 /// A single diagnostic finding from a doctor check.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct DoctorFinding {
     /// What the finding is.
     pub kind: FindingKind,
@@ -163,9 +163,9 @@ pub struct DoctorFinding {
 }
 
 /// Output of a `remargin doctor` run.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct DoctorReport {
     /// How long the call took.
     #[serde(default)]
@@ -211,7 +211,7 @@ pub struct DoctorReport {
 impl DoctorReport {
     /// `true` when there are no findings.
     #[must_use = "the return value is the only result of this call"]
-    pub const fn is_clean(&self) -> bool {
+    pub fn is_clean(&self) -> bool {
         self.findings.is_empty()
     }
 }
@@ -615,7 +615,7 @@ pub fn run_doctor(
             ));
         }
         // Short-circuit: no further checks are meaningful without the hook.
-        return Ok(DoctorReport {
+        return Ok(DoctorReportDraft {
             elapsed_ms: 0,
             findings,
             goose_guard_installed,
@@ -625,7 +625,8 @@ pub fn run_doctor(
             session_guard_installed,
             project_settings_file,
             user_settings_file: user_settings_file.to_path_buf(),
-        });
+        }
+        .into());
     }
 
     if checks.contains(&CheckName::Hook) {
@@ -677,7 +678,7 @@ pub fn run_doctor(
         )?);
     }
 
-    Ok(DoctorReport {
+    Ok(DoctorReportDraft {
         elapsed_ms: 0,
         findings,
         goose_guard_installed,
@@ -687,7 +688,8 @@ pub fn run_doctor(
         session_guard_installed,
         project_settings_file,
         user_settings_file: user_settings_file.to_path_buf(),
-    })
+    }
+    .into())
 }
 
 /// Findings from the checks that walk `resolve_permissions` /
@@ -873,12 +875,13 @@ fn hook_missing_finding(
             )
         },
     );
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::HookMissing,
         message,
         remedy,
         severity: Severity::Critical,
     }
+    .into()
 }
 
 /// The `SessionStart` backstop's finding. As with the hook gate, a `fault`
@@ -919,12 +922,13 @@ fn session_guard_missing_finding(
             )
         },
     );
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::SessionGuardMissing,
         message,
         remedy,
         severity: Severity::Critical,
     }
+    .into()
 }
 
 /// One entry still naming the binary by bare name. `subject` names which
@@ -935,7 +939,7 @@ fn path_relative_finding(
     settings_file: &Path,
     install_command: &str,
 ) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::HookPathRelative,
         message: format!(
             "The {subject} entry in {} runs `{command}`, naming the remargin binary by bare name \
@@ -949,6 +953,7 @@ fn path_relative_finding(
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 fn goose_session_guard_missing_finding(
@@ -967,7 +972,7 @@ fn goose_session_guard_missing_finding(
         },
         |reason| format!("it is not live: {reason}"),
     );
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::GooseSessionGuardMissing,
         message: format!(
             "goose is installed but the remargin guard plugin declares no live SessionStart entry \
@@ -980,6 +985,7 @@ fn goose_session_guard_missing_finding(
         ),
         severity: Severity::Critical,
     }
+    .into()
 }
 
 /// Every selected goose check's findings. A `None` probe is a machine with
@@ -1016,7 +1022,7 @@ fn goose_mcp_missing_finding(
         },
         |reason| format!("its entry is not live: {reason}"),
     );
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::GooseMcpMissing,
         message: format!(
             "The goose guard is wired but remargin is not registered as a goose MCP extension — \
@@ -1030,10 +1036,11 @@ fn goose_mcp_missing_finding(
         ),
         severity: Severity::Critical,
     }
+    .into()
 }
 
 fn goose_guard_missing_finding(user_dir: &Path, project_dir: &Path) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::GooseGuardMissing,
         message: format!(
             "goose is installed but the remargin guard plugin is absent from both the user-scope \
@@ -1045,10 +1052,11 @@ fn goose_guard_missing_finding(user_dir: &Path, project_dir: &Path) -> DoctorFin
         remedy: String::from("Run `remargin goose pretool install` to install the guard plugin."),
         severity: Severity::Critical,
     }
+    .into()
 }
 
 fn goose_guard_broken_finding(reason: &str) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::GooseGuardBroken,
         message: format!(
             "The remargin guard plugin for goose is installed but does not describe a live hook: \
@@ -1060,10 +1068,11 @@ fn goose_guard_broken_finding(reason: &str) -> DoctorFinding {
         ),
         severity: Severity::Critical,
     }
+    .into()
 }
 
 fn trusted_root_escape_finding(escape: &TrustedRootEscape) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::TrustedRootEscape,
         message: escape.message(),
         remedy: format!(
@@ -1076,6 +1085,7 @@ fn trusted_root_escape_finding(escape: &TrustedRootEscape) -> DoctorFinding {
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 /// One [`FindingKind::TrustedRootMissing`] per resolved trusted root whose
@@ -1101,7 +1111,7 @@ fn trusted_root_missing_findings(system: &dyn System, cwd: &Path) -> Result<Vec<
 }
 
 fn trusted_root_missing_finding(root: &ResolvedTrustedRoot, anchor: &Path) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::TrustedRootMissing,
         message: format!(
             "trusted_roots entry in {} resolves to {}, which does not exist. It protects nothing.",
@@ -1114,6 +1124,7 @@ fn trusted_root_missing_finding(root: &ResolvedTrustedRoot, anchor: &Path) -> Do
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 /// One [`FindingKind::ConfigSchemaLint`] per permissions-schema fault in
@@ -1131,14 +1142,16 @@ fn config_schema_lint_findings(system: &dyn System, cwd: &Path) -> Result<Vec<Do
     Ok(lint_permissions_in_parents(system, cwd)?
         .into_iter()
         .filter(|err| !escape_messages.contains(&err.message))
-        .map(|err| DoctorFinding {
-            kind: FindingKind::ConfigSchemaLint,
-            message: schema_lint_message(&err),
-            remedy: format!(
-                "Fix the permissions schema in {}.",
-                err.source_file.display()
-            ),
-            severity: Severity::Warning,
+        .map(|err| {
+            DoctorFinding::from(DoctorFindingDraft {
+                kind: FindingKind::ConfigSchemaLint,
+                message: schema_lint_message(&err),
+                remedy: format!(
+                    "Fix the permissions schema in {}.",
+                    err.source_file.display()
+                ),
+                severity: Severity::Warning,
+            })
         })
         .collect())
 }
@@ -1169,7 +1182,7 @@ fn leftover_finding(rule: &str, file: &Path, reason: &LeftoverReason) -> DoctorF
             file.display()
         ),
     };
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::LeftoverProjectedRule,
         message,
         remedy: format!(
@@ -1178,6 +1191,7 @@ fn leftover_finding(rule: &str, file: &Path, reason: &LeftoverReason) -> DoctorF
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 /// Read-only diagnostics over the realm's resolved signing identity.
@@ -1253,7 +1267,7 @@ fn identity_key_unresolvable_finding(
         || String::from("the realm's `.remargin.yaml`"),
         |path| path.display().to_string(),
     );
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::IdentityKeyUnresolvable,
         message: format!(
             "Identity `{identity}` runs in strict mode but its signing key `{}` ({declared_in}) \
@@ -1265,10 +1279,11 @@ fn identity_key_unresolvable_finding(
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 fn agent_key_under_ssh_finding(identity: &str, key_path: &Path) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::AgentKeyUnderUserSsh,
         message: format!(
             "Agent identity `{identity}`'s key `{}` lives under your ~/.ssh — the agent can sign \
@@ -1281,6 +1296,7 @@ fn agent_key_under_ssh_finding(identity: &str, key_path: &Path) -> DoctorFinding
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 /// One [`FindingKind::StaleSandboxEntry`] per realm sandbox entry whose
@@ -1308,7 +1324,7 @@ fn stale_sandbox_findings(system: &dyn System, cwd: &Path) -> Result<Vec<DoctorF
 }
 
 fn stale_sandbox_finding(path: &Path, author: &str) -> DoctorFinding {
-    DoctorFinding {
+    DoctorFindingDraft {
         kind: FindingKind::StaleSandboxEntry,
         message: format!(
             "`{}` carries a sandbox entry for `{author}`, who is not an active registry \
@@ -1322,6 +1338,7 @@ fn stale_sandbox_finding(path: &Path, author: &str) -> DoctorFinding {
         ),
         severity: Severity::Warning,
     }
+    .into()
 }
 
 /// Render a [`DoctorReport`] as human-readable text.

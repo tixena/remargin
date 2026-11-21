@@ -199,7 +199,7 @@ fn check_why_populates_matching_rule_for_outside_allow_list() {
         true,
     )
     .unwrap();
-    let rule = result.matching_rule.unwrap();
+    let rule = result.into_draft().matching_rule.unwrap();
     assert_eq!(rule.kind, "trusted_roots");
     assert_eq!(rule.source_file, PathBuf::from("/r/.remargin.yaml"));
     assert!(rule.rule_text.contains("outside trusted_roots"));

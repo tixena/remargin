@@ -22,9 +22,9 @@ use crate::wait::Wait as _;
 use crate::writer::serialize_comment;
 
 /// An acknowledgment of a comment by another participant.
+#[model_schema]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct Acknowledgment {
     pub author: String,
     pub ts: DateTime<FixedOffset>,
@@ -36,19 +36,19 @@ pub struct Acknowledgment {
 /// string. Sandbox entries represent "this participant has staged this
 /// file for attention" — they are volatile user state and excluded from
 /// comment-level checksums and signatures.
+#[model_schema]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct SandboxEntry {
     pub author: String,
     pub ts: DateTime<FixedOffset>,
 }
 
 /// Whether the comment author is a human or an AI agent.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum AuthorType {
     Agent,
     Human,
@@ -67,9 +67,9 @@ impl AuthorType {
 }
 
 /// A parsed Remargin comment with all metadata fields.
+#[model_schema]
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
-#[model_schema]
 pub struct Comment {
     pub ack: Vec<Acknowledgment>,
     pub attachments: Vec<String>,
@@ -159,7 +159,9 @@ impl Comment {
     pub fn is_pending_for(&self, target: &str) -> bool {
         is_pending_for(&self.to, &self.ack, target)
     }
+}
 
+impl CommentDraft {
     /// Borrow the comment's classification tags as a slice. Returns
     /// `&[]` when the field is absent, so callers that do not care
     /// about the `Some(empty)` vs `None` distinction can iterate,
@@ -313,7 +315,8 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
 
         if block.tag == "remargin" {
             let mut comment = parse_remargin_block(&block.inner, line)
-                .with_context(|| format!("in remargin block starting at byte {}", block.start))?;
+                .with_context(|| format!("in remargin block starting at byte {}", block.start))?
+                .into_draft();
             // Exact source line span from the block's byte range — never
             // re-serialized, so it cannot drift.
             let block_text = &content[block.start..block.end];
@@ -321,7 +324,7 @@ pub fn parse(content: &str) -> Result<ParsedDocument> {
                 block_text.matches('\n').count() + usize::from(!block_text.ends_with('\n'));
             comment.sl = Some(line);
             comment.el = Some(line + block_lines - 1);
-            segments.push(Segment::Comment(Box::new(comment)));
+            segments.push(Segment::Comment(Box::new(comment.into())));
         } else {
             segments.push(Segment::Body(content[block.start..block.end].to_owned()));
         }
@@ -478,7 +481,7 @@ pub fn parse_sandbox_entry(entry: &str) -> Result<SandboxEntry> {
     let ts_str = &entry[at_pos + 1..];
     let ts = DateTime::parse_from_rfc3339(ts_str)
         .with_context(|| format!("invalid sandbox timestamp: {ts_str}"))?;
-    Ok(SandboxEntry { author, ts })
+    Ok(SandboxEntryDraft { author, ts }.into())
 }
 
 /// Serialize a [`SandboxEntry`] to its compact `author@timestamp` wire form.

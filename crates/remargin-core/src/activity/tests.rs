@@ -802,7 +802,9 @@ fn compact_activity_envelope_shape() {
 /// Holds for both the hand-built compact map and the derived `Serialize`.
 #[test]
 fn unset_newest_ts_is_omitted_not_nulled() {
-    use crate::activity::{CompactFileChanges, FileChanges, to_compact_file};
+    use crate::activity::{
+        CompactFileChanges, CompactFileChangesDraft, FileChanges, to_compact_file,
+    };
 
     let file = FileChanges {
         changes: Vec::new(),
@@ -815,12 +817,12 @@ fn unset_newest_ts_is_omitted_not_nulled() {
     assert!(!obj.contains_key("newest_ts"), "{compact:#}");
     assert!(!obj.contains_key("cutoff_applied"), "{compact:#}");
 
-    let anchor = CompactFileChanges {
+    let anchor = CompactFileChanges::from(CompactFileChangesDraft {
         changes: Vec::new(),
         cutoff_applied: None,
         newest_ts: None,
         path: PathBuf::from("/r/note.md"),
-    };
+    });
     let json = serde_json::to_string(&anchor).unwrap();
     assert!(!json.contains("newest_ts"), "{json}");
 }

@@ -37,10 +37,10 @@ use crate::writer::ensure_not_forbidden_target;
 
 /// Which copy path ran. Carried in [`CpOutcome`] so callers can distinguish
 /// without inspecting fields.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub enum CpKind {
     /// Comment-bearing markdown: body + frontmatter copied, comments
     /// dropped so the duplicate starts a clean history.
@@ -53,9 +53,9 @@ pub enum CpKind {
 }
 
 /// Outcome of a successful [`cp`] call.
+#[model_schema(enable = ["jsonschema"])]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
-#[model_schema(enable = ["jsonschema"])]
 pub struct CpOutcome {
     /// Size of the source file in bytes. `0` for [`CpKind::Noop`].
     pub bytes_copied: u64,
@@ -138,7 +138,7 @@ pub fn cp(
     let (src_resolved, dst_resolved) = resolve_endpoints(system, base_dir, config, args)?;
 
     if src_resolved == dst_resolved {
-        return Ok(CpOutcome {
+        return Ok(CpOutcomeDraft {
             bytes_copied: 0,
             comments_dropped: 0,
             dst_absolute: dst_resolved,
@@ -146,7 +146,8 @@ pub fn cp(
             kind: CpKind::Noop,
             overwritten: false,
             src_absolute: src_resolved,
-        });
+        }
+        .into());
     }
 
     let caller = config.caller_info();
@@ -241,7 +242,7 @@ fn perform_copy(
             .copy(src, dst)
             .wait()
             .with_context(|| format!("copying {} -> {}", src.display(), dst.display()))?;
-        return Ok(CpOutcome {
+        return Ok(CpOutcomeDraft {
             bytes_copied,
             comments_dropped: 0,
             dst_absolute: dst.to_path_buf(),
@@ -249,7 +250,8 @@ fn perform_copy(
             kind: CpKind::Verbatim,
             overwritten: dst_pre_existed,
             src_absolute: src.to_path_buf(),
-        });
+        }
+        .into());
     }
 
     let src_content = system
@@ -263,7 +265,7 @@ fn perform_copy(
 
     if comment_count == 0 {
         write_markdown_copy(system, dst, &src_content, config)?;
-        return Ok(CpOutcome {
+        return Ok(CpOutcomeDraft {
             bytes_copied,
             comments_dropped: 0,
             dst_absolute: dst.to_path_buf(),
@@ -271,7 +273,8 @@ fn perform_copy(
             kind: CpKind::Verbatim,
             overwritten: dst_pre_existed,
             src_absolute: src.to_path_buf(),
-        });
+        }
+        .into());
     }
 
     let mut body_only_doc = parsed;
@@ -286,7 +289,7 @@ fn perform_copy(
 
     write_markdown_copy(system, dst, &body_text, config)?;
 
-    Ok(CpOutcome {
+    Ok(CpOutcomeDraft {
         bytes_copied,
         comments_dropped,
         dst_absolute: dst.to_path_buf(),
@@ -294,7 +297,8 @@ fn perform_copy(
         kind: CpKind::BodyOnly,
         overwritten: dst_pre_existed,
         src_absolute: src.to_path_buf(),
-    })
+    }
+    .into())
 }
 
 /// Write markdown content to `dst` through the frontmatter pipeline.

@@ -33,7 +33,7 @@ pub enum HumanIdentityErrorKind {
 }
 
 /// A tool refused because the server resolved to a human identity.
-#[model_schema(enable = ["jsonschema"])]
+#[model_schema(enable = ["jsonschema"], new = false)]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub struct HumanIdentityRejected {
@@ -64,7 +64,7 @@ pub struct Failure {
 impl HumanIdentityRejected {
     #[must_use = "the return value is the only result of this call"]
     pub fn new(identity: &str, tool: &str) -> Self {
-        Self {
+        HumanIdentityRejectedDraft {
             error_kind: HumanIdentityErrorKind::McpHumanIdentityRejected,
             headline: format!(
                 "MCP tool '{tool}' refused: this server resolved to '{identity}', a human \
@@ -75,20 +75,25 @@ impl HumanIdentityRejected {
             identity: String::from(identity),
             tool: String::from(tool),
         }
+        .into()
     }
 }
 
 impl From<anyhow::Error> for RemarginError {
     fn from(err: anyhow::Error) -> Self {
         if let Some(failure) = err.downcast_ref::<SubsetGateFailure>() {
-            return Self::SubsetGate(failure.to_json());
+            return RemarginErrorDraft::SubsetGate(failure.to_json()).into();
         }
         if let Some(failure) = err.downcast_ref::<VerifyFailure>() {
-            return Self::Verify(Box::new(failure.payload()));
+            return RemarginErrorDraft::Verify(Box::new(failure.payload())).into();
         }
-        Self::Failed(Failure {
-            error_kind: FailureKind::Failed,
-            message: format!("{err:#}"),
-        })
+        RemarginErrorDraft::Failed(
+            FailureDraft {
+                error_kind: FailureKind::Failed,
+                message: format!("{err:#}"),
+            }
+            .into(),
+        )
+        .into()
     }
 }

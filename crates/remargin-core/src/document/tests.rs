@@ -3073,13 +3073,13 @@ fn write_create_never_reports_noop() {
 fn list_entry_json_shape_matches_schema() {
     use std::path::PathBuf;
 
-    let entry = document::ListEntry {
+    let entry = document::ListEntry::from(document::ListEntryDraft {
         is_dir: false,
         path: PathBuf::from("foo/bar.md"),
         remargin_last_activity: Some(String::from("2026-04-06T12:00:00-04:00")),
         remargin_pending: Some(2_u32),
         size: Some(1024_u64),
-    };
+    });
 
     let value = serde_json::to_value(&entry).unwrap();
     let obj = value.as_object().unwrap();
@@ -3095,13 +3095,13 @@ fn list_entry_json_shape_matches_schema() {
         serde_json::json!("2026-04-06T12:00:00-04:00")
     );
 
-    let bare = document::ListEntry {
+    let bare = document::ListEntry::from(document::ListEntryDraft {
         is_dir: true,
         path: PathBuf::from("dir"),
         remargin_last_activity: None,
         remargin_pending: None,
         size: None,
-    };
+    });
     let bare_value = serde_json::to_value(&bare).unwrap();
     let bare_obj = bare_value.as_object().unwrap();
     for key in ["size", "remargin_pending", "remargin_last_activity"] {

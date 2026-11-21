@@ -25,8 +25,8 @@ use crate::id;
 use crate::kind::{self, validate_kinds};
 use crate::linter;
 use crate::operations::verify::commit_with_verify;
-use crate::operations::{apply_sandbox_entry, copy_attachments, find_comment_mut, resolve_thread};
-use crate::parser::{self, Acknowledgment, AuthorType, Comment, ParsedDocument};
+use crate::operations::{apply_sandbox_entry, change_comment, copy_attachments, resolve_thread};
+use crate::parser::{self, AcknowledgmentDraft, AuthorType, CommentDraft, ParsedDocument};
 use crate::permissions::op_guard::pre_mutate_check_for_caller;
 use crate::reactions::Reactions;
 use crate::writer::{self, InsertPosition};
@@ -260,7 +260,7 @@ pub fn batch_comment(
         }
 
         let now = Utc::now().fixed_offset();
-        let mut comment = Comment {
+        let mut comment = CommentDraft {
             ack: Vec::new(),
             attachments: resolved_attachments,
             author: String::from(identity),
@@ -291,7 +291,7 @@ pub fn batch_comment(
 
         let lines_before = doc.to_markdown()?.matches('\n').count();
 
-        writer::insert_comment(&mut doc, comment, &position)
+        writer::insert_comment(&mut doc, comment.into(), &position)
             .with_context(|| format!("batch operation {idx}: inserting comment"))?;
 
         if let Some(parent_id) = op.reply_to.as_deref() {
@@ -386,7 +386,7 @@ pub(crate) fn refuse_unknown_fields(
 /// parent.author != caller. Records the parent's line + ack-induced
 /// line count into `line_shifts` so subsequent `AfterLine` targets see
 /// the shift.
-fn apply_batch_auto_ack(
+pub(crate) fn apply_batch_auto_ack(
     doc: &mut ParsedDocument,
     parent_id: &str,
     identity: &str,
@@ -409,13 +409,16 @@ fn apply_batch_auto_ack(
         return Ok(());
     }
     let lines_before_ack = doc.to_markdown()?.matches('\n').count();
-    let parent = find_comment_mut(doc, parent_id).with_context(|| {
-        format!("batch operation {idx}: auto-ack parent {parent_id:?} not found")
-    })?;
-    parent.ack.push(Acknowledgment {
-        author: String::from(identity),
-        ts: now,
-    });
+    change_comment(doc, parent_id, |parent| {
+        parent.ack.push(
+            AcknowledgmentDraft {
+                author: String::from(identity),
+                ts: now,
+            }
+            .into(),
+        );
+    })
+    .with_context(|| format!("batch operation {idx}: auto-ack parent {parent_id:?} not found"))?;
     let lines_after_ack = doc.to_markdown()?.matches('\n').count();
     let ack_lines_added = lines_after_ack.saturating_sub(lines_before_ack);
     if ack_lines_added > 0

@@ -64,10 +64,10 @@ describe("report schemas — live --json payloads parse whole", () => {
     assert.equal(report.elapsed_ms, 2n);
   });
 
-  it("elapsed_ms is always written, so a payload without it is rejected", () => {
+  it("a payload without elapsed_ms reads it as 0, as the Rust read does", () => {
     const payload = JSON.parse(DOCTOR);
     delete payload.elapsed_ms;
-    assert.equal(DoctorReport$Schema.safeParse(payload).success, false);
+    assert.equal(DoctorReport$Schema.parse(payload).elapsed_ms, 0n);
   });
 });
 
