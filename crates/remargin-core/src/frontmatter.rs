@@ -18,7 +18,7 @@
 mod tests;
 
 use anyhow::{Context as _, Result};
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::Timestamp;
 use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
@@ -297,7 +297,7 @@ pub fn set_sandbox_on_mapping(mapping: &mut Mapping, entries: &[SandboxEntry]) {
 pub fn add_sandbox_entry_for(
     entries: &mut Vec<SandboxEntry>,
     identity: &str,
-    now: DateTime<FixedOffset>,
+    now: Timestamp,
 ) -> bool {
     if let Some(existing) = entries.iter_mut().find(|e| e.author == identity) {
         if existing.ts == now {
@@ -362,7 +362,7 @@ fn populate_non_author_fields(mapping: &mut Mapping, doc_body: &str) {
 
     let created_key = Value::String(String::from("created"));
     if !mapping.contains_key(&created_key) {
-        let now = rfc3339_z(&Utc::now());
+        let now = rfc3339_z(&Timestamp::now());
         mapping.insert(created_key, Value::String(now));
     }
 }
@@ -452,8 +452,8 @@ pub fn extract_title_from_heading(body: &str) -> Option<String> {
 }
 
 /// Find the most recent activity timestamp across all comments, acks, and reactions.
-fn find_last_activity(comments: &[&Comment]) -> Option<DateTime<FixedOffset>> {
-    let mut latest: Option<DateTime<FixedOffset>> = None;
+fn find_last_activity(comments: &[&Comment]) -> Option<Timestamp> {
+    let mut latest: Option<Timestamp> = None;
 
     for cm in comments {
         latest = Some(max_ts(latest, cm.ts));
@@ -466,10 +466,7 @@ fn find_last_activity(comments: &[&Comment]) -> Option<DateTime<FixedOffset>> {
     latest
 }
 
-fn max_ts(
-    current: Option<DateTime<FixedOffset>>,
-    candidate: DateTime<FixedOffset>,
-) -> DateTime<FixedOffset> {
+fn max_ts(current: Option<Timestamp>, candidate: Timestamp) -> Timestamp {
     match current {
         Some(existing) if existing > candidate => existing,
         _ => candidate,

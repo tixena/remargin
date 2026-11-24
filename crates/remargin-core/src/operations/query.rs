@@ -12,7 +12,7 @@ use alloc::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 use os_shim::System;
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
@@ -94,7 +94,7 @@ pub struct QueryFilter {
     pub pending_for_me: Option<String>,
     /// A comment passes when its kinds hold at least one of these values; empty means no filter.
     pub remargin_kind: Vec<String>,
-    pub since: Option<DateTime<FixedOffset>>,
+    pub since: Option<Timestamp>,
     pub summary: bool,
 }
 
@@ -229,7 +229,7 @@ pub struct ExpandedComment {
     /// `None` for comments that have never been edited. Pretty-print
     /// and the activity command both surface this when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edited_at: Option<DateTime<FixedOffset>>,
+    pub edited_at: Option<Timestamp>,
     /// Relative path to the file this comment belongs to.
     pub file: PathBuf,
     /// Unique short identifier.
@@ -255,7 +255,7 @@ pub struct ExpandedComment {
     /// Addressees of the comment.
     pub to: Vec<String>,
     /// Timestamp when the comment was created.
-    pub ts: DateTime<FixedOffset>,
+    pub ts: Timestamp,
 }
 
 /// A single result from a cross-document query.
@@ -273,7 +273,7 @@ pub struct QueryResult {
     pub comments: Option<Vec<ExpandedComment>>,
     /// Most recent activity timestamp.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_activity: Option<DateTime<FixedOffset>>,
+    pub last_activity: Option<Timestamp>,
     /// Number of comments matching the active filters; equals
     /// `comment_count` when no comment-level filter is set.
     pub matched_count: u32,
@@ -300,14 +300,14 @@ pub type CompactCommentRow = (
     usize,
     String,
     AuthorType,
-    DateTime<FixedOffset>,
+    Timestamp,
     Option<String>,
     Option<String>,
     Vec<String>,
     Vec<String>,
     BTreeMap<String, Vec<ReactionEntry>>,
     Option<Vec<String>>,
-    Option<DateTime<FixedOffset>>,
+    Option<Timestamp>,
     Vec<String>,
     String,
 );
@@ -320,14 +320,14 @@ pub type CompactCommentRowWithIntegrity = (
     usize,
     String,
     AuthorType,
-    DateTime<FixedOffset>,
+    Timestamp,
     Option<String>,
     Option<String>,
     Vec<String>,
     Vec<String>,
     BTreeMap<String, Vec<ReactionEntry>>,
     Option<Vec<String>>,
-    Option<DateTime<FixedOffset>>,
+    Option<Timestamp>,
     Vec<String>,
     String,
     Option<String>,
@@ -351,7 +351,7 @@ pub struct CompactQueryResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comments: Option<Vec<CompactCommentRow>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_activity: Option<DateTime<FixedOffset>>,
+    pub last_activity: Option<Timestamp>,
     /// Number of comments matching the active filters; equals
     /// `comment_count` when no comment-level filter is set.
     pub matched_count: u32,

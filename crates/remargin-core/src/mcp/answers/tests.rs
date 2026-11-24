@@ -4,7 +4,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 use serde_json::json;
 
 use std::path::{Path, PathBuf};
@@ -51,8 +51,8 @@ use crate::permissions::inspect::{
 };
 use crate::responses::{CommentCreated, CommentCreatedDraft};
 
-fn ts() -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339("2026-01-02T03:04:05Z").unwrap()
+fn ts() -> Timestamp {
+    "2026-01-02T03:04:05Z".parse::<Timestamp>().unwrap()
 }
 
 fn plain_row() -> CommentRow {

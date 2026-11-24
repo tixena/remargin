@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use super::{
     Multiplexer, Tab, build_herdr_plan, build_tmux_plan, default_multiplexer,
@@ -19,8 +19,8 @@ use super::{
 /// A `herdr workspace create` response; its `root_pane` carries the default tab's `tab_id`.
 const WORKSPACE_CREATE_JSON: &str = r#"{"result":{"root_pane":{"pane_id":"w4:p1","tab_id":"w4:t1","terminal_id":"term_6570da89722875","workspace_id":"w4"},"workspace":{"workspace_id":"w4","label":"remargin-smoke"}}}"#;
 
-fn at(secs: i64) -> DateTime<Utc> {
-    DateTime::from_timestamp(secs, 0).unwrap()
+fn at(secs: i64) -> Timestamp {
+    Timestamp::from_second(secs).unwrap()
 }
 
 fn tab(identity: &str, cwd: &str, launch: &[&str], seeds: &[&str]) -> Tab {

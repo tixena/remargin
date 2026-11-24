@@ -134,7 +134,7 @@ fn render_node(
     let _ = writeln!(out, "{file_path}:{}", cm.line);
 
     let author_type_str = cm.author_type.as_str();
-    let ts_short = cm.ts.format("%Y-%m-%d %H:%M");
+    let ts_short = cm.ts.strftime("%Y-%m-%d %H:%M");
     let _ = writeln!(
         out,
         "{indent}{} \u{00b7} {} ({author_type_str}) \u{00b7} {ts_short}",
@@ -142,7 +142,7 @@ fn render_node(
     );
 
     if let Some(edited_at) = cm.edited_at {
-        let edited_short = edited_at.format("%Y-%m-%d %H:%M");
+        let edited_short = edited_at.strftime("%Y-%m-%d %H:%M");
         let _ = writeln!(out, "{indent}\u{2502} edited {edited_short}");
     }
 
@@ -167,7 +167,7 @@ fn render_node(
         let _ = writeln!(out, "{indent}\u{2502} pending");
     } else {
         for ack_entry in &cm.ack {
-            let ack_ts = ack_entry.ts.format("%Y-%m-%d %H:%M");
+            let ack_ts = ack_entry.ts.strftime("%Y-%m-%d %H:%M");
             let _ = writeln!(
                 out,
                 "{indent}\u{2502} \u{2713} acked by {} @ {ack_ts}",
@@ -243,7 +243,7 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
     let _ = writeln!(out, "{file_path}:{}", cm.line);
 
     let author_type_str = cm.author_type.as_str();
-    let ts_short = cm.ts.format("%Y-%m-%d %H:%M");
+    let ts_short = cm.ts.strftime("%Y-%m-%d %H:%M");
     let _ = writeln!(
         out,
         "  {} \u{00b7} {} ({author_type_str}) \u{00b7} {ts_short}",
@@ -251,7 +251,7 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
     );
 
     if let Some(edited_at) = cm.edited_at {
-        let edited_short = edited_at.format("%Y-%m-%d %H:%M");
+        let edited_short = edited_at.strftime("%Y-%m-%d %H:%M");
         let _ = writeln!(out, "  \u{2502} edited {edited_short}");
     }
 
@@ -276,7 +276,7 @@ fn render_expanded_comment(out: &mut String, file_path: &str, cm: &ExpandedComme
         let _ = writeln!(out, "  \u{2502} pending");
     } else {
         for ack_entry in &cm.ack {
-            let ack_ts = ack_entry.ts.format("%Y-%m-%d %H:%M");
+            let ack_ts = ack_entry.ts.strftime("%Y-%m-%d %H:%M");
             let _ = writeln!(
                 out,
                 "  \u{2502} \u{2713} acked by {} @ {ack_ts}",
@@ -366,7 +366,7 @@ pub fn render_activity_pretty(result: &ActivityResult) -> String {
                     let _ = writeln!(
                         out,
                         "  {} \u{00b7} comment \u{00b7} {comment_id} by {author}{arrow} (lines {line_start}-{line_end})",
-                        ts.format("%Y-%m-%d %H:%M"),
+                        ts.strftime("%Y-%m-%d %H:%M"),
                     );
                 }
                 Change::Ack {
@@ -378,7 +378,7 @@ pub fn render_activity_pretty(result: &ActivityResult) -> String {
                     let _ = writeln!(
                         out,
                         "  {} \u{00b7} ack \u{00b7} {comment_id} acked by {author}",
-                        ts.format("%Y-%m-%d %H:%M"),
+                        ts.strftime("%Y-%m-%d %H:%M"),
                     );
                 }
                 Change::Sandbox {
@@ -389,7 +389,7 @@ pub fn render_activity_pretty(result: &ActivityResult) -> String {
                     let _ = writeln!(
                         out,
                         "  {} \u{00b7} sandbox \u{00b7} {author}",
-                        ts.format("%Y-%m-%d %H:%M"),
+                        ts.strftime("%Y-%m-%d %H:%M"),
                     );
                 }
             }
@@ -406,12 +406,12 @@ pub fn render_activity_pretty(result: &ActivityResult) -> String {
 #[must_use = "the return value is the only result of this call"]
 pub fn render_activity_cutoff_header(
     cutoff_explicit: bool,
-    cutoff: Option<chrono::DateTime<chrono::FixedOffset>>,
+    cutoff: Option<jiff::Timestamp>,
 ) -> String {
     if cutoff_explicit {
         cutoff.map_or_else(
             || String::from("(since: explicit cutoff missing)"),
-            |ts| format!("(since {})", ts.format("%Y-%m-%d %H:%M")),
+            |ts| format!("(since {})", ts.strftime("%Y-%m-%d %H:%M")),
         )
     } else {
         cutoff.map_or_else(
@@ -419,7 +419,7 @@ pub fn render_activity_cutoff_header(
             |ts| {
                 format!(
                     "(since you last touched this file: {})",
-                    ts.format("%Y-%m-%d %H:%M"),
+                    ts.strftime("%Y-%m-%d %H:%M"),
                 )
             },
         )

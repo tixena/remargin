@@ -13,7 +13,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use chrono::Utc;
+use jiff::Timestamp;
 use os_shim::System;
 use os_shim::bucket::Condition;
 use serde_yaml::{Mapping, Value};
@@ -163,7 +163,7 @@ pub fn restrict(
     let claude_files_touched = if rules.is_empty() {
         Vec::new()
     } else {
-        let timestamp = rfc3339_z(&Utc::now());
+        let timestamp = rfc3339_z(&Timestamp::now());
         apply_rules(
             system,
             &anchor,

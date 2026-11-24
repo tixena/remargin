@@ -13,7 +13,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 use os_shim::System;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -48,8 +48,8 @@ pub struct FileChanges {
     pub changes: Vec<Change>,
     /// The explicit `since`, else the caller's last action in this file, else `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cutoff_applied: Option<DateTime<FixedOffset>>,
-    pub newest_ts: Option<DateTime<FixedOffset>>,
+    pub cutoff_applied: Option<Timestamp>,
+    pub newest_ts: Option<Timestamp>,
     pub path: PathBuf,
 }
 
@@ -68,7 +68,7 @@ pub enum Change {
         #[serde(skip_serializing_if = "Option::is_none")]
         author_type: Option<String>,
         comment_id: String,
-        ts: DateTime<FixedOffset>,
+        ts: Timestamp,
     },
     /// `ts` carries `max(ts, edited_at)`, the timestamp that surfaced the change.
     Comment {
@@ -80,13 +80,13 @@ pub enum Change {
         #[serde(skip_serializing_if = "Option::is_none")]
         reply_to: Option<String>,
         to: Vec<String>,
-        ts: DateTime<FixedOffset>,
+        ts: Timestamp,
     },
     Sandbox {
         author: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         author_type: Option<String>,
-        ts: DateTime<FixedOffset>,
+        ts: Timestamp,
     },
 }
 
@@ -144,7 +144,7 @@ impl Change {
     }
 
     #[must_use = "the return value is the only result of this call"]
-    pub const fn ts(&self) -> DateTime<FixedOffset> {
+    pub const fn ts(&self) -> Timestamp {
         match self {
             Self::Ack {
                 ts,
@@ -179,7 +179,7 @@ pub struct ActivityResult {
     pub cutoff_explicit: bool,
     /// Sorted by path.
     pub files: Vec<FileChanges>,
-    pub newest_ts_overall: Option<DateTime<FixedOffset>>,
+    pub newest_ts_overall: Option<Timestamp>,
 }
 
 /// One compact change row, positional columns named by [`CHANGE_COLS`].
@@ -192,7 +192,7 @@ pub struct ActivityResult {
 /// serde tag values `ack` / `comment` / `sandbox`.
 #[model_schema(name = "CompactChangeRow", enable = ["jsonschema"])]
 pub type CompactChangeRow = (
-    DateTime<FixedOffset>,
+    Timestamp,
     String,
     String,
     Option<String>,
@@ -216,9 +216,9 @@ pub type CompactChangeRow = (
 pub struct CompactFileChanges {
     pub changes: Vec<CompactChangeRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cutoff_applied: Option<DateTime<FixedOffset>>,
+    pub cutoff_applied: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub newest_ts: Option<DateTime<FixedOffset>>,
+    pub newest_ts: Option<Timestamp>,
     pub path: PathBuf,
 }
 
@@ -324,7 +324,7 @@ pub fn compact_file(file: &FileChanges) -> CompactFileChanges {
 pub fn gather_activity(
     system: &dyn System,
     path: &Path,
-    since: Option<DateTime<FixedOffset>>,
+    since: Option<Timestamp>,
     config: &ResolvedConfig,
 ) -> Result<ActivityResult> {
     let Some(caller_identity) = config.identity.as_deref() else {
@@ -413,7 +413,7 @@ fn is_md_path(path: &Path) -> bool {
 fn gather_one_file(
     system: &dyn System,
     file_path: &Path,
-    since: Option<DateTime<FixedOffset>>,
+    since: Option<Timestamp>,
     caller_identity: &str,
     registry: Option<&Registry>,
 ) -> Option<FileChanges> {
@@ -478,9 +478,9 @@ fn caller_last_action(
     comments: &[&Comment],
     sandbox_entries: &[SandboxEntry],
     caller: &str,
-) -> Option<DateTime<FixedOffset>> {
-    let mut accumulator: Option<DateTime<FixedOffset>> = None;
-    let consider = |slot: &mut Option<DateTime<FixedOffset>>, candidate: DateTime<FixedOffset>| {
+) -> Option<Timestamp> {
+    let mut accumulator: Option<Timestamp> = None;
+    let consider = |slot: &mut Option<Timestamp>, candidate: Timestamp| {
         if slot.is_none_or(|prior| candidate > prior) {
             *slot = Some(candidate);
         }
@@ -504,7 +504,7 @@ fn caller_last_action(
     accumulator
 }
 
-fn comment_change(cm: &Comment, cutoff: Option<DateTime<FixedOffset>>) -> Option<Change> {
+fn comment_change(cm: &Comment, cutoff: Option<Timestamp>) -> Option<Change> {
     let effective = cm.effective_ts();
     if !past_cutoff(effective, cutoff) {
         return None;
@@ -523,7 +523,7 @@ fn comment_change(cm: &Comment, cutoff: Option<DateTime<FixedOffset>>) -> Option
     })
 }
 
-fn past_cutoff(ts: DateTime<FixedOffset>, cutoff: Option<DateTime<FixedOffset>>) -> bool {
+fn past_cutoff(ts: Timestamp, cutoff: Option<Timestamp>) -> bool {
     cutoff.is_none_or(|cut| ts > cut)
 }
 

@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use chrono::Utc;
+use jiff::Timestamp;
 use os_shim::System;
 use serde_json::{Map, Value};
 
@@ -259,7 +259,7 @@ pub fn batch_comment(
                 .with_context(|| format!("batch operation {idx}: to: {recipient:?}"))?;
         }
 
-        let now = Utc::now().fixed_offset();
+        let now = Timestamp::now();
         let mut comment = CommentDraft {
             ack: Vec::new(),
             attachments: resolved_attachments,
@@ -326,7 +326,7 @@ pub fn batch_comment(
     frontmatter::ensure_frontmatter(&mut doc, cfg)?;
 
     if operations.iter().any(|op| op.sandbox) {
-        apply_sandbox_entry(&mut doc, identity, Utc::now().fixed_offset())?;
+        apply_sandbox_entry(&mut doc, identity, Timestamp::now())?;
     }
 
     let markdown_after = doc.to_markdown()?;
@@ -391,7 +391,7 @@ pub(crate) fn apply_batch_auto_ack(
     parent_id: &str,
     identity: &str,
     auto_ack: Option<bool>,
-    now: chrono::DateTime<chrono::FixedOffset>,
+    now: jiff::Timestamp,
     idx: usize,
     line_shifts: &mut Vec<(usize, usize)>,
 ) -> Result<()> {

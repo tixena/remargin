@@ -5,13 +5,13 @@ use super::{
     ReactionEntry, Reactions, ReactionsExt, deserialize_with_legacy, format_reaction_entry_block,
     legacy_sentinel_ts, quote_emoji_key,
 };
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 
 use crate::parser::AcknowledgmentDraft;
 use serde_yaml::Value;
 
-fn ts(s: &str) -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339(s).unwrap()
+fn ts(s: &str) -> Timestamp {
+    s.parse::<Timestamp>().unwrap()
 }
 
 fn parse(yaml: &str) -> Reactions {
@@ -43,13 +43,13 @@ fn deserialize_legacy_shape_uses_sentinel_ts() {
 
 #[test]
 fn deserialize_new_shape_keeps_explicit_ts() {
-    let yaml = "+1:\n  - author: eduardo\n    ts: 2026-04-26T12:00:00-04:00\n  - author: claude\n    ts: 2026-04-26T12:01:00-04:00\n";
+    let yaml = "+1:\n  - author: eduardo\n    ts: 2026-04-26T12:00:00Z\n  - author: claude\n    ts: 2026-04-26T12:01:00Z\n";
     let value = parse(yaml);
     let entry_list = entries_for(&value, "+1");
     assert_eq!(entry_list.len(), 2);
     assert_eq!(entry_list[0].author, "eduardo");
-    assert_eq!(entry_list[0].ts, ts("2026-04-26T12:00:00-04:00"));
-    assert_eq!(entry_list[1].ts, ts("2026-04-26T12:01:00-04:00"));
+    assert_eq!(entry_list[0].ts, ts("2026-04-26T12:00:00Z"));
+    assert_eq!(entry_list[1].ts, ts("2026-04-26T12:01:00Z"));
 }
 
 #[test]
@@ -58,20 +58,20 @@ fn deserialize_mixed_per_emoji_shapes() {
 +1: [eduardo]
 heart:
   - author: claude
-    ts: 2026-04-26T12:00:00-04:00
+    ts: 2026-04-26T12:00:00Z
 ";
     let value = parse(yaml);
     assert_eq!(value.len(), 2);
     assert_eq!(entries_for(&value, "+1")[0].ts, legacy_sentinel_ts());
     assert_eq!(
         entries_for(&value, "heart")[0].ts,
-        ts("2026-04-26T12:00:00-04:00")
+        ts("2026-04-26T12:00:00Z")
     );
 }
 
 #[test]
 fn deserialize_rejects_unknown_field() {
-    let yaml = "+1:\n  - author: eduardo\n    ts: 2026-04-26T12:00:00-04:00\n    foo: bar\n";
+    let yaml = "+1:\n  - author: eduardo\n    ts: 2026-04-26T12:00:00Z\n    foo: bar\n";
     let err = try_parse(yaml).unwrap_err();
     let _: String = err.to_string();
 }
@@ -87,8 +87,8 @@ fn deserialize_rejects_missing_ts() {
 fn backfill_uses_ack_ts_when_author_acked() {
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction("+1", "eduardo", legacy_sentinel_ts());
-    let comment_ts = ts("2026-04-26T10:00:00-04:00");
-    let ack_ts = ts("2026-04-26T11:00:00-04:00");
+    let comment_ts = ts("2026-04-26T10:00:00Z");
+    let ack_ts = ts("2026-04-26T11:00:00Z");
     let acks = vec![
         AcknowledgmentDraft {
             author: String::from("eduardo"),
@@ -104,7 +104,7 @@ fn backfill_uses_ack_ts_when_author_acked() {
 fn backfill_falls_back_to_comment_ts_without_ack() {
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction("+1", "claude", legacy_sentinel_ts());
-    let comment_ts = ts("2026-04-26T10:00:00-04:00");
+    let comment_ts = ts("2026-04-26T10:00:00Z");
     reactions.backfill_legacy_timestamps(comment_ts, &[]);
     assert_eq!(entries_for(&reactions, "+1")[0].ts, comment_ts);
 }
@@ -113,7 +113,7 @@ fn backfill_falls_back_to_comment_ts_without_ack() {
 fn backfill_clamps_to_comment_ts_floor() {
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction("+1", "eduardo", legacy_sentinel_ts());
-    let comment_ts = ts("2026-04-26T10:00:00-04:00");
+    let comment_ts = ts("2026-04-26T10:00:00Z");
     let stale_ack = ts("2024-01-01T00:00:00+00:00");
     let acks = vec![
         AcknowledgmentDraft {
@@ -128,14 +128,14 @@ fn backfill_clamps_to_comment_ts_floor() {
 
 #[test]
 fn backfill_leaves_explicit_ts_alone() {
-    let explicit_ts = ts("2026-04-26T12:00:00-04:00");
+    let explicit_ts = ts("2026-04-26T12:00:00Z");
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction("+1", "eduardo", explicit_ts);
-    let comment_ts = ts("2026-04-26T10:00:00-04:00");
+    let comment_ts = ts("2026-04-26T10:00:00Z");
     let acks = vec![
         AcknowledgmentDraft {
             author: String::from("eduardo"),
-            ts: ts("2026-04-26T11:00:00-04:00"),
+            ts: ts("2026-04-26T11:00:00Z"),
         }
         .into(),
     ];
@@ -146,19 +146,19 @@ fn backfill_leaves_explicit_ts_alone() {
 #[test]
 fn add_is_idempotent_for_same_author() {
     let mut reactions = Reactions::new();
-    let first = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00-04:00"));
-    let second = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T13:00:00-04:00"));
+    let first = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00Z"));
+    let second = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T13:00:00Z"));
     assert!(first);
     assert!(!second);
     let entry_list = entries_for(&reactions, "+1");
     assert_eq!(entry_list.len(), 1);
-    assert_eq!(entry_list[0].ts, ts("2026-04-26T12:00:00-04:00"));
+    assert_eq!(entry_list[0].ts, ts("2026-04-26T12:00:00Z"));
 }
 
 #[test]
 fn remove_drops_emoji_when_empty() {
     let mut reactions = Reactions::new();
-    let _added = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00-04:00"));
+    let _added = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00Z"));
     let removed = ReactionsExt::remove_reaction(&mut reactions, "+1", "eduardo");
     assert!(removed);
     assert!(reactions.is_empty());
@@ -167,8 +167,8 @@ fn remove_drops_emoji_when_empty() {
 #[test]
 fn remove_keeps_other_authors() {
     let mut reactions = Reactions::new();
-    let _added_eduardo = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00-04:00"));
-    let _added_claude = reactions.add_reaction("+1", "claude", ts("2026-04-26T12:01:00-04:00"));
+    let _added_eduardo = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00Z"));
+    let _added_claude = reactions.add_reaction("+1", "claude", ts("2026-04-26T12:01:00Z"));
     let removed = ReactionsExt::remove_reaction(&mut reactions, "+1", "eduardo");
     assert!(removed);
     let entry_list = entries_for(&reactions, "+1");
@@ -179,7 +179,7 @@ fn remove_keeps_other_authors() {
 #[test]
 fn serialize_emits_new_shape() {
     let mut reactions = Reactions::new();
-    let _added = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00-04:00"));
+    let _added = reactions.add_reaction("+1", "eduardo", ts("2026-04-26T12:00:00Z"));
     let yaml = serde_yaml::to_string(&reactions).unwrap();
     let value: Value = serde_yaml::from_str(&yaml).unwrap();
     let plus_one = value
@@ -208,11 +208,11 @@ fn quote_emoji_key_handles_special_chars() {
 
 #[test]
 fn format_reaction_entry_block_has_two_lines_and_trailing_newline() {
-    let entry = ReactionEntry::new(String::from("eduardo"), ts("2026-04-26T12:00:00-04:00"));
+    let entry = ReactionEntry::new(String::from("eduardo"), ts("2026-04-26T12:00:00Z"));
     let block = format_reaction_entry_block("    ", &entry);
     let lines: Vec<&str> = block.split('\n').collect();
     assert_eq!(lines.len(), 3);
     assert_eq!(lines[0], "    - author: eduardo");
-    assert_eq!(lines[1], "      ts: 2026-04-26T12:00:00-04:00");
+    assert_eq!(lines[1], "      ts: 2026-04-26T12:00:00Z");
     assert_eq!(lines[2], "");
 }

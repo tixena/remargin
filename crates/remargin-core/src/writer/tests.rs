@@ -5,7 +5,7 @@ extern crate alloc;
 use std::collections::HashSet;
 use std::path::Path;
 
-use chrono::DateTime;
+use jiff::Timestamp;
 use os_shim::System as _;
 use os_shim::mock::MemorySystem;
 
@@ -39,7 +39,7 @@ fn make_comment(id: &str, content: &str) -> Comment {
         sl: None,
         thread: None,
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
+        ts: "2026-04-06T14:32:00-04:00".parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -64,14 +64,14 @@ fn full_serialize() {
     let _added = reactions.add_reaction(
         "thumbsup",
         "bob",
-        DateTime::parse_from_rfc3339("2026-04-06T14:35:00-04:00").unwrap(),
+        "2026-04-06T14:35:00-04:00".parse::<Timestamp>().unwrap(),
     );
 
     let comment = CommentDraft {
         ack: vec![
             AcknowledgmentDraft {
                 author: String::from("jorge"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+                ts: "2026-04-06T15:00:00-04:00".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -91,7 +91,7 @@ fn full_serialize() {
         sl: None,
         thread: Some(String::from("t01")),
         to: vec![String::from("jorge"), String::from("claude")],
-        ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
+        ts: "2026-04-06T14:32:00-04:00".parse::<Timestamp>().unwrap(),
     }
     .into();
 
@@ -553,7 +553,7 @@ fn round_trip_append_code_block_all_comments_preserved() {
 fn ack_at(author: &str, ts_rfc3339: &str) -> Acknowledgment {
     AcknowledgmentDraft {
         author: String::from(author),
-        ts: DateTime::parse_from_rfc3339(ts_rfc3339).unwrap(),
+        ts: ts_rfc3339.parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -569,7 +569,7 @@ fn dedupe_acks_keeps_latest_ts_per_identity() {
     assert_eq!(out[0].author, "alice");
     assert_eq!(
         out[0].ts,
-        DateTime::parse_from_rfc3339("2026-04-27T05:02:15+00:00").unwrap(),
+        "2026-04-27T05:02:15+00:00".parse::<Timestamp>().unwrap(),
     );
 }
 
@@ -583,7 +583,7 @@ fn dedupe_acks_keeps_first_when_later_ts_is_older() {
     assert_eq!(out.len(), 1);
     assert_eq!(
         out[0].ts,
-        DateTime::parse_from_rfc3339("2026-04-27T05:02:15+00:00").unwrap(),
+        "2026-04-27T05:02:15+00:00".parse::<Timestamp>().unwrap(),
         "later-but-older ts must not overwrite the survivor's ts",
     );
 }
@@ -727,13 +727,13 @@ fn writer_emits_every_on_disk_comment_field() {
     let _added = reactions.add_reaction(
         "+1",
         "bob",
-        DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap(),
+        "2026-04-26T12:00:00-04:00".parse::<Timestamp>().unwrap(),
     );
     let comment = CommentDraft {
         ack: vec![
             AcknowledgmentDraft {
                 author: String::from("jorge"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+                ts: "2026-04-06T15:00:00-04:00".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -742,7 +742,7 @@ fn writer_emits_every_on_disk_comment_field() {
         author_type: AuthorType::Agent,
         checksum: String::from("sha256:deadbeef"),
         content: String::from("body"),
-        edited_at: Some(DateTime::parse_from_rfc3339("2026-04-07T10:00:00-04:00").unwrap()),
+        edited_at: Some("2026-04-07T10:00:00-04:00".parse::<Timestamp>().unwrap()),
         el: None,
         id: String::from("full"),
         line: 0,
@@ -753,7 +753,7 @@ fn writer_emits_every_on_disk_comment_field() {
         sl: None,
         thread: Some(String::from("t01")),
         to: vec![String::from("jorge"), String::from("claude")],
-        ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
+        ts: "2026-04-06T14:32:00-04:00".parse::<Timestamp>().unwrap(),
     }
     .into();
 

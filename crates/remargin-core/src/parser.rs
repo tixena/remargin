@@ -5,12 +5,11 @@ pub mod heading;
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
-use core::fmt::Display;
 use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use chrono::{DateTime, FixedOffset, SecondsFormat, TimeZone};
+use jiff::Timestamp;
 use os_shim::System;
 use serde::Serialize;
 use tixschema::model_schema;
@@ -27,7 +26,7 @@ use crate::writer::serialize_comment;
 #[non_exhaustive]
 pub struct Acknowledgment {
     pub author: String,
-    pub ts: DateTime<FixedOffset>,
+    pub ts: Timestamp,
 }
 
 /// A single sandbox entry attached to a document's frontmatter.
@@ -41,7 +40,7 @@ pub struct Acknowledgment {
 #[non_exhaustive]
 pub struct SandboxEntry {
     pub author: String,
-    pub ts: DateTime<FixedOffset>,
+    pub ts: Timestamp,
 }
 
 /// Whether the comment author is a human or an AI agent.
@@ -83,7 +82,7 @@ pub struct Comment {
     /// when present. Deliberately NOT included in the signed payload
     /// (see [`crate::crypto::signature_payload`] for the rationale).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edited_at: Option<DateTime<FixedOffset>>,
+    pub edited_at: Option<Timestamp>,
     /// 1-indexed last source line of the comment block (closing fence).
     /// `None` for in-memory comments with no source position. Runtime-only:
     /// never written to disk (the on-disk form is [`OnDiskComment`]).
@@ -120,14 +119,14 @@ pub struct Comment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     pub to: Vec<String>,
-    pub ts: DateTime<FixedOffset>,
+    pub ts: Timestamp,
 }
 
 impl Comment {
     /// `max(ts, edited_at)`: the timestamp to use when deciding whether the comment is newer than a
     /// cutoff, so an edited comment surfaces under its edit time.
     #[must_use = "the return value is the only result of this call"]
-    pub fn effective_ts(&self) -> DateTime<FixedOffset> {
+    pub fn effective_ts(&self) -> Timestamp {
         match self.edited_at {
             Some(edited) if edited > self.ts => edited,
             _ => self.ts,
@@ -479,7 +478,8 @@ pub fn parse_sandbox_entry(entry: &str) -> Result<SandboxEntry> {
         .with_context(|| format!("sandbox entry missing '@': {entry}"))?;
     let author = entry[..at_pos].to_owned();
     let ts_str = &entry[at_pos + 1..];
-    let ts = DateTime::parse_from_rfc3339(ts_str)
+    let ts = ts_str
+        .parse::<Timestamp>()
         .with_context(|| format!("invalid sandbox timestamp: {ts_str}"))?;
     Ok(SandboxEntryDraft { author, ts }.into())
 }
@@ -490,17 +490,12 @@ pub fn format_sandbox_entry(entry: &SandboxEntry) -> String {
     format!("{}@{}", entry.author, rfc3339_z(&entry.ts))
 }
 
-/// Canonical RFC 3339 rendering for every displayed or on-disk timestamp:
-/// `SecondsFormat::AutoSi` plus `Z` for zero offset, exactly what chrono's
-/// serde impl emits, so hand-formatted and serde-serialized fields agree
-/// byte for byte. Crypto canonicalization payloads deliberately do NOT use
-/// this.
-pub(crate) fn rfc3339_z<Tz>(ts: &DateTime<Tz>) -> String
-where
-    Tz: TimeZone,
-    Tz::Offset: Display,
-{
-    ts.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+/// Canonical RFC 3339 rendering for every displayed or on-disk timestamp: UTC with `Z` and the
+/// fraction in the fewest digits, exactly what jiff's serde impl emits, so hand-formatted and
+/// serde-serialized fields agree byte for byte. Crypto canonicalization payloads deliberately do
+/// NOT use this.
+pub(crate) fn rfc3339_z(ts: &Timestamp) -> String {
+    ts.to_string()
 }
 
 fn parse_remargin_block(inner: &str, line: usize) -> Result<Comment> {

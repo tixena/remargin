@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use chrono::DateTime;
+use jiff::Timestamp;
 
 use crate::operations::threading::{build_thread_tree, find_descendants, resolve_thread_root};
 use crate::parser::{AuthorType, Comment, CommentDraft};
@@ -27,7 +27,7 @@ fn make_comment(id: &str, reply_to: Option<&str>, thread: Option<&str>) -> Comme
         sl: None,
         thread: thread.map(String::from),
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T12:00:00-04:00").unwrap(),
+        ts: "2026-04-06T12:00:00-04:00".parse::<Timestamp>().unwrap(),
     }
     .into()
 }

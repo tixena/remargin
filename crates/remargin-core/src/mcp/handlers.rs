@@ -530,7 +530,7 @@ fn activity_now(
     );
     let cutoff = match req.since.as_deref() {
         Some(raw) => Some(
-            chrono::DateTime::parse_from_rfc3339(raw)
+            raw.parse::<jiff::Timestamp>()
                 .with_context(|| format!("activity: invalid ISO 8601 since={raw:?}"))?,
         ),
         None => None,
@@ -1261,7 +1261,7 @@ fn query_filter(req: &QueryArgs, identity: Option<String>) -> anyhow::Result<Que
         .since
         .as_deref()
         .map(|raw| {
-            chrono::DateTime::parse_from_rfc3339(raw)
+            raw.parse::<jiff::Timestamp>()
                 .with_context(|| format!("invalid timestamp: {raw}"))
         })
         .transpose()?;

@@ -54,7 +54,7 @@ fn doc(id: &str, author: &str, ts: &str) -> String {
 /// With no mode flag, `remargin activity` prints the `ActivityResult` as JSON on stdout.
 #[test]
 fn json_output_is_default() {
-    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00Z"))]);
     let out = run_in(
         realm.path(),
         &["activity", "--identity", "alice", "--type", "human"],
@@ -72,7 +72,7 @@ fn json_output_is_default() {
 /// `--pretty` renders the timeline on stderr, each per-file block opening with its cutoff header.
 #[test]
 fn pretty_output_renders_timeline() {
-    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00Z"))]);
     let out = run_in(
         realm.path(),
         &[
@@ -102,8 +102,8 @@ fn pretty_output_renders_timeline() {
 #[test]
 fn pretty_output_renders_explicit_since_header() {
     let realm = realm_with(&[
-        ("a.md", &doc("c1", "bob", "2026-04-08T12:00:00-04:00")),
-        ("b.md", &doc("c2", "bob", "2026-04-06T12:00:00-04:00")),
+        ("a.md", &doc("c1", "bob", "2026-04-08T12:00:00Z")),
+        ("b.md", &doc("c2", "bob", "2026-04-06T12:00:00Z")),
     ]);
     let out = run_in(
         realm.path(),
@@ -111,7 +111,7 @@ fn pretty_output_renders_explicit_since_header() {
             "activity",
             "--pretty",
             "--since",
-            "2026-04-07T00:00:00-04:00",
+            "2026-04-07T00:00:00Z",
             "--identity",
             "alice",
             "--type",
@@ -129,13 +129,13 @@ fn pretty_output_renders_explicit_since_header() {
 /// `--since` parses ISO 8601 and drops a comment older than the cutoff.
 #[test]
 fn since_cutoff_filters_comments() {
-    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00Z"))]);
     let out = run_in(
         realm.path(),
         &[
             "activity",
             "--since",
-            "2026-04-06T13:00:00-04:00",
+            "2026-04-06T13:00:00Z",
             "--identity",
             "alice",
             "--type",
@@ -152,7 +152,7 @@ fn since_cutoff_filters_comments() {
 
 #[test]
 fn malformed_since_errors() {
-    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00Z"))]);
     let out = run_in(
         realm.path(),
         &[
@@ -172,7 +172,7 @@ fn malformed_since_errors() {
 
 #[test]
 fn pretty_and_json_are_mutually_exclusive() {
-    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00Z"))]);
     let out = run_in(
         realm.path(),
         &[
@@ -193,7 +193,7 @@ fn pretty_and_json_are_mutually_exclusive() {
 /// `--json` keeps the verbose shape: pretty-printed, tagged `Change` objects with named fields.
 #[test]
 fn cli_activity_verbose_json_unchanged() {
-    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00-04:00"))]);
+    let realm = realm_with(&[("note.md", &doc("c1", "bob", "2026-04-06T12:00:00Z"))]);
     let out = run_in(
         realm.path(),
         &[

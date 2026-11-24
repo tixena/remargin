@@ -23,7 +23,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
-use chrono::Utc;
+use jiff::Timestamp;
 use os_shim::System;
 use serde_yaml::Value;
 
@@ -283,7 +283,7 @@ pub fn project_ack(
 
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
 
     for comment_id in comment_ids {
         change_comment(&mut after, comment_id, |cm| {
@@ -355,7 +355,7 @@ pub fn project_batch(
 
     preflight_batch_ops(operations, &author_type)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     let mut line_shifts: Vec<(usize, usize)> = Vec::new();
 
     for (idx, op) in operations.iter().enumerate() {
@@ -525,7 +525,7 @@ pub fn project_comment(
         result
     };
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     let comment = CommentDraft {
         ack: Vec::new(),
         attachments: resolved_attachments,
@@ -741,7 +741,7 @@ pub fn project_react(
 
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     change_comment(&mut after, comment_id, |cm| {
         if remove {
             let _was_removed = cm.reactions.remove_reaction(emoji, identity);
@@ -860,7 +860,7 @@ pub fn project_sandbox_add(
 
     let (before, mut after) = parse_file_twice(system, path)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     let mut entries = frontmatter::read_sandbox_entries(&after)?;
     let added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
     if added {

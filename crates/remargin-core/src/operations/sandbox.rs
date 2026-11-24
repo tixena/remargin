@@ -27,7 +27,7 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use chrono::{DateTime, FixedOffset, Utc};
+use jiff::Timestamp;
 use os_shim::System;
 use os_shim::bucket::Condition;
 use serde::Serialize;
@@ -171,7 +171,7 @@ pub struct SandboxFailure {
 #[non_exhaustive]
 pub struct SandboxListing {
     pub path: PathBuf,
-    pub since: DateTime<FixedOffset>,
+    pub since: Timestamp,
 }
 
 /// A single realm-wide sandbox entry: the file, the staging identity, and
@@ -182,7 +182,7 @@ pub struct SandboxListing {
 pub struct SandboxScanEntry {
     pub author: String,
     pub path: PathBuf,
-    pub since: DateTime<FixedOffset>,
+    pub since: Timestamp,
 }
 
 /// Strip `base` from `path` for display; if `path` is not anchored at
@@ -227,7 +227,7 @@ pub fn add_to_files(
         bail!("identity is required for sandbox add");
     }
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     let mut result = SandboxBulkResult::default();
 
     for file in files {
@@ -376,7 +376,7 @@ fn add_one(
     system: &dyn System,
     file: &Path,
     identity: &str,
-    now: DateTime<FixedOffset>,
+    now: Timestamp,
     config: &ResolvedConfig,
 ) -> Result<bool> {
     ensure_not_forbidden_target(file)?;
@@ -431,11 +431,7 @@ fn remove_one(
 /// Appends `identity@now` to `entries`, or refreshes the timestamp of the identity's existing
 /// entry. Returns whether `entries` changed.
 #[must_use = "the caller writes the entries back only when this says they changed"]
-pub fn upsert_entry(
-    entries: &mut Vec<SandboxEntry>,
-    identity: &str,
-    now: DateTime<FixedOffset>,
-) -> bool {
+pub fn upsert_entry(entries: &mut Vec<SandboxEntry>, identity: &str, now: Timestamp) -> bool {
     frontmatter::add_sandbox_entry_for(entries, identity, now)
 }
 

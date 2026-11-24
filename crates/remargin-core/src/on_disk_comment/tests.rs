@@ -3,20 +3,20 @@
 use super::{OnDiskComment, comment_from_on_disk};
 use crate::parser::{AcknowledgmentDraft, AuthorType, Comment, CommentDraft};
 use crate::reactions::{Reactions, ReactionsExt as _};
-use chrono::DateTime;
+use jiff::Timestamp;
 
 fn sample_comment() -> Comment {
     let mut reactions = Reactions::new();
     let _added = reactions.add_reaction(
         "+1",
         "bob",
-        DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap(),
+        "2026-04-26T12:00:00Z".parse::<Timestamp>().unwrap(),
     );
     CommentDraft {
         ack: vec![
             AcknowledgmentDraft {
                 author: String::from("jorge"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+                ts: "2026-04-06T15:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -25,7 +25,7 @@ fn sample_comment() -> Comment {
         author_type: AuthorType::Agent,
         checksum: String::from("sha256:deadbeef"),
         content: String::from("body"),
-        edited_at: Some(DateTime::parse_from_rfc3339("2026-04-07T10:00:00-04:00").unwrap()),
+        edited_at: Some("2026-04-07T10:00:00Z".parse::<Timestamp>().unwrap()),
         el: None,
         id: String::from("full"),
         line: 0,
@@ -36,7 +36,7 @@ fn sample_comment() -> Comment {
         sl: None,
         thread: Some(String::from("t01")),
         to: vec![String::from("jorge"), String::from("claude")],
-        ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
+        ts: "2026-04-06T14:32:00Z".parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -50,19 +50,19 @@ fn from_comment_pins_author_type_to_lowercase_string() {
 #[test]
 fn from_comment_formats_ack_as_author_at_ts_string() {
     let on_disk = OnDiskComment::from(&sample_comment());
-    assert_eq!(on_disk.ack, vec!["jorge@2026-04-06T15:00:00-04:00"]);
+    assert_eq!(on_disk.ack, vec!["jorge@2026-04-06T15:00:00Z"]);
 }
 
 /// A zero offset lands on disk as `Z`, matching what serde emits in a JSON payload.
 #[test]
 fn from_comment_renders_every_zero_offset_timestamp_with_z() {
     let mut comment = sample_comment().into_draft();
-    comment.ts = DateTime::parse_from_rfc3339("2026-04-06T14:32:00+00:00").unwrap();
-    comment.edited_at = Some(DateTime::parse_from_rfc3339("2026-04-07T10:00:00+00:00").unwrap());
+    comment.ts = "2026-04-06T14:32:00+00:00".parse::<Timestamp>().unwrap();
+    comment.edited_at = Some("2026-04-07T10:00:00+00:00".parse::<Timestamp>().unwrap());
     comment.ack = vec![
         AcknowledgmentDraft {
             author: String::from("jorge"),
-            ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00+00:00").unwrap(),
+            ts: "2026-04-06T15:00:00+00:00".parse::<Timestamp>().unwrap(),
         }
         .into(),
     ];
@@ -70,7 +70,7 @@ fn from_comment_renders_every_zero_offset_timestamp_with_z() {
     let _added = reactions.add_reaction(
         "+1",
         "bob",
-        DateTime::parse_from_rfc3339("2026-04-26T12:00:00+00:00").unwrap(),
+        "2026-04-26T12:00:00+00:00".parse::<Timestamp>().unwrap(),
     );
     comment.reactions = reactions;
 
@@ -100,11 +100,11 @@ fn round_trip_preserves_all_wire_fields() {
     assert_eq!(restored.author_type, AuthorType::Agent);
     assert_eq!(
         restored.ts,
-        DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap()
+        "2026-04-06T14:32:00Z".parse::<Timestamp>().unwrap()
     );
     assert_eq!(
         restored.edited_at,
-        Some(DateTime::parse_from_rfc3339("2026-04-07T10:00:00-04:00").unwrap())
+        Some("2026-04-07T10:00:00Z".parse::<Timestamp>().unwrap())
     );
     assert_eq!(restored.to, vec!["jorge", "claude"]);
     assert_eq!(restored.reply_to.as_deref(), Some("xyz"));
@@ -137,12 +137,12 @@ fn dedupes_acks_at_wire_boundary() {
     comment.ack = vec![
         AcknowledgmentDraft {
             author: String::from("alice"),
-            ts: DateTime::parse_from_rfc3339("2026-04-27T05:01:00+00:00").unwrap(),
+            ts: "2026-04-27T05:01:00+00:00".parse::<Timestamp>().unwrap(),
         }
         .into(),
         AcknowledgmentDraft {
             author: String::from("alice"),
-            ts: DateTime::parse_from_rfc3339("2026-04-27T05:02:00+00:00").unwrap(),
+            ts: "2026-04-27T05:02:00+00:00".parse::<Timestamp>().unwrap(),
         }
         .into(),
     ];

@@ -4,7 +4,7 @@ extern crate alloc;
 
 use std::path::PathBuf;
 
-use chrono::DateTime;
+use jiff::Timestamp;
 
 use crate::display::{
     build_comment_tree, count_pending, format_comments_pretty, format_query_pretty,
@@ -42,7 +42,7 @@ impl Default for TestComment<'_> {
             reactions: Reactions::new(),
             reply_to: None,
             to: Vec::new(),
-            ts: "2026-04-06T14:00:00-04:00",
+            ts: "2026-04-06T14:00:00Z",
         }
     }
 }
@@ -66,7 +66,7 @@ fn build_comment(params: TestComment<'_>) -> Comment {
         sl: None,
         thread: None,
         to: params.to.into_iter().map(String::from).collect(),
-        ts: DateTime::parse_from_rfc3339(params.ts).unwrap(),
+        ts: params.ts.parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -96,14 +96,14 @@ fn make_reply(id: &str, line: usize, ts: &str, reply_to: &str) -> Comment {
 fn make_ack(author: &str, ts: &str) -> Acknowledgment {
     AcknowledgmentDraft {
         author: String::from(author),
-        ts: DateTime::parse_from_rfc3339(ts).unwrap(),
+        ts: ts.parse::<Timestamp>().unwrap(),
     }
     .into()
 }
 
 #[test]
 fn tree_single_root() {
-    let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    let cm = make_comment("abc", 10, "2026-04-06T14:00:00Z");
     let comments: Vec<&Comment> = vec![&cm];
     let forest = build_comment_tree(&comments);
 
@@ -114,9 +114,9 @@ fn tree_single_root() {
 
 #[test]
 fn tree_root_with_replies() {
-    let root = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
-    let reply_b = make_reply("bbb", 20, "2026-04-06T14:05:00-04:00", "abc");
-    let reply_c = make_reply("ccc", 30, "2026-04-06T14:03:00-04:00", "abc");
+    let root = make_comment("abc", 10, "2026-04-06T14:00:00Z");
+    let reply_b = make_reply("bbb", 20, "2026-04-06T14:05:00Z", "abc");
+    let reply_c = make_reply("ccc", 30, "2026-04-06T14:03:00Z", "abc");
     let comments: Vec<&Comment> = vec![&root, &reply_b, &reply_c];
     let forest = build_comment_tree(&comments);
 
@@ -129,10 +129,10 @@ fn tree_root_with_replies() {
 
 #[test]
 fn tree_deep_nesting() {
-    let a = make_comment("aaa", 10, "2026-04-06T14:00:00-04:00");
-    let b = make_reply("bbb", 20, "2026-04-06T14:01:00-04:00", "aaa");
-    let c = make_reply("ccc", 30, "2026-04-06T14:02:00-04:00", "bbb");
-    let d = make_reply("ddd", 40, "2026-04-06T14:03:00-04:00", "ccc");
+    let a = make_comment("aaa", 10, "2026-04-06T14:00:00Z");
+    let b = make_reply("bbb", 20, "2026-04-06T14:01:00Z", "aaa");
+    let c = make_reply("ccc", 30, "2026-04-06T14:02:00Z", "bbb");
+    let d = make_reply("ddd", 40, "2026-04-06T14:03:00Z", "ccc");
     let comments: Vec<&Comment> = vec![&a, &b, &c, &d];
     let forest = build_comment_tree(&comments);
 
@@ -148,9 +148,9 @@ fn tree_deep_nesting() {
 
 #[test]
 fn tree_multiple_roots() {
-    let root_a = make_comment("aaa", 50, "2026-04-06T14:00:00-04:00");
-    let root_b = make_comment("bbb", 10, "2026-04-06T14:01:00-04:00");
-    let reply_c = make_reply("ccc", 55, "2026-04-06T14:02:00-04:00", "aaa");
+    let root_a = make_comment("aaa", 50, "2026-04-06T14:00:00Z");
+    let root_b = make_comment("bbb", 10, "2026-04-06T14:01:00Z");
+    let reply_c = make_reply("ccc", 55, "2026-04-06T14:02:00Z", "aaa");
     let comments: Vec<&Comment> = vec![&root_a, &root_b, &reply_c];
     let forest = build_comment_tree(&comments);
 
@@ -163,7 +163,7 @@ fn tree_multiple_roots() {
 
 #[test]
 fn tree_orphan_reply() {
-    let orphan = make_reply("bbb", 10, "2026-04-06T14:00:00-04:00", "nonexistent");
+    let orphan = make_reply("bbb", 10, "2026-04-06T14:00:00Z", "nonexistent");
     let comments: Vec<&Comment> = vec![&orphan];
     let forest = build_comment_tree(&comments);
 
@@ -173,9 +173,9 @@ fn tree_orphan_reply() {
 
 #[test]
 fn tree_children_sorted_by_ts() {
-    let root = make_comment("aaa", 10, "2026-04-06T12:00:00-04:00");
-    let late = make_reply("bbb", 20, "2026-04-06T14:00:00-04:00", "aaa");
-    let early = make_reply("ccc", 30, "2026-04-06T13:00:00-04:00", "aaa");
+    let root = make_comment("aaa", 10, "2026-04-06T12:00:00Z");
+    let late = make_reply("bbb", 20, "2026-04-06T14:00:00Z", "aaa");
+    let early = make_reply("ccc", 30, "2026-04-06T13:00:00Z", "aaa");
     let comments: Vec<&Comment> = vec![&root, &late, &early];
     let forest = build_comment_tree(&comments);
 
@@ -185,8 +185,8 @@ fn tree_children_sorted_by_ts() {
 
 #[test]
 fn tree_roots_sorted_by_line() {
-    let a = make_comment("aaa", 50, "2026-04-06T14:00:00-04:00");
-    let b = make_comment("bbb", 10, "2026-04-06T14:01:00-04:00");
+    let a = make_comment("aaa", 50, "2026-04-06T14:00:00Z");
+    let b = make_comment("bbb", 10, "2026-04-06T14:01:00Z");
     let comments: Vec<&Comment> = vec![&a, &b];
     let forest = build_comment_tree(&comments);
 
@@ -206,7 +206,7 @@ fn render_root_comment() {
     let cm = build_comment(TestComment {
         id: "abc",
         author: "eduardo",
-        ts: "2026-04-06T14:32:00-04:00",
+        ts: "2026-04-06T14:32:00Z",
         line: 25,
         content: "The comment content goes here.",
         ..TestComment::default()
@@ -224,7 +224,7 @@ fn render_reply_indentation() {
     let root = build_comment(TestComment {
         id: "abc",
         author: "eduardo",
-        ts: "2026-04-06T14:32:00-04:00",
+        ts: "2026-04-06T14:32:00Z",
         line: 25,
         content: "Root content.",
         ..TestComment::default()
@@ -233,7 +233,7 @@ fn render_reply_indentation() {
         id: "xyz",
         author: "claude",
         author_type: AuthorType::Agent,
-        ts: "2026-04-06T14:33:00-04:00",
+        ts: "2026-04-06T14:33:00Z",
         line: 35,
         content: "Reply content.",
         reply_to: Some("abc"),
@@ -248,9 +248,9 @@ fn render_reply_indentation() {
 
 #[test]
 fn render_deep_indent() {
-    let a = make_comment("aaa", 10, "2026-04-06T14:00:00-04:00");
-    let b = make_reply("bbb", 20, "2026-04-06T14:01:00-04:00", "aaa");
-    let c = make_reply("ccc", 30, "2026-04-06T14:02:00-04:00", "bbb");
+    let a = make_comment("aaa", 10, "2026-04-06T14:00:00Z");
+    let b = make_reply("bbb", 20, "2026-04-06T14:01:00Z", "aaa");
+    let c = make_reply("ccc", 30, "2026-04-06T14:02:00Z", "bbb");
     let comments: Vec<&Comment> = vec![&a, &b, &c];
     let output = format_comments_pretty("file.md", &comments);
 
@@ -259,8 +259,8 @@ fn render_deep_indent() {
 
 #[test]
 fn render_threading_marker() {
-    let root = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
-    let reply = make_reply("xyz", 20, "2026-04-06T14:01:00-04:00", "abc");
+    let root = make_comment("abc", 10, "2026-04-06T14:00:00Z");
+    let reply = make_reply("xyz", 20, "2026-04-06T14:01:00Z", "abc");
     let comments: Vec<&Comment> = vec![&root, &reply];
     let output = format_comments_pretty("file.md", &comments);
 
@@ -283,7 +283,7 @@ fn render_pending_status() {
 
 #[test]
 fn render_acked_status() {
-    let ack = make_ack("eduardo", "2026-04-06T15:00:00-04:00");
+    let ack = make_ack("eduardo", "2026-04-06T15:00:00Z");
     let cm = build_comment(TestComment {
         id: "abc",
         author: "claude",
@@ -300,8 +300,8 @@ fn render_acked_status() {
 
 #[test]
 fn render_multiple_acks() {
-    let ack1 = make_ack("alice", "2026-04-06T15:00:00-04:00");
-    let ack2 = make_ack("bob", "2026-04-06T15:30:00-04:00");
+    let ack1 = make_ack("alice", "2026-04-06T15:00:00Z");
+    let ack2 = make_ack("bob", "2026-04-06T15:30:00Z");
     let cm = build_comment(TestComment {
         id: "abc",
         to: vec!["alice", "bob"],
@@ -321,12 +321,12 @@ fn render_reactions() {
     let _added_jorge = reactions.add_reaction(
         "\u{1f44d}",
         "jorge",
-        DateTime::parse_from_rfc3339("2026-04-06T14:00:00-04:00").unwrap(),
+        "2026-04-06T14:00:00Z".parse::<Timestamp>().unwrap(),
     );
     let _added_alice = reactions.add_reaction(
         "\u{1f44d}",
         "alice",
-        DateTime::parse_from_rfc3339("2026-04-06T14:01:00-04:00").unwrap(),
+        "2026-04-06T14:01:00Z".parse::<Timestamp>().unwrap(),
     );
     let cm = build_comment(TestComment {
         id: "abc",
@@ -376,39 +376,39 @@ fn render_footer() {
     let cm1 = build_comment(TestComment {
         id: "aaa",
         line: 10,
-        ts: "2026-04-06T14:00:00-04:00",
+        ts: "2026-04-06T14:00:00Z",
         to: vec!["alice"],
         ..TestComment::default()
     });
     let cm2 = build_comment(TestComment {
         id: "bbb",
         line: 20,
-        ts: "2026-04-06T14:01:00-04:00",
+        ts: "2026-04-06T14:01:00Z",
         to: vec!["bob"],
         ..TestComment::default()
     });
-    let ack = make_ack("charlie", "2026-04-06T15:00:00-04:00");
+    let ack = make_ack("charlie", "2026-04-06T15:00:00Z");
     let cm3 = build_comment(TestComment {
         id: "ccc",
         line: 30,
-        ts: "2026-04-06T14:02:00-04:00",
+        ts: "2026-04-06T14:02:00Z",
         to: vec!["charlie"],
         ack: vec![ack],
         ..TestComment::default()
     });
-    let ack4 = make_ack("dave", "2026-04-06T15:10:00-04:00");
+    let ack4 = make_ack("dave", "2026-04-06T15:10:00Z");
     let cm4 = build_comment(TestComment {
         id: "ddd",
         line: 40,
-        ts: "2026-04-06T14:03:00-04:00",
+        ts: "2026-04-06T14:03:00Z",
         ack: vec![ack4],
         ..TestComment::default()
     });
-    let ack5 = make_ack("eve", "2026-04-06T15:11:00-04:00");
+    let ack5 = make_ack("eve", "2026-04-06T15:11:00Z");
     let cm5 = build_comment(TestComment {
         id: "eee",
         line: 50,
-        ts: "2026-04-06T14:04:00-04:00",
+        ts: "2026-04-06T14:04:00Z",
         ack: vec![ack5],
         ..TestComment::default()
     });
@@ -439,26 +439,26 @@ fn render_single_comment_footer() {
 
 #[test]
 fn render_no_pending() {
-    let ack1 = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let ack1 = make_ack("alice", "2026-04-06T15:00:00Z");
     let cm1 = build_comment(TestComment {
         id: "aaa",
         to: vec!["alice"],
         ack: vec![ack1],
         ..TestComment::default()
     });
-    let ack2 = make_ack("bob", "2026-04-06T14:10:00-04:00");
+    let ack2 = make_ack("bob", "2026-04-06T14:10:00Z");
     let cm2 = build_comment(TestComment {
         id: "bbb",
         line: 20,
-        ts: "2026-04-06T14:01:00-04:00",
+        ts: "2026-04-06T14:01:00Z",
         ack: vec![ack2],
         ..TestComment::default()
     });
-    let ack3 = make_ack("bob", "2026-04-06T14:11:00-04:00");
+    let ack3 = make_ack("bob", "2026-04-06T14:11:00Z");
     let cm3 = build_comment(TestComment {
         id: "ccc",
         line: 30,
-        ts: "2026-04-06T14:02:00-04:00",
+        ts: "2026-04-06T14:02:00Z",
         ack: vec![ack3],
         ..TestComment::default()
     });
@@ -484,9 +484,9 @@ fn render_content_with_special_chars() {
 
 #[test]
 fn render_orphan_mixed_with_roots() {
-    let root1 = make_comment("aaa", 10, "2026-04-06T14:00:00-04:00");
-    let root2 = make_comment("bbb", 30, "2026-04-06T14:01:00-04:00");
-    let orphan = make_reply("ccc", 20, "2026-04-06T14:02:00-04:00", "nonexistent");
+    let root1 = make_comment("aaa", 10, "2026-04-06T14:00:00Z");
+    let root2 = make_comment("bbb", 30, "2026-04-06T14:01:00Z");
+    let orphan = make_reply("ccc", 20, "2026-04-06T14:02:00Z", "nonexistent");
     let comments: Vec<&Comment> = vec![&root1, &root2, &orphan];
     let output = format_comments_pretty("file.md", &comments);
 
@@ -499,14 +499,14 @@ fn render_orphan_mixed_with_roots() {
 
 #[test]
 fn broadcast_no_ack_is_pending() {
-    let cm = make_comment("abc", 10, "2026-04-06T14:00:00-04:00");
+    let cm = make_comment("abc", 10, "2026-04-06T14:00:00Z");
     assert!(is_pending(&cm));
     assert_eq!(count_pending(&[&cm]), 1);
 }
 
 #[test]
 fn broadcast_with_ack_not_pending() {
-    let ack = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let ack = make_ack("alice", "2026-04-06T15:00:00Z");
     let cm = build_comment(TestComment {
         id: "abc",
         to: vec![],
@@ -519,7 +519,7 @@ fn broadcast_with_ack_not_pending() {
 
 #[test]
 fn pending_with_partial_ack() {
-    let ack = make_ack("alice", "2026-04-06T15:00:00-04:00");
+    let ack = make_ack("alice", "2026-04-06T15:00:00Z");
     let cm = build_comment(TestComment {
         id: "abc",
         to: vec!["alice", "bob"],
@@ -531,8 +531,8 @@ fn pending_with_partial_ack() {
 
 #[test]
 fn pending_all_acked() {
-    let ack1 = make_ack("alice", "2026-04-06T15:00:00-04:00");
-    let ack2 = make_ack("bob", "2026-04-06T15:30:00-04:00");
+    let ack1 = make_ack("alice", "2026-04-06T15:00:00Z");
+    let ack2 = make_ack("bob", "2026-04-06T15:30:00Z");
     let cm = build_comment(TestComment {
         id: "abc",
         to: vec!["alice", "bob"],
@@ -569,7 +569,7 @@ fn make_expanded(
         signature: None,
         thread: None,
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339(ts).unwrap(),
+        ts: ts.parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -611,7 +611,7 @@ fn query_pretty_single_file() {
         AuthorType::Human,
         10,
         "Fix this bug.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "docs/design.md",
     );
     let result = make_query_result("docs/design.md", vec![cm]);
@@ -633,7 +633,7 @@ fn query_pretty_header_names_both_counts_under_a_filter() {
         AuthorType::Human,
         10,
         "Fix this bug.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "docs/design.md",
     );
     let mut result = make_query_result("docs/design.md", vec![cm]).into_draft();
@@ -655,7 +655,7 @@ fn query_pretty_multi_file() {
         AuthorType::Human,
         5,
         "Comment in B.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "src/b.md",
     );
     let cm2 = make_expanded(
@@ -664,7 +664,7 @@ fn query_pretty_multi_file() {
         AuthorType::Agent,
         15,
         "Comment in A.",
-        "2026-04-06T14:01:00-04:00",
+        "2026-04-06T14:01:00Z",
         "src/a.md",
     );
     let result_b = make_query_result("src/b.md", vec![cm1]);
@@ -686,7 +686,7 @@ fn query_pretty_pending_for() {
         AuthorType::Human,
         10,
         "Review this.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "design.md",
     )
     .into_draft();
@@ -709,7 +709,7 @@ fn query_pretty_flat_not_threaded() {
         AuthorType::Human,
         20,
         "Root comment.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "file.md",
     );
     let mut reply = make_expanded(
@@ -718,7 +718,7 @@ fn query_pretty_flat_not_threaded() {
         AuthorType::Agent,
         10,
         "Reply comment.",
-        "2026-04-06T14:01:00-04:00",
+        "2026-04-06T14:01:00Z",
         "file.md",
     )
     .into_draft();
@@ -747,7 +747,7 @@ fn query_pretty_content_full_no_truncation() {
         AuthorType::Human,
         10,
         content,
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "file.md",
     );
     let result = make_query_result("file.md", vec![cm]);
@@ -765,12 +765,12 @@ fn query_pretty_reactions() {
     let _added_alice = reactions.add_reaction(
         "\u{1f44d}",
         "alice",
-        DateTime::parse_from_rfc3339("2026-04-06T14:00:00-04:00").unwrap(),
+        "2026-04-06T14:00:00Z".parse::<Timestamp>().unwrap(),
     );
     let _added_bob = reactions.add_reaction(
         "\u{1f44d}",
         "bob",
-        DateTime::parse_from_rfc3339("2026-04-06T14:01:00-04:00").unwrap(),
+        "2026-04-06T14:01:00Z".parse::<Timestamp>().unwrap(),
     );
     let mut cm = make_expanded(
         "abc",
@@ -778,7 +778,7 @@ fn query_pretty_reactions() {
         AuthorType::Human,
         10,
         "Nice idea.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "file.md",
     )
     .into_draft();
@@ -793,7 +793,7 @@ fn query_pretty_reactions() {
 fn query_pretty_acked_status() {
     let ack = AcknowledgmentDraft {
         author: String::from("alice"),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+        ts: "2026-04-06T15:00:00Z".parse::<Timestamp>().unwrap(),
     }
     .into();
     let mut cm = make_expanded(
@@ -802,7 +802,7 @@ fn query_pretty_acked_status() {
         AuthorType::Human,
         10,
         "Review this.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "file.md",
     )
     .into_draft();
@@ -831,7 +831,7 @@ fn query_pretty_no_filter() {
         AuthorType::Human,
         10,
         "Content.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "file.md",
     );
     let result = make_query_result("file.md", vec![cm]);
@@ -849,7 +849,7 @@ fn query_pretty_file_line_links() {
         AuthorType::Human,
         42,
         "Comment at line 42.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "docs/guide.md",
     );
     let cm2 = make_expanded(
@@ -858,7 +858,7 @@ fn query_pretty_file_line_links() {
         AuthorType::Agent,
         7,
         "Comment at line 7.",
-        "2026-04-06T14:01:00-04:00",
+        "2026-04-06T14:01:00Z",
         "docs/guide.md",
     );
     let result = make_query_result("docs/guide.md", vec![cm1, cm2]);
@@ -876,7 +876,7 @@ fn query_pretty_reply_marker() {
         AuthorType::Agent,
         15,
         "Reply content.",
-        "2026-04-06T14:01:00-04:00",
+        "2026-04-06T14:01:00Z",
         "file.md",
     )
     .into_draft();
@@ -895,7 +895,7 @@ fn query_no_pretty_unchanged() {
         AuthorType::Human,
         10,
         "Content.",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         "file.md",
     );
     let result = make_query_result("file.md", vec![cm]);
@@ -907,8 +907,8 @@ fn query_no_pretty_unchanged() {
     assert!(output.contains("\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}"));
 }
 
-fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
-    chrono::DateTime::parse_from_rfc3339(s).unwrap()
+fn ts(s: &str) -> jiff::Timestamp {
+    s.parse::<jiff::Timestamp>().unwrap()
 }
 
 #[test]
@@ -948,13 +948,13 @@ fn strip_prefix_display_returns_full_when_not_under_base() {
 
 #[test]
 fn render_activity_cutoff_header_explicit_since() {
-    let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
+    let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00Z")));
     assert_eq!(header, "(since 2026-04-27 02:09)");
 }
 
 #[test]
 fn render_activity_cutoff_header_implicit_with_last_action() {
-    let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
+    let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00Z")));
     assert_eq!(
         header,
         "(since you last touched this file: 2026-04-27 02:09)"

@@ -36,7 +36,7 @@ title: Needs Review
 id: abc
 author: eduardo
 type: human
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 to: [alice]
 checksum: sha256:aaa
 ---
@@ -56,10 +56,10 @@ title: All Done
 id: def
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 checksum: sha256:bbb
 ack:
-  - eduardo@2026-04-06T11:00:00-04:00
+  - eduardo@2026-04-06T11:00:00Z
 ---
 Already reviewed.
 ```
@@ -307,7 +307,7 @@ title: Expanded Test
 id: c1
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [bob]
 checksum: sha256:c1c1
 ---
@@ -319,7 +319,7 @@ First comment from alice.
 id: c2
 author: bob
 type: agent
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 to: [alice]
 checksum: sha256:c2c2
 ---
@@ -331,11 +331,11 @@ Second comment from bob.
 id: c3
 author: alice
 type: human
-ts: 2026-04-06T14:00:00-04:00
+ts: 2026-04-06T14:00:00Z
 to: [bob]
 checksum: sha256:c3c3
 ack:
-  - bob@2026-04-06T15:00:00-04:00
+  - bob@2026-04-06T15:00:00Z
 ---
 Third comment, already acked.
 ```
@@ -353,7 +353,7 @@ title: Other Doc
 id: d1
 author: carol
 type: human
-ts: 2026-04-07T08:00:00-04:00
+ts: 2026-04-07T08:00:00Z
 to: [alice]
 checksum: sha256:d1d1
 ---
@@ -473,7 +473,7 @@ fn query_expanded_author_filters_comments() {
 #[test]
 fn query_expanded_since_filters_comments() {
     let system = setup_expanded_system();
-    let since = chrono::DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap();
+    let since = "2026-04-06T13:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let filter = QueryFilter {
         expanded: true,
         since: Some(since),
@@ -575,7 +575,7 @@ fn query_expanded_comment_fields_complete() {
     assert_eq!(cm.author, "alice");
     assert!(matches!(cm.author_type, AuthorType::Human));
     assert_eq!(cm.content, "Third comment, already acked.");
-    assert_eq!(cm.ts.to_rfc3339(), "2026-04-06T14:00:00-04:00");
+    assert_eq!(cm.ts.to_string(), "2026-04-06T14:00:00Z");
     assert!(cm.line > 0);
     assert_eq!(cm.to, vec![String::from("bob")]);
     assert_eq!(cm.ack.len(), 1);
@@ -640,7 +640,7 @@ title: Mixed
 id: bcast
 author: bot
 type: agent
-ts: 2026-04-06T09:00:00-04:00
+ts: 2026-04-06T09:00:00Z
 checksum: sha256:bc1
 ---
 Broadcast -- no to field.
@@ -651,7 +651,7 @@ Broadcast -- no to field.
 id: dir1
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [eduardo]
 checksum: sha256:d1d1
 ---
@@ -672,11 +672,11 @@ title: Partial
 id: pa1
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [bob, carol]
 checksum: sha256:pa1
 ack:
-  - bob@2026-04-06T11:00:00-04:00
+  - bob@2026-04-06T11:00:00Z
 ---
 Partially acked: bob acked, carol did not.
 ```
@@ -695,12 +695,12 @@ title: Fully Acked
 id: fa1
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [bob, carol]
 checksum: sha256:fa1
 ack:
-  - bob@2026-04-06T11:00:00-04:00
-  - carol@2026-04-06T12:00:00-04:00
+  - bob@2026-04-06T11:00:00Z
+  - carol@2026-04-06T12:00:00Z
 ---
 Fully acked by both.
 ```
@@ -858,7 +858,7 @@ title: Broadcast Only
 id: b1
 author: bot
 type: agent
-ts: 2026-04-06T09:00:00-04:00
+ts: 2026-04-06T09:00:00Z
 checksum: sha256:b1b1
 ---
 No to field at all.
@@ -906,10 +906,10 @@ title: Acked Broadcast
 id: b2
 author: bot
 type: agent
-ts: 2026-04-06T09:00:00-04:00
+ts: 2026-04-06T09:00:00Z
 checksum: sha256:b2b2
 ack:
-  - alice@2026-04-06T10:00:00-04:00
+  - alice@2026-04-06T10:00:00Z
 ---
 Broadcast, already closed by an ack.
 ```
@@ -1197,7 +1197,7 @@ fn expanded_comment_skips_none_options_in_json() {
 id: mini
 author: alice
 type: human
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 checksum: sha256:mini
 ---
 Minimal.
@@ -1279,7 +1279,7 @@ title: Cafe Doc
 id: m1
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [bob]
 checksum: sha256:m1
 ---
@@ -1291,7 +1291,7 @@ Visited CAF\u{c9} today.
 id: m2
 author: alice
 type: human
-ts: 2026-04-06T11:00:00-04:00
+ts: 2026-04-06T11:00:00Z
 to: [bob]
 checksum: sha256:m2
 ---
@@ -1351,7 +1351,7 @@ title: Four Shapes
 id: brd_open
 author: bot
 type: agent
-ts: 2026-04-06T09:00:00-04:00
+ts: 2026-04-06T09:00:00Z
 checksum: sha256:b0
 ---
 Fresh broadcast, zero acks.
@@ -1362,10 +1362,10 @@ Fresh broadcast, zero acks.
 id: brd_mine
 author: bot
 type: agent
-ts: 2026-04-06T09:30:00-04:00
+ts: 2026-04-06T09:30:00Z
 checksum: sha256:b1
 ack:
-  - alice@2026-04-06T10:00:00-04:00
+  - alice@2026-04-06T10:00:00Z
 ---
 Broadcast acked by alice.
 ```
@@ -1375,7 +1375,7 @@ Broadcast acked by alice.
 id: dir_alice
 author: bob
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [alice]
 checksum: sha256:da
 ---
@@ -1387,7 +1387,7 @@ Directed to alice, no ack.
 id: dir_bob
 author: alice
 type: human
-ts: 2026-04-06T10:30:00-04:00
+ts: 2026-04-06T10:30:00Z
 to: [bob]
 checksum: sha256:db
 ---
@@ -1399,11 +1399,11 @@ Directed to bob, no ack.
 id: dir_closed
 author: bob
 type: human
-ts: 2026-04-06T11:00:00-04:00
+ts: 2026-04-06T11:00:00Z
 to: [alice]
 checksum: sha256:dc
 ack:
-  - alice@2026-04-06T12:00:00-04:00
+  - alice@2026-04-06T12:00:00Z
 ---
 Directed to alice, acked.
 ```
@@ -1580,7 +1580,7 @@ title: Kind Filter
 id: q1
 author: alice
 type: human
-ts: 2026-04-10T12:00:00-04:00
+ts: 2026-04-10T12:00:00Z
 checksum: sha256:ce6efcb37b2a6f75f1fd85be6ffdd2bbfcc2e8ce4bd56e37f34e7e9a8e12cd19
 remargin_kind: [question]
 ---
@@ -1592,7 +1592,7 @@ what do you think
 id: t1
 author: bob
 type: human
-ts: 2026-04-10T13:00:00-04:00
+ts: 2026-04-10T13:00:00Z
 checksum: sha256:4c7081d5e6c36cf7dbc8cce15d24478b7cafcf2af7dfa2d32ccec3bba5ae0da7
 remargin_kind: [todo, action item]
 ---
@@ -1604,7 +1604,7 @@ follow up with design
 id: u1
 author: alice
 type: human
-ts: 2026-04-10T14:00:00-04:00
+ts: 2026-04-10T14:00:00Z
 checksum: sha256:c3b6fb0c9a83f83f3b4b8a2a8e0b1c2f2b8c92ea52a7fa0de2ed7f5f2d7c8a7f
 ---
 no tags at all
@@ -1892,7 +1892,7 @@ fn compact_row_shape_drops_file_and_compacts_acks() {
     assert_eq!(c3[0].as_str().unwrap(), "c3");
     let ack = c3[8].as_array().unwrap();
     assert_eq!(ack.len(), 1);
-    assert_eq!(ack[0].as_str().unwrap(), "bob@2026-04-06T15:00:00-04:00");
+    assert_eq!(ack[0].as_str().unwrap(), "bob@2026-04-06T15:00:00Z");
     assert!(c3[5].is_null(), "reply_to null: {c3:?}");
     assert!(c3[11].is_null(), "edited_at null: {c3:?}");
 }
@@ -2045,7 +2045,7 @@ fn summary_mode_reports_matched_count_without_comments() {
 fn zero_match_filter() -> QueryFilter {
     QueryFilter {
         author: Some(String::from("bob")),
-        since: Some(chrono::DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap()),
+        since: Some("2026-04-06T13:00:00Z".parse::<jiff::Timestamp>().unwrap()),
         ..QueryFilter::default()
     }
 }
@@ -2207,7 +2207,7 @@ title: Two Broadcasts
 id: brd_by_alice
 author: alice
 type: human
-ts: 2026-04-06T09:00:00-04:00
+ts: 2026-04-06T09:00:00Z
 checksum: sha256:c0
 ---
 Alice's own broadcast, zero acks.
@@ -2218,7 +2218,7 @@ Alice's own broadcast, zero acks.
 id: brd_by_bob
 author: bob
 type: human
-ts: 2026-04-06T09:30:00-04:00
+ts: 2026-04-06T09:30:00Z
 checksum: sha256:c1
 ---
 Bob's broadcast, zero acks.

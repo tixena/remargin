@@ -25,7 +25,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use chrono::Utc;
+use jiff::Timestamp;
 use os_shim::System;
 
 use crate::comment_style;
@@ -132,7 +132,7 @@ pub fn create_comment(
             .with_context(|| format!("comment to: {recipient:?}"))?;
     }
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     let mut comment = CommentDraft {
         ack: Vec::new(),
         attachments: resolved_attachments,
@@ -236,7 +236,7 @@ fn apply_auto_ack_to_parent(
     parent_id: &str,
     identity: &str,
     auto_ack: Option<bool>,
-    now: chrono::DateTime<chrono::FixedOffset>,
+    now: jiff::Timestamp,
 ) -> Result<()> {
     change_comment(doc, parent_id, |parent| {
         let should_ack = match auto_ack {
@@ -262,7 +262,7 @@ fn apply_auto_ack_to_parent(
 fn apply_sandbox_entry(
     doc: &mut ParsedDocument,
     identity: &str,
-    now: chrono::DateTime<chrono::FixedOffset>,
+    now: jiff::Timestamp,
 ) -> Result<()> {
     let mut entries = frontmatter::read_sandbox_entries(doc)?;
     let _added = frontmatter::add_sandbox_entry_for(&mut entries, identity, now);
@@ -296,7 +296,7 @@ pub fn ack_comments(
         .context("identity is required to ack")?;
 
     let mut doc = parser::parse_file(system, path)?;
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
 
     for comment_id in comment_ids {
         change_comment(&mut doc, comment_id, |cm| {
@@ -354,7 +354,7 @@ pub fn react(
 
     let mut doc = parser::parse_file(system, path)?;
 
-    let now = Utc::now().fixed_offset();
+    let now = Timestamp::now();
     let _reaction_checksum = change_comment(&mut doc, comment_id, |cm| {
         if remove {
             let _was_removed = cm.reactions.remove_reaction(emoji, identity);
@@ -531,7 +531,7 @@ pub fn edit_comment(
 
         // `ts` keeps the creation time and `edited_at` records the edit. The signature payload
         // excludes `edited_at`.
-        cm.edited_at = Some(Utc::now().fixed_offset());
+        cm.edited_at = Some(Timestamp::now());
 
         cm.ack.clear();
 

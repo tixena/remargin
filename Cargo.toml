@@ -6,7 +6,7 @@ default-members = ["crates/remargin", "crates/remargin-core"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.20"
+version = "0.1.21"
 edition = "2024"
 rust-version = "1.91.1"
 authors = ["Eduardo Burgos <eduardo@tixena.com>"]
@@ -27,7 +27,7 @@ serde_json = "1.0"
 os-shim = "0.4"
 
 # TypeScript type + Zod schema generation from Rust models, and the MCP server
-tixschema = { version = "0.6.2", features = ["chrono"] }
+tixschema = "0.7.0"
 
 # Cryptography (checksums, signatures)
 sha2 = "0.11"
@@ -45,7 +45,7 @@ ignore = "0.4"
 # Image sampling / cropping for binary attachments
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
-chrono = { version = ">=0.4.45", features = ["serde"] }
+jiff = { version = "1", features = ["serde"] }
 
 # Random ID generation
 rand = ">=0.10.2"

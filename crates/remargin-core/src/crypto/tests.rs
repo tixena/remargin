@@ -4,12 +4,12 @@ extern crate alloc;
 
 use std::path::Path;
 
-use chrono::DateTime;
+use jiff::Timestamp;
 use os_shim::mock::MemorySystem;
 
 use crate::crypto::{
     compute_checksum, compute_reaction_checksum, compute_signature, normalize_whitespace,
-    signature_payload, verify_checksum, verify_signature,
+    signature_payload, signed_rfc3339, verify_checksum, verify_signature,
 };
 use crate::parser::{AuthorType, Comment, CommentDraft};
 use crate::reactions::{Reactions, ReactionsExt as _};
@@ -45,7 +45,7 @@ fn make_comment(content: &str) -> Comment {
         sl: None,
         thread: None,
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T12:00:00-04:00").unwrap(),
+        ts: "2026-04-06T12:00:00-04:00".parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -127,8 +127,8 @@ fn verify_checksum_fail() {
 
 #[test]
 fn reaction_checksum_changes_on_add() {
-    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
-    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T13:00:00-04:00").unwrap();
+    let ts1 = "2026-04-26T12:00:00-04:00".parse::<Timestamp>().unwrap();
+    let ts2 = "2026-04-26T13:00:00-04:00".parse::<Timestamp>().unwrap();
     let mut reactions1 = Reactions::new();
     let _added_alice = reactions1.add_reaction("thumbsup", "alice", ts1);
 
@@ -152,8 +152,8 @@ fn reaction_does_not_affect_content_checksum() {
 
 #[test]
 fn reaction_checksum_deterministic_order() {
-    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
-    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T12:01:00-04:00").unwrap();
+    let ts1 = "2026-04-26T12:00:00-04:00".parse::<Timestamp>().unwrap();
+    let ts2 = "2026-04-26T12:01:00-04:00".parse::<Timestamp>().unwrap();
     let mut reactions = Reactions::new();
     let _added_bob = reactions.add_reaction("thumbsup", "bob", ts1);
     let _added_alice = reactions.add_reaction("thumbsup", "alice", ts2);
@@ -165,8 +165,8 @@ fn reaction_checksum_deterministic_order() {
 
 #[test]
 fn reaction_checksum_changes_when_ts_changes() {
-    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
-    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T13:00:00-04:00").unwrap();
+    let ts1 = "2026-04-26T12:00:00-04:00".parse::<Timestamp>().unwrap();
+    let ts2 = "2026-04-26T13:00:00-04:00".parse::<Timestamp>().unwrap();
     let mut r1 = Reactions::new();
     let _added_one = r1.add_reaction("thumbsup", "alice", ts1);
     let mut r2 = Reactions::new();
@@ -180,8 +180,8 @@ fn reaction_checksum_changes_when_ts_changes() {
 
 #[test]
 fn reaction_checksum_independent_of_insert_order() {
-    let ts1 = DateTime::parse_from_rfc3339("2026-04-26T12:00:00-04:00").unwrap();
-    let ts2 = DateTime::parse_from_rfc3339("2026-04-26T12:01:00-04:00").unwrap();
+    let ts1 = "2026-04-26T12:00:00-04:00".parse::<Timestamp>().unwrap();
+    let ts2 = "2026-04-26T12:01:00-04:00".parse::<Timestamp>().unwrap();
 
     let mut a = Reactions::new();
     let _a_alice = a.add_reaction("thumbsup", "alice", ts1);
@@ -298,7 +298,7 @@ fn empty_kinds_produce_legacy_checksum() {
 #[test]
 fn signature_payload_renders_zero_offset_as_plus_zero() {
     let mut comment = make_comment("Frozen payload").into_draft();
-    comment.ts = DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z").unwrap();
+    comment.ts = "2026-04-06T12:00:00Z".parse::<Timestamp>().unwrap();
     assert_eq!(
         signature_payload(&comment),
         "id:abc\n\
@@ -315,7 +315,7 @@ fn reaction_checksum_renders_zero_offset_as_plus_zero() {
     let _added = reactions.add_reaction(
         "thumbsup",
         "alice",
-        DateTime::parse_from_rfc3339("2026-04-26T12:00:00Z").unwrap(),
+        "2026-04-26T12:00:00Z".parse::<Timestamp>().unwrap(),
     );
     // sha256 of `thumbsup:alice@2026-04-26T12:00:00+00:00\n`.
     assert_eq!(
@@ -328,22 +328,22 @@ fn reaction_checksum_renders_zero_offset_as_plus_zero() {
 #[test]
 fn z_and_plus_zero_disk_forms_canonicalize_identically() {
     let mut from_z = make_comment("Same instant").into_draft();
-    from_z.ts = DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z").unwrap();
+    from_z.ts = "2026-04-06T12:00:00Z".parse::<Timestamp>().unwrap();
     let mut from_offset = make_comment("Same instant").into_draft();
-    from_offset.ts = DateTime::parse_from_rfc3339("2026-04-06T12:00:00+00:00").unwrap();
+    from_offset.ts = "2026-04-06T12:00:00+00:00".parse::<Timestamp>().unwrap();
     assert_eq!(signature_payload(&from_z), signature_payload(&from_offset));
 
     let mut reactions_z = Reactions::new();
     let _z = reactions_z.add_reaction(
         "thumbsup",
         "alice",
-        DateTime::parse_from_rfc3339("2026-04-26T12:00:00Z").unwrap(),
+        "2026-04-26T12:00:00Z".parse::<Timestamp>().unwrap(),
     );
     let mut reactions_offset = Reactions::new();
     let _offset = reactions_offset.add_reaction(
         "thumbsup",
         "alice",
-        DateTime::parse_from_rfc3339("2026-04-26T12:00:00+00:00").unwrap(),
+        "2026-04-26T12:00:00+00:00".parse::<Timestamp>().unwrap(),
     );
     assert_eq!(
         compute_reaction_checksum(&reactions_z),
@@ -534,5 +534,28 @@ fn ssh_keygen_accepts_our_keypair() {
     assert_eq!(
         derived_blob, ours_blob,
         "ssh-keygen-derived public key disagrees with ours"
+    );
+}
+
+/// The signed text keeps the fraction in 0, 3, 6 or 9 digits and `+00:00`, whatever offset was read.
+#[test]
+fn signed_rfc3339_renders_the_frozen_text() {
+    let signed = |text: &str| signed_rfc3339(text.parse::<Timestamp>().unwrap());
+    assert_eq!(signed("2026-04-06T14:32:00Z"), "2026-04-06T14:32:00+00:00");
+    assert_eq!(
+        signed("2026-04-06T14:32:00.5Z"),
+        "2026-04-06T14:32:00.500+00:00"
+    );
+    assert_eq!(
+        signed("2026-04-06T14:32:00.31409Z"),
+        "2026-04-06T14:32:00.314090+00:00"
+    );
+    assert_eq!(
+        signed("2026-04-06T14:32:00.017897877Z"),
+        "2026-04-06T14:32:00.017897877+00:00"
+    );
+    assert_eq!(
+        signed("2026-04-06T10:32:00-04:00"),
+        "2026-04-06T14:32:00+00:00"
     );
 }

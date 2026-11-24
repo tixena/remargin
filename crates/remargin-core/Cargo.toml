@@ -48,7 +48,7 @@ ignore.workspace = true
 # Image sampling / cropping for binary attachments
 image.workspace = true
 
-chrono.workspace = true
+jiff.workspace = true
 
 # Random ID generation
 rand.workspace = true

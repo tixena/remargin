@@ -4,7 +4,7 @@ use core::time::Duration;
 use std::path::{Path, PathBuf};
 use std::thread;
 
-use chrono::DateTime;
+use jiff::Timestamp;
 use os_shim::System as _;
 use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
@@ -105,7 +105,7 @@ fn parse_sandbox_entry_success() {
     assert_eq!(entry.author, "alice");
     assert_eq!(
         entry.ts,
-        DateTime::parse_from_rfc3339("2026-04-11T12:00:00+00:00").unwrap()
+        "2026-04-11T12:00:00+00:00".parse::<Timestamp>().unwrap()
     );
 }
 
@@ -392,7 +392,7 @@ fn scan_all_entries_carries_author_and_timestamp() {
     assert_eq!(scanned[0].author, "jorge");
     assert_eq!(
         scanned[0].since,
-        DateTime::parse_from_rfc3339("2026-04-11T12:00:00+00:00").unwrap()
+        "2026-04-11T12:00:00+00:00".parse::<Timestamp>().unwrap()
     );
 }
 

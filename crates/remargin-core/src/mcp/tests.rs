@@ -40,7 +40,7 @@ title: Expanded
 id: ex1
 author: alice
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [bob]
 checksum: sha256:ex1
 ---
@@ -52,11 +52,11 @@ Pending comment from alice.
 id: ex2
 author: bob
 type: agent
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 to: [alice]
 checksum: sha256:ex2
 ack:
-  - alice@2026-04-06T13:00:00-04:00
+  - alice@2026-04-06T13:00:00Z
 ---
 Acked comment from bob.
 ```
@@ -74,7 +74,7 @@ title: Four Shapes
 id: brd_open
 author: bot
 type: agent
-ts: 2026-04-06T09:00:00-04:00
+ts: 2026-04-06T09:00:00Z
 checksum: sha256:b0
 ---
 Fresh broadcast, zero acks.
@@ -85,10 +85,10 @@ Fresh broadcast, zero acks.
 id: brd_mine
 author: bot
 type: agent
-ts: 2026-04-06T09:30:00-04:00
+ts: 2026-04-06T09:30:00Z
 checksum: sha256:b1
 ack:
-  - tester@2026-04-06T10:00:00-04:00
+  - tester@2026-04-06T10:00:00Z
 ---
 Broadcast already acked by tester.
 ```
@@ -98,7 +98,7 @@ Broadcast already acked by tester.
 id: dir_me
 author: bob
 type: human
-ts: 2026-04-06T10:00:00-04:00
+ts: 2026-04-06T10:00:00Z
 to: [tester]
 checksum: sha256:dm
 ---
@@ -110,7 +110,7 @@ Directed to tester.
 id: dir_other
 author: alice
 type: human
-ts: 2026-04-06T10:30:00-04:00
+ts: 2026-04-06T10:30:00Z
 to: [bob]
 checksum: sha256:do
 ---
@@ -132,7 +132,7 @@ Body paragraph one.
 id: aaa
 author: eduardo
 type: human
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 checksum: sha256:3e5121224e71bb75be3d2a2ac568d2117b6cd3aa10a54f7abc9b19cdb1976b2e
 ---
 Original comment.
@@ -1743,7 +1743,7 @@ fn verify_escalates_to_realm_strict_mode_when_caller_is_open() {
 id: u01
 author: alice
 type: human
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 ---
 hello
@@ -1836,7 +1836,7 @@ fn verify_keeps_open_verdict_when_no_stricter_subrealm_exists() {
 id: u01
 author: alice
 type: human
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 checksum: sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 ---
 hello
@@ -2961,7 +2961,7 @@ fn assert_activity_change_rows(rows: &[Value]) {
 #[test]
 fn mcp_activity_compact_columnar_minified() {
     let base = Path::new("/docs");
-    let body = "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T17:00:00-04:00\n---\n\n# Body\n\n```remargin\n---\nid: c1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00-04:00\nto: [carol]\nchecksum: sha256:test\nack:\n  - carol@2026-04-06T14:00:00-04:00\n---\nHello.\n```\n";
+    let body = "---\ntitle: t\nsandbox:\n  - alice@2026-04-06T17:00:00Z\n---\n\n# Body\n\n```remargin\n---\nid: c1\nauthor: bob\ntype: human\nts: 2026-04-06T12:00:00Z\nto: [carol]\nchecksum: sha256:test\nack:\n  - carol@2026-04-06T14:00:00Z\n---\nHello.\n```\n";
     let system = MemorySystem::new()
         .with_file(
             Path::new("/docs/.remargin.yaml"),
@@ -2982,7 +2982,7 @@ fn mcp_activity_compact_columnar_minified() {
             "method": "tools/call",
             "params": {
                 "name": "activity",
-                "arguments": { "since": "2026-01-01T00:00:00-04:00" }
+                "arguments": { "since": "2026-01-01T00:00:00Z" }
             }
         }),
     );
@@ -3010,7 +3010,7 @@ fn mcp_activity_compact_columnar_minified() {
     assert!(file["newest_ts"].is_string());
     assert_eq!(
         file["cutoff_applied"].as_str().unwrap(),
-        "2026-01-01T00:00:00-04:00"
+        "2026-01-01T00:00:00Z"
     );
 
     let rows = file["changes"].as_array().unwrap();
@@ -6002,7 +6002,7 @@ Body.
 id: abc
 author: tester
 type: human
-ts: 2026-04-06T12:00:00-04:00
+ts: 2026-04-06T12:00:00Z
 checksum: sha256:0000000000000000000000000000000000000000000000000000000000000000
 ---
 hello

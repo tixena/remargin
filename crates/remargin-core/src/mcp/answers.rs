@@ -6,7 +6,7 @@ mod tests;
 
 use std::path::PathBuf;
 
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 use serde::Serialize;
 use tixschema::model_schema;
 
@@ -95,7 +95,7 @@ pub struct ActivityPage {
     pub elapsed_ms: u64,
     pub files: Vec<CompactFileChanges>,
     #[model_schema_prop(nullable)]
-    pub newest_ts_overall: Option<DateTime<FixedOffset>>,
+    pub newest_ts_overall: Option<Timestamp>,
     pub total: usize,
 }
 
@@ -109,7 +109,7 @@ pub struct QueryFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comments: Option<Vec<CommentRow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_activity: Option<DateTime<FixedOffset>>,
+    pub last_activity: Option<Timestamp>,
     pub matched_count: u32,
     pub path: PathBuf,
     pub pending_count: u32,

@@ -19,7 +19,7 @@ extern crate alloc;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use chrono::DateTime;
+use jiff::Timestamp;
 use os_shim::System as _;
 use os_shim::bucket::Condition;
 use os_shim::mock::MemorySystem;
@@ -147,7 +147,7 @@ fn pre_signed_doc(system_for_signing: &MemorySystem) -> String {
         sl: None,
         thread: None,
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T12:00:00-04:00").unwrap(),
+        ts: "2026-04-06T12:00:00-04:00".parse::<Timestamp>().unwrap(),
     };
     let sig = compute_signature(&comment, Path::new("/keys/ed25519"), system_for_signing).unwrap();
 
@@ -445,7 +445,7 @@ fn legacy_zero_offset_signature_survives_the_z_rewrite() {
         sl: None,
         thread: None,
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T12:00:00+00:00").unwrap(),
+        ts: "2026-04-06T12:00:00+00:00".parse::<Timestamp>().unwrap(),
     };
     let signing_system = MemorySystem::new()
         .with_file(Path::new("/keys/ed25519"), TEST_PRIVATE_KEY.as_bytes())

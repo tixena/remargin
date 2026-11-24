@@ -14,14 +14,14 @@ use crate::render::registry_participant_pretty;
 
 use super::handlers::registry_participant_json;
 
-fn ts(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
-    chrono::DateTime::parse_from_rfc3339(s).unwrap()
+fn ts(s: &str) -> jiff::Timestamp {
+    s.parse::<jiff::Timestamp>().unwrap()
 }
 
 /// Renders as "(since you last touched this file: …)".
 #[test]
 fn cutoff_header_implicit_with_last_action() {
-    let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00-04:00")));
+    let header = render_activity_cutoff_header(false, Some(ts("2026-04-27T02:09:00Z")));
     assert_eq!(
         header,
         "(since you last touched this file: 2026-04-27 02:09)"
@@ -43,7 +43,7 @@ fn cutoff_header_implicit_initial_touch() {
 
 #[test]
 fn cutoff_header_explicit_since() {
-    let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00-04:00")));
+    let header = render_activity_cutoff_header(true, Some(ts("2026-04-27T02:09:00Z")));
     assert_eq!(header, "(since 2026-04-27 02:09)");
 }
 
@@ -51,8 +51,7 @@ fn cutoff_header_explicit_since() {
 #[test]
 fn cutoff_header_never_emits_placeholder() {
     for explicit in [true, false] {
-        let with_ts =
-            render_activity_cutoff_header(explicit, Some(ts("2026-04-27T02:09:00-04:00")));
+        let with_ts = render_activity_cutoff_header(explicit, Some(ts("2026-04-27T02:09:00Z")));
         let without_ts = render_activity_cutoff_header(explicit, None);
         assert!(!with_ts.contains("YOUR-LAST-ACTION"), "{with_ts}");
         assert!(!without_ts.contains("YOUR-LAST-ACTION"), "{without_ts}");

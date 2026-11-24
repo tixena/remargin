@@ -34,7 +34,7 @@ use std::process::Command;
 use std::thread::sleep;
 
 use anyhow::{Context as _, Result, bail};
-use chrono::{DateTime, SecondsFormat, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
@@ -319,10 +319,10 @@ pub const fn default_multiplexer(herdr_available: bool) -> Multiplexer {
 /// The name is `<basename>-<hash>`: the cwd's sanitized basename (multiplexer
 /// session names cannot carry `.`/`:`/spaces) plus a short hex hash of the
 /// full path and timestamp. `now` is a parameter so the name is deterministic
-/// under test; the caller passes [`chrono::Utc::now`], whose sub-second
+/// under test; the caller passes [`Timestamp::now`], whose sub-second
 /// precision makes two consecutive launches produce two distinct names.
 #[must_use = "the return value is the only result of this call"]
-pub fn session_name(cwd: &Path, now: DateTime<Utc>) -> String {
+pub fn session_name(cwd: &Path, now: Timestamp) -> String {
     let raw_base = cwd
         .file_name()
         .and_then(|name| name.to_str())
@@ -333,7 +333,11 @@ pub fn session_name(cwd: &Path, now: DateTime<Utc>) -> String {
     let mut hasher = Sha256::new();
     hasher.update(cwd.to_string_lossy().as_bytes());
     hasher.update(b"\0");
-    hasher.update(now.to_rfc3339_opts(SecondsFormat::Nanos, true).as_bytes());
+    hasher.update(
+        now.strftime("%Y-%m-%dT%H:%M:%S%.9fZ")
+            .to_string()
+            .as_bytes(),
+    );
     let digest = hasher.finalize();
 
     let mut short = String::with_capacity(8);

@@ -46,7 +46,7 @@ os-shim.workspace = true
 
 anyhow.workspace = true
 
-chrono.workspace = true
+jiff.workspace = true
 
 tracing.workspace = true
 tracing-subscriber.workspace = true

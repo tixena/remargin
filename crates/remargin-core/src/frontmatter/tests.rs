@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 use serde_yaml::{Mapping, Value};
 
 use crate::config::{Mode, ResolvedConfig};
@@ -63,7 +63,7 @@ fn make_comment(id: &str, ts: &str, to: Vec<String>, ack: Vec<Acknowledgment>) -
         sl: None,
         thread: None,
         to,
-        ts: DateTime::parse_from_rfc3339(ts).unwrap(),
+        ts: ts.parse::<Timestamp>().unwrap(),
     }
     .into()
 }
@@ -127,16 +127,16 @@ fn title_from_heading_none() {
 
 #[test]
 fn pending_count() {
-    let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
-    let cm2 = make_comment("b", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
+    let cm1 = make_comment("a", "2026-04-06T12:00:00Z", Vec::new(), Vec::new());
+    let cm2 = make_comment("b", "2026-04-06T13:00:00Z", Vec::new(), Vec::new());
     let cm3 = make_comment(
         "c",
-        "2026-04-06T14:00:00-04:00",
+        "2026-04-06T14:00:00Z",
         Vec::new(),
         vec![
             AcknowledgmentDraft {
                 author: String::from("alice"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T15:00:00-04:00").unwrap(),
+                ts: "2026-04-06T15:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -154,13 +154,13 @@ fn pending_count() {
 fn pending_for() {
     let cm1 = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("eduardo")],
         Vec::new(),
     );
     let cm2 = make_comment(
         "b",
-        "2026-04-06T13:00:00-04:00",
+        "2026-04-06T13:00:00Z",
         vec![String::from("alice"), String::from("eduardo")],
         Vec::new(),
     );
@@ -177,7 +177,7 @@ fn pending_for() {
 
 #[test]
 fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
-    let cm = make_comment("u", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
+    let cm = make_comment("u", "2026-04-06T12:00:00Z", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
     update_remargin_fields(&mut mapping, &comments);
@@ -196,11 +196,11 @@ fn pending_for_unaddressed_unacked_surfaces_as_unassigned_sentinel() {
 fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
     let addressed = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("eduardo")],
         Vec::new(),
     );
-    let unaddressed = make_comment("u", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
+    let unaddressed = make_comment("u", "2026-04-06T13:00:00Z", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&addressed, &unaddressed];
     let mut mapping = Mapping::new();
     update_remargin_fields(&mut mapping, &comments);
@@ -217,8 +217,8 @@ fn pending_for_addressed_and_unaddressed_mix_sorts_with_sentinel() {
 
 #[test]
 fn pending_for_two_unaddressed_dedupes_sentinel() {
-    let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
-    let cm2 = make_comment("b", "2026-04-06T13:00:00-04:00", Vec::new(), Vec::new());
+    let cm1 = make_comment("a", "2026-04-06T12:00:00Z", Vec::new(), Vec::new());
+    let cm2 = make_comment("b", "2026-04-06T13:00:00Z", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm1, &cm2];
     let mut mapping = Mapping::new();
     update_remargin_fields(&mut mapping, &comments);
@@ -237,12 +237,12 @@ fn pending_for_two_unaddressed_dedupes_sentinel() {
 fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
     let cm = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         Vec::new(),
         vec![
             AcknowledgmentDraft {
                 author: String::from("anyone"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+                ts: "2026-04-06T13:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -261,12 +261,12 @@ fn pending_for_unaddressed_acked_does_not_surface_sentinel() {
 fn pending_count_directed_with_partial_ack_is_pending() {
     let cm = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("alice")],
         vec![
             AcknowledgmentDraft {
                 author: String::from("bob"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+                ts: "2026-04-06T13:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -287,12 +287,12 @@ fn pending_count_directed_with_partial_ack_is_pending() {
 fn pending_for_directed_with_partial_ack_lists_unacked_recipient() {
     let cm = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("alice")],
         vec![
             AcknowledgmentDraft {
                 author: String::from("bob"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+                ts: "2026-04-06T13:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -315,12 +315,12 @@ fn pending_for_directed_with_partial_ack_lists_unacked_recipient() {
 fn pending_for_directed_with_one_recipient_acked_excludes_them() {
     let cm = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("alice"), String::from("eduardo")],
         vec![
             AcknowledgmentDraft {
                 author: String::from("alice"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+                ts: "2026-04-06T13:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -343,12 +343,12 @@ fn pending_for_directed_with_one_recipient_acked_excludes_them() {
 fn pending_count_self_addressed_with_third_party_ack_is_pending() {
     let cm = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("eduardo")],
         vec![
             AcknowledgmentDraft {
                 author: String::from("agent"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+                ts: "2026-04-06T13:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -372,7 +372,7 @@ fn pending_count_self_addressed_with_third_party_ack_is_pending() {
 
 #[test]
 fn broadcast_comment_with_no_to_and_no_ack_is_pending_for_unassigned() {
-    let cm = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
+    let cm = make_comment("a", "2026-04-06T12:00:00Z", Vec::new(), Vec::new());
     let comments: Vec<&Comment> = vec![&cm];
     let mut mapping = Mapping::new();
     update_remargin_fields(&mut mapping, &comments);
@@ -400,15 +400,15 @@ fn broadcast_comment_with_no_to_and_no_ack_is_pending_for_unassigned() {
 
 #[test]
 fn last_activity() {
-    let cm1 = make_comment("a", "2026-04-06T12:00:00-04:00", Vec::new(), Vec::new());
+    let cm1 = make_comment("a", "2026-04-06T12:00:00Z", Vec::new(), Vec::new());
     let cm2 = make_comment(
         "b",
-        "2026-04-06T13:00:00-04:00",
+        "2026-04-06T13:00:00Z",
         Vec::new(),
         vec![
             AcknowledgmentDraft {
                 author: String::from("alice"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T16:00:00-04:00").unwrap(),
+                ts: "2026-04-06T16:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -450,12 +450,12 @@ fn zero_pending_sheds_stale_stored_values() {
 
     let cm = make_comment(
         "a",
-        "2026-04-06T12:00:00-04:00",
+        "2026-04-06T12:00:00Z",
         vec![String::from("alice")],
         vec![
             AcknowledgmentDraft {
                 author: String::from("alice"),
-                ts: DateTime::parse_from_rfc3339("2026-04-06T13:00:00-04:00").unwrap(),
+                ts: "2026-04-06T13:00:00Z".parse::<Timestamp>().unwrap(),
             }
             .into(),
         ],
@@ -706,7 +706,7 @@ fn sandbox_missing_key_reads_as_empty() {
 
 #[test]
 fn sandbox_existing_sequence_reads_entries() {
-    let body = "---\ntitle: Doc\nsandbox:\n  - alice@2026-04-16T10:00:00-04:00\n---\n\nBody.\n";
+    let body = "---\ntitle: Doc\nsandbox:\n  - alice@2026-04-16T10:00:00Z\n---\n\nBody.\n";
     let doc = make_doc(body, Vec::new());
 
     let entries = read_sandbox_entries(&doc).unwrap();
@@ -728,7 +728,7 @@ fn sandbox_legacy_zero_offset_reads_like_z_and_converges_on_write() {
     assert_eq!(legacy_entries[0].ts, z_entries[0].ts);
     assert_eq!(
         legacy_entries[0].ts,
-        DateTime::parse_from_rfc3339("2026-04-16T14:00:00Z").unwrap()
+        "2026-04-16T14:00:00Z".parse::<Timestamp>().unwrap()
     );
 
     write_sandbox_entries(&mut legacy_doc, &legacy_entries).unwrap();
@@ -748,7 +748,7 @@ fn sandbox_null_value_self_heals_on_write() {
     let added = add_sandbox_entry_for(
         &mut entries,
         "eduardo",
-        DateTime::parse_from_rfc3339("2026-04-16T10:33:21-04:00").unwrap(),
+        "2026-04-16T10:33:21Z".parse::<Timestamp>().unwrap(),
     );
     assert!(added);
     write_sandbox_entries(&mut doc, &entries).unwrap();
@@ -773,20 +773,20 @@ fn sandbox_non_sequence_errors() {
     assert!(msg.contains("not a sequence"), "got: {msg}");
 }
 
-fn t1() -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339("2026-04-16T10:00:00-04:00").unwrap()
+fn t1() -> Timestamp {
+    "2026-04-16T10:00:00Z".parse::<Timestamp>().unwrap()
 }
 
-fn t2() -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339("2026-04-16T11:00:00-04:00").unwrap()
+fn t2() -> Timestamp {
+    "2026-04-16T11:00:00Z".parse::<Timestamp>().unwrap()
 }
 
-fn t3() -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339("2026-04-16T12:00:00-04:00").unwrap()
+fn t3() -> Timestamp {
+    "2026-04-16T12:00:00Z".parse::<Timestamp>().unwrap()
 }
 
-fn t4() -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339("2026-04-16T13:00:00-04:00").unwrap()
+fn t4() -> Timestamp {
+    "2026-04-16T13:00:00Z".parse::<Timestamp>().unwrap()
 }
 
 #[test]

@@ -702,8 +702,8 @@ Original.
     let cm = doc.find_comment("abc").unwrap();
     assert!(cm.edited_at.is_some(), "edit must stamp edited_at");
     assert_eq!(
-        cm.ts.to_rfc3339(),
-        "2026-04-06T12:00:00-04:00",
+        cm.ts.to_string(),
+        "2026-04-06T16:00:00Z",
         "creation ts must survive edit"
     );
     assert!(content.contains("edited_at:"));
@@ -1470,8 +1470,8 @@ First comment.
         cm.ack
     );
     assert_eq!(
-        alice_acks[0].ts.to_rfc3339(),
-        "2026-04-06T13:00:00-04:00",
+        alice_acks[0].ts.to_string(),
+        "2026-04-06T17:00:00Z",
         "first (earliest) ack timestamp should be preserved",
     );
 }

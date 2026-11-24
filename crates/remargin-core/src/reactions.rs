@@ -36,7 +36,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 use tixschema::model_schema;
 
@@ -49,12 +49,12 @@ use crate::parser::{Acknowledgment, rfc3339_z};
 #[non_exhaustive]
 pub struct ReactionEntry {
     pub author: String,
-    pub ts: DateTime<FixedOffset>,
+    pub ts: Timestamp,
 }
 
 impl ReactionEntry {
     #[must_use = "the return value is the only result of this call"]
-    pub fn new(author: String, ts: DateTime<FixedOffset>) -> Self {
+    pub fn new(author: String, ts: Timestamp) -> Self {
         ReactionEntryDraft { author, ts }.into()
     }
 }
@@ -76,10 +76,7 @@ enum RawReactionItem {
     /// `"author"` — the legacy shape; `ts` is filled in later.
     Author(String),
     /// `{author: "x", ts: "..."}` — the new shape.
-    Full {
-        author: String,
-        ts: DateTime<FixedOffset>,
-    },
+    Full { author: String, ts: Timestamp },
 }
 
 impl RawReactionItem {
@@ -106,7 +103,7 @@ pub trait ReactionsExt {
     /// author already has an entry for this emoji, the call is a no-op
     /// (existing `ts` is preserved). Returns `true` when a new entry
     /// was inserted.
-    fn add_reaction(&mut self, emoji: &str, author: &str, ts: DateTime<FixedOffset>) -> bool;
+    fn add_reaction(&mut self, emoji: &str, author: &str, ts: Timestamp) -> bool;
 
     /// Promote legacy entries (those whose timestamp is the
     /// [`legacy_sentinel_ts`] placeholder used during deserialization)
@@ -119,11 +116,7 @@ pub trait ReactionsExt {
     ///
     /// Entries that already carry a real (non-sentinel) timestamp are
     /// left untouched apart from the floor clamp.
-    fn backfill_legacy_timestamps(
-        &mut self,
-        comment_ts: DateTime<FixedOffset>,
-        acks: &[Acknowledgment],
-    );
+    fn backfill_legacy_timestamps(&mut self, comment_ts: Timestamp, acks: &[Acknowledgment]);
 
     /// Pairs of `(emoji, entries)` in stable key order. Returned as an
     /// owned `Vec` rather than an iterator so the writer / display
@@ -137,7 +130,7 @@ pub trait ReactionsExt {
 }
 
 impl ReactionsExt for Reactions {
-    fn add_reaction(&mut self, emoji: &str, author: &str, ts: DateTime<FixedOffset>) -> bool {
+    fn add_reaction(&mut self, emoji: &str, author: &str, ts: Timestamp) -> bool {
         let entries = self.entry(String::from(emoji)).or_default();
         if entries.iter().any(|e| e.author == author) {
             return false;
@@ -152,11 +145,7 @@ impl ReactionsExt for Reactions {
         true
     }
 
-    fn backfill_legacy_timestamps(
-        &mut self,
-        comment_ts: DateTime<FixedOffset>,
-        acks: &[Acknowledgment],
-    ) {
+    fn backfill_legacy_timestamps(&mut self, comment_ts: Timestamp, acks: &[Acknowledgment]) {
         let sentinel = legacy_sentinel_ts();
         for entries in self.values_mut() {
             for entry in entries.iter_mut() {
@@ -231,15 +220,13 @@ where
 /// Sentinel `ts` used to mark legacy entries during deserialization.
 ///
 /// Real on-disk timestamps will never equal this exact value because
-/// they come from `Utc::now().fixed_offset()` at write time and the
+/// they come from `Timestamp::now()` at write time and the
 /// parser's backfill replaces any sentinel found.
 ///
-/// Returns the UNIX epoch projected into a `FixedOffset` of zero
-/// (`1970-01-01T00:00:00+00:00`). Built from chrono's `UNIX_EPOCH`
-/// constant so the function is total — no panics, no error paths.
+/// Returns the UNIX epoch (`1970-01-01T00:00:00Z`).
 #[must_use = "the return value is the only result of this call"]
-pub fn legacy_sentinel_ts() -> DateTime<FixedOffset> {
-    chrono::DateTime::UNIX_EPOCH.fixed_offset()
+pub const fn legacy_sentinel_ts() -> Timestamp {
+    Timestamp::UNIX_EPOCH
 }
 
 /// Serialize one [`ReactionEntry`] into a stable two-line YAML block

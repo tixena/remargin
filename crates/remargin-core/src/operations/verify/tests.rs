@@ -7,7 +7,7 @@ extern crate alloc;
 
 use std::path::{Path, PathBuf};
 
-use chrono::DateTime;
+use jiff::Timestamp;
 use os_shim::System as _;
 use os_shim::mock::MemorySystem;
 
@@ -151,7 +151,7 @@ fn make_comment(id: &str, author: &str, content: &str) -> Comment {
         sl: None,
         thread: None,
         to: Vec::new(),
-        ts: DateTime::parse_from_rfc3339("2026-04-06T14:32:00-04:00").unwrap(),
+        ts: "2026-04-06T14:32:00-04:00".parse::<Timestamp>().unwrap(),
     }
     .into()
 }

@@ -1214,7 +1214,7 @@ pub fn cmd_activity(
 
     let cutoff = match p.since {
         Some(raw) => Some(
-            chrono::DateTime::parse_from_rfc3339(raw)
+            raw.parse::<jiff::Timestamp>()
                 .with_context(|| format!("--since: invalid ISO 8601 timestamp {raw:?}"))?,
         ),
         None => None,
@@ -2203,7 +2203,7 @@ fn build_query_filter(
     let since_dt = params
         .since
         .map(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
+            s.parse::<jiff::Timestamp>()
                 .with_context(|| format!("invalid timestamp: {s}"))
         })
         .transpose()?;
@@ -3033,7 +3033,7 @@ fn render_session_launch(
         let seeds = backend.seed_inputs(&spec);
         tabs.push(Tab::new(spec.identity, spec.cwd, launch, seeds));
     }
-    let name = session_name(cwd, chrono::Utc::now());
+    let name = session_name(cwd, jiff::Timestamp::now());
     launch_into_multiplexer(mux, &name, &tabs)?;
     out(
         sinks,

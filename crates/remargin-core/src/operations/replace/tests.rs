@@ -44,7 +44,7 @@ fn remargin_block(id: &str, content: &str) -> String {
          id: {id}\n\
          author: eduardo\n\
          type: human\n\
-         ts: 2026-04-06T14:32:00-04:00\n\
+         ts: 2026-04-06T14:32:00Z\n\
          checksum: {checksum}\n\
          ---\n\
          {content}\n\

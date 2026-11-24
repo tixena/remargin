@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail};
-use chrono::DateTime;
+use jiff::Timestamp;
 use serde::ser::SerializeStruct as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tixschema::model_schema;
@@ -250,12 +250,13 @@ pub fn comment_from_on_disk(
         signature,
     } = on_disk.into_draft();
 
-    let ts = DateTime::parse_from_rfc3339(&ts_raw)
+    let ts = ts_raw
+        .parse::<Timestamp>()
         .map_err(|e| anyhow!("invalid timestamp {ts_raw:?}: {e}"))?;
 
     let edited_at = match edited_at_raw {
         Some(raw) => Some(
-            DateTime::parse_from_rfc3339(&raw)
+            raw.parse::<Timestamp>()
                 .map_err(|e| anyhow!("invalid edited_at {raw:?}: {e}"))?,
         ),
         None => None,
@@ -281,7 +282,9 @@ pub fn comment_from_on_disk(
             let entry_ts = if entry.ts.is_empty() {
                 legacy_sentinel_ts()
             } else {
-                DateTime::parse_from_rfc3339(&entry.ts)
+                entry
+                    .ts
+                    .parse::<Timestamp>()
                     .map_err(|e| anyhow!("invalid reaction ts {:?}: {e}", entry.ts))?
             };
             converted.push(
@@ -357,7 +360,8 @@ fn parse_ack_string(entry: &str) -> Result<Acknowledgment> {
         .ok_or_else(|| anyhow!("ack entry missing '@': {entry}"))?;
     let author = entry[..at_pos].to_owned();
     let ts_str = &entry[at_pos + 1..];
-    let ts = DateTime::parse_from_rfc3339(ts_str)
+    let ts = ts_str
+        .parse::<Timestamp>()
         .map_err(|e| anyhow!("invalid ack timestamp {ts_str:?}: {e}"))?;
     Ok(AcknowledgmentDraft { author, ts }.into())
 }

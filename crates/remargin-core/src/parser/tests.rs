@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use chrono::DateTime;
+use jiff::Timestamp;
 use os_shim::mock::MemorySystem;
 
 use super::{AuthorType, Segment, parse, parse_file};
@@ -14,7 +14,7 @@ fn minimal_block(id: &str) -> String {
          id: {id}\n\
          author: testuser\n\
          type: human\n\
-         ts: 2026-04-06T14:32:00-04:00\n\
+         ts: 2026-04-06T14:32:00Z\n\
          checksum: sha256:abc123\n\
          ---\n\
          ```\n"
@@ -28,7 +28,7 @@ fn block_with_content(id: &str, content: &str) -> String {
          id: {id}\n\
          author: testuser\n\
          type: human\n\
-         ts: 2026-04-06T14:32:00-04:00\n\
+         ts: 2026-04-06T14:32:00Z\n\
          checksum: sha256:abc123\n\
          ---\n\
          {content}\n\
@@ -93,7 +93,7 @@ fn test_all_fields_present() {
 id: full
 author: eduardo
 type: agent
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:deadbeef
 to: [jorge, claude]
 reply-to: abc
@@ -103,8 +103,8 @@ reactions:
   thumbsup: [eduardo, jorge]
   heart: [claude]
 ack:
-  - jorge@2026-04-06T15:00:00-04:00
-  - claude@2026-04-06T15:05:00-04:00
+  - jorge@2026-04-06T15:00:00Z
+  - claude@2026-04-06T15:05:00Z
 signature: ed25519:base64signature==
 ---
 This is the comment body.
@@ -181,7 +181,7 @@ fn test_four_backtick_wrapper() {
 id: deep
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 ---
 Here is a code block inside the comment:
@@ -208,7 +208,7 @@ fn test_six_backtick_wrapper() {
 id: v6wrap
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 ---
 Quoting a remargin block:
@@ -242,7 +242,7 @@ fn test_same_depth_not_confused() {
 id: sd4
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 ---
 Inner code:
@@ -306,7 +306,7 @@ fn test_content_multiline() {
 id: ml1
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 ---
 Line one.
@@ -382,7 +382,7 @@ fn test_comment_json_shape_matches_schema() {
          id: full\n\
          author: alice\n\
          type: human\n\
-         ts: 2026-04-06T14:32:00-04:00\n\
+         ts: 2026-04-06T14:32:00Z\n\
          checksum: sha256:abc123\n\
          to: [bob, carol]\n\
          reply-to: abc\n\
@@ -391,7 +391,7 @@ fn test_comment_json_shape_matches_schema() {
          reactions:\n\
            \"+1\": [bob]\n\
          ack:\n\
-           - bob@2026-04-06T15:00:00-04:00\n\
+           - bob@2026-04-06T15:00:00Z\n\
          signature: ed25519:deadbeef\n\
          ---\n\
          Hello world.\n\
@@ -431,7 +431,7 @@ fn test_comment_json_shape_matches_schema() {
     assert_eq!(obj["thread"], serde_json::json!("t1"));
     assert_eq!(obj["signature"], serde_json::json!("ed25519:deadbeef"));
 
-    assert_eq!(obj["ts"], serde_json::json!("2026-04-06T14:32:00-04:00"));
+    assert_eq!(obj["ts"], serde_json::json!("2026-04-06T14:32:00Z"));
 }
 
 #[test]
@@ -494,7 +494,7 @@ fn test_remargin_kind_explicit_empty_list_normalizes_to_none() {
 id: abc
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 remargin_kind: []
 ---
@@ -532,7 +532,7 @@ fn test_remargin_kind_round_trip() {
 id: abc
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 remargin_kind: [question, action item]
 ---
@@ -561,7 +561,7 @@ fn test_remargin_kind_invalid_value_rejected() {
 id: abc
 author: testuser
 type: human
-ts: 2026-04-06T14:32:00-04:00
+ts: 2026-04-06T14:32:00Z
 checksum: sha256:abc123
 remargin_kind: [\"bad!value\"]
 ---
@@ -584,7 +584,7 @@ fn legacy_reactions_round_trip_to_new_shape() {
 id: legacy
 author: eduardo
 type: human
-ts: 2026-04-26T10:00:00-04:00
+ts: 2026-04-26T10:00:00Z
 checksum: sha256:abc
 reactions:
   thumbsup: [eduardo, claude]
@@ -599,8 +599,8 @@ hello
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].author, "eduardo");
     assert_eq!(entries[1].author, "claude");
-    assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
-    assert_eq!(entries[1].ts.to_rfc3339(), "2026-04-26T10:00:00-04:00");
+    assert_eq!(entries[0].ts.to_string(), "2026-04-26T10:00:00Z");
+    assert_eq!(entries[1].ts.to_string(), "2026-04-26T10:00:00Z");
 
     let written = parsed.to_markdown().unwrap();
     assert!(
@@ -608,7 +608,7 @@ hello
         "serialized form missing new-shape author entry:\n{written}"
     );
     assert!(
-        written.contains("ts: 2026-04-26T10:00:00-04:00"),
+        written.contains("ts: 2026-04-26T10:00:00Z"),
         "serialized form missing the synthesized reaction ts:\n{written}"
     );
     assert!(
@@ -625,12 +625,12 @@ fn legacy_reaction_uses_ack_ts_when_author_acked() {
 id: ackedreact
 author: eduardo
 type: human
-ts: 2026-04-26T10:00:00-04:00
+ts: 2026-04-26T10:00:00Z
 checksum: sha256:abc
 reactions:
   thumbsup: [eduardo]
 ack:
-  - eduardo@2026-04-26T11:00:00-04:00
+  - eduardo@2026-04-26T11:00:00Z
 ---
 hi
 ```
@@ -639,7 +639,7 @@ hi
     let cm = parsed.comments()[0];
     let entries = &cm.reactions["thumbsup"];
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].ts.to_rfc3339(), "2026-04-26T11:00:00-04:00");
+    assert_eq!(entries[0].ts.to_string(), "2026-04-26T11:00:00Z");
 }
 
 /// One block carrying every timestamp the wire format has — `ts`,
@@ -679,7 +679,7 @@ fn legacy_plus_zero_block_parses_to_the_same_instants_as_its_z_twin() {
     assert_eq!(legacy_cm.ts, modern_cm.ts);
     assert_eq!(
         legacy_cm.ts,
-        DateTime::parse_from_rfc3339("2026-04-26T10:00:00Z").unwrap()
+        "2026-04-26T10:00:00Z".parse::<Timestamp>().unwrap()
     );
     assert_eq!(legacy_cm.edited_at, modern_cm.edited_at);
     assert_eq!(legacy_cm.ack[0].ts, modern_cm.ack[0].ts);
@@ -721,7 +721,7 @@ fn nested_three_backtick_remargin_truncates_outer_body_at_inner_close() {
 id: outer3
 author: alice
 type: human
-ts: 2026-05-25T00:00:00-04:00
+ts: 2026-05-25T00:00:00Z
 checksum: sha256:outer3
 ---
 quoting an inner comment below:
@@ -730,7 +730,7 @@ quoting an inner comment below:
 id: inner3
 author: bob
 type: human
-ts: 2026-05-25T01:00:00-04:00
+ts: 2026-05-25T01:00:00Z
 checksum: sha256:inner3
 ---
 inner body text
@@ -779,7 +779,7 @@ fn nested_four_backtick_outer_three_backtick_inner_preserves_inner_verbatim() {
 id: outer4
 author: alice
 type: human
-ts: 2026-05-25T00:00:00-04:00
+ts: 2026-05-25T00:00:00Z
 checksum: sha256:outer4
 ---
 quoting an inner comment below:
@@ -788,7 +788,7 @@ quoting an inner comment below:
 id: inner3
 author: bob
 type: human
-ts: 2026-05-25T01:00:00-04:00
+ts: 2026-05-25T01:00:00Z
 checksum: sha256:inner3
 ---
 inner body text
@@ -826,7 +826,7 @@ fn comment_spans_track_exact_block_lines() {
          id: aaa\n\
          author: testuser\n\
          type: human\n\
-         ts: 2026-04-06T14:32:00-04:00\n\
+         ts: 2026-04-06T14:32:00Z\n\
          checksum: sha256:abc123\n\
          #x\n\
          ---\n\

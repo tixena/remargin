@@ -12,6 +12,8 @@ use std::path::Path;
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use jiff::Timestamp;
+use jiff::tz::Offset;
 use os_shim::System;
 use sha2::{Digest as _, Sha256};
 
@@ -22,6 +24,24 @@ use crate::reactions::{Reactions, ReactionsExt as _};
 use crate::wait::Wait as _;
 
 const SIGNATURE_NAMESPACE: &str = "remargin";
+
+/// Renders `ts` as every stored signature and reaction checksum signed it, in UTC: `+00:00`, never
+/// `Z`, and the fraction in 0, 3, 6 or 9 digits, the fewest that hold it. Any other rendering
+/// invalidates them, so `Z` and `+00:00` on disk both sign as `+00:00`.
+fn signed_rfc3339(ts: Timestamp) -> String {
+    let civil = Offset::UTC.to_datetime(ts);
+    let nanos = civil.strftime("%9f").to_string();
+    let mut digits = nanos.as_str();
+    while let Some(shorter) = digits.strip_suffix("000") {
+        digits = shorter;
+    }
+    let fraction = if digits.is_empty() {
+        String::new()
+    } else {
+        format!(".{digits}")
+    };
+    format!("{}{fraction}+00:00", civil.strftime("%Y-%m-%dT%H:%M:%S"))
+}
 
 /// Normalize whitespace for deterministic checksumming.
 ///
@@ -68,11 +88,9 @@ pub fn compute_checksum(content: &str, kinds: &[String]) -> String {
 pub fn compute_reaction_checksum(reactions: &Reactions) -> String {
     let mut payload = String::new();
     for (emoji, entries) in reactions.entries_by_emoji() {
-        // Frozen on bare `to_rfc3339()` (`+00:00`, not `Z`): any other rendering invalidates every
-        // stored reaction checksum.
         let mut projected: Vec<String> = entries
             .iter()
-            .map(|e| format!("{}@{}", e.author, e.ts.to_rfc3339()))
+            .map(|e| format!("{}@{}", e.author, signed_rfc3339(e.ts)))
             .collect();
         projected.sort();
         let _ = writeln!(payload, "{emoji}:{}", projected.join(","));
@@ -178,9 +196,7 @@ fn signature_payload(comment: &CommentDraft) -> String {
     let _ = writeln!(payload, "id:{}", comment.id);
     let _ = writeln!(payload, "author:{}", comment.author);
     let _ = writeln!(payload, "type:{}", comment.author_type.as_str());
-    // Frozen on bare `to_rfc3339()`: the payload is rebuilt from the parsed ts, so `Z` and
-    // `+00:00` on disk both sign as `+00:00`.
-    let _ = writeln!(payload, "ts:{}", comment.ts.to_rfc3339());
+    let _ = writeln!(payload, "ts:{}", signed_rfc3339(comment.ts));
     for recipient in &comment.to {
         let _ = writeln!(payload, "to:{recipient}");
     }
